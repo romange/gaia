@@ -1,0 +1,20 @@
+sudo: enabled
+dist: xenial
+language: cpp
+os: linux
+
+matrix:
+  include:
+    - compiler: gcc
+      env: COMPILER=g++-5
+
+
+before_install:
+  - sudo apt update -qq
+
+install: sudo ./install-dependencies.sh
+
+script:
+  - ./blaze.sh -ninja
+  - cd build-dbg
+  - make base

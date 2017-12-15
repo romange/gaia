@@ -9,7 +9,7 @@ set(THIRD_PARTY_CXX_FLAGS "-std=c++11 -O3 -DNDEBUG -fPIC")
 
 function(add_third_party name)
   set(options SHARED)
-  set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB)
+  set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB BUILD_COMMAND)
 
   CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "" ${ARGN})
   set(BUILD_OPTIONS "-j4")
@@ -21,6 +21,10 @@ function(add_third_party name)
   set(INSTALL_CMD "make;install")
   if (parsed_INSTALL_OVERRIDE)
     set(INSTALL_CMD ${parsed_INSTALL_OVERRIDE})
+  endif()
+
+  if (NOT parsed_BUILD_COMMAND)
+    set(parsed_BUILD_COMMAND make -j4)
   endif()
 
   set(_DIR ${THIRD_PARTY_DIR}/${name})
@@ -50,7 +54,7 @@ function(add_third_party name)
     INSTALL_DIR ${_IROOT}
     UPDATE_COMMAND ""
 
-    BUILD_COMMAND make ${BUILD_OPTIONS}
+    BUILD_COMMAND ${parsed_BUILD_COMMAND}
 
     INSTALL_COMMAND ${INSTALL_CMD}
 
@@ -136,11 +140,56 @@ add_third_party(
   LIB libtcmalloc_and_profiler.so
 )
 
+set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
+add_third_party(lz4
+  GIT_REPOSITORY https://github.com/lz4/lz4.git
+  GIT_TAG v1.8.0
+  BUILD_IN_SOURCE 1
+  UPDATE_COMMAND ""
+  CONFIGURE_COMMAND echo foo
+  BUILD_COMMAND DESTDIR=${LZ4_DIR} "CFLAGS=-fPIC -O3" lib
+  INSTALL_COMMAND PREFIX=${LZ4_DIR} "CFLAGS=-fPIC -O3"
+)
+
+add_third_party(
+  dconv
+  GIT_REPOSITORY https://github.com/google/double-conversion.git
+  GIT_TAG v3.0.0
+  LIB libdouble-conversion.a
+)
+
+set(LDFOLLY "-L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
+set(CXXFOLLY "-I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR}")
+ExternalProject_Add(folly_project
+  DEPENDS gflags_project glog_project dconv_project
+  GIT_REPOSITORY https://github.com/facebook/folly.git
+  GIT_TAG v2017.12.11.00
+  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/folly
+  SOURCE_DIR ${THIRD_PARTY_DIR}/folly
+  LOG_BUILD ON
+  UPDATE_COMMAND ""
+  PATCH_COMMAND autoreconf <SOURCE_DIR>/folly/ -ivf
+  CONFIGURE_COMMAND cd <SOURCE_DIR>/folly
+  COMMAND ./configure --enable-shared=no
+                    --prefix=${THIRD_PARTY_LIB_DIR}/folly LDFLAGS=${LDFOLLY}
+                    CXXFLAGS=${CXXFOLLY} "LIBS=-lpthread -lunwind"
+  BUILD_COMMAND sh -c "cd folly && make -j4"
+  INSTALL_COMMAND sh -c "cd folly && make install"
+  BUILD_IN_SOURCE 1
+)
+
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR})
 
 set_property(TARGET TRDP::gtest APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
+
+set(FOLLY_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/folly/include)
+set(FOLLY_LIB_DIR ${THIRD_PARTY_LIB_DIR}/folly/lib)
+add_library(TRDP::folly STATIC IMPORTED)
+add_dependencies(TRDP::folly folly_project)
+set_target_properties(TRDP::folly PROPERTIES IMPORTED_LOCATION ${FOLLY_LIB_DIR}/libfolly.a
+                      INTERFACE_INCLUDE_DIRECTORIES ${FOLLY_INCLUDE_DIR})
 
 add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
