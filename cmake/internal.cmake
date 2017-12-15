@@ -47,7 +47,6 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -gdwarf-4")
 
 IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
   MESSAGE (CXX_FLAGS " ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 ELSEIF(CMAKE_BUILD_TYPE STREQUAL "Release")
   MESSAGE (CXX_FLAGS " ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
 ELSE()
@@ -55,17 +54,15 @@ ELSE()
 ENDIF()
 
 # -fuse-ld=gold does not work for some reason - it does not load fast_malloc lib.
-set(LINKER_FLAGS "")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINKER_FLAGS}")
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${LINKER_FLAGS}")
-set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${LINKER_FLAGS}")
+# set(LINKER_FLAGS "")
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINKER_FLAGS}")
+# set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${LINKER_FLAGS}")
+# set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${LINKER_FLAGS}")
 
 
 set(ROOT_GEN_DIR ${CMAKE_SOURCE_DIR}/genfiles)
 file(MAKE_DIRECTORY ${ROOT_GEN_DIR})
 include_directories(${ROOT_GEN_DIR})
-
-MESSAGE (STATUS "Enabled both CPU and memory profiling via Google perftools")
 
 function(cur_gen_dir out_dir)
   file(RELATIVE_PATH _rel_folder "${CMAKE_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -305,3 +302,4 @@ function(jinja_lib name)
   add_library(${lib_name} ${gen_cc_list})
   add_dependencies(${lib_name} ${target_name})
 endfunction()
+

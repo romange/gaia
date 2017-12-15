@@ -147,4 +147,4 @@ add_dependencies(fast_malloc gperf_project)
 set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       ${GPERF_LIB_DIR}/libtcmalloc_and_profiler.so)
 
-link_libraries(unwind)
+link_libraries(unwind ${CMAKE_THREAD_LIBS_INIT})

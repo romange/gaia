@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.4.0 FATAL_ERROR)
 
 # includes
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
 
 # package information
-set(PACKAGE_NAME      "gaea")
+set(PACKAGE_NAME      "gaia")
 set(PACKAGE_VERSION   "")
 set(PACKAGE_STRING    "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 set(PACKAGE_TARNAME   "${PACKAGE_NAME}-${PACKAGE_VERSION}")
@@ -24,7 +24,7 @@ project(${PACKAGE_NAME} CXX)
 
 # Check target architecture
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-  message(FATAL_ERROR "Folly requires a 64bit target architecture.")
+  message(FATAL_ERROR "Gaia requires a 64bit target architecture.")
 endif()
 
 if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
@@ -42,7 +42,12 @@ if (NOT UNWIND_LIBRARY)
 endif ()
 
 include(third_party)
-include(internal)
+
+get_directory_property(HAS_PARENT PARENT_DIRECTORY)
+if (NOT HAS_PARENT)
+  include(internal)
+endif ()
+
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(base)
