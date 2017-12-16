@@ -136,6 +136,7 @@ add_third_party(
   GIT_TAG gperftools-2.6.3
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
+                    --enable-libunwind
                     --prefix=${THIRD_PARTY_LIB_DIR}/gperf
   LIB libtcmalloc_and_profiler.so
 )
@@ -178,14 +179,71 @@ ExternalProject_Add(folly_project
   BUILD_IN_SOURCE 1
 )
 
+set(FOLLY_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/folly/include)
+set(FOLLY_LIB_DIR ${THIRD_PARTY_LIB_DIR}/folly/lib)
+
+ExternalProject_Add(
+  wangle_project
+  DEPENDS folly_project
+  GIT_REPOSITORY https://github.com/facebook/wangle.git
+  GIT_TAG v2017.12.11.00
+  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/wangle
+  SOURCE_DIR ${THIRD_PARTY_DIR}/wangle
+  UPDATE_COMMAND ""
+
+  CONFIGURE_COMMAND cmake wangle -DFOLLY_LIBRARYDIR:PATH=${FOLLY_LIB_DIR}
+                    -DFOLLY_INCLUDEDIR:PATH=${FOLLY_INCLUDE_DIR}
+                    -DDOUBLE_CONVERSION_INCLUDE_DIR=${DCONV_INCLUDE_DIR}
+                    -DDOUBLE_CONVERSION_LIBRARYDIR=${DCONV_LIB_DIR}
+                    -DGFLAGS_INCLUDE_DIR=${GFLAGS_INCLUDE_DIR}
+                    -DGFLAGS_LIBRARYDIR=${GFLAGS_LIB_DIR}
+                    -DGLOG_INCLUDE_DIR=${GLOG_INCLUDE_DIR}
+                    -DGLOG_LIBRARYDIR=${GLOG_LIB_DIR}
+                    -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
+                    -DBUILD_TESTS=OFF
+                    -DCMAKE_BUILD_TYPE=Release
+                    -DCMAKE_INSTALL_PREFIX=${THIRD_PARTY_LIB_DIR}/wangle
+  BUILD_COMMAND make -j4
+  BUILD_IN_SOURCE 1
+)
+set(WANGLE_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/wangle/include)
+set(WANGLE_LIB_DIR ${THIRD_PARTY_LIB_DIR}/wangle/lib)
+
+
+set(LDPROXYGEN "${LDFOLLY} -L${FOLLY_LIB_DIR} -L${WANGLE_LIB_DIR} -L${GPERF_LIB_DIR}")
+set(CXXPROXYGEN "${CXXFOLLY} -I${FOLLY_INCLUDE_DIR} -I${WANGLE_INCLUDE_DIR} ")
+ExternalProject_Add(proxygen_project
+  DEPENDS folly_project wangle_project
+  GIT_REPOSITORY https://github.com/facebook/proxygen.git
+  GIT_TAG v2017.12.11.00
+  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/proxygen
+  SOURCE_DIR ${THIRD_PARTY_DIR}/proxygen
+  LOG_BUILD ON
+  LOG_CONFIGURE ON
+  UPDATE_COMMAND ""
+  PATCH_COMMAND autoreconf <SOURCE_DIR>/proxygen -ivf
+  CONFIGURE_COMMAND echo foo
+  BUILD_COMMAND make -C proxygen -j4 install
+  INSTALL_COMMAND echo coo
+  BUILD_IN_SOURCE 1
+)
+
+ExternalProject_Add_Step(proxygen_project config
+  DEPENDEES configure
+  DEPENDERS build
+  WORKING_DIRECTORY ${THIRD_PARTY_DIR}/proxygen/proxygen
+  COMMAND ./configure --enable-shared=no
+                      --prefix=${THIRD_PARTY_LIB_DIR}/proxygen LDFLAGS=${LDPROXYGEN}
+                      CXXFLAGS=${CXXPROXYGEN} "LIBS=-lpthread"
+  LOG 1
+)
+
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR})
 
 set_property(TARGET TRDP::gtest APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
 
-set(FOLLY_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/folly/include)
-set(FOLLY_LIB_DIR ${THIRD_PARTY_LIB_DIR}/folly/lib)
 add_library(TRDP::folly STATIC IMPORTED)
 add_dependencies(TRDP::folly folly_project)
 set_target_properties(TRDP::folly PROPERTIES IMPORTED_LOCATION ${FOLLY_LIB_DIR}/libfolly.a
@@ -194,6 +252,7 @@ set_target_properties(TRDP::folly PROPERTIES IMPORTED_LOCATION ${FOLLY_LIB_DIR}/
 add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
 set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
-                      ${GPERF_LIB_DIR}/libtcmalloc_and_profiler.so)
+                      ${GPERF_LIB_DIR}/libtcmalloc_and_profiler.so
+                      IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
 
-link_libraries(unwind ${CMAKE_THREAD_LIBS_INIT})
+link_libraries(${CMAKE_THREAD_LIBS_INIT})
