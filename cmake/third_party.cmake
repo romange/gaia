@@ -9,10 +9,9 @@ set(THIRD_PARTY_CXX_FLAGS "-std=c++11 -O3 -DNDEBUG -fPIC")
 
 function(add_third_party name)
   set(options SHARED)
-  set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB BUILD_COMMAND)
-
-  CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "" ${ARGN})
-  set(BUILD_OPTIONS "-j4")
+  set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB )
+  set(multiValArgs BUILD_COMMAND)
+  CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "${multiValArgs}" ${ARGN})
 
   if (parsed_CMAKE_PASS_FLAGS)
     string(REPLACE " " ";" list_CMAKE_ARGS ${parsed_CMAKE_PASS_FLAGS})
@@ -161,36 +160,31 @@ add_third_party(
 
 set(LDFOLLY "-L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
 set(CXXFOLLY "-I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR}")
-ExternalProject_Add(folly_project
+add_third_party(folly
   DEPENDS gflags_project glog_project dconv_project
   GIT_REPOSITORY https://github.com/facebook/folly.git
   GIT_TAG v2017.12.11.00
-  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/folly
-  SOURCE_DIR ${THIRD_PARTY_DIR}/folly
-  LOG_BUILD ON
-  UPDATE_COMMAND ""
   PATCH_COMMAND autoreconf <SOURCE_DIR>/folly/ -ivf
-  CONFIGURE_COMMAND cd <SOURCE_DIR>/folly
-  COMMAND ./configure --enable-shared=no
-                    --prefix=${THIRD_PARTY_LIB_DIR}/folly LDFLAGS=${LDFOLLY}
-                    CXXFLAGS=${CXXFOLLY} "LIBS=-lpthread -lunwind"
-  BUILD_COMMAND sh -c "cd folly && make -j4"
-  INSTALL_COMMAND sh -c "cd folly && make install"
+  CONFIGURE_COMMAND echo "hi handsome"
+  BUILD_COMMAND make -C folly -j4 install
+  INSTALL_COMMAND echo "bye handsome"
   BUILD_IN_SOURCE 1
 )
 
-set(FOLLY_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/folly/include)
-set(FOLLY_LIB_DIR ${THIRD_PARTY_LIB_DIR}/folly/lib)
+ExternalProject_Add_Step(folly_project config
+  DEPENDEES configure
+  DEPENDERS build
+  WORKING_DIRECTORY ${THIRD_PARTY_DIR}/folly/folly
+  COMMAND ./configure --enable-shared=no
+                      --prefix=${THIRD_PARTY_LIB_DIR}/folly LDFLAGS=${LDFOLLY}
+                    CXXFLAGS=${CXXFOLLY} "LIBS=-lpthread -lunwind"
+  LOG 1
+)
 
-ExternalProject_Add(
-  wangle_project
+add_third_party(wangle
   DEPENDS folly_project
   GIT_REPOSITORY https://github.com/facebook/wangle.git
   GIT_TAG v2017.12.11.00
-  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/wangle
-  SOURCE_DIR ${THIRD_PARTY_DIR}/wangle
-  UPDATE_COMMAND ""
-
   CONFIGURE_COMMAND cmake wangle -DFOLLY_LIBRARYDIR:PATH=${FOLLY_LIB_DIR}
                     -DFOLLY_INCLUDEDIR:PATH=${FOLLY_INCLUDE_DIR}
                     -DDOUBLE_CONVERSION_INCLUDE_DIR=${DCONV_INCLUDE_DIR}
@@ -203,24 +197,15 @@ ExternalProject_Add(
                     -DBUILD_TESTS=OFF
                     -DCMAKE_BUILD_TYPE=Release
                     -DCMAKE_INSTALL_PREFIX=${THIRD_PARTY_LIB_DIR}/wangle
-  BUILD_COMMAND make -j4
   BUILD_IN_SOURCE 1
 )
-set(WANGLE_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/wangle/include)
-set(WANGLE_LIB_DIR ${THIRD_PARTY_LIB_DIR}/wangle/lib)
-
 
 set(LDPROXYGEN "${LDFOLLY} -L${FOLLY_LIB_DIR} -L${WANGLE_LIB_DIR} -L${GPERF_LIB_DIR}")
 set(CXXPROXYGEN "${CXXFOLLY} -I${FOLLY_INCLUDE_DIR} -I${WANGLE_INCLUDE_DIR} ")
-ExternalProject_Add(proxygen_project
+add_third_party(proxygen
   DEPENDS folly_project wangle_project
   GIT_REPOSITORY https://github.com/facebook/proxygen.git
   GIT_TAG v2017.12.11.00
-  DOWNLOAD_DIR ${THIRD_PARTY_DIR}/proxygen
-  SOURCE_DIR ${THIRD_PARTY_DIR}/proxygen
-  LOG_BUILD ON
-  LOG_CONFIGURE ON
-  UPDATE_COMMAND ""
   PATCH_COMMAND autoreconf <SOURCE_DIR>/proxygen -ivf
   CONFIGURE_COMMAND echo foo
   BUILD_COMMAND make -C proxygen -j4 install
@@ -239,15 +224,17 @@ ExternalProject_Add_Step(proxygen_project config
 )
 
 set_property(TARGET TRDP::glog APPEND PROPERTY
-             INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR})
+             INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}
+             )
+
+set_property(TARGET TRDP::glog APPEND PROPERTY
+             IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
+
+set_property(TARGET TRDP::folly APPEND PROPERTY
+             IMPORTED_LINK_INTERFACE_LIBRARIES event TRDP::dconv boost_context)
 
 set_property(TARGET TRDP::gtest APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
-
-add_library(TRDP::folly STATIC IMPORTED)
-add_dependencies(TRDP::folly folly_project)
-set_target_properties(TRDP::folly PROPERTIES IMPORTED_LOCATION ${FOLLY_LIB_DIR}/libfolly.a
-                      INTERFACE_INCLUDE_DIRECTORIES ${FOLLY_INCLUDE_DIR})
 
 add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
