@@ -5,8 +5,6 @@
 #include "base/integral_types.h"
 #include "base/logging.h"
 
-// Urghhh: need to think how to make it work.
-#define __SANITIZE_ADDRESS__ 0
 #include <folly/io/async/EventBase.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/fibers/FiberManagerMap.h>

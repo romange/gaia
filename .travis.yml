@@ -18,3 +18,4 @@ script:
   - ./blaze.sh -ninja
   - cd build-dbg
   - make base
+  - make bits_test fiber_demo

@@ -104,7 +104,7 @@ add_third_party(
   glog
   DEPENDS gflags_project
   GIT_REPOSITORY https://github.com/google/glog.git
-  GIT_TAG v0.3.4
+  GIT_TAG v0.3.5
   PATCH_COMMAND autoreconf --force --install  # needed to refresh toolchain
 
   CONFIGURE_COMMAND <SOURCE_DIR>/configure
@@ -178,6 +178,9 @@ ExternalProject_Add_Step(folly_project config
   COMMAND ./configure --enable-shared=no
                       --prefix=${THIRD_PARTY_LIB_DIR}/folly LDFLAGS=${LDFOLLY}
                     CXXFLAGS=${CXXFOLLY} "LIBS=-lpthread -lunwind"
+
+  # Disable sanitization code in library includes.
+  COMMAND sed -i "s/__SANITIZE_ADDRESS__/__SANITIZE_ADDRESS_DISABLED/" CPortability.h
   LOG 1
 )
 
