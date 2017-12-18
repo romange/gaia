@@ -21,5 +21,5 @@ script:
   - ninja -j4 bits_test fiber_demo
 
 after_failure:
-  - pwd && cat build/reports/tests/index.html
+  - pwd
   - find ../third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
