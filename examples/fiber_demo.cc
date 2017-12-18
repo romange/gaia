@@ -5,14 +5,21 @@
 #include "base/integral_types.h"
 #include "base/logging.h"
 
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/GlobalExecutor.h>
 #include <folly/io/async/EventBase.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/fibers/FiberManagerMap.h>
+#include <folly/File.h>
+#include <folly/FileUtil.h>
+#include <folly/init/Init.h>
 
 using namespace std;
 using namespace std::chrono_literals;
 
 DEFINE_int32(count, 1000, "");
+DEFINE_int32(threads, 4, "");
+DEFINE_string(file, "", "File to read asynchronously");
 
 template<typename Rep, typename Period> void SleepFiber(
 const std::chrono::duration<Rep, Period>& timeout) {
@@ -26,12 +33,56 @@ template<typename Rep, typename Period>
 }
 
 using std::chrono::steady_clock;
+using namespace folly;
+
+void TestFileRead(fibers::FiberManager* fb, File file) {
+  auto executor = getCPUExecutor();
+  ssize_t rc, total = 0;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[4096]);
+  fibers::Baton baton;
+
+  while (true) {
+    executor->add([&, dest = buf.get()] ()
+        mutable {
+      ssize_t rc_local = folly::readNoInt(file.fd(), dest, 4096);
+      fb->addTaskRemote([rc_local, &rc, &baton]() {
+        rc = rc_local;
+        baton.post();
+      });
+    });
+
+    baton.wait();
+    if (rc <= 0) {
+      if (rc < 0)
+        cout << "Error " << rc << endl;
+      break;
+    }
+    total += rc;
+    baton.reset();
+    //
+  }
+  cout << "Read " << total << " bytes " << endl;
+}
+
 int main(int argc, char **argv) {
-  MainInitGuard guard(&argc, &argv);
+  // MainInitGuard guard(&argc, &argv);
+  folly::init(&argc, &argv);
 
   folly::EventBase evb;
   folly::fibers::FiberManager::Options opts;
+
+  // Does not really bound number of active fibers, probably limits number of "recycled" ones.
   opts.maxFibersPoolSize = 10;
+
+  auto diskIOThreadPool = std::make_shared<folly::CPUThreadPoolExecutor>(
+    FLAGS_threads, std::make_shared<folly::NamedThreadFactory>("DiskIOThread"));
+  folly::setCPUExecutor(diskIOThreadPool);
+
+  /*fibers::Baton baton2;
+  CHECK(!baton2.try_wait());
+  baton2.post();
+  baton2.wait();
+  CHECK(!baton2.try_wait());*/
 
   auto& fiberManager = folly::fibers::getFiberManager(evb);
   folly::fibers::Baton baton;
@@ -41,12 +92,25 @@ int main(int argc, char **argv) {
       // std::cout << "Task " << i << ": start" << std::endl;
     });
   }
-  fiberManager.addTask([&baton] {
+  auto start = steady_clock::now();
+
+  fiberManager.addTask([] {
     std::cout << "Task 1: start" << std::endl;
     auto start = steady_clock::now();
     SleepFiber(2s);
     std::cout << "Task 1: after Sleep, " << as_millis(steady_clock::now() - start) << endl;
   });
+  fiberManager.addTask([] {
+    int i = fibers::Promise<int>::await([](fibers::Promise<int> p) { p.setValue(5);});
+    std::cout << "Promise " << i << endl;
+  });
+
+  if (!FLAGS_file.empty()) {
+    fiberManager.addTask([&] {
+      TestFileRead(&fiberManager, folly::File(FLAGS_file));
+      std::cout << "File read took : " << as_millis(steady_clock::now() - start) << endl;
+    });
+  }
 
   /*fiberManager.addTask([&baton] {
     std::cout << "Task 2: start" << std::endl;
