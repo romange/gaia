@@ -37,28 +37,25 @@ using namespace folly;
 
 void TestFileRead(fibers::FiberManager* fb, File file) {
   auto executor = getCPUExecutor();
-  ssize_t rc, total = 0;
-  std::unique_ptr<uint8_t[]> buf(new uint8_t[4096]);
-  fibers::Baton baton;
+  ssize_t total = 0;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[1 << 16]);
 
   while (true) {
-    executor->add([&, dest = buf.get()] ()
+    // Promise and Baton are thread-safe.
+    ssize_t rc = fibers::await([&](fibers::Promise<ssize_t> rc_promise) {
+      executor->add([&, dest = buf.get(), rc_promise = std::move(rc_promise)] ()
         mutable {
-      ssize_t rc_local = folly::readNoInt(file.fd(), dest, 4096);
-      fb->addTaskRemote([rc_local, &rc, &baton]() {
-        rc = rc_local;
-        baton.post();
-      });
-    });
+        ssize_t rc = folly::readNoInt(file.fd(), dest, 1 << 16);
+        rc_promise.setValue(rc);
+        });  // executor
+    });  // await
 
-    baton.wait();
     if (rc <= 0) {
       if (rc < 0)
         cout << "Error " << rc << endl;
       break;
     }
     total += rc;
-    baton.reset();
     //
   }
   cout << "Read " << total << " bytes " << endl;
