@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <memory>
+
 #include "base/init.h"
 #include "base/integral_types.h"
 #include "base/logging.h"
@@ -89,8 +90,6 @@ int main(int argc, char **argv) {
       // std::cout << "Task " << i << ": start" << std::endl;
     });
   }
-  auto start = steady_clock::now();
-
   fiberManager.addTask([] {
     std::cout << "Task 1: start" << std::endl;
     auto start = steady_clock::now();
@@ -103,10 +102,15 @@ int main(int argc, char **argv) {
   });
 
   if (!FLAGS_file.empty()) {
+    auto start = steady_clock::now();
+
     fiberManager.addTask([&] {
       TestFileRead(&fiberManager, folly::File(FLAGS_file));
       std::cout << "File read took : " << as_millis(steady_clock::now() - start) << endl;
     });
+
+    TestFileRead(&fiberManager, folly::File(FLAGS_file));
+    std::cout << "File SyncRead took : " << as_millis(steady_clock::now() - start) << endl;
   }
 
   /*fiberManager.addTask([&baton] {
