@@ -7,7 +7,7 @@ apt install -y libboost-all-dev autoconf-archive gperf
 
 BOOST=boost_1_66_0
 wget http://dl.bintray.com/boostorg/release/1.66.0/source/$BOOST.tar.bz2 \
-    && tar -xjvf $BOOST.tar.bz2 && cd $BOOST \
+    && tar -xjf $BOOST.tar.bz2 && cd $BOOST \
     && ./bootstrap.sh --prefix=/opt/$BOOST --without-libraries=graph_parallel,graph,program_options,wave,test,mpi,python
-./b2 --link=shared cxxflags="-std=c++14 -Wno-deprecated-declarations"  --variant=release --threading=multi --without-test  -j4
+./b2 --link=shared cxxflags="-std=c++14 -Wno-deprecated-declarations"  --variant=release --threading=multi --without-test -d0 -j4
 ./b2 install
