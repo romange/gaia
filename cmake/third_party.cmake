@@ -226,6 +226,44 @@ ExternalProject_Add_Step(proxygen_project config
   LOG 1
 )
 
+
+SET(BOOST_SOURCES_DIR ${THIRD_PARTY_DIR}/boost)
+SET(BOOST_INCLUDE_DIR "${BOOST_SOURCES_DIR}/" CACHE PATH "boost include directory." FORCE)
+
+ExternalProject_Add(boost_project
+  URL https://dl.bintray.com/boostorg/release/1.65.0/source/boost_1_65_0.tar.gz
+  #GIT_REPOSITORY "https://github.com/boostorg/boost.git"
+  #GIT_TAG "boost-1.65.0"
+  SOURCE_DIR ${BOOST_SOURCES_DIR}
+  UPDATE_COMMAND ""
+  PATCH_COMMAND ""
+  CONFIGURE_COMMAND <SOURCE_DIR>/bootstrap.sh --without-libraries=python,mpi,test
+    --without-icu
+    --prefix=${THIRD_PARTY_LIB_DIR}/boost
+
+  BUILD_COMMAND  ./b2 install
+    --variant=release --threading=multi
+    --without-test --link=shared cxxflags=-std=c++14 -j4
+  BUILD_IN_SOURCE 1
+  INSTALL_COMMAND ""
+)
+
+#set(Boost_DEBUG ON)
+set(Boost_USE_MULTITHREADED ON)
+SET(Boost_NO_SYSTEM_PATHS ON)
+set(BOOST_ROOT /opt/boost_1_66_0)
+find_package(Boost 1.66.0 REQUIRED COMPONENTS fiber context)
+# ExternalProject_Add(
+#     boost_project
+#     DOWNLOAD_DIR ${THIRD_PARTY_PATH}
+#     DOWNLOAD_COMMAND  wget https://dl.bintray.com/boostorg/release/1.64.0/source/boost_1_64_0.tar.gz -O boost_1_64_0.tar.gz
+#     CONFIGURE_COMMAND cd ${THIRD_PARTY_PATH}/ && tar xzf boost_1_64_0.tar.gz && cd boost_1_64_0 &&
+#         ./bootstrap.sh --with-libraries=system,regex,filesystem,python,test,random --with-python=${PYTHON_CMD}  --with-python-root=${PYTHON_INSTALL_DIR} --with-python-version=2.7
+#     BUILD_COMMAND cd ${THIRD_PARTY_PATH}/boost_1_64_0 && ./b2 cxxflags=-fPIC --with-system --with-regex --with-filesystem --with-test --with-random --with-python include=${PYTHON_INCLUDE_DIR}/python2.7
+#     INSTALL_COMMAND rm -rf ./include/boost && cd  ${THIRD_PARTY_PATH} && cp -r boost_1_64_0/boost ./include/
+#     )
+
+
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}
              )
