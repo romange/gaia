@@ -15,8 +15,7 @@ before_install:
 install: sudo ./install-dependencies.sh
 
 script:
-  - ./blaze.sh -ninja
-  - cd build-dbg
+  - ./blaze.sh -ninja && cd build-dbg
   - ninja -j4 base
   - ninja -j4 bits_test fiber_demo
 
