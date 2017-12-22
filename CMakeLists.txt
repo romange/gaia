@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.4.0 FATAL_ERROR)
 
-# includes
-set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
-
-
 # package information
 set(PACKAGE_NAME      "gaia")
 set(PACKAGE_VERSION   "")
@@ -41,10 +37,11 @@ if (NOT UNWIND_LIBRARY)
   Message(FATAL_ERROR  "libunwind8-dev is not installed but advised for better glog stacktraces")
 endif ()
 
-include(third_party)
-
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
 if (NOT HAS_PARENT)
+  set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
+  include(third_party)
   include(internal)
 endif ()
 
