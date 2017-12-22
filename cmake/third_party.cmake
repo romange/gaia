@@ -7,6 +7,15 @@ Include(ExternalProject)
 set(THIRD_PARTY_LIB_DIR "${THIRD_PARTY_DIR}/libs")
 set(THIRD_PARTY_CXX_FLAGS "-std=c++11 -O3 -DNDEBUG -fPIC")
 
+find_package(Threads REQUIRED)
+find_library (UNWIND_LIBRARY NAMES unwind DOC "unwind library")
+mark_as_advanced (UNWIND_LIBRARY)  ## Hides this variable from GUI.
+
+if (NOT UNWIND_LIBRARY)
+  Message(FATAL_ERROR  "libunwind8-dev is not installed but required for better glog stacktraces")
+endif ()
+
+
 function(add_third_party name)
   set(options SHARED)
   set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB )
