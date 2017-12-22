@@ -1,8 +1,5 @@
 #!/bin/bash
 
-root=`dirname $0`
-pushd $root
-
 TARGET_BUILD_TYPE=Debug
 BUILD_DIR=build-dbg
 COMPILER=`which g++`
@@ -37,5 +34,5 @@ mkdir -p $BUILD_DIR && cd $BUILD_DIR
 set -x
 
 cmake -L -DCMAKE_BUILD_TYPE=$TARGET_BUILD_TYPE -DCMAKE_CXX_COMPILER=$COMPILER $GENERATOR ..
-popd
+
 
