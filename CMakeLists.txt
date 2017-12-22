@@ -22,8 +22,9 @@ endif()
 Message("PROJECT_BINARY_DIR ${PROJECT_BINARY_DIR} GENERATOR ${CMAKE_GENERATOR}")
 
 get_directory_property(HAS_PARENT PARENT_DIRECTORY)
+
 if (NOT HAS_PARENT)
-  set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+  list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
   include(third_party)
   include(internal)

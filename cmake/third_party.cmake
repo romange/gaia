@@ -18,8 +18,8 @@ endif ()
 
 function(add_third_party name)
   set(options SHARED)
-  set(oneValueArgs CMAKE_PASS_FLAGS INSTALL_OVERRIDE LIB )
-  set(multiValArgs BUILD_COMMAND)
+  set(oneValueArgs CMAKE_PASS_FLAGS LIB)
+  set(multiValArgs BUILD_COMMAND INSTALL_COMMAND)
   CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "${multiValArgs}" ${ARGN})
 
   if (parsed_CMAKE_PASS_FLAGS)
@@ -78,6 +78,7 @@ function(add_third_party name)
     CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${_IROOT}
         -DCMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=${_IROOT}
         -DCMAKE_BUILD_TYPE:STRING=Release
+        -DBUILD_TESTING=OFF
         -DCMAKE_C_FLAGS:STRING=-O3 -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
         -DCMAKE_INSTALL_PREFIX:PATH=${_IROOT}
         ${list_CMAKE_ARGS}
@@ -146,6 +147,16 @@ add_third_party(
                     --enable-libunwind
                     --prefix=${THIRD_PARTY_LIB_DIR}/gperf
   LIB libtcmalloc_and_profiler.so
+)
+
+set(CCTZ_DIR ${THIRD_PARTY_LIB_DIR}/cctz)
+add_third_party(cctz
+  GIT_REPOSITORY https://github.com/google/cctz.git
+  GIT_TAG v2.1
+  CONFIGURE_COMMAND true # 'true' is bash's NOP
+  BUILD_COMMAND make -j4 classic
+  INSTALL_COMMAND make install -e PREFIX=${CCTZ_DIR}
+  BUILD_IN_SOURCE 1
 )
 
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
