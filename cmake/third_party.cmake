@@ -17,9 +17,8 @@ function(add_third_party name)
     string(REPLACE " " ";" list_CMAKE_ARGS ${parsed_CMAKE_PASS_FLAGS})
   endif()
 
-  set(INSTALL_CMD "make;install")
-  if (parsed_INSTALL_OVERRIDE)
-    set(INSTALL_CMD ${parsed_INSTALL_OVERRIDE})
+  if (NOT parsed_INSTALL_COMMAND)
+    set(parsed_INSTALL_COMMAND make install)
   endif()
 
   if (NOT parsed_BUILD_COMMAND)
@@ -55,7 +54,7 @@ function(add_third_party name)
 
     BUILD_COMMAND ${parsed_BUILD_COMMAND}
 
-    INSTALL_COMMAND ${INSTALL_CMD}
+    INSTALL_COMMAND ${parsed_INSTALL_COMMAND}
 
     # Wrap download, configure and build steps in a script to log output
     LOG_INSTALL ON
@@ -147,8 +146,8 @@ add_third_party(lz4
   BUILD_IN_SOURCE 1
   UPDATE_COMMAND ""
   CONFIGURE_COMMAND echo foo
-  BUILD_COMMAND DESTDIR=${LZ4_DIR} "CFLAGS=-fPIC -O3" lib
-  INSTALL_COMMAND PREFIX=${LZ4_DIR} "CFLAGS=-fPIC -O3"
+  BUILD_COMMAND make -e "CFLAGS=-fPIC -O3" lib-release
+  INSTALL_COMMAND make install -e PREFIX=${LZ4_DIR}
 )
 
 add_third_party(
@@ -224,6 +223,24 @@ ExternalProject_Add_Step(proxygen_project config
                       --prefix=${THIRD_PARTY_LIB_DIR}/proxygen LDFLAGS=${LDPROXYGEN}
                       CXXFLAGS=${CXXPROXYGEN} "LIBS=-lpthread"
   LOG 1
+)
+
+set(ZSTD_DIR ${THIRD_PARTY_LIB_DIR}/zstd)
+add_third_party(zstd
+  GIT_REPOSITORY https://github.com/facebook/zstd.git
+  GIT_TAG v1.3.3
+  BUILD_IN_SOURCE 1
+  CONFIGURE_COMMAND echo "foo"
+
+  # for debug: "CFLAGS=-fPIC -O0 -ggdb"
+  BUILD_COMMAND make -e "CFLAGS=-fPIC -O3" -j4
+  INSTALL_COMMAND make install -e PREFIX=${ZSTD_DIR}
+)
+
+add_third_party(blosc
+  GIT_REPOSITORY https://github.com/romange/c-blosc.git
+  # GIT_TAG v1.12.1
+  CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON"
 )
 
 
