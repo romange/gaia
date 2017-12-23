@@ -31,6 +31,10 @@ if (NOT HAS_PARENT)
 endif ()
 
 
+set(ABSL_CCTZ_TARGET TRDP::cctz)
+set(BUILD_TESTING OFF)
+add_subdirectory(abseil-cpp)
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(base)
 add_subdirectory(util)

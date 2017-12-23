@@ -321,7 +321,3 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
-
-set(ABSL_CCTZ_TARGET TRDP::cctz)
-set(BUILD_TESTING OFF)
-add_subdirectory(third_party/abseil-cpp)
