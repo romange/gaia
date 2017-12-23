@@ -11,4 +11,4 @@ wget http://dl.bintray.com/boostorg/release/1.66.0/source/$BOOST.tar.bz2 \
     && ./bootstrap.sh --prefix=/opt/$BOOST --without-libraries=graph_parallel,graph,program_options,wave,test,mpi,python
 ./b2 --link=shared cxxflags="-std=c++14 -Wno-deprecated-declarations"  --variant=release --threading=multi \
      --without-test -j4
-./b2 install
+./b2 install -d0
