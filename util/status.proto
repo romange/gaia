@@ -1,0 +1,27 @@
+// Copyright 2013, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+syntax = "proto2";
+
+package util;
+
+message StatusCode {
+  enum Code {
+    OK = 0;
+    CANCELLED = 1;
+    NOT_IMPLEMENTED_ERROR = 2;
+    RUNTIME_ERROR = 3;
+    INTERNAL_ERROR = 4;
+    INVALID_ARGUMENT = 5;
+    IO_ERROR = 20;
+    IO_TIMEOUT = 21;
+
+    PARSE_ERROR = 31;
+  }
+}
+
+message StatusProto {
+  required StatusCode.Code status_code = 1;
+  repeated string error_msg = 2;
+}
+

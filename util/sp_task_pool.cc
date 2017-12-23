@@ -79,7 +79,7 @@ void SingleProducerTaskPoolBase::JoinThreads() {
 
 unsigned SingleProducerTaskPoolBase::FindMostFreeThread() const {
   // Give each thread a score according to his queue size and if its runnning task.
-  // Retrun thread index with lowest score.
+  // Rerun thread index with lowest score.
   uint32 min_score = kuint32max;
   unsigned index = 0;
   for (unsigned i = 0; i < threads_.size(); ++i) {

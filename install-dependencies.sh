@@ -3,7 +3,7 @@
 apt install -y cmake libevent-dev libunwind8-dev zip flex bison ninja-build autoconf-archive
 
 # for folly & proxygen. gperf is not related to gperftools.
-apt install -y libboost-all-dev autoconf-archive gperf
+apt install -y libboost-all-dev autoconf-archive gperf curl
 
 BOOST=boost_1_66_0
 wget http://dl.bintray.com/boostorg/release/1.66.0/source/$BOOST.tar.bz2 \

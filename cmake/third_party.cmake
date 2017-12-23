@@ -159,6 +159,61 @@ add_third_party(cctz
   BUILD_IN_SOURCE 1
 )
 
+#Protobuf project
+set(PROTOBUF_DIR ${THIRD_PARTY_LIB_DIR}/protobuf)
+set(PROTOC ${PROTOBUF_DIR}/bin/protoc)
+add_third_party(
+    protobuf
+    GIT_REPOSITORY https://github.com/romange/protobuf.git
+    GIT_TAG roman_cxx11_move-3.0.0-beta-2
+    PATCH_COMMAND ./autogen.sh
+
+    CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
+        CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} --prefix=${PROTOBUF_DIR}
+    COMMAND make clean
+    BUILD_IN_SOURCE 1
+    SHARED_PRODUCT
+)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/proto_python_setup.cmd"
+     "PROTOC=${PROTOC} python setup.py build\n"
+     "PYTHONPATH=${THIRD_PARTY_LIB_DIR}/lib/python/ python setup.py install "
+     "--home=${THIRD_PARTY_LIB_DIR}\n"
+     "cd `mktemp -d`\n"
+     "mkdir google\n"
+     "echo > google/__init__.py\n"
+     "zip ${THIRD_PARTY_LIB_DIR}/lib/python/protobuf-3.0.0b2-py2.7.egg google/__init__.py"
+     )
+
+ExternalProject_Add_Step(protobuf_project install_python
+  DEPENDEES install
+  WORKING_DIRECTORY ${THIRD_PARTY_DIR}/protobuf/python
+  COMMAND mkdir -p ${THIRD_PARTY_LIB_DIR}/lib/python
+  COMMAND bash ${CMAKE_CURRENT_BINARY_DIR}/proto_python_setup.cmd
+  LOG 1
+)
+
+add_third_party(pmr
+  GIT_REPOSITORY https://github.com/romange/pmr.git
+)
+
+set(SPARSE_HASH_DIR ${THIRD_PARTY_LIB_DIR}/sparsehash)
+add_third_party(
+  sparsehash
+  GIT_REPOSITORY https://github.com/romange/sparsehash.git
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=${SPARSE_HASH_DIR} CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}
+)
+set(SPARSE_HASH_INCLUDE_DIR ${SPARSE_HASH_DIR}/include)
+
+
+add_third_party(
+  xxhash
+  GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
+  GIT_TAG v0.6.4
+  CONFIGURE_COMMAND cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=${THIRD_PARTY_LIB_DIR}/xxhash
+                          -DBUILD_SHARED_LIBS=OFF <SOURCE_DIR>/cmake_unofficial/
+)
+
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
 add_third_party(lz4
   GIT_REPOSITORY https://github.com/lz4/lz4.git
@@ -321,3 +376,4 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
+include_directories(${SPARSE_HASH_INCLUDE_DIR})
