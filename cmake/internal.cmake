@@ -2,7 +2,7 @@
 # Author: Roman Gershman (romange@gmail.com)
 #
 
-enable_testing()
+include(CTest)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 # Set targets in folders
