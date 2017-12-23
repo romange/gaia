@@ -77,7 +77,7 @@ void Float2DecimalTest::CheckFloat(float d0) const {
   *end = '\0';
 
   {
-    float const d1 = StringToSingle(StringPiece(str, end));
+    float const d1 = StringToSingle(StringPiece(str, end - str));
     uint32_t const b0 = IEEEFloat<float>(d0).bits;
     uint32_t const b1 = IEEEFloat<float>(d1).bits;
     ASSERT_EQ(b0, b1) << d0;
