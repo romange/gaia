@@ -7,6 +7,7 @@ using std::string;
 namespace util {
 
 const Status Status::CANCELLED(StatusCode::CANCELLED, "Cancelled");
+const Status Status::OK;
 
 void Status::AddErrorMsg(StatusCode::Code code, const std::string& msg) {
   if (error_detail_ == NULL) {

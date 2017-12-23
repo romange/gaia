@@ -5,14 +5,15 @@
 #include "util/zlib_source.h"
 
 #include <memory>
+#include <absl/strings/str_cat.h>
 #include "base/logging.h"
-#include "strings/strcat.h"
 
 namespace util {
 
-using base::Status;
-using base::StatusObject;
-using base::StatusCode;
+inline Status ToStatus(int err, StringPiece msg) {
+  return Status(StatusCode::IO_ERROR,
+                absl::StrCat("ZLib error ", err, ": ",  msg));
+}
 
 bool ZlibSource::IsZlibSource(Source* source) {
   std::array<unsigned char, 2> buf;
@@ -75,21 +76,19 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
     if (first_time) {
       int zerror = internalInflateInit2(format_, &zcontext_);
       if (zerror != Z_OK) {
-        return Status(StatusCode::IO_ERROR,
-                      StrCat("ZLib error ", zerror, ": ",  zcontext_.msg));
+        return ToStatus(zerror, zcontext_.msg);
       }
     }
     int zerror = inflate(&zcontext_, Z_NO_FLUSH);
 
     if (zerror != Z_OK && zerror != Z_STREAM_END) {
-      return Status(StatusCode::IO_ERROR,
-                      StrCat("ZLib error ", zerror, ": ",  zcontext_.msg));
+      return ToStatus(zerror, zcontext_.msg);
     }
 
     if (zcontext_.avail_in > 0) {
       CHECK_EQ(0, zcontext_.avail_out);
 
-      sub_stream_->Prepend(StringPiece(zcontext_.next_in, zcontext_.avail_in));
+      sub_stream_->Prepend(strings::ByteRange(zcontext_.next_in, zcontext_.avail_in));
     }
   } while (zcontext_.next_out != range.end());
 

@@ -14,14 +14,14 @@ class ZStdSink : public Sink {
   ZStdSink(Sink* upstream);
   ~ZStdSink();
 
-  base::Status Init(int level);
-  base::Status Append(const strings::ByteRange& slice) override;
-  base::Status Flush() override;
+  Status Init(int level);
+  Status Append(const strings::ByteRange& slice) override;
+  Status Flush() override;
   static size_t CompressBound(size_t src_size);
 
  private:
   size_t buf_sz_;
-  std::unique_ptr<char[]> buf_;
+  std::unique_ptr<uint8_t[]> buf_;
   std::unique_ptr<Sink> upstream_;
   void* zstd_handle_;
 };
@@ -33,7 +33,7 @@ class ZStdSource : public Source {
   static bool HasValidHeader(Source* upstream);
 
  private:
-  base::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
+  StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
 
   std::unique_ptr<Source> sub_stream_;
   void* zstd_handle_;

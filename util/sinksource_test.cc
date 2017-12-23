@@ -122,6 +122,8 @@ bool is_rep_char(const string& s, char c) {
   return true;
 }
 
+using namespace strings;
+
 TEST_F(ZstdSourceTest, Basic) {
   string buf;
 
@@ -131,7 +133,7 @@ TEST_F(ZstdSourceTest, Basic) {
   zstd_compress.Init(10);
   for (unsigned i = 0; i < 1000; ++i) {
     buf.assign(1000, 'a' + (i % 32));
-    auto status = zstd_compress.Append(StringPiece(buf));
+    auto status = zstd_compress.Append(ToByteRange(buf));
     ASSERT_TRUE(status.ok()) << status;
   }
   ASSERT_TRUE(zstd_compress.Flush().ok());
@@ -143,7 +145,7 @@ TEST_F(ZstdSourceTest, Basic) {
   buf.resize(1000);
 
   for (unsigned i = 0; i < 1000; ++i) {
-    auto result = zstd_src.Read(strings::MutableStringPiece(buf));
+    auto result = zstd_src.Read(AsMutableByteRange(buf));
     ASSERT_TRUE(result.ok()) << result.status;
     ASSERT_EQ(buf.size(), result.obj);
     ASSERT_TRUE(is_rep_char(buf, 'a' + (i % 32))) << i;

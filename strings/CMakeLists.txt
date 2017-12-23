@@ -1,5 +1,5 @@
 add_library(strings unique_strings.cc stringpiece.cc)
-target_link_libraries(strings base absl::strings)
+target_link_libraries(strings base absl::strings TRDP::folly)
 add_dependencies(strings TRDP::sparsehash)
 
 #add_library(strpmr strpmr.cc)

@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <string>
-#include <experimental/string_view>
 #include "base/integral_types.h"
 #include "base/pod_array.h"
 
@@ -30,7 +29,7 @@ class Sink {
   virtual ~Sink() {}
 
   // Appends slice to sink.
-  virtual base::Status Append(const strings::ByteRange& slice) = 0;
+  virtual Status Append(const strings::ByteRange& slice) = 0;
 
   // Returns a writable buffer for appending .
   // Guarantees that result.capacity >=min_capacity.
@@ -58,7 +57,7 @@ class Sink {
   // Flushes internal buffers. The default implemenation does nothing. Sink
   // subclasses may use internal buffers that require calling Flush() at the end
   // of writing to the stream.
-  virtual base::Status Flush();
+  virtual Status Flush();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Sink);
@@ -69,10 +68,10 @@ class ZeroCopySink : public Sink {
  public:
   explicit ZeroCopySink(void* dest) : dest_(reinterpret_cast<uint8*>(dest)) {}
 
-  base::Status Append(const strings::ByteRange& slice) {
+  Status Append(const strings::ByteRange& slice) {
     memcpy(dest_ + offset_, slice.data(), slice.size());
     offset_ += slice.size();
-    return base::Status::OK;
+    return Status::OK;
   }
 
   size_t written() const { return offset_; }
@@ -84,29 +83,32 @@ class ZeroCopySink : public Sink {
 class StringSink : public Sink {
   std::string contents_;
 public:
-  base::Status Append(const strings::ByteRange& slice) {
+  Status Append(const strings::ByteRange& slice) {
     contents_.append(strings::charptr(slice.data()), slice.size());
-    return base::Status::OK;
+    return Status::OK;
   }
 
   std::string& contents() { return contents_; }
   const std::string& contents() const { return contents_; }
 };
 
+
+
+// Source classes. Allow synchronous reads from an abstract source.
 class Source {
  public:
   Source() {}
   virtual ~Source() {}
 
 
-  base::StatusObject<size_t> Read(const strings::MutableByteRange& range);
+  StatusObject<size_t> Read(const strings::MutableByteRange& range);
 
   void Prepend(const strings::ByteRange& range) {
     prepend_buf_.insert(prepend_buf_.begin(), range.begin(), range.end());
   }
 
  protected:
-  virtual base::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) = 0;
+  virtual StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) = 0;
 
  private:
 
@@ -126,7 +128,7 @@ public:
   size_t Available() const {return input_.size();};
 
 private:
-  base::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
+  StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
 
   StringPiece input_;
   uint32 block_size_;

@@ -6,9 +6,6 @@
 #include "base/logging.h"
 #include "base/port.h"
 
-using base::Status;
-using base::StatusObject;
-
 namespace util {
 
 Sink::WritableBuffer Sink::GetAppendBuffer(
@@ -22,7 +19,7 @@ Sink::WritableBuffer Sink::GetAppendBuffer(
 Status Sink::Flush() { return Status::OK; }
 
 
-base::StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) {
+StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) {
   CHECK(!range.empty());
 
   if (prepend_buf_.size() >= range.size()) {
@@ -51,11 +48,11 @@ base::StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) 
 }
 
 
-base::StatusObject<size_t> StringSource::ReadInternal(const strings::MutableByteRange& range) {
+StatusObject<size_t> StringSource::ReadInternal(const strings::MutableByteRange& range) {
   size_t to_fill = std::min<size_t>({range.size(), block_size_, input_.size()});
   memcpy(range.begin(), input_.begin(), to_fill);
 
-  input_.advance(to_fill);
+  input_.remove_prefix(to_fill);
   return to_fill;
 }
 

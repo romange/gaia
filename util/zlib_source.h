@@ -34,7 +34,7 @@ class ZlibSource : public Source {
 
  private:
 
-  base::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
+  StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
 
   Source* sub_stream_;
 
