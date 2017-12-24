@@ -10,11 +10,11 @@
 
 namespace std {
 
-template<> struct hash<StringPiece> {
-  size_t operator()(StringPiece slice) const {
+template<typename Iter> struct hash<strings::Range<Iter>> {
+  size_t operator()(strings::Range<Iter> slice) const {
     return base::MurmurHash3_x86_32(
           reinterpret_cast<const uint8_t*>(slice.data()),
-          slice.size() * sizeof(typename StringPiece::value_type), 16785407UL);
+          slice.size() * sizeof(typename strings::Range<Iter>::value_type), 16785407UL);
   }
 };
 

@@ -3,10 +3,7 @@
 //
 #pragma once
 
-#include <absl/strings/string_view.h>
-#include <folly/Range.h>
-
-typedef absl::string_view StringPiece;
+#include "strings/range.h"
 
 namespace strings {
 
@@ -17,9 +14,6 @@ inline const char* charptr(const unsigned char* ptr) {
 inline char* charptr(unsigned char* ptr) {
   return reinterpret_cast<char*>(ptr);
 }
-
-using folly::MutableByteRange;
-using folly::ByteRange;
 
 inline ByteRange ToByteRange(StringPiece s) { 
   return ByteRange(reinterpret_cast<const uint8_t*>(s.data()), s.size());

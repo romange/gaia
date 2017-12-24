@@ -5,14 +5,14 @@
 #include "util/zlib_source.h"
 
 #include <memory>
-#include <absl/strings/str_cat.h>
+#include "strings/strcat.h"
 #include "base/logging.h"
 
 namespace util {
 
 inline Status ToStatus(int err, StringPiece msg) {
   return Status(StatusCode::IO_ERROR,
-                absl::StrCat("ZLib error ", err, ": ",  msg));
+                StrCat("ZLib error ", err, ": ",  msg));
 }
 
 bool ZlibSource::IsZlibSource(Source* source) {
