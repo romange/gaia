@@ -8,7 +8,7 @@ set(PACKAGE_TARNAME   "${PACKAGE_NAME}-${PACKAGE_VERSION}")
 set(PACKAGE_BUGREPORT "TBD")
 set(PROJECT_CONTACT romange@gmail.com)
 
-project(${PACKAGE_NAME} CXX)
+project(${PACKAGE_NAME})
 
 # Check target architecture
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)

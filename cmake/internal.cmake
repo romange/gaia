@@ -4,6 +4,7 @@
 
 include(CTest)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+enable_language(CXX C)
 
 # Set targets in folders
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
