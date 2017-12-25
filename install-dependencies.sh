@@ -17,8 +17,10 @@ install_boost() {
     ./b2 install -d0
 }
 
-if ! [ -d /opt/$BOOST_VER ]; then
+if ! [ -d /opt/$BOOST_VER/lib ]; then
   install_boost
+else
+  echo "Skipping installing boost"
 fi
 
 
