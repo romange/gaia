@@ -23,4 +23,6 @@ ConsoleLogSink* ConsoleLogSink::instance() {
   return &sink;
 }
 
+const char* kProgramName = "";
+
 }  // namespace base

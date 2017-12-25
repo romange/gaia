@@ -19,6 +19,8 @@ public:
   static ConsoleLogSink* instance();
 };
 
+extern const char* kProgramName;
+
 }  // namespace base
 
 #define CONSOLE_INFO LOG_TO_SINK(base::ConsoleLogSink::instance(), INFO)

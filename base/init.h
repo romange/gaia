@@ -49,11 +49,10 @@ class ModuleInitializer {
   }
 
 class MainInitGuard {
-  public:
-    MainInitGuard(int* argc, char*** argv);
+ public:
+   MainInitGuard(int* argc, char*** argv);
 
-    ~MainInitGuard();
+   ~MainInitGuard();
 };
 
 #define MainInitGuard(x, y) static_assert(false, "Forgot variable name")
-

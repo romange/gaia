@@ -33,6 +33,8 @@ MainInitGuard::MainInitGuard(int* argc, char*** argv) {
   google::ParseCommandLineFlags(argc, argv, true);
   google::InitGoogleLogging((*argv)[0]);
 
+  base::kProgramName = (*argv)[0];
+  
 #if defined NDEBUG
   LOG(INFO) << (*argv)[0] << " running in opt mode.";
 #else
