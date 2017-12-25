@@ -11,7 +11,6 @@
 #include <boost/fiber/buffered_channel.hpp>
 #include <boost/fiber/future.hpp>
 #include <boost/thread.hpp>
-#include <folly/Function.h>
 
 namespace util {
 
@@ -19,7 +18,8 @@ namespace util {
 class SingleQueueThreadPool {
  public:
   // I must use folly::Function because std & boost functions do not wrap MoveableOnly lambdas.
-  typedef folly::Function<void()> Func;
+  typedef std::function<void()> Func;
+  
   explicit SingleQueueThreadPool(unsigned num_threads, unsigned queue_size = 128); 
 
   ~SingleQueueThreadPool();
