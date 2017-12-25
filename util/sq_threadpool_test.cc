@@ -26,21 +26,19 @@ namespace {
 }  // namespace
 
 TEST_F(SQThreadPoolTest, Read) {
-  // int fd = open("/dev/random", O_RDONLY, 0400);
-  // CHECK_GT(fd, 0);
-}
+  int fd = open(base::kProgramName, O_RDONLY, 0400);
+  CHECK_GT(fd, 0);
+  FileIOManager mngr(1);
+  std::array<uint8_t[16], 16> a;
 
-TEST_F(SQThreadPoolTest, Promise) {
-  fibers::future<void> f;
-  {
-    fibers::promise<void> p;
-    f = p.get_future();
+  std::vector<FileIOManager::ReadResult> reads;
+  for (unsigned i = 0; i < a.size(); ++i) {
+    reads.push_back(mngr.Read(fd, i * 16, strings::MutableByteRange(a[i], sizeof(a[0]))));
   }
-  fibers::promise<StatusObject<int>> p2;
-  p2.set_value(5);
-  fibers::promise<StatusObject<int>> p3(std::move(p2));
-  StatusObject<int> res = p3.get_future().get();
-  EXPECT_EQ(5, res.obj);
+
+  for (unsigned i = 0; i < reads.size(); ++i) {
+    reads[i].get();
+  }
 }
 
 }  // namespace util

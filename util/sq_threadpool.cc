@@ -45,7 +45,7 @@ SingleQueueThreadPool::SingleQueueThreadPool(unsigned num_threads, unsigned queu
   if (num_threads == 0) {
     num_threads = thread::hardware_concurrency();
   }
-  attrs.set_stack_size(1 << 14);
+  attrs.set_stack_size(1 << 16);
 
   workers_.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i) {
@@ -67,25 +67,41 @@ void SingleQueueThreadPool::Shutdown() {
 }
 
 
+void SingleQueueThreadPool::WorkerFunction() {
+  while (true) {
+    Func f;
+    fibers::channel_op_status st = input_.pop(f);
+    if (st == fibers::channel_op_status::closed)
+      break;
+    CHECK(st == fibers::channel_op_status::success) << int(st);
+    try {
+      f();
+    } catch(std::exception& e) {
+      std::exception_ptr p = std::current_exception();
+      LOG(FATAL) << "Exception " << e.what();
+    }
+  }
+}
+
+
 auto FileIOManager::Read(int fd, size_t offs, strings::MutableByteRange dest) -> ReadResult {
-  fibers::promise<ReadStatus> pr;
-  fibers::future<ReadStatus> future = pr.get_future();
-  fibers::channel_op_status st = sq_tp_.Add([fd, offs, dest, pr = std::move(pr)] () mutable {
+  auto pr = std::make_shared<fibers::promise<ReadStatus>>();
+  
+  fibers::channel_op_status st = sq_tp_.Add([fd, offs, dest, pr] () mutable {
     ReadStatus st = ReadNoInt(fd, dest.data(), dest.size(), offs);
-    pr.set_value(st);
+    pr->set_value(st);
   });
 
-  if (st == fibers::channel_op_status::success)
-    return future;
-
-  switch (st) {
-    case fibers::channel_op_status::closed:
-      pr.set_value(Status(StatusCode::IO_ERROR, "Channel closed"));
-    break;
-    default:
-      pr.set_value(Status("Unknown error!"));
+  if (st != fibers::channel_op_status::success) {
+    switch (st) {
+      case fibers::channel_op_status::closed:
+        pr->set_value(Status(StatusCode::IO_ERROR, "Channel closed"));
+      break;
+      default:
+        pr->set_value(Status("Unknown error!"));
+    }
   }
-  return pr.get_future();
+  return pr->get_future();
 }
 
 }  // namespace util
