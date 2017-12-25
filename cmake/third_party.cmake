@@ -39,14 +39,16 @@ function(add_third_party name)
   set(LIB_PREFIX "${_IROOT}/lib/lib${name}.")
 
   if (parsed_LIB)
+    set(LIB_FILE "${_IROOT}/lib/${parsed_LIB}")
     if (${parsed_LIB} MATCHES ".*\.so$")
       set(LIB_TYPE SHARED)
     elseif (${parsed_LIB} MATCHES ".*\.a$")
       set(LIB_TYPE STATIC)
+    elseif("${parsed_LIB}" STREQUAL "none")
+      set(LIB_FILE "")
     else()
       MESSAGE(FATAL_ERROR "Unrecognized lib ${parsed_LIB}")
     endif()
-    set(LIB_FILE "${_IROOT}/lib/${parsed_LIB}")
   elseif(parsed_SHARED)
     set(LIB_TYPE SHARED)
     STRING(CONCAT LIB_FILE "${LIB_PREFIX}" "so")
@@ -89,12 +91,14 @@ function(add_third_party name)
   file(MAKE_DIRECTORY ${_IROOT}/include)
 
   set("${uname}_INCLUDE_DIR" "${_IROOT}/include" PARENT_SCOPE)
-  set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
 
-  add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
-  add_dependencies(TRDP::${name} ${name}_project)
-  set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILE}
-                        INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+  if (LIB_TYPE)
+      set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
+      add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
+      add_dependencies(TRDP::${name} ${name}_project)
+      set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILE}
+                            INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+  endif()
 endfunction()
 
 # We need gflags as shared library because glog is shared and it uses it too.
@@ -202,6 +206,7 @@ add_third_party(
   sparsehash
   GIT_REPOSITORY https://github.com/romange/sparsehash.git
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=${SPARSE_HASH_DIR} CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}
+  LIB "none"
 )
 set(SPARSE_HASH_INCLUDE_DIR ${SPARSE_HASH_DIR}/include)
 

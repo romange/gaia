@@ -1,7 +1,14 @@
+// Copyright 2017, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+
 #include "base/init.h"
 #include "base/logging.h"
-#include <boost/fiber/all.hpp>
-#include <thread>
+#include "base/walltime.h"
+#include "util/sq_threadpool.h"
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 using namespace boost;
 
@@ -9,62 +16,70 @@ DEFINE_string(file, "", "File to read asynchronously");
 DEFINE_int32(threads, 4, "");
 DEFINE_int32(io_len, 4, "");
 
-struct ReadRequest {
-  int fd;
-  ssize_t offs;
+using namespace std;
+using util::FileIOManager;
+using fibers::channel_op_status;
+
+struct Item {
+  strings::MutableByteRange buf;
+  FileIOManager::ReadResult res;
 };
 
-using fibers::channel_op_status;
-using namespace std;
+typedef fibers::buffered_channel<Item> ReadQueue;
 
-std::atomic<long> num_requests;
-void ReadIO(fibers::buffered_channel<ReadRequest>& ch) {  
-  ReadRequest rr;
-  char buf[32];
+void ReadRequests(ReadQueue* q) {
+  channel_op_status st;
+  Item item;
 
-  while (true) {
-    channel_op_status st = ch.pop(rr);
-    if (st == channel_op_status::closed)
-      return;
-
-    --num_requests;
-    CHECK(st == channel_op_status::success);
-    pread(rr.fd, buf, 16, rr.offs);
-  }
+  while(true) {
+    uint64 start = base::GetMonotonicMicrosFast();
+    st = q->pop(item);
+    if (channel_op_status::closed == st)
+      break;
+    uint64 delta = base::GetMonotonicMicrosFast() - start;
+    if (delta > 500) {
+      LOG(INFO) << "Stuck for " << delta;
+    }
+    CHECK(st == channel_op_status::success) << int(st);  
+    item.res.get();
+  };
 }
 
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
 
-  fibers::buffered_channel<ReadRequest> ch(FLAGS_io_len);
-  using fibers::channel_op_status;
-
+  
   CHECK(!FLAGS_file.empty());
   int fd = open(FLAGS_file.c_str(), O_RDONLY, 0644);
   CHECK_GT(fd, 0);
-  std::vector<std::thread> io_threads;
-  for (int i = 0; i < FLAGS_threads; ++i) {
-    io_threads.emplace_back(&ReadIO, std::ref(ch));
-  }
-
+  
   struct stat sbuf;
   CHECK_EQ(0, fstat(fd, &sbuf));
   cout << "File size is " << sbuf.st_size << endl;
   off_t offset = 0;
+  
+  FileIOManager io_mgr(FLAGS_threads, FLAGS_io_len);  
+  ReadQueue ch(8);
+  std::array<uint8_t[16], 8> buf_array;
+  unsigned num_requests = 0;
 
-  num_requests = 0;
+  // launch::post means - dispatch a new fiber but do not yield now.
+  fibers::fiber read_fiber(fibers::launch::post, &ReadRequests, &ch);
+
   while (offset + 20 < sbuf.st_size) {
-    channel_op_status st = ch.push(ReadRequest{fd, offset});
-    ++num_requests;
+    static_assert(sizeof(buf_array.front()) == 16, "");
+
+    strings::MutableByteRange dest(buf_array[num_requests % 8], sizeof(buf_array.front()));
+    FileIOManager::ReadResult res = io_mgr.Read(fd, offset, dest);
+    channel_op_status st = ch.push(Item{dest, std::move(res)});
     CHECK(st == channel_op_status::success);
+    
+    ++num_requests;
+    
     offset += (1 << 17);
   }
   ch.close();
-  
-  cout << "Before join\n";
-  for (auto& t : io_threads)
-    t.join();
-  CHECK_EQ(0, num_requests.load());
+  read_fiber.join();
   
   return 0;
 }
