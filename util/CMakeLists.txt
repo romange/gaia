@@ -15,9 +15,9 @@ add_library(task_pool sp_task_pool.cc)
 cxx_link(task_pool base TRDP::folly)
 
 add_library(fibers sq_threadpool.cc)
-cxx_link(fibers base ${Boost_LIBRARIES})
-add_include(fibers ${Boost_INCLUDE_DIR})
+cxx_link(fibers base status ${Boost_LIBRARIES} TRDP::folly)
 
 cxx_test(sp_task_pool_test base task_pool LABELS CI)
 cxx_test(sinksource_test strings util LABELS CI)
+cxx_test(sq_threadpool_test base fibers LABELS CI)
 

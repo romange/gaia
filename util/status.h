@@ -22,7 +22,7 @@ class Status {
   }
 
   // Move c'tor.
-  Status(Status&& st) : error_detail_(st.error_detail_) {
+  Status(Status&& st) noexcept : error_detail_(st.error_detail_) {
     st.error_detail_ = nullptr;
   }
 
@@ -112,9 +112,13 @@ template<typename T> struct StatusObject {
 
   bool ok() const { return status.ok(); }
 
-  StatusObject() = default;
+  StatusObject() noexcept = default;
+  StatusObject(StatusObject&&) noexcept = default;
+  StatusObject(const StatusObject& st) = default;
+  
   StatusObject(const Status& s) : status(s), obj() {}
-  StatusObject(Status&& s) : status(std::move(s)), obj() {}
+  StatusObject(Status&& s) noexcept : status(std::move(s)), obj() {}
+
   StatusObject(const T& t) : obj(t) {}
   StatusObject(T&& t) : obj(std::move(t)) {}
 

@@ -6,20 +6,49 @@
 
 namespace util {
 
-void Foo() {}
+using namespace boost;
+
+namespace {
+
+typedef StatusObject<size_t> ReadStatus;
+
+Status StatusFileError() {
+  char buf[1024];
+  char* result = strerror_r(errno, buf, sizeof(buf));
+
+  return Status(StatusCode::IO_ERROR, result);
+}
+
+ReadStatus ReadNoInt(int fd, uint8_t* buffer, size_t length, size_t offset) {
+  size_t left_to_read = length;
+  uint8_t* curr_buf = buffer;
+
+  while (left_to_read > 0) {
+    ssize_t read = pread(fd, curr_buf, left_to_read, offset);
+    if (read <= 0) {
+      return read == 0 ? ReadStatus(length - left_to_read) : StatusFileError();
+    }
+
+    curr_buf += read;
+    offset += read;
+    left_to_read -= read;
+  }
+  return length;
+}
+
+}  // namespace
 
 SingleQueueThreadPool::SingleQueueThreadPool(unsigned num_threads, unsigned queue_size) 
     : input_(queue_size) {
-  boost::thread::attributes attrs;
+  thread::attributes attrs;
   
   if (num_threads == 0) {
-    num_threads = boost::thread::hardware_concurrency();
+    num_threads = thread::hardware_concurrency();
   }
   attrs.set_stack_size(1 << 14);
 
   workers_.reserve(num_threads);
   for (unsigned i = 0; i < num_threads; ++i) {
-    // boost::thread t{};
     workers_.emplace_back(attrs, std::bind(&SingleQueueThreadPool::WorkerFunction, this));
   }
 } 
@@ -32,8 +61,31 @@ SingleQueueThreadPool::~SingleQueueThreadPool() {
 
 void SingleQueueThreadPool::Shutdown() {
   input_.close();
-  for (auto& w : workers_)
+  for (auto& w : workers_) {
     w.join();
+  }
+}
+
+
+auto FileIOManager::Read(int fd, size_t offs, strings::MutableByteRange dest) -> ReadResult {
+  fibers::promise<ReadStatus> pr;
+  fibers::future<ReadStatus> future = pr.get_future();
+  fibers::channel_op_status st = sq_tp_.Add([fd, offs, dest, pr = std::move(pr)] () mutable {
+    ReadStatus st = ReadNoInt(fd, dest.data(), dest.size(), offs);
+    pr.set_value(st);
+  });
+
+  if (st == fibers::channel_op_status::success)
+    return future;
+
+  switch (st) {
+    case fibers::channel_op_status::closed:
+      pr.set_value(Status(StatusCode::IO_ERROR, "Channel closed"));
+    break;
+    default:
+      pr.set_value(Status("Unknown error!"));
+  }
+  return pr.get_future();
 }
 
 }  // namespace util

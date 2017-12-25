@@ -232,8 +232,15 @@ add_third_party(
   LIB libdouble-conversion.a
 )
 
-set(LDFOLLY "-L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
-set(CXXFOLLY "-I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR}")
+set(Boost_USE_MULTITHREADED ON)
+SET(Boost_NO_SYSTEM_PATHS ON)
+set(BOOST_ROOT /opt/boost_1_66_0)
+find_package(Boost 1.66.0 REQUIRED COMPONENTS fiber context system)
+
+Message(FATAL_ERROR "${Boost_LIBRARY_DIR}")
+
+set(LDFOLLY "-L${Boost_LIBRARY_DIR} -L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${Boost_LIBRARY_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
+set(CXXFOLLY "-I${Boost_INCLUDE_DIR} -I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR}")
 add_third_party(folly
   DEPENDS gflags_project glog_project dconv_project
   GIT_REPOSITORY https://github.com/facebook/folly.git
@@ -249,7 +256,7 @@ ExternalProject_Add_Step(folly_project config
   DEPENDEES configure
   DEPENDERS build
   WORKING_DIRECTORY ${THIRD_PARTY_DIR}/folly/folly
-  COMMAND ./configure --enable-shared=no
+  COMMAND ./configure --enable-shared=no --with-boost=${BOOST_ROOT}
                       --prefix=${THIRD_PARTY_LIB_DIR}/folly LDFLAGS=${LDFOLLY}
                     CXXFLAGS=${CXXFOLLY} "LIBS=-lpthread -lunwind"
 
@@ -319,32 +326,7 @@ add_third_party(blosc
 )
 
 
-SET(BOOST_SOURCES_DIR ${THIRD_PARTY_DIR}/boost)
-SET(BOOST_INCLUDE_DIR "${BOOST_SOURCES_DIR}/" CACHE PATH "boost include directory." FORCE)
-
-ExternalProject_Add(boost_project
-  URL https://dl.bintray.com/boostorg/release/1.65.0/source/boost_1_65_0.tar.gz
-  #GIT_REPOSITORY "https://github.com/boostorg/boost.git"
-  #GIT_TAG "boost-1.65.0"
-  SOURCE_DIR ${BOOST_SOURCES_DIR}
-  UPDATE_COMMAND ""
-  PATCH_COMMAND ""
-  CONFIGURE_COMMAND <SOURCE_DIR>/bootstrap.sh --without-libraries=python,mpi,test
-    --without-icu
-    --prefix=${THIRD_PARTY_LIB_DIR}/boost
-
-  BUILD_COMMAND  ./b2 install
-    --variant=release --threading=multi
-    --without-test --link=shared cxxflags=-std=c++14 -j4
-  BUILD_IN_SOURCE 1
-  INSTALL_COMMAND ""
-)
-
 #set(Boost_DEBUG ON)
-set(Boost_USE_MULTITHREADED ON)
-SET(Boost_NO_SYSTEM_PATHS ON)
-set(BOOST_ROOT /opt/boost_1_66_0)
-find_package(Boost 1.66.0 REQUIRED COMPONENTS fiber context)
 # ExternalProject_Add(
 #     boost_project
 #     DOWNLOAD_DIR ${THIRD_PARTY_PATH}
@@ -376,4 +358,4 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
-include_directories(${SPARSE_HASH_INCLUDE_DIR})
+include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR})
