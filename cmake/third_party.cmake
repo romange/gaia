@@ -237,10 +237,8 @@ SET(Boost_NO_SYSTEM_PATHS ON)
 set(BOOST_ROOT /opt/boost_1_66_0)
 find_package(Boost 1.66.0 REQUIRED COMPONENTS fiber context system)
 
-Message(FATAL_ERROR "${Boost_LIBRARY_DIR}")
-
 set(LDFOLLY "-L${Boost_LIBRARY_DIR} -L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${Boost_LIBRARY_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
-set(CXXFOLLY "-I${Boost_INCLUDE_DIR} -I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR}")
+set(CXXFOLLY "-I${Boost_INCLUDE_DIR} -I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR} -I${GTEST_INCLUDE_DIR}")
 add_third_party(folly
   DEPENDS gflags_project glog_project dconv_project
   GIT_REPOSITORY https://github.com/facebook/folly.git
@@ -346,7 +344,7 @@ set_property(TARGET TRDP::glog APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
 
 set_property(TARGET TRDP::folly APPEND PROPERTY
-             IMPORTED_LINK_INTERFACE_LIBRARIES event TRDP::dconv boost_context)
+             IMPORTED_LINK_INTERFACE_LIBRARIES event TRDP::dconv ${BOOST_ROOT}/lib/libboost_context.so)
 
 set_property(TARGET TRDP::gtest APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
