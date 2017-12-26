@@ -32,7 +32,9 @@ int main(int argc, char **argv) {
     FLAGS_threads, std::make_unique<queue_t>(FLAGS_io_len),
     std::make_shared<folly::NamedThreadFactory>("DiskIOThread"));
 
-  char cbuf[32];
+  constexpr unsigned kBufSize = 1 << 15;
+  char cbuf[kBufSize];
+
   unsigned sent_requests = 0;
   for (int i = 1; i < argc; ++i) {
     const char* filename = argv[i]; 
@@ -41,26 +43,27 @@ int main(int argc, char **argv) {
 
     struct stat sbuf;
     CHECK_EQ(0, fstat(fd, &sbuf));
-    
+    posix_fadvise(fd, 0, 0, POSIX_FADV_NOREUSE);
+
     off_t offset = 0;
     std::atomic_long active_requests(0);
     folly::EventCount ec;
-    while (offset + 20 < sbuf.st_size) {
+    while (offset + kBufSize < sbuf.st_size) {
       ++sent_requests;
       if (FLAGS_async) {
         active_requests.fetch_add(1, std::memory_order_acq_rel);
         pool->add([&, offset, fd] () 
           { 
             // LOG(INFO) << "Offset " << offset;
-            CHECK_EQ(16, pread(fd, cbuf, 16, offset));
+            CHECK_EQ(kBufSize, pread(fd, cbuf, kBufSize, offset));
             if (1 == active_requests.fetch_sub(1, std::memory_order_acq_rel)) {
               ec.notify(); 
             }
           });
       } else {
-        pread(fd, cbuf, 16, offset);
+        CHECK_EQ(kBufSize, pread(fd, cbuf, kBufSize, offset));
       }
-      offset += (1 << 17);
+      offset += (1 << 18);
     }
 
     if (FLAGS_async) {
