@@ -1,6 +1,7 @@
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/executors/task_queue/PriorityLifoSemMPMCQueue.h>
 #include <folly/init/Init.h>
+#include <folly/experimental/EventCount.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -8,46 +9,68 @@
 #include <unistd.h>
 
 #include <iostream>
+
+#include "base/init.h"
 #include "base/logging.h"
 
-DEFINE_string(file, "", "File to read asynchronously");
+
 DEFINE_int32(threads, 4, "");
+DEFINE_int32(io_len, 64, "");
 DEFINE_bool(async, false, "");
 
 using namespace folly;
 using namespace std;
 
 int main(int argc, char **argv) {
-  folly::init(&argc, &argv);
+  MainInitGuard guard(&argc, &argv);
+
+  // folly::init(&argc, &argv);
 
   using queue_t = LifoSemMPMCQueue<CPUThreadPoolExecutor::CPUTask, QueueBehaviorIfFull::BLOCK>;
   std::shared_ptr<folly::CPUThreadPoolExecutor> pool 
       = std::make_shared<folly::CPUThreadPoolExecutor>(
-    FLAGS_threads, std::make_unique<queue_t>(256),
+    FLAGS_threads, std::make_unique<queue_t>(FLAGS_io_len),
     std::make_shared<folly::NamedThreadFactory>("DiskIOThread"));
 
-  CHECK(!FLAGS_file.empty());
-  int fd = open(FLAGS_file.c_str(), O_RDONLY, 0644);
-  CHECK_GT(fd, 0);
-
-  struct stat sbuf;
-  CHECK_EQ(0, fstat(fd, &sbuf));
-  
-  off_t offset = 0;
   char cbuf[32];
-  while (offset + 20 < sbuf.st_size) {
-    if (FLAGS_async) {
-      pool->add([offset, fd, &cbuf] {pread(fd, cbuf, 16, offset); 
-                                    });
-    } else {
-      pread(fd, cbuf, 16, offset);
+  unsigned sent_requests = 0;
+  for (int i = 1; i < argc; ++i) {
+    const char* filename = argv[i]; 
+    int fd = open(filename, O_RDONLY, 0644);
+    CHECK_GT(fd, 0);
+
+    struct stat sbuf;
+    CHECK_EQ(0, fstat(fd, &sbuf));
+    
+    off_t offset = 0;
+    std::atomic_long active_requests(0);
+    folly::EventCount ec;
+    while (offset + 20 < sbuf.st_size) {
+      ++sent_requests;
+      if (FLAGS_async) {
+        active_requests.fetch_add(1, std::memory_order_acq_rel);
+        pool->add([&, offset, fd] () 
+          { 
+            // LOG(INFO) << "Offset " << offset;
+            CHECK_EQ(16, pread(fd, cbuf, 16, offset));
+            if (1 == active_requests.fetch_sub(1, std::memory_order_acq_rel)) {
+              ec.notify(); 
+            }
+          });
+      } else {
+        pread(fd, cbuf, 16, offset);
+      }
+      offset += (1 << 17);
     }
-    offset += (1 << 17);
+
+    if (FLAGS_async) {
+      ec.await([&] { return active_requests.load(std::memory_order_acquire) == 0; });
+    }
+    CHECK_EQ(0, active_requests);
+
+    close(fd);
+    LOG(INFO) << "Finished " << filename << " with " << sent_requests;
   }
-
-  if (FLAGS_async)
-    pool->join();
-  close(fd);
-
+  
   return 0;
 }
