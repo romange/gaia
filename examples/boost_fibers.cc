@@ -67,19 +67,25 @@ int main(int argc, char **argv) {
   FileIOManager io_mgr(FLAGS_threads, FLAGS_io_len);  
 
   constexpr unsigned kThisFiberQueue = 16;
-  ReadQueue ch(kThisFiberQueue);
-  std::array<uint8_t[16], kThisFiberQueue> buf_array;
+  constexpr unsigned kReadSize = 1 << 15;
+  ReadQueue read_channel(kThisFiberQueue);
+
+  typedef std::unique_ptr<uint8_t[]> ReadBuf;
+
+  std::array<ReadBuf, kThisFiberQueue> buf_array;
+  for (auto& ptr : buf_array)
+    ptr.reset(new uint8_t[kReadSize]);
+
   unsigned num_requests = 0;
 
   // launch::post means - dispatch a new fiber but do not yield now.
-  fibers::fiber read_fiber(fibers::launch::post, &ReadRequests, &ch);
+  fibers::fiber read_fiber(fibers::launch::post, &ReadRequests, &read_channel);
 
-  while (offset + 20 < sbuf.st_size) {
-    static_assert(sizeof(buf_array.front()) == 16, "");
-
-    strings::MutableByteRange dest(buf_array[num_requests % 8], sizeof(buf_array.front()));
+  while (offset + kReadSize < sbuf.st_size) {
+    strings::MutableByteRange dest(buf_array[num_requests % 8].get(), kReadSize);
     FileIOManager::ReadResult res = io_mgr.Read(fd, offset, dest);
-    channel_op_status st = ch.push(Item{dest, std::move(res)});
+    
+    channel_op_status st = read_channel.push(Item{dest, std::move(res)});
     CHECK(st == channel_op_status::success);
     ++queue_requests;
 
@@ -87,7 +93,7 @@ int main(int argc, char **argv) {
     
     offset += (1 << 17);
   }
-  ch.close();
+  read_channel.close();
   read_fiber.join();
   
   return 0;

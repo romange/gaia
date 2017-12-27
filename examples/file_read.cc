@@ -14,9 +14,8 @@
 #include "base/logging.h"
 
 
-DEFINE_int32(threads, 4, "");
+DEFINE_int32(threads, 0, "");
 DEFINE_int32(io_len, 64, "");
-DEFINE_bool(async, false, "");
 
 using namespace folly;
 using namespace std;
@@ -27,17 +26,20 @@ int main(int argc, char **argv) {
   // folly::init(&argc, &argv);
 
   using queue_t = LifoSemMPMCQueue<CPUThreadPoolExecutor::CPUTask, QueueBehaviorIfFull::BLOCK>;
-  std::shared_ptr<folly::CPUThreadPoolExecutor> pool 
-      = std::make_shared<folly::CPUThreadPoolExecutor>(
+  std::shared_ptr<folly::CPUThreadPoolExecutor> pool;
+
+  if (FLAGS_threads > 0) {
+    pool = std::make_shared<folly::CPUThreadPoolExecutor>(
     FLAGS_threads, std::make_unique<queue_t>(FLAGS_io_len),
     std::make_shared<folly::NamedThreadFactory>("DiskIOThread"));
+  }
 
   constexpr unsigned kBufSize = 1 << 15;
   char cbuf[kBufSize];
 
   unsigned sent_requests = 0;
   for (int i = 1; i < argc; ++i) {
-    const char* filename = argv[i]; 
+    const char* filename = argv[i];
     int fd = open(filename, O_RDONLY, 0644);
     CHECK_GT(fd, 0);
 
@@ -50,14 +52,14 @@ int main(int argc, char **argv) {
     folly::EventCount ec;
     while (offset + kBufSize < sbuf.st_size) {
       ++sent_requests;
-      if (FLAGS_async) {
+      if (FLAGS_threads > 0) {
         active_requests.fetch_add(1, std::memory_order_acq_rel);
-        pool->add([&, offset, fd] () 
-          { 
+        pool->add([&, offset, fd] ()
+          {
             // LOG(INFO) << "Offset " << offset;
             CHECK_EQ(kBufSize, pread(fd, cbuf, kBufSize, offset));
             if (1 == active_requests.fetch_sub(1, std::memory_order_acq_rel)) {
-              ec.notify(); 
+              ec.notify();
             }
           });
       } else {
@@ -66,7 +68,7 @@ int main(int argc, char **argv) {
       offset += (1 << 18);
     }
 
-    if (FLAGS_async) {
+    if (FLAGS_threads > 0) {
       ec.await([&] { return active_requests.load(std::memory_order_acquire) == 0; });
     }
     CHECK_EQ(0, active_requests);
@@ -74,6 +76,6 @@ int main(int argc, char **argv) {
     close(fd);
     LOG(INFO) << "Finished " << filename << " with " << sent_requests;
   }
-  
+
   return 0;
 }
