@@ -27,6 +27,8 @@ struct Item {
 
 typedef fibers::buffered_channel<Item> ReadQueue;
 
+int queue_requests = 0;
+
 void ReadRequests(ReadQueue* q) {
   channel_op_status st;
   Item item;
@@ -36,12 +38,16 @@ void ReadRequests(ReadQueue* q) {
     st = q->pop(item);
     if (channel_op_status::closed == st)
       break;
+    --queue_requests;
     uint64 delta = base::GetMonotonicMicrosFast() - start;
     if (delta > 500) {
       LOG(INFO) << "Stuck for " << delta;
     }
     CHECK(st == channel_op_status::success) << int(st);  
     item.res.get();
+    if (queue_requests < 4)
+      boost::this_fiber::yield();
+
   };
 }
 
@@ -59,8 +65,10 @@ int main(int argc, char **argv) {
   off_t offset = 0;
   
   FileIOManager io_mgr(FLAGS_threads, FLAGS_io_len);  
-  ReadQueue ch(8);
-  std::array<uint8_t[16], 8> buf_array;
+
+  constexpr unsigned kThisFiberQueue = 16;
+  ReadQueue ch(kThisFiberQueue);
+  std::array<uint8_t[16], kThisFiberQueue> buf_array;
   unsigned num_requests = 0;
 
   // launch::post means - dispatch a new fiber but do not yield now.
@@ -73,7 +81,8 @@ int main(int argc, char **argv) {
     FileIOManager::ReadResult res = io_mgr.Read(fd, offset, dest);
     channel_op_status st = ch.push(Item{dest, std::move(res)});
     CHECK(st == channel_op_status::success);
-    
+    ++queue_requests;
+
     ++num_requests;
     
     offset += (1 << 17);
