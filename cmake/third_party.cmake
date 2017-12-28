@@ -18,8 +18,8 @@ endif ()
 
 function(add_third_party name)
   set(options SHARED)
-  set(oneValueArgs CMAKE_PASS_FLAGS LIB)
-  set(multiValArgs BUILD_COMMAND INSTALL_COMMAND)
+  set(oneValueArgs CMAKE_PASS_FLAGS)
+  set(multiValArgs BUILD_COMMAND INSTALL_COMMAND LIB)
   CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "${multiValArgs}" ${ARGN})
 
   if (parsed_CMAKE_PASS_FLAGS)
@@ -39,22 +39,26 @@ function(add_third_party name)
   set(LIB_PREFIX "${_IROOT}/lib/lib${name}.")
 
   if (parsed_LIB)
-    set(LIB_FILE "${_IROOT}/lib/${parsed_LIB}")
-    if (${parsed_LIB} MATCHES ".*\.so$")
-      set(LIB_TYPE SHARED)
-    elseif (${parsed_LIB} MATCHES ".*\.a$")
-      set(LIB_TYPE STATIC)
-    elseif("${parsed_LIB}" STREQUAL "none")
-      set(LIB_FILE "")
-    else()
-      MESSAGE(FATAL_ERROR "Unrecognized lib ${parsed_LIB}")
-    endif()
+    set(LIB_FILES "")
+
+    foreach (_file ${parsed_LIB})
+      LIST(APPEND LIB_FILES "${_IROOT}/lib/${_file}")
+      if (${_file} MATCHES ".*\.so$")
+        set(LIB_TYPE SHARED)
+      elseif (${_file} MATCHES ".*\.a$")
+        set(LIB_TYPE STATIC)
+      elseif("${_file}" STREQUAL "none")
+        set(LIB_FILES "")
+      else()
+        MESSAGE(FATAL_ERROR "Unrecognized lib ${_file}")
+      endif()
+    endforeach(_file)
   elseif(parsed_SHARED)
     set(LIB_TYPE SHARED)
-    STRING(CONCAT LIB_FILE "${LIB_PREFIX}" "so")
+    STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "so")
   else()
     set(LIB_TYPE STATIC)
-    STRING(CONCAT LIB_FILE "${LIB_PREFIX}" "a")
+    STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "a")
   endif()
 
   ExternalProject_Add(${name}_project
@@ -74,7 +78,7 @@ function(add_third_party name)
     LOG_BUILD ON
 
     CMAKE_GENERATOR "Unix Makefiles"
-    BUILD_BYPRODUCTS ${LIB_FILE}
+    BUILD_BYPRODUCTS ${LIB_FILES}
 
     # we need those CMAKE_ARGS for cmake based 3rd party projects.
     CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${_IROOT}
@@ -91,13 +95,26 @@ function(add_third_party name)
   file(MAKE_DIRECTORY ${_IROOT}/include)
 
   set("${uname}_INCLUDE_DIR" "${_IROOT}/include" PARENT_SCOPE)
-
+  
   if (LIB_TYPE)
-      set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
-      add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
-      add_dependencies(TRDP::${name} ${name}_project)
-      set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILE}
-                            INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+    set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
+    list(LENGTH LIB_FILES LIB_LEN)
+    if (${LIB_LEN} GREATER 1)
+      foreach (_file ${LIB_FILES})
+        get_filename_component(base_name ${_file} NAME_WE)
+        STRING(REGEX REPLACE "^lib" "" tname ${base_name})
+        
+        add_library(TRDP::${tname} ${LIB_TYPE} IMPORTED)
+        add_dependencies(TRDP::${tname} ${name}_project)
+        set_target_properties(TRDP::${tname} PROPERTIES IMPORTED_LOCATION ${_file}
+                              INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+      endforeach(_file)
+    else()        
+        add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
+        add_dependencies(TRDP::${name} ${name}_project)
+        set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILES}
+                              INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+    endif()
   endif()
 endfunction()
 
@@ -134,6 +151,7 @@ add_third_party(
   gtest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG release-1.8.0
+  LIB libgtest.a libgmock.a
 )
 
 add_third_party(

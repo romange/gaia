@@ -14,7 +14,7 @@
 #include <thread>
 #include <benchmark/benchmark.h>
 
-#include "base/commandlineflags.h"
+#include "base/flags.h"
 #include "base/gtest.h"
 #include "base/logging.h"
 
@@ -52,13 +52,6 @@ void __attribute__ ((noinline)) MyFunction(void* foo, void* bar) {
   (void)bar;
 }
 
-
-TEST_F(WalltimeTest, Tmzone) {
-  int est_diff = base::TimezoneDiff("EST");
-  EXPECT_EQ(-5, est_diff);
-  int ny_diff = base::TimezoneDiff("America/New_York");
-  EXPECT_LE(est_diff, ny_diff);
-}
 
 TEST_F(WalltimeTest, ClockRes) {
   timespec ts;
@@ -136,22 +129,7 @@ TEST_F(WalltimeTest, ThreadTime) {
   t1.join();
 }
 
-TEST_F(WalltimeTest, CycleClockSleep) {
-  CycleClock clk;
-  SleepForMilliseconds(50);
-  EXPECT_GT(clk.Usec(), 50000);
-}
-
-
 using benchmark::DoNotOptimize;
-
-static void BM_GetCurrentTimeMicros(benchmark::State& state) {
-  LOG(INFO) << "Cycle frequency: " << CycleClock::CycleFreq();
-  while (state.KeepRunning()) {
-    DoNotOptimize(GetCurrentTimeMicros());
-  }
-}
-BENCHMARK(BM_GetCurrentTimeMicros);
 
 static void BM_TimeX4(benchmark::State& state) {
   while (state.KeepRunning()) {
@@ -185,13 +163,6 @@ BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_PROCESS_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_THREAD_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME_ALARM);
-
-static void BM_CycleClock(benchmark::State& state) {
-  while (state.KeepRunning()) {
-    DoNotOptimize(CycleClock::Now());
-  }
-}
-BENCHMARK(BM_CycleClock);
 
 static void BM_TimerGetTime(benchmark::State& state) {
   struct sigevent sev;
