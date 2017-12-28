@@ -352,7 +352,7 @@ set_property(TARGET TRDP::folly APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES event TRDP::dconv ${BOOST_ROOT}/lib/libboost_context.so)
 
 set_property(TARGET TRDP::gtest APPEND PROPERTY
-             IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT} ${GTEST_LIB_DIR}/libgmock.a)
+             IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
 
 add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
