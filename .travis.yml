@@ -7,14 +7,12 @@ cache:
   directories:
   - /opt/boost_1_66_0
 
-env:
-  - LSAN_OPTIONS=suppressions=$HOME/supress.txt
-
 
 matrix:
   include:
     - compiler: gcc
-      env: COMPILER=g++-5
+      env: 
+        - COMPILER=g++-5 LSAN_OPTIONS=suppressions=$HOME/supress.txt
 
 
 before_install:
