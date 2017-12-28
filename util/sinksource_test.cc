@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "util/coding/fixed.h"
+#include "base/fixed.h"
 #include "base/logging.h"
 
 #include "util/zlib_source.h"

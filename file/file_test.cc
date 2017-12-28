@@ -7,7 +7,6 @@
 #include <gmock/gmock.h>
 
 #include "file/file_util.h"
-#include "file/s3_file.h"
 #include "file/gzip_file.h"
 #include "file/lz4_file.h"
 #include "base/gtest.h"
