@@ -7,8 +7,8 @@
 #include <lz4frame.h>
 #include <fcntl.h>
 
-using base::Status;
-using base::StatusCode;
+using util::Status;
+using util::StatusCode;
 
 constexpr size_t kInputBatchSize = 1 << 16;
 

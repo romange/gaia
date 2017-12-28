@@ -28,7 +28,7 @@ public:
   bool Open() override;
   bool Close() override;
 
-  base::Status Write(const uint8* buffer, uint64 length) override;
+  util::Status Write(const uint8* buffer, uint64 length) override;
 };
 
 
