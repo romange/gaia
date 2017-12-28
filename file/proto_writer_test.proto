@@ -1,0 +1,9 @@
+syntax = "proto2";
+
+package test;
+import "util/plang/addressbook.proto";
+
+message Container {
+  optional tutorial.Person person = 1;
+  optional tutorial.Person.PhoneType val = 2 [ default = HOME ];
+}

@@ -195,6 +195,15 @@ class MathUtil {
     return x > 0 ? x : -x;
   }
 
+  // Absolute value of the difference between two numbers.
+  // Works correctly for signed types and special floating point values.
+  template<typename T>
+  static typename MathLimits<T>::UnsignedType AbsDiff(const T x, const T y) {
+    // Carries out arithmetic as unsigned to avoid overflow.
+    typedef typename MathLimits<T>::UnsignedType R;
+    return x > y ? R(x) - R(y) : R(y) - R(x);
+  }
+  
   // The sign of x
   // (works for unsigned types and special floating point values as well):
   //   -1 if x < 0,

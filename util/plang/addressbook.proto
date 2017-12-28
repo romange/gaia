@@ -1,0 +1,56 @@
+// See README.txt for information and build instructions.
+syntax = "proto2";
+package tutorial;
+option cc_generic_services = true;
+option java_package = "com.example.tutorial";
+option java_outer_classname = "AddressBookProtos";
+option cc_enable_arenas = true;
+
+message Address {
+  optional string street = 1;
+}
+
+message BankAccount {
+  repeated int32 activity_id = 3;
+  optional string bank_name = 1;
+  optional Address address = 2;
+}
+
+message Person {
+  required string name = 1;
+  required int64 id = 2;        // Unique ID number for this person.
+  optional string email = 3;
+
+  enum PhoneType {
+    MOBILE = 0;
+    HOME = 1;
+    WORK = 2;
+  }
+
+  message PhoneNumber {
+    required string number = 1;
+    optional PhoneType type = 2 [default = HOME];
+  }
+
+  repeated PhoneNumber phone = 4;
+  repeated PhoneNumber phone2 = 5;
+  optional BankAccount account = 6;
+  repeated string tag = 7;
+  required double dval = 8;
+}
+
+// Our address book file is just one of these.
+message AddressBook {
+  repeated Person person = 1;
+  repeated int64 ts = 2;
+  repeated uint64 tmp = 3;
+  map<int32, string> ids = 4;
+}
+
+message JsonParse {
+  optional bool bval = 1;
+}
+
+service TestService {
+  rpc Test(Person) returns (AddressBook);
+}

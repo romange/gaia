@@ -122,6 +122,9 @@ template<typename T> struct StatusObject {
   StatusObject(const T& t) : obj(t) {}
   StatusObject(T&& t) : obj(std::move(t)) {}
 
+  StatusObject& operator=(StatusObject&&) noexcept = default;
+  StatusObject& operator=(const StatusObject&) = default;
+
   std::string ToString() const { return status.ToString(); }
 };
 
