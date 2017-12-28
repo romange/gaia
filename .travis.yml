@@ -24,6 +24,7 @@ install: sudo ./install-dependencies.sh
 
 script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
+  - env && cat $HOME/supress.txt
   - mkdir testresults && ./blaze.sh -ninja && cd build-dbg
   - ninja -j4 base
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
