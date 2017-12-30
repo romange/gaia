@@ -347,6 +347,19 @@ add_third_party(blosc
 )
 
 
+set(DYNASM_DIR ${THIRD_PARTY_LIB_DIR}/dynasm)
+set(DYNASM_COMPILER ${DYNASM_DIR}/bin/minilua)
+set(DYNASM_INCLUDE_DIR ${DYNASM_DIR}/include)
+
+add_third_party(dynasm
+  URL http://luajit.org/download/LuaJIT-2.1.0-beta3.tar.gz
+  PATCH_COMMAND mkdir -p ${DYNASM_DIR}/include ${DYNASM_DIR}/bin
+  BUILD_IN_SOURCE 1
+  CONFIGURE_COMMAND true
+  BUILD_COMMAND gcc -o ${DYNASM_COMPILER} -O3 src/host/minilua.c -lm
+  INSTALL_COMMAND sh -c "test -L ${DYNASM_INCLUDE_DIR}/dynasm || ln -s ${THIRD_PARTY_DIR}/dynasm/dynasm -t ${DYNASM_INCLUDE_DIR}/"
+)
+
 #set(Boost_DEBUG ON)
 # ExternalProject_Add(
 #     boost_project
