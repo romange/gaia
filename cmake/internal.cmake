@@ -137,8 +137,9 @@ function(cxx_proto_lib name)
 
   GET_FILENAME_COMPONENT(absolute_proto_name ${name}.proto ABSOLUTE)
 
+  # Message("Current ${name} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}")
   CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS" ${ARGN})
-  set(prefix_command ${PROTOC} ${absolute_proto_name} --proto_path=${CMAKE_SOURCE_DIR})
+  set(prefix_command ${PROTOC} ${absolute_proto_name} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${CMAKE_SOURCE_DIR})
   set(py_command cat /dev/null)
   if (parsed_PY)
     set(py_command ${prefix_command} --proto_path=${PROTOBUF_INCLUDE_DIR} --python_out=${ROOT_GEN_DIR})
