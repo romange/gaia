@@ -1,6 +1,8 @@
 // See README.txt for information and build instructions.
 syntax = "proto2";
+
 package tutorial;
+
 option cc_generic_services = true;
 option java_package = "com.example.tutorial";
 option java_outer_classname = "AddressBookProtos";

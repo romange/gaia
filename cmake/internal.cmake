@@ -72,7 +72,8 @@ file(MAKE_DIRECTORY ${ROOT_GEN_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ROOT_GEN_DIR}) 
 
 function(cur_gen_dir out_dir)
-  file(RELATIVE_PATH _rel_folder "${CMAKE_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
+  file(RELATIVE_PATH _rel_folder "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
+
   set(_tmp_dir ${ROOT_GEN_DIR}/${_rel_folder})
   set(${out_dir} ${_tmp_dir} PARENT_SCOPE)
   file(MAKE_DIRECTORY ${_tmp_dir})
@@ -126,6 +127,7 @@ function(cxx_proto_lib name)
   # create __init__.py in all parent directories that lead to protobuf to support
   # python proto files.
   file(RELATIVE_PATH gen_rel_path ${ROOT_GEN_DIR} ${gen_dir})
+  # Message("gen_rel_path ${ROOT_GEN_DIR} ${gen_dir}")  # pumadb/genfiles pumadb/genfiles/gaia/util
   string(REPLACE "/" ";" parent_list ${gen_rel_path})
   set(cur_parent ${ROOT_GEN_DIR})
   foreach (rel_parent ${parent_list})
@@ -137,31 +139,31 @@ function(cxx_proto_lib name)
 
   GET_FILENAME_COMPONENT(absolute_proto_name ${name}.proto ABSOLUTE)
 
-  Message("Current ${name} ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}")
+  # Message("Current2 ${name} ${cxx_out_files} ${gen_rel_path} ${CMAKE_SOURCE_DIR}")
   CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS" ${ARGN})
   set(prefix_command ${PROTOC} ${absolute_proto_name} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${CMAKE_SOURCE_DIR})
   set(py_command cat /dev/null)
   if (parsed_PY)
     set(py_command ${prefix_command} --proto_path=${PROTOBUF_INCLUDE_DIR} --python_out=${ROOT_GEN_DIR})
   endif()
-  set(lib_link_dep "")
+  
   set(plugins_arg "")
   set(proj_depends "protobuf_project")
   ADD_CUSTOM_COMMAND(
            OUTPUT ${cxx_out_files}
            COMMAND ${PROTOC} ${absolute_proto_name}
-                   --proto_path=${CMAKE_SOURCE_DIR} --proto_path=${PROTOBUF_INCLUDE_DIR}
+                   --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROTOBUF_INCLUDE_DIR}
                    --cpp_out=${ROOT_GEN_DIR} --cpp_opt=cxx11  ${plugins_arg}
            COMMAND ${py_command}
            COMMAND touch ${gen_dir}/__init__.py
            DEPENDS ${name}.proto DEPENDS ${proj_depends} ${parsed_DEPENDS}
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-           COMMENT "Generating sources from ${absolute_proto_name}" VERBATIM)
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+           COMMENT "Generating sources ${cxx_out_files} from ${absolute_proto_name}" VERBATIM)
   set_source_files_properties(${cxx_out_files}
                               PROPERTIES GENERATED TRUE)
   set(lib_name "${name}_proto")
   add_library(${lib_name} ${cxx_out_files})
-  target_link_libraries(${lib_name} ${parsed_DEPENDS} TRDP::protobuf ${lib_link_dep})
+  target_link_libraries(${lib_name} ${parsed_DEPENDS} TRDP::protobuf)
   add_include(${lib_name} ${PROTOBUF_INCLUDE_DIR})
   add_compile_flag(${lib_name} "-DGOOGLE_PROTOBUF_NO_RTTI -Wno-unused-parameter")
 endfunction()
