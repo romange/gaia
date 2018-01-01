@@ -20,4 +20,6 @@ template <typename T> void sink_result(const T& t0) {
 std::string GetTestTempDir();
 std::string GetTestTempPath(const std::string& base_name);
 
+std::string RandStr(const unsigned len);
+
 }  // namespace base

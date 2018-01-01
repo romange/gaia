@@ -61,7 +61,23 @@ void DeleteRecursively(const char* name) {
   rmdir(name);
 }
 
+std::string RandStr(const unsigned len) {
+  static const char alphanum[] =
+      "0123456789"
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz";
+
+  string s(len, '\0');
+  for (unsigned i = 0; i < len; ++i) {
+      s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+  }
+
+  s[len] = 0;
+
+  return s;
 }
+
+}  // namespace base
 
 
 int main(int argc, char **argv) {
