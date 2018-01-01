@@ -48,7 +48,7 @@ void BlockCompressor::Start() {
 
   VLOG(1) << "Starting with " << params;
 
-  size_t res = ZSTD_compressBegin_advanced(HANDLE, nullptr, 0, params, 0);
+  size_t res = ZSTD_compressBegin_advanced(HANDLE, nullptr, 0, params, ZSTD_CONTENTSIZE_UNKNOWN);
   CHECK_ZSTDERR(res);
 
   if (!double_buf_) {

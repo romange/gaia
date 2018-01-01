@@ -95,7 +95,7 @@ function(add_third_party name)
   file(MAKE_DIRECTORY ${_IROOT}/include)
 
   set("${uname}_INCLUDE_DIR" "${_IROOT}/include" PARENT_SCOPE)
-  
+
   if (LIB_TYPE)
     set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
     list(LENGTH LIB_FILES LIB_LEN)
@@ -103,13 +103,13 @@ function(add_third_party name)
       foreach (_file ${LIB_FILES})
         get_filename_component(base_name ${_file} NAME_WE)
         STRING(REGEX REPLACE "^lib" "" tname ${base_name})
-        
+
         add_library(TRDP::${tname} ${LIB_TYPE} IMPORTED)
         add_dependencies(TRDP::${tname} ${name}_project)
         set_target_properties(TRDP::${tname} PROPERTIES IMPORTED_LOCATION ${_file}
                               INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
       endforeach(_file)
-    else()        
+    else()
         add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
         add_dependencies(TRDP::${name} ${name}_project)
         set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILES}
@@ -343,7 +343,7 @@ add_third_party(zstd
 add_third_party(blosc
   GIT_REPOSITORY https://github.com/romange/c-blosc.git
   # GIT_TAG v1.12.1
-  CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON"
+  CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON -DDEACTIVATE_ZSTD=ON"
 )
 
 
