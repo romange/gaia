@@ -35,11 +35,12 @@ double FromPositive(int64_t significand, int exponent) {
     significand /= 10;
     ++exponent;
   }
-  CHECK_LE(Bits::FindMSBSet64NonZero(significand), 52);
+  DCHECK_LE(Bits::FindMSBSet64NonZero(significand), 52);
   double res(significand);
   return res * exp10(exponent);
 }
 
+// TODO: to memoize exp10(exponent).
 double FromDecimal(int64_t significand, int exponent) {
   if (significand == 0)
     return 0.0;
