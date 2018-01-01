@@ -532,7 +532,7 @@ void SeqEncoderBase::CompressFlitSequences(bool final) {
     VLOG(1) << "Using: " << params;
 
     CHECK_ZSTDERR(ZSTD_compressBegin_advanced(
-        zstd_cntx_->context, zstd_dict_.get(), zstd_dict_size_, params, 0));
+        zstd_cntx_->context, zstd_dict_.get(), zstd_dict_size_, params, ZSTD_CONTENTSIZE_UNKNOWN));
     zstd_cntx_->start = false;
   }
 
