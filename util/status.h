@@ -14,7 +14,7 @@ namespace util {
 
 class Status {
  public:
-  constexpr Status(): error_detail_(NULL) {}
+  constexpr Status() noexcept : error_detail_(NULL) {}
 
   // copy c'tor makes copy of error detail so Status can be returned by value
   Status(const Status& status) : error_detail_(
@@ -52,6 +52,11 @@ class Status {
     } else {
       error_detail_ = new ErrorDetail(*status.error_detail_);
     }
+    return *this;
+  }
+
+  Status& operator=(Status&& status) noexcept {
+    std::swap(error_detail_, status.error_detail_);
     return *this;
   }
 
@@ -115,7 +120,7 @@ template<typename T> struct StatusObject {
   StatusObject() noexcept = default;
   StatusObject(StatusObject&&) noexcept = default;
   StatusObject(const StatusObject& st) = default;
-  
+
   StatusObject(const Status& s) : status(s), obj() {}
   StatusObject(Status&& s) noexcept : status(std::move(s)), obj() {}
 
