@@ -116,14 +116,14 @@ TEST_F(WalltimeTest, TimerMonotonicNoInterrupt) {
 TEST_F(WalltimeTest, ThreadTime) {
   std::thread t1([]() {
     MicrosecondsInt64 thread_start = GetClockMicros<CLOCK_THREAD_CPUTIME_ID>();
-    MicrosecondsInt64 proc_start = GetClockMicros<CLOCK_PROCESS_CPUTIME_ID>();
+    // MicrosecondsInt64 proc_start = GetClockMicros<CLOCK_PROCESS_CPUTIME_ID>();
     MicrosecondsInt64 wall_start = GetMonotonicMicros();
     SleepForMilliseconds(100);
 
     EXPECT_GT(GetMonotonicMicros(), wall_start + 99*kNumMicrosPerMilli);
 
     // EXPECT_LT(GetClockMicros<CLOCK_PROCESS_CPUTIME_ID>() - proc_start,10*kNumMicrosPerMilli);
-    // EXPECT_LT(GetClockMicros<CLOCK_THREAD_CPUTIME_ID>() - thread_start, 1*kNumMicrosPerMilli);
+    EXPECT_LT(GetClockMicros<CLOCK_THREAD_CPUTIME_ID>() - thread_start, 1*kNumMicrosPerMilli);
   });
 
   t1.join();
