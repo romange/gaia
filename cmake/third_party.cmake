@@ -364,10 +364,10 @@ set(SEASTAR_DIR ${THIRD_PARTY_LIB_DIR}/seastar)
 set(SEASTAR_INCLUDE_DIR ${SEASTAR_DIR}/include)
 set(SEASTAR_LIB_DIR ${SEASTAR_DIR}/lib)
 add_third_party(seastar
-  DEPENDS protobuf_project
+  DEPENDS protobuf_project lz4_project
   GIT_REPOSITORY https://github.com/romange/seastar.git
   PATCH_COMMAND mkdir -p ${SEASTAR_LIB_DIR} ${SEASTAR_INCLUDE_DIR}
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 --cflags=-I${PROTOBUF_INCLUDE_DIR}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR}"
                     --protoc-compiler=${PROTOC}
   BUILD_COMMAND ninja -j4 build/release/libseastar.a
   INSTALL_COMMAND sh -c "test -L ${SEASTAR_INCLUDE_DIR}/seastar || ln -s ${THIRD_PARTY_DIR}/seastar -t ${SEASTAR_INCLUDE_DIR}"
