@@ -366,11 +366,12 @@ set(SEASTAR_LIB_DIR ${SEASTAR_DIR}/lib)
 add_third_party(seastar
   DEPENDS protobuf_project lz4_project
   GIT_REPOSITORY https://github.com/romange/seastar.git
-  PATCH_COMMAND mkdir -p ${SEASTAR_LIB_DIR} ${SEASTAR_INCLUDE_DIR}
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR}"
-                    --protoc-compiler=${PROTOC}
+  PATCH_COMMAND mkdir -p ${SEASTAR_LIB_DIR} && ln -s ${THIRD_PARTY_DIR}/seastar ${SEASTAR_INCLUDE_DIR}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5
+                    "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR} -I${Boost_INCLUDE_DIR}"
+                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}"
   BUILD_COMMAND ninja -j4 build/release/libseastar.a
-  INSTALL_COMMAND sh -c "test -L ${SEASTAR_INCLUDE_DIR}/seastar || ln -s ${THIRD_PARTY_DIR}/seastar -t ${SEASTAR_INCLUDE_DIR}"
+  INSTALL_COMMAND sh -c "ln -sf <SOURCE_DIR>/build/release/*.a -t ${SEASTAR_LIB_DIR}"
   BUILD_IN_SOURCE 1
 )
 
@@ -407,3 +408,14 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
 include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR})
+
+set_property(TARGET TRDP::seastar APPEND PROPERTY
+             INTERFACE_INCLUDE_DIRECTORIES ${SEASTAR_INCLUDE_DIR}/fmt)
+
+foreach(var IN ITEMS system program_options thread filesystem)
+  LIST(APPEND SEASTAR_BOOST_LIBS "${BOOST_ROOT}/lib/libboost_${var}.so")
+endforeach()
+
+set_property(TARGET TRDP::seastar APPEND PROPERTY
+             IMPORTED_LINK_INTERFACE_LIBRARIES ${SEASTAR_BOOST_LIBS}
+             ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl aio rt unwind)
