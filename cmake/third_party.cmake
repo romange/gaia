@@ -362,13 +362,15 @@ add_third_party(dynasm
 
 set(SEASTAR_DIR ${THIRD_PARTY_LIB_DIR}/seastar)
 set(SEASTAR_INCLUDE_DIR ${SEASTAR_DIR}/include)
+set(SEASTAR_LIB_DIR ${SEASTAR_DIR}/lib)
 add_third_party(seastar
+  DEPENDS protobuf_project
   GIT_REPOSITORY https://github.com/romange/seastar.git
-  PATCH_COMMAND mkdir -p ${SEASTAR_INCLUDE_DIR}
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 --cflags=-I/home/roman/projects/pumadb/third_party/libs/protobuf/include/
-                    --protoc-compiler=/home/roman/projects/pumadb/third_party/libs/protobuf/bin/protoc
+  PATCH_COMMAND mkdir -p ${SEASTAR_LIB_DIR} ${SEASTAR_INCLUDE_DIR}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 --cflags=-I${PROTOBUF_INCLUDE_DIR}
+                    --protoc-compiler=${PROTOC}
   BUILD_COMMAND ninja -j4 build/release/libseastar.a
-
+  INSTALL_COMMAND sh -c "test -L ${SEASTAR_INCLUDE_DIR}/seastar || ln -s ${THIRD_PARTY_DIR}/seastar -t ${SEASTAR_INCLUDE_DIR}"
   BUILD_IN_SOURCE 1
 )
 
