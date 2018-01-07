@@ -353,11 +353,23 @@ set(DYNASM_INCLUDE_DIR ${DYNASM_DIR}/include)
 
 add_third_party(dynasm
   URL http://luajit.org/download/LuaJIT-2.1.0-beta3.tar.gz
-  PATCH_COMMAND mkdir -p ${DYNASM_DIR}/include ${DYNASM_DIR}/bin
+  PATCH_COMMAND mkdir -p ${DYNASM_INCLUDE_DIR} ${DYNASM_DIR}/bin
   BUILD_IN_SOURCE 1
   CONFIGURE_COMMAND true
   BUILD_COMMAND gcc -o ${DYNASM_COMPILER} -O3 src/host/minilua.c -lm
   INSTALL_COMMAND sh -c "test -L ${DYNASM_INCLUDE_DIR}/dynasm || ln -s ${THIRD_PARTY_DIR}/dynasm/dynasm -t ${DYNASM_INCLUDE_DIR}/"
+)
+
+set(SEASTAR_DIR ${THIRD_PARTY_LIB_DIR}/seastar)
+set(SEASTAR_INCLUDE_DIR ${SEASTAR_DIR}/include)
+add_third_party(seastar
+  GIT_REPOSITORY https://github.com/romange/seastar.git
+  PATCH_COMMAND mkdir -p ${SEASTAR_INCLUDE_DIR}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5 --cflags=-I/home/roman/projects/pumadb/third_party/libs/protobuf/include/
+                    --protoc-compiler=/home/roman/projects/pumadb/third_party/libs/protobuf/bin/protoc
+  BUILD_COMMAND ninja -j4 build/release/libseastar.a
+
+  BUILD_IN_SOURCE 1
 )
 
 #set(Boost_DEBUG ON)
