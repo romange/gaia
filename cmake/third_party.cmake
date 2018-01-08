@@ -384,7 +384,7 @@ add_third_party(seastar
   COMMAND mkdir -p ${SEASTAR_DIR}/lib
   CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5
                     "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR} -I${Boost_INCLUDE_DIR}"
-                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}" --mode=${SEASTAR_MODE}
+                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}" --mode=all
   LIB ${SEASTAR_MODE}/libseastar.a
   BUILD_COMMAND ninja -j4 build/${SEASTAR_MODE}/libseastar.a
   INSTALL_COMMAND sh -c "rm -rf ${SEASTAR_LIB_DIR}/${SEASTAR_MODE} && ln -sf <SOURCE_DIR>/build/${SEASTAR_MODE} -t ${SEASTAR_LIB_DIR}"
@@ -441,5 +441,5 @@ endif()
 
 
 set_property(TARGET TRDP::seastar APPEND PROPERTY
-             IMPORTED_LINK_INTERFACE_LIBRARIES ${SEASTAR_LINK_LIBS}
-             ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl aio rt unwind)
+             IMPORTED_LINK_INTERFACE_LIBRARIES aio ${SEASTAR_LINK_LIBS}
+             ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl rt gcc_s unwind)
