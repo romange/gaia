@@ -416,6 +416,10 @@ foreach(var IN ITEMS system program_options thread filesystem)
   LIST(APPEND SEASTAR_BOOST_LIBS "${BOOST_ROOT}/lib/libboost_${var}.so")
 endforeach()
 
+set_target_properties(TRDP::seastar PROPERTIES
+                      INTERFACE_COMPILE_DEFINITIONS FMT_HEADER_ONLY)
+
+
 set_property(TARGET TRDP::seastar APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${SEASTAR_BOOST_LIBS}
              ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl aio rt unwind)
