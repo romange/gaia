@@ -36,7 +36,6 @@ function(add_third_party name)
 
   set(_DIR ${THIRD_PARTY_DIR}/${name})
   set(_IROOT ${THIRD_PARTY_LIB_DIR}/${name})
-  set(LIB_PREFIX "${_IROOT}/lib/lib${name}.")
 
   if (parsed_LIB)
     set(LIB_FILES "")
@@ -53,12 +52,16 @@ function(add_third_party name)
         MESSAGE(FATAL_ERROR "Unrecognized lib ${_file}")
       endif()
     endforeach(_file)
-  elseif(parsed_SHARED)
-    set(LIB_TYPE SHARED)
-    STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "so")
   else()
-    set(LIB_TYPE STATIC)
-    STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "a")
+    set(LIB_PREFIX "${_IROOT}/lib/lib${name}.")
+
+    if(parsed_SHARED)
+      set(LIB_TYPE SHARED)
+      STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "so")
+    else()
+      set(LIB_TYPE STATIC)
+      STRING(CONCAT LIB_FILES "${LIB_PREFIX}" "a")
+    endif(parsed_SHARED)
   endif()
 
   ExternalProject_Add(${name}_project
@@ -362,16 +365,29 @@ add_third_party(dynasm
 
 set(SEASTAR_DIR ${THIRD_PARTY_LIB_DIR}/seastar)
 set(SEASTAR_INCLUDE_DIR ${SEASTAR_DIR}/include)
-set(SEASTAR_LIB_DIR ${SEASTAR_DIR}/lib)
+
+set(SEASTAR_LIB_DIR "${SEASTAR_DIR}/lib")
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+set(SEASTAR_MODE debug)
+else()
+set(SEASTAR_MODE release)
+endif()
+
+# to make seastar INTERFACE_INCLUDE_DIRECTORIES happy.
+file(MAKE_DIRECTORY ${SEASTAR_INCLUDE_DIR}/fmt)
 add_third_party(seastar
   DEPENDS protobuf_project lz4_project
   GIT_REPOSITORY https://github.com/romange/seastar.git
-  PATCH_COMMAND mkdir -p ${SEASTAR_LIB_DIR} && ln -sf ${THIRD_PARTY_DIR}/seastar ${SEASTAR_INCLUDE_DIR}
+  PATCH_COMMAND sh -c "rm -rf ${SEASTAR_INCLUDE_DIR}"
+  COMMAND ln -sf ${THIRD_PARTY_DIR}/seastar ${SEASTAR_INCLUDE_DIR}
+  COMMAND mkdir -p ${SEASTAR_DIR}/lib
   CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5
                     "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR} -I${Boost_INCLUDE_DIR}"
-                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}"
-  BUILD_COMMAND ninja -j4 build/release/libseastar.a
-  INSTALL_COMMAND sh -c "ln -sf <SOURCE_DIR>/build/release/*.a -t ${SEASTAR_LIB_DIR}"
+                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}" --mode=${SEASTAR_MODE}
+  LIB ${SEASTAR_MODE}/libseastar.a
+  BUILD_COMMAND ninja -j4 build/${SEASTAR_MODE}/libseastar.a
+  INSTALL_COMMAND sh -c "rm -rf ${SEASTAR_LIB_DIR}/${SEASTAR_MODE} && ln -sf <SOURCE_DIR>/build/${SEASTAR_MODE} -t ${SEASTAR_LIB_DIR}"
   BUILD_IN_SOURCE 1
 )
 
@@ -413,13 +429,17 @@ set_property(TARGET TRDP::seastar APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${SEASTAR_INCLUDE_DIR}/fmt)
 
 foreach(var IN ITEMS system program_options thread filesystem)
-  LIST(APPEND SEASTAR_BOOST_LIBS "${BOOST_ROOT}/lib/libboost_${var}.so")
+  LIST(APPEND SEASTAR_LINK_LIBS "${BOOST_ROOT}/lib/libboost_${var}.so")
 endforeach()
 
 set_target_properties(TRDP::seastar PROPERTIES
                       INTERFACE_COMPILE_DEFINITIONS FMT_HEADER_ONLY)
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set_property(TARGET TRDP::seastar APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS DEBUG_SHARED_PTR)
+endif()
+
 
 set_property(TARGET TRDP::seastar APPEND PROPERTY
-             IMPORTED_LINK_INTERFACE_LIBRARIES ${SEASTAR_BOOST_LIBS}
+             IMPORTED_LINK_INTERFACE_LIBRARIES ${SEASTAR_LINK_LIBS}
              ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl aio rt unwind)

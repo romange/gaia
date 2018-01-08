@@ -33,7 +33,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.9 OR CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
       set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fdiagnostics-color=auto")
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
-      set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined")
+      set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined -fno-sanitize=vptr")
   endif()
 endif()
 
@@ -69,7 +69,7 @@ ENDIF()
 
 set(ROOT_GEN_DIR ${CMAKE_SOURCE_DIR}/genfiles)
 file(MAKE_DIRECTORY ${ROOT_GEN_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ROOT_GEN_DIR}) 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ROOT_GEN_DIR})
 
 function(cur_gen_dir out_dir)
   file(RELATIVE_PATH _rel_folder "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -146,7 +146,7 @@ function(cxx_proto_lib name)
   if (parsed_PY)
     set(py_command ${prefix_command} --proto_path=${PROTOBUF_INCLUDE_DIR} --python_out=${ROOT_GEN_DIR})
   endif()
-  
+
   set(plugins_arg "")
   set(proj_depends "protobuf_project")
   ADD_CUSTOM_COMMAND(
