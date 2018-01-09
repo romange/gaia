@@ -1,4 +1,4 @@
-// Copyright 2013, Beeri 15.  All rights reserved.
+// Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include <dirent.h>
@@ -14,6 +14,10 @@ using namespace std;
 namespace base {
 
 static char test_path[1024] = {0};
+
+static constexpr char kProcSelf[] = "/proc/self/exe";
+static constexpr char kDeletedSuffix[] =  " (deleted)";
+constexpr size_t kDeletedSuffixLen = sizeof(kDeletedSuffix) - 1;
 
 std::string GetTestTempDir() {
   if (test_path[0] == '\0') {
@@ -75,6 +79,30 @@ std::string RandStr(const unsigned len) {
   s[len] = 0;
 
   return s;
+}
+
+string ProgramAbsoluteFileName() {
+  string res(2048, '\0');
+  size_t sz = readlink(kProcSelf, &res.front(), res.size());
+  CHECK_GT(sz, 0);
+  if (sz > kDeletedSuffixLen) {
+    // When binary was deleted, linux link contains kDeletedSuffix at the end.
+    // Lets strip it.
+    if (res.compare(sz - kDeletedSuffixLen, kDeletedSuffixLen, kDeletedSuffix) == 0) {
+      sz -= kDeletedSuffixLen;
+      res[sz] = '\0';
+    }
+  }
+  res.resize(sz);
+  return res;
+}
+
+string ProgramRunfilesPath() {
+  return ProgramAbsoluteFileName().append(".runfiles/");
+}
+
+string ProgramRunfile(const string& relative_path) {
+  return ProgramRunfilesPath().append(relative_path);
 }
 
 }  // namespace base

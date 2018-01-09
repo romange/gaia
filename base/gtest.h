@@ -22,4 +22,6 @@ std::string GetTestTempPath(const std::string& base_name);
 
 std::string RandStr(const unsigned len);
 
+std::string ProgramRunfile(const std::string& relative_path);  // relative to runtime dir.
+
 }  // namespace base

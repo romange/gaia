@@ -10,7 +10,8 @@ cxx_test(simd_test base LABELS CI)
 cxx_test(crc32c_test base LABELS CI)
 cxx_test(walltime_test base LABELS CI)
 cxx_test(flit_test base LABELS CI)
-#TBD: cxx_test(hash_test base file DATA testdata/ids.txt.gz LABELS CI)
+cxx_test(cxx_test base LABELS CI)
+cxx_test(hash_test base file DATA testdata/ids.txt.gz LABELS CI)
 
 
 # Define default gtest_main for tests.
