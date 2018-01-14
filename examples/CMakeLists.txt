@@ -8,6 +8,6 @@ add_executable(boost_fibers boost_fibers.cc)
 cxx_link(boost_fibers fibers base dl ${Boost_LIBRARIES})
 
 
-add_executable(mr_demo mr_demo.cc)
-cxx_link(mr_demo fibers base file dl ${Boost_LIBRARIES})
+add_executable(mr_demo_fibers mr_demo.cc)
+cxx_link(mr_demo_fibers fibers base file dl ${Boost_LIBRARIES})
 

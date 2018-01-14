@@ -2,12 +2,14 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include <functional>
 #include <thread>
 
 #include "base/init.h"
 #include "base/logging.h"
 #include "base/walltime.h"
 #include "file/file_util.h"
+#include "strings/stringpiece.h"
 
 #include "util/sq_threadpool.h"
 
@@ -33,9 +35,10 @@ typedef fibers::buffered_channel<Item> ReadQueue;
 
 int queue_requests = 0;
 
-void ReadRequests(ReadQueue* q) {
+void ProcessFile(ReadQueue* q, std::function<void(StringPiece)> line_cb) {
   channel_op_status st;
   Item item;
+  string line;
 
   while(true) {
     uint64 start = base::GetMonotonicMicrosFast();
@@ -47,12 +50,38 @@ void ReadRequests(ReadQueue* q) {
     if (delta > 500) {
       LOG(INFO) << "Stuck for " << delta;
     }
+
     CHECK(st == channel_op_status::success) << int(st);
     item.res.get();
-    if (queue_requests < 4)
-      boost::this_fiber::yield();
 
+    while (!item.buf.empty()) {
+      auto it = std::find(item.buf.begin(), item.buf.end(), '\n');
+
+      if (it == item.buf.end()) {
+        line.append(item.buf.begin(), item.buf.end());
+        break;
+      }
+
+      if (line.empty()) {
+        StringPiece str(reinterpret_cast<const char*>(item.buf.data()),
+                        it - item.buf.begin());
+        line_cb(str);
+      } else {
+        line.append(item.buf.begin(), it);
+        line_cb(line);
+        line.clear();
+      }
+      item.buf.remove_prefix(it - item.buf.begin() + 1);
+    }
+
+
+    if (queue_requests < 4) {
+      boost::this_fiber::yield();
+    }
   };
+
+  if (!line.empty())
+    line_cb(line);
 }
 
 class Mr {
@@ -129,9 +158,10 @@ void Mr::Process(const string& filename) {
 
   off_t offset = 0;
   unsigned num_requests = 0;
+  unsigned num_lines = 0;
+  auto line_cb = [&num_lines](StringPiece line) { ++num_lines; };
 
-  // launch::post means - dispatch a new fiber but do not yield now.
-  fibers::fiber read_fiber(fibers::launch::post, &ReadRequests, &read_channel);
+  fibers::fiber read_fiber(fibers::launch::post, &ProcessFile, &read_channel, line_cb);
 
   while (offset + kReadSize < sbuf.st_size) {
     strings::MutableByteRange dest(buf_array[num_requests % 8].get(), kReadSize);
@@ -148,7 +178,7 @@ void Mr::Process(const string& filename) {
   read_channel.close();
   read_fiber.join();
   close(fd);
-
+  CONSOLE_INFO << filename << " has " << num_lines << " lines with " << num_requests;
 
   m_.lock();
   unsigned local_num = --num_pending_reads_;
@@ -171,8 +201,10 @@ int main(int argc, char **argv) {
 
   Mr mr(&io_mgr);
 
-  for (const auto& item : files)
+  for (const auto& item : files) {
     mr.Emplace(item);
+  }
+
   mr.Join();
 
   return 0;
