@@ -17,7 +17,6 @@
 
 using namespace boost;
 
-DEFINE_string(dir, "", "File to read asynchronously");
 DEFINE_int32(threads, 4, "");
 DEFINE_int32(io_len, 4, "");
 
@@ -59,6 +58,7 @@ void ReadRequests(ReadQueue* q) {
 class Mr {
   static constexpr unsigned kThisFiberQueue = 16;
   static constexpr unsigned kReadSize = 1 << 15;
+  static constexpr unsigned kMaxActiveFibers = 10;
 
   typedef std::unique_ptr<uint8_t[]> ReadBuf;
   FileIOManager* io_mgr_;
@@ -74,27 +74,40 @@ class Mr {
       channel_op_status st = inc_queue_.pop(file_name);
       if (st == channel_op_status::closed)
         break;
+
       CHECK(st == channel_op_status::success);
       CONSOLE_INFO << file_name;
+
+      std::unique_lock<boost::fibers::mutex> lock( m_);
+
+      num_fibers_.wait(lock, [this] () {return num_pending_reads_ < kMaxActiveFibers;});
+      ++num_pending_reads_;
+
+      fibers::async([this, file_name] () { Process(file_name); });
     }
   }
 
   std::thread t_;
 
-  int num_pending_reads_ = 0;
+  unsigned num_pending_reads_ = 0;
   fibers::mutex m_;
-  fibers::condition_variable no_fibers_;
+  fibers::condition_variable num_fibers_;
 public:
-  Mr(FileIOManager* mgr) : io_mgr_(mgr), inc_queue_(2), t_(&Mr::ThreadFunc, this) {
-  }
+  Mr(FileIOManager* mgr) : io_mgr_(mgr), inc_queue_(2), t_(&Mr::ThreadFunc, this) {}
 
   void Join() {
     inc_queue_.close();
     t_.join();
+
+    CONSOLE_INFO << "Before joining on num_pending_reads_";
+    std::unique_lock<boost::fibers::mutex> lock( m_);
+    num_fibers_.wait(lock, [this] () {return num_pending_reads_ == 0;});
   }
 
   void Emplace(string item) {
-    inc_queue_.push(item);
+    channel_op_status st = inc_queue_.push(item);
+    VLOG(1) << "Pushing " << item;
+    CHECK(st == channel_op_status::success);
   }
 
  private:
@@ -107,7 +120,7 @@ void Mr::Process(const string& filename) {
 
   struct stat sbuf;
   CHECK_EQ(0, fstat(fd, &sbuf));
-  cout << "File size is " << sbuf.st_size << endl;
+  LOG(INFO) << "File size is " << sbuf.st_size << endl;
 
   std::array<ReadBuf, kThisFiberQueue> buf_array;
   ReadQueue read_channel(kThisFiberQueue);
@@ -137,24 +150,29 @@ void Mr::Process(const string& filename) {
   close(fd);
 
 
-  std::lock_guard<fibers::mutex> lg(m_);
-  --num_pending_reads_;
-  if (num_pending_reads_ == 0)
-    no_fibers_.notify_one();
+  m_.lock();
+  unsigned local_num = --num_pending_reads_;
+  m_.unlock();
+  if (local_num < kMaxActiveFibers)
+    num_fibers_.notify_one();
 }
 
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
 
+  std::vector<std::string> files;
+  for (int i = 1; i < argc; ++i)
+    files.push_back(argv[i]);
 
-  CHECK(!FLAGS_dir.empty());
-  std::vector<std::string> files = file_util::ExpandFiles(FLAGS_dir);
   CHECK(!files.empty());
+  LOG(INFO) << "Processing " << files.size() << " files";
 
   FileIOManager io_mgr(FLAGS_threads, FLAGS_io_len);
 
   Mr mr(&io_mgr);
-  mr.Emplace(files[0]);
+
+  for (const auto& item : files)
+    mr.Emplace(item);
   mr.Join();
 
   return 0;
