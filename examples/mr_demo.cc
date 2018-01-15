@@ -52,26 +52,28 @@ void ProcessFile(ReadQueue* q, std::function<void(StringPiece)> line_cb) {
     }
 
     CHECK(st == channel_op_status::success) << int(st);
-    item.res.get();
+    util::StatusObject<size_t> result = item.res.get();
+    CHECK(result.ok());
+    strings::ByteRange res_buf(item.buf.data(), result.obj);
 
-    while (!item.buf.empty()) {
-      auto it = std::find(item.buf.begin(), item.buf.end(), '\n');
+    while (!res_buf.empty()) {
+      auto it = std::find(res_buf.begin(), res_buf.end(), '\n');
 
-      if (it == item.buf.end()) {
-        line.append(item.buf.begin(), item.buf.end());
+      if (it == res_buf.end()) {
+        line.append(res_buf.begin(), res_buf.end());
         break;
       }
 
       if (line.empty()) {
-        StringPiece str(reinterpret_cast<const char*>(item.buf.data()),
-                        it - item.buf.begin());
+        StringPiece str(reinterpret_cast<const char*>(res_buf.data()),
+                        it - res_buf.begin());
         line_cb(str);
       } else {
-        line.append(item.buf.begin(), it);
+        line.append(res_buf.begin(), it);
         line_cb(line);
         line.clear();
       }
-      item.buf.remove_prefix(it - item.buf.begin() + 1);
+      res_buf.remove_prefix(it - res_buf.begin() + 1);
     }
 
 
@@ -80,8 +82,9 @@ void ProcessFile(ReadQueue* q, std::function<void(StringPiece)> line_cb) {
     }
   };
 
-  if (!line.empty())
+  if (!line.empty()) {
     line_cb(line);
+  }
 }
 
 class Mr {
@@ -149,6 +152,12 @@ void Mr::Process(const string& filename) {
 
   struct stat sbuf;
   CHECK_EQ(0, fstat(fd, &sbuf));
+  if ((sbuf.st_mode & S_IFMT) != S_IFREG) {
+    LOG(INFO) << "Skipping " << filename;
+    close(fd);
+    return;
+  }
+
   LOG(INFO) << "File size is " << sbuf.st_size << endl;
 
   std::array<ReadBuf, kThisFiberQueue> buf_array;
@@ -163,7 +172,7 @@ void Mr::Process(const string& filename) {
 
   fibers::fiber read_fiber(fibers::launch::post, &ProcessFile, &read_channel, line_cb);
 
-  while (offset + kReadSize < sbuf.st_size) {
+  while (offset < sbuf.st_size) {
     strings::MutableByteRange dest(buf_array[num_requests % 8].get(), kReadSize);
     FileIOManager::ReadResult res = io_mgr_->Read(fd, offset, dest);
 
