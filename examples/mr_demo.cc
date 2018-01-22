@@ -25,6 +25,7 @@ DEFINE_int32(io_len, 4, "");
 using namespace std;
 using util::FileIOManager;
 using fibers::channel_op_status;
+using namespace std::chrono_literals;
 
 struct Item {
   strings::MutableByteRange buf;
@@ -35,7 +36,43 @@ typedef fibers::buffered_channel<Item> ReadQueue;
 
 int queue_requests = 0;
 
-void ProcessFile(ReadQueue* q, std::function<void(StringPiece)> line_cb) {
+
+class BufStore {
+
+  typedef std::unique_ptr<uint8_t[]> ReadBuf;
+  typedef std::unique_ptr<ReadBuf[]> BufArray;
+
+ public:
+  BufStore(unsigned count, size_t buf_capacity)
+      : buf_array_(new ReadBuf[count]), buf_capacity_(buf_capacity), q_(count * 2) {
+    for (unsigned i = 0; i < count; ++i) {
+      buf_array_[i].reset(new uint8_t[buf_capacity]);
+      channel_op_status st = q_.push(buf_array_[i].get());
+      CHECK(st == channel_op_status::success);
+    }
+
+  }
+
+  strings::MutableByteRange Get() {
+    uint8_t* ptr = q_.value_pop();
+    return strings::MutableByteRange(ptr, buf_capacity_);
+  }
+
+  void Return(strings::MutableByteRange mb) {
+    channel_op_status st = q_.try_push(mb.data());
+    CHECK(st == channel_op_status::success);
+  }
+
+ private:
+  BufArray buf_array_;
+  size_t buf_capacity_;
+
+  // Can be made much easier with something else than buffered_channel.
+  // or just vector protected with mutex and cv.
+  fibers::buffered_channel<uint8_t*> q_;
+};
+
+void ProcessFile(ReadQueue* q, BufStore* store, std::function<void(StringPiece)> line_cb) {
   channel_op_status st;
   Item item;
   string line;
@@ -75,7 +112,7 @@ void ProcessFile(ReadQueue* q, std::function<void(StringPiece)> line_cb) {
       }
       res_buf.remove_prefix(it - res_buf.begin() + 1);
     }
-
+    store->Return(item.buf);
 
     if (queue_requests < 4) {
       boost::this_fiber::yield();
@@ -92,7 +129,7 @@ class Mr {
   static constexpr unsigned kReadSize = 1 << 15;
   static constexpr unsigned kMaxActiveFibers = 10;
 
-  typedef std::unique_ptr<uint8_t[]> ReadBuf;
+
   FileIOManager* io_mgr_;
 
   typedef fibers::buffered_channel<string> IncomingQueue;
@@ -154,40 +191,46 @@ void Mr::Process(const string& filename) {
   CHECK_EQ(0, fstat(fd, &sbuf));
   if ((sbuf.st_mode & S_IFMT) != S_IFREG) {
     LOG(INFO) << "Skipping " << filename;
-    close(fd);
-    return;
+    goto exit1;
   }
 
-  LOG(INFO) << "File size is " << sbuf.st_size << endl;
+  {
+    CONSOLE_INFO << "File size " << filename << " " << sbuf.st_size;
 
-  std::array<ReadBuf, kThisFiberQueue> buf_array;
-  ReadQueue read_channel(kThisFiberQueue);
-  for (auto& ptr : buf_array)
-      ptr.reset(new uint8_t[kReadSize]);
+    BufStore buf_store(kThisFiberQueue, kReadSize);
+    ReadQueue read_channel(kThisFiberQueue);
 
-  off_t offset = 0;
-  unsigned num_requests = 0;
-  unsigned num_lines = 0;
-  auto line_cb = [&num_lines](StringPiece line) { ++num_lines; };
+    off_t offset = 0;
+    unsigned num_requests = 0;
+    unsigned num_lines = 0;
+    auto line_cb = [&num_lines](StringPiece line) { ++num_lines; };
 
-  fibers::fiber read_fiber(fibers::launch::post, &ProcessFile, &read_channel, line_cb);
+    // Start a consumer fiber but do not switch yet.
+    fibers::fiber read_fiber(fibers::launch::post, &ProcessFile, &read_channel,
+                             &buf_store, line_cb);
 
-  while (offset < sbuf.st_size) {
-    strings::MutableByteRange dest(buf_array[num_requests % 8].get(), kReadSize);
-    FileIOManager::ReadResult res = io_mgr_->Read(fd, offset, dest);
+    // Start sending read requests.
+    while (offset < sbuf.st_size) {
+      strings::MutableByteRange dest = buf_store.Get();
+      FileIOManager::ReadResult res = io_mgr_->Read(fd, offset, dest);
 
-    channel_op_status st = read_channel.push(Item{dest, std::move(res)});
-    CHECK(st == channel_op_status::success);
-    ++queue_requests;
+      channel_op_status st = read_channel.push(Item{dest, std::move(res)});
+      CHECK(st == channel_op_status::success);
+      ++queue_requests;
 
-    ++num_requests;
+      ++num_requests;
 
-    offset += (1 << 17);
+      offset += (1 << 17);
+    }
+
+    read_channel.close();  // Signal that this channel is closed.
+    read_fiber.join(); // Wait for the consumer fiber to stop.
+    CONSOLE_INFO << filename << " has " << num_lines << " lines with " << num_requests;
   }
-  read_channel.close();
-  read_fiber.join();
+
+exit1:
   close(fd);
-  CONSOLE_INFO << filename << " has " << num_lines << " lines with " << num_requests;
+
 
   m_.lock();
   unsigned local_num = --num_pending_reads_;
