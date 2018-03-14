@@ -1,6 +1,8 @@
 #!/bin/bash
 
-apt install -y cmake libevent-dev libunwind8-dev zip flex bison ninja-build autoconf-archive
+set -e
+
+apt install -y cmake libevent-dev libunwind-dev zip flex bison ninja-build autoconf-archive
 
 # for folly & proxygen. gperf is not related to gperftools.
 apt install -y autoconf-archive gperf curl
