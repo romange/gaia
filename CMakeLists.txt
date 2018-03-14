@@ -33,6 +33,7 @@ endif ()
 
 set(ABSL_CCTZ_TARGET TRDP::cctz)
 set(BUILD_TESTING OFF)
+set(CCTZ_INCLUDE_DIRS ${CCTZ_INCLUDE_DIR})
 add_subdirectory(abseil-cpp)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
