@@ -26,15 +26,18 @@ AlphaNum gEmptyAlphaNum("");
 // after the area just overwritten.  It comes in multiple flavors to minimize
 // call overhead.
 static char *Append1(char *out, const AlphaNum &x) {
-  memcpy(out, x.data(), x.size());
+  if (x.size())
+    memcpy(out, x.data(), x.size());
   return out + x.size();
 }
 
 static char *Append2(char *out, const AlphaNum &x1, const AlphaNum &x2) {
-  memcpy(out, x1.data(), x1.size());
+  if (x1.size())
+    memcpy(out, x1.data(), x1.size());
   out += x1.size();
 
-  memcpy(out, x2.data(), x2.size());
+  if (x2.size())
+    memcpy(out, x2.data(), x2.size());
   return out + x2.size();
 }
 

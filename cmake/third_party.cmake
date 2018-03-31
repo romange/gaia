@@ -360,6 +360,7 @@ add_third_party(dynasm
   BUILD_IN_SOURCE 1
   CONFIGURE_COMMAND true
   BUILD_COMMAND gcc -o ${DYNASM_COMPILER} -O3 src/host/minilua.c -lm
+  LIB "none"
   INSTALL_COMMAND sh -c "test -L ${DYNASM_INCLUDE_DIR}/dynasm || ln -s ${THIRD_PARTY_DIR}/dynasm/dynasm -t ${DYNASM_INCLUDE_DIR}/"
 )
 
