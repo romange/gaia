@@ -421,7 +421,9 @@ add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
 set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       ${GPERF_LIB_DIR}/libtcmalloc_and_profiler.so
-                      IMPORTED_LINK_INTERFACE_LIBRARIES unwind)
+                      IMPORTED_LINK_INTERFACE_LIBRARIES unwind
+                      INTERFACE_INCLUDE_DIRECTORIES ${GPERF_INCLUDE_DIR}
+                      )
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
 include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR})

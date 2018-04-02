@@ -191,7 +191,7 @@ function(flex_lib name)
   # plang_parser.hh is here because this must be generated after the parser is generated
   add_library(${lib_name} ${gen_dir}/${name}.cc ${gen_dir}/plang_parser.hh)
   add_compile_flag(${lib_name} "-Wno-extra")
-  target_link_libraries(${lib_name} glog)
+  target_link_libraries(${lib_name} TRDP::glog)
 endfunction()
 
 function(bison_lib name)

@@ -22,26 +22,28 @@
    using TOKEN = plang::Parser::token::yytokentype;
 %}
 [ \t\n]+                            // skip white space chars.
-[0-9]+                         return TOKEN::NUMBER;
-"AND"|"and"|"&&"               return TOKEN::AND_OP;
-"OR"|"or"|"||"                 return TOKEN::OR_OP;
+-?[0-9]+                         return TOKEN::NUMBER;
+-?[0-9]*"."[0-9]+                return TOKEN::NUMBER;
+(?i:"and")|"&&"                  return TOKEN::AND_OP;
+(?i:"or")|"||"                 return TOKEN::OR_OP;
 "<="                           return TOKEN::LE_OP;
 ">="                           return TOKEN::GE_OP;
-"not"|"NOT"                    return TOKEN::NOT_OP;
+(?i:"not")                     return TOKEN::NOT_OP;
 "!="                           return TOKEN::NE_OP;
-"True"|"true"|"TRUE"           {
+(?i:"rlike")|(?i:"regexp")     return TOKEN::RLIKE_OP;
+(?i:"true")                    {
                                  yytext[0] = '1';
                                  yytext[1] = '\0';
                                  yyleng = 1;
                                  return TOKEN::NUMBER;
                                }
-"False"|"false"|"FALSE"        {
+(?i:"false")                   {
                                  yytext[0] = '0';
                                  yytext[1] = '\0';
                                  yyleng = 1;
                                  return TOKEN::NUMBER;
                                }
-"def"|"DEF"                    return TOKEN::DEF_TOK;
+(?i:"def")                     return TOKEN::DEF_TOK;
 [[:alpha:]_][[:alnum:]_.]*     return TOKEN::IDENTIFIER;
 \"([^"]|\\.)*\"|\'([^']|\\.)*\' {
                   memmove(yytext, yytext + 1, yyleng);

@@ -92,6 +92,7 @@ public:
 
   bool Equal(const ExprValue& other) const;
   bool Less(const ExprValue& other) const;
+  bool RLike(const ExprValue& other) const;
 };
 
 class Expr {
@@ -107,30 +108,47 @@ public:
 
 typedef std::vector<Expr*> ArgList;
 
-class IntLiteral : public Expr {
+class NumericLiteral : public Expr {
   union {
     int64 signed_val;
     uint64 uval;
+    double dval;
   } val_;
-  bool unsigned_ = false;
+  enum class ValType { SINT64, UINT64, DOUBLE };
+  ValType val_type_;
 public:
-  static IntLiteral Signed(int64 v) {
-    IntLiteral lit;
+  static NumericLiteral Signed(int64 v) {
+    NumericLiteral lit;
     lit.val_.signed_val = v;
+    lit.val_type_ = ValType::SINT64;
     return lit;
   }
 
-  static IntLiteral Unsigned(uint64 v) {
-    IntLiteral lit;
+  static NumericLiteral Unsigned(uint64 v) {
+    NumericLiteral lit;
     lit.val_.uval = v;
+    lit.val_type_ = ValType::UINT64;
+    return lit;
+  }
+
+  static NumericLiteral Double(double v) {
+    NumericLiteral lit;
+    lit.val_.dval = v;
+    lit.val_type_ = ValType::DOUBLE;
     return lit;
   }
 
   virtual void eval(const gpb::Message& msg, ExprValueCb cb) const override {
-    if (unsigned_)
+    switch (val_type_) {
+    case ValType::UINT64:
       cb(ExprValue::fromUInt(val_.uval));
-    else
+      break;
+    case ValType::SINT64:
       cb(ExprValue::fromInt(val_.signed_val));
+      break;
+    case ValType::DOUBLE:
+      cb(ExprValue::fromDouble(val_.dval));
+    }
   }
 };
 
@@ -153,10 +171,13 @@ class BinOp : public Expr {
   std::unique_ptr<Expr> right_;
 
 public:
-  enum Type {EQ, AND, OR, LT, LE, NOT};
+  enum Type {EQ, AND, OR, LT, LE, NOT, RLIKE};
   BinOp(Type t, Expr* l, Expr* r) : left_(l), right_(r), type_(t) {}
 
   virtual void eval(const gpb::Message& msg, ExprValueCb cb) const override;
+  const Expr& left() const { return *left_.get(); }
+  const Expr& right() const { return *right_.get(); }
+  Type type() const { return type_; }
 private:
   Type type_;
 };

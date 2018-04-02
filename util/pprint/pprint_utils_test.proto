@@ -1,0 +1,38 @@
+syntax = "proto2";
+
+message SimpleString {
+  required string simple = 1;
+}
+
+message RepeatingString {
+  repeated string repeating = 1;
+}
+
+message NestedString {
+  message NestedA {
+    required string s1 = 1;
+    repeated string s2 = 2;
+  }
+
+  message NestedB {
+    required string s1 = 1;
+    repeated string s2 = 2;
+    required string s3 = 3;
+  }
+
+
+  message NestedC {
+    message NestedD {
+      required string s1 = 1;
+      required string s2 = 2;
+    }
+    required string s1 = 1;
+    required string s2 = 2;
+    required NestedD d1 = 3;
+  }
+
+  required NestedA a1 = 1;
+  repeated NestedA a2 = 2;
+  repeated NestedB b1 = 3;
+  required NestedC c1 = 4;
+}

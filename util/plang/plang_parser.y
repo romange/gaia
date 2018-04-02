@@ -12,8 +12,11 @@
 
 
                                  // lowest precedence
-%left AND_OP OR_OP LE_OP GE_OP NE_OP
-%left   '='
+%left OR_OP
+%left AND_OP
+%left LE_OP GE_OP '<' '>'
+%left   '=' NE_OP RLIKE_OP
+%right NOT_OP
                                 // highest precedence
 
 %locations
@@ -95,6 +98,10 @@ comparison_predicate :
     {
        $$ = new BinOp(BinOp::NOT, new BinOp(BinOp::EQ, $1, $3), nullptr);
     }
+|   scalar_expr RLIKE_OP scalar_expr
+    {
+      $$ = new BinOp(BinOp::RLIKE, $1, $3);
+    }
 |  scalar_expr '<' scalar_expr
    {
      $$ = new BinOp(BinOp::LT, $1, $3);
@@ -127,12 +134,15 @@ scalar_expr:
    {
       // std::cout << " number " << d_scanner.matched() << '\n';
       int64 tmp;
+      uint64 tmp2;
+      double tmp3;
       if (safe_strto64(scanner->matched(), &tmp)) {
-        $$ = new IntLiteral(IntLiteral::Signed(tmp));
+        $$ = new NumericLiteral(NumericLiteral::Signed(tmp));
+      } else if (safe_strtou64(scanner->matched(), &tmp2)) {
+        $$ = new NumericLiteral(NumericLiteral::Unsigned(tmp2));
       } else {
-        uint64 tmp2;
-        CHECK(safe_strtou64(scanner->matched(), &tmp2)) << scanner->matched();
-        $$ = new IntLiteral(IntLiteral::Unsigned(tmp2));
+        CHECK(safe_strtod(scanner->matched(), &tmp3)) << scanner->matched();
+        $$ = new NumericLiteral(NumericLiteral::Double(tmp3));
       }
    }
  | STRING
