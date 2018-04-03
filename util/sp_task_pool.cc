@@ -9,7 +9,6 @@
 #include "base/logging.h"
 #include "base/pthread_utils.h"
 #include "base/walltime.h"
-// #include "util/proc_stats.h"
 
 namespace util {
 

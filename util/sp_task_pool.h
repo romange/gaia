@@ -1,4 +1,4 @@
-// Copyright 2015, .com .  All rights reserved.
+// Copyright 2017, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
 #ifndef _UTIL_SP_TASK_POOL_H
@@ -11,6 +11,8 @@
 
 #include <pthread.h>
 
+// NOTE: To consider to pull out those classes to gaia
+// or to use more lightweight dependency.
 #include <folly/ProducerConsumerQueue.h>
 #include <folly/experimental/EventCount.h>
 
@@ -102,11 +104,11 @@ protected:
     uint64 queue_delay_count = 0;
   };
 
-  
+
   std::string base_name_;
   std::atomic_bool start_cancel_;
   unsigned per_thread_capacity_, thread_count_;
-  
+
   struct ThreadInfo {
     struct Data {
       pthread_t thread_id = 0;
