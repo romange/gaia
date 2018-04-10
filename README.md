@@ -1,4 +1,6 @@
-Gaia - primal goddess of rapid development in C++ [![Build Status](https://travis-ci.org/romange/gaia.svg?branch=master)](https://travis-ci.org/romange/gaia)
+Gaia - primal goddess of rapid development in C++
+
+[![Build Status](https://travis-ci.org/romange/gaia.svg?branch=master)](https://travis-ci.org/romange/gaia)
 =====
 
 Gaia is a set of libraries and c++ environment that allows you efficient and rapid development
