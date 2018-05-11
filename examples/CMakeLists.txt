@@ -12,5 +12,5 @@ add_executable(mr_demo_fibers mr_demo.cc)
 cxx_link(mr_demo_fibers fibers base file dl ${Boost_LIBRARIES})
 
 add_executable(asio asio.cc)
-cxx_link(asio fibers base ${Boost_LIBRARIES})
+cxx_link(asio fibers base absl_strings ${Boost_LIBRARIES})
 

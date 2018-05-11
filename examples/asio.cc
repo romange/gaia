@@ -5,7 +5,7 @@
 
 #include "base/init.h"
 #include "base/logging.h"
-
+#include "absl/strings/escaping.h"
 
 namespace asio = ::boost::asio;
 
@@ -43,8 +43,7 @@ private:
 };
 
 io_context_pool::io_context_pool(std::size_t pool_size)
-  : next_io_context_(0)
-{
+  : next_io_context_(0) {
   CHECK_GT(pool_size, 0);
 
   // Give all the io_contexts work to do so that their run() functions will not
@@ -59,6 +58,8 @@ io_context_pool::io_context_pool(std::size_t pool_size)
 void io_context_pool::run() {
   // Create a pool of threads to run all of the io_contexts.
   std::vector<std::thread> threads;
+  LOG(INFO) << "Creating " << io_contexts_.size() << " threads";
+
   for (std::size_t i = 0; i < io_contexts_.size(); ++i) {
     std::thread t([this, i] {io_contexts_[i]->run();});
     threads.push_back(std::move(t));
@@ -85,65 +86,71 @@ asio::io_context& io_context_pool::get_io_context() {
 }
 
 
-struct reply {};
-struct request {};
-
-/// The common handler for all incoming requests.
-class request_handler {
- public:
-  /// Construct with a directory containing files to be served.
-  explicit request_handler(const std::string& doc_root) : doc_root_(doc_root) {}
-
- /// Handle a request and produce a reply.
- void handle_request(const request& req, reply& rep) {}
-
- private:
-  /// The directory containing the files to be served.
-  std::string doc_root_;
-};
-
-
 /// Represents a single connection from a client.
 class connection : public std::enable_shared_from_this<connection> {
  public:
   /// Construct a connection with the given io_context.
-  explicit connection(boost::asio::io_context& io_context,
-      request_handler& handler);
+  connection(asio::io_context& io_context, asio::ip::tcp::socket socket)
+    : io_(io_context), socket_(std::move(socket)) {}
+
+  ~connection() {
+    LOG(INFO) << "Closing connection " << socket_.remote_endpoint();
+  }
+
+  connection(const connection&) = delete;
+  connection& operator=(const connection&) = delete;
 
   /// Get the socket associated with the connection.
   boost::asio::ip::tcp::socket& socket();
 
   /// Start the first asynchronous operation for the connection.
-  void start();
+  void start() {
+    do_read();
+  }
 
  private:
+  void do_read() {
+    // Holds the object until there are active callbacks.
+    auto self(shared_from_this());
+
+    socket_.async_read_some(boost::asio::buffer(buffer_),
+        [this, self](boost::system::error_code ec, std::size_t length) {
+          handle_read(ec, length);
+        });
+  }
+
   /// Handle completion of a read operation.
-  void handle_read(const boost::system::error_code& e,
-      std::size_t bytes_transferred);
+  void handle_read(const boost::system::error_code& e, std::size_t length) {
+    if (!e) {
+      LOG(INFO) << "Read " << length << " bytes";
+      LOG(INFO) << absl::CEscape(absl::string_view(buffer_.data(), length));
+      do_read();
+    }
+  }
 
   /// Handle completion of a write operation.
   void handle_write(const boost::system::error_code& e);
 
+  asio::io_context& io_;
+
   /// Socket for the connection.
   asio::ip::tcp::socket socket_;
 
-  /// The handler used to process the incoming request.
-  request_handler& request_handler_;
-
   /// Buffer for incoming data.
   std::array<char, 8192> buffer_;
-
-  /// The incoming request.
-  request request_;
-
-  /// The reply to be sent back to the client.
-  reply reply_;
 };
 
-typedef boost::shared_ptr<connection> connection_ptr;
 
-void handle_accept(const boost::system::error_code& e, boost::asio::ip::tcp::socket s) {
-  LOG(INFO) << e;
+void do_accept(io_context_pool* pool, asio::ip::tcp::acceptor* acc) {
+  acc->async_accept(
+     [acc, pool](const boost::system::error_code& ec, boost::asio::ip::tcp::socket peer) {
+      if (!ec) {
+        LOG(ERROR) << "Succeeded " << peer.remote_endpoint();
+        auto cptr = std::make_shared<connection>(pool->get_io_context(), std::move(peer));
+        cptr->start();
+      }
+      do_accept(pool, acc);
+    });
 }
 
 int main(int argc, char **argv) {
@@ -152,31 +159,32 @@ int main(int argc, char **argv) {
   io_context_pool pool(std::thread::hardware_concurrency());
 
   /// The signal_set is used to register for process termination notifications.
-  asio::signal_set signals(pool.get_io_context());
+  asio::signal_set signals(pool.get_io_context(), SIGINT, SIGTERM);
 
   /// Acceptor used to listen for incoming connections.
   asio::ip::tcp::acceptor acceptor(pool.get_io_context());
 
-  signals.add(SIGINT);
-  signals.add(SIGTERM);
+  signals.async_wait(
+      [&](boost::system::error_code /*ec*/, int /*signo*/) {
+        // The server is stopped by cancelling all outstanding asynchronous
+        // operations. Once all operations have finished the io_context::run()
+        // call will exit.
+        acceptor.close();
+        pool.stop();
+      });
 
-  asio::ip::tcp::resolver resolver(acceptor.get_executor().context());
-
+  asio::ip::tcp::resolver resolver(acceptor.get_io_context());
   asio::ip::tcp::endpoint endpoint = *resolver.resolve("0.0.0.0", "8080").begin();
   acceptor.open(endpoint.protocol());
   acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
   acceptor.bind(endpoint);
   acceptor.listen();
 
-  request_handler rh("foo");
+  CHECK(acceptor.is_open());
 
-  /*connection_ptr new_connection(new connection(pool.get_io_context(), rh));
+  do_accept(&pool, &acceptor);
 
-  acceptor.async_accept(new_connection->socket(),
-     [](const boost::system::error_code& ec)
-    {
+  pool.run();
 
-    });
-*/
   return 0;
 }
