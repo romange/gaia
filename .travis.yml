@@ -25,6 +25,8 @@ before_install:
     while (pgrep -c apt.systemd.daily); do
       sleep 1
     done
+  - ps aux | grep apt
+  - pgrep apt.systemd.daily
   - sudo apt update -qq
   - ps aux | grep apt
 install:
