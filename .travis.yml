@@ -21,14 +21,13 @@ before_install:
   - |
     sudo systemctl stop apt-daily.timer
     sudo systemctl stop apt-daily.service &&
-    sudo systemctl kill --kill-who=all apt-daily.service &&
-    while ! (systemctl list-units --all apt-daily.service | fgrep -q dead) ; do
+    sudo systemctl kill --kill-who=all apt-daily.service
+    while (pgrep -c apt-daily.service) ; do
       sleep 1
     done
   - sudo apt update -qq
-  - systemctl list-units --all apt-daily.service
-install:
   - ps aux | grep apt
+install:
   - sudo ./install-dependencies.sh
 
 script:
