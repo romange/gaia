@@ -1,6 +1,10 @@
-// Copyright 2017, Beeri 15.  All rights reserved.
+// Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 #include <functional>
 #include <thread>
@@ -12,10 +16,6 @@
 #include "strings/stringpiece.h"
 
 #include "util/sq_threadpool.h"
-
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <fcntl.h>
 
 using namespace boost;
 
@@ -38,7 +38,6 @@ int queue_requests = 0;
 
 
 class BufStore {
-
   typedef std::unique_ptr<uint8_t[]> ReadBuf;
   typedef std::unique_ptr<ReadBuf[]> BufArray;
 
@@ -50,7 +49,6 @@ class BufStore {
       channel_op_status st = q_.push(buf_array_[i].get());
       CHECK(st == channel_op_status::success);
     }
-
   }
 
   strings::MutableByteRange Get() {
@@ -147,7 +145,7 @@ class Mr {
       CHECK(st == channel_op_status::success);
       CONSOLE_INFO << file_name;
 
-      std::unique_lock<boost::fibers::mutex> lock( m_);
+      std::unique_lock<boost::fibers::mutex> lock(m_);
 
       num_fibers_.wait(lock, [this] () {return num_pending_reads_ < kMaxActiveFibers;});
       ++num_pending_reads_;
@@ -161,15 +159,17 @@ class Mr {
   unsigned num_pending_reads_ = 0;
   fibers::mutex m_;
   fibers::condition_variable num_fibers_;
-public:
-  Mr(FileIOManager* mgr) : io_mgr_(mgr), inc_queue_(2), t_(&Mr::ThreadFunc, this) {}
+
+ public:
+  explicit Mr(FileIOManager* mgr) : io_mgr_(mgr), inc_queue_(2), t_(&Mr::ThreadFunc, this) {}
 
   void Join() {
     inc_queue_.close();
     t_.join();
 
     CONSOLE_INFO << "Before joining on num_pending_reads_";
-    std::unique_lock<boost::fibers::mutex> lock( m_);
+
+    std::unique_lock<boost::fibers::mutex> lock(m_);
     num_fibers_.wait(lock, [this] () {return num_pending_reads_ == 0;});
   }
 
