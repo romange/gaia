@@ -26,7 +26,9 @@ before_install:
     done
   - sudo apt update -qq
 
-install: sudo ./install-dependencies.sh
+install:
+  - ps aux | grep apt
+  - sudo ./install-dependencies.sh
 
 script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
