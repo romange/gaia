@@ -22,7 +22,7 @@ before_install:
     sudo systemctl stop apt-daily.timer
     sudo systemctl stop apt-daily.service &&
     sudo systemctl kill --kill-who=all apt-daily.service
-    while (pgrep -c apt-daily.service) ; do
+    while (pgrep -c apt.systemd.daily); do
       sleep 1
     done
   - sudo apt update -qq
