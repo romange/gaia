@@ -261,7 +261,7 @@ add_third_party(
 set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
 set(BOOST_ROOT /opt/boost_1_67_0)
-find_package(Boost 1.67.0 REQUIRED COMPONENTS fiber context system thread)
+find_package(Boost 1.67.0 REQUIRED COMPONENTS coroutine fiber context system thread)
 
 set(LDFOLLY "-L${Boost_LIBRARY_DIR} -L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${Boost_LIBRARY_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
 set(CXXFOLLY "-g  -I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR} -I${GTEST_INCLUDE_DIR}")
