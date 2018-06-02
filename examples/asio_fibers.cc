@@ -13,7 +13,14 @@
 #include <boost/fiber/operations.hpp>  // for this_fiber.
 #include <boost/fiber/scheduler.hpp>
 
+#include "examples/yield.hpp"
+
 using namespace boost;
+
+using asio::ip::tcp;
+
+typedef std::shared_ptr< tcp::socket > socket_ptr;
+
 
 class round_robin : public fibers::algo::algorithm {
  private:
@@ -57,27 +64,8 @@ public:
         // service_already_exists if you pass the same io_service instance to
         // more than one round_robin instance.
         asio::add_service( * io_svc_, new service( * io_svc_) );
-        io_svc_->post([this]() mutable {
-//]
-//[asio_rr_service_lambda
-                while ( ! io_svc_->stopped() ) {
-                    if ( has_ready_fibers() ) {
-                        // run all pending handlers in round_robin
-                        while ( io_svc_->poll() );
-                        // block this fiber till all pending (ready) fibers are processed
-                        // == round_robin::suspend_until() has been called
-                        std::unique_lock< fibers::mutex > lk( mtx_);
-                        cnd_.wait( lk);
-                    } else {
-                        // run one handler inside io_service
-                        // if no handler available, block this thread
-                        if ( ! io_svc_->run_one() ) {
-                            break;
-                        }
-                    }
-               }
-//]
-            });
+
+        asio::post(*io_svc_, [this] () mutable { this->loop();});
     }
 
     void awakened( fibers::context * ctx) noexcept {
@@ -87,6 +75,7 @@ public:
         if ( ! ctx->is_context( fibers::type::dispatcher_context) ) {
             ++counter_;
         }
+        LOG(INFO) << "awakened: " << ctx->get_id();
     }
 
     fibers::context * pick_next() noexcept {
@@ -102,6 +91,10 @@ public:
                 --counter_;
             }
         }
+        fibers::context::id id;
+        if (ctx)
+          id =  ctx->get_id();
+        LOG(INFO) << "PickNext: " << id << ", counter: " << counter_;
         return ctx;
     }
 
@@ -142,6 +135,8 @@ public:
 
 //[asio_rr_notify
     void notify() noexcept {
+        LOG(INFO) << "Notify";
+
         // Something has happened that should wake one or more fibers BEFORE
         // suspend_timer_ expires. Reset the timer to cause it to fire
         // immediately, causing the run_one() call to return. In theory we
@@ -162,13 +157,137 @@ public:
                                   });
         suspend_timer_.expires_at( std::chrono::steady_clock::now() );
     }
+
 //]
+
+ private:
+    void loop() {
+      while ( ! io_svc_->stopped() ) {
+        if ( has_ready_fibers() ) {
+            // run all pending handlers in round_robin
+            while ( io_svc_->poll() );
+            // block this fiber till all pending (ready) fibers are processed
+            // == round_robin::suspend_until() has been called
+            std::unique_lock< fibers::mutex > lk( mtx_);
+            cnd_.wait( lk);
+        } else {
+            // run one handler inside io_service
+            // if no handler available, block this thread
+            if ( ! io_svc_->run_one() ) {
+                break;
+            }
+        }
+      }
+      LOG(INFO) << "RR loop ended";
+    }
 };
 
 asio::io_service::id round_robin::service::id;
 
+constexpr unsigned max_length = 1024;
+
+/*****************************************************************************
+*   fiber function per server connection
+*****************************************************************************/
+// TODO: there is a bug here:
+// if server stops, this socket still block and the fiber does not exit.
+// There is resource leak and fiber scheduler will deadlock.
+// Solution: we should have the notion of connection that tracks all its
+// resources (fiber, socket etc)
+// Server should access the list of all active connections and release them upon exit.
+// In addition, each fiber should be able to remove its connection from the list when exiting.
+// One way to do it is to use intrusive linked list. That way each connection ptr could remove itself
+// and no allocations are needed. For example, intrusive::slist, like terminated_queue_type in scheduler.hpp.
+// libs/asio/example/cpp03/http/server/server.hpp uses simpler way to handle the connections using
+// regular containers.
+void session(socket_ptr sock) {
+    try {
+        char data[max_length];
+        boost::system::error_code ec;
+
+        for (;;) {
+            std::size_t length = sock->async_read_some(
+                    boost::asio::buffer( data),
+                    boost::fibers::asio::yield[ec]);
+            if ( ec == boost::asio::error::eof) {
+                LOG(INFO) << "Connection closed";
+                break; //connection closed cleanly by peer
+            } else if ( ec) {
+              throw boost::system::system_error( ec); //some other error
+            }
+            LOG(INFO) << ": handled: " << std::string(data, length);
+            asio::async_write(* sock,
+                    boost::asio::buffer( data, length),
+                    boost::fibers::asio::yield[ec]);
+            if ( ec == boost::asio::error::eof) {
+                break; //connection closed cleanly by peer
+            } else if ( ec) {
+                throw boost::system::system_error( ec); //some other error
+            }
+        }
+        LOG(INFO) << ": connection closed";
+    } catch ( std::exception const& ex) {
+        LOG(WARNING) << ": caught exception : ", ex.what();
+    }
+    LOG(INFO) << "Session closed";
+}
+
+
+void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) {
+    LOG(INFO) << ": echo-server started";
+    try {
+        for (;;) {
+            socket_ptr socket( new tcp::socket(*io_svc) );
+            boost::system::error_code ec;
+            a.async_accept(
+                    * socket,
+                    boost::fibers::asio::yield[ec]);
+
+            if ( ec) {
+                throw boost::system::system_error( ec); //some other error
+            } else {
+                boost::fibers::fiber(session, socket).detach();
+            }
+        }
+    } catch ( std::exception const& ex) {
+        LOG(WARNING) << ": caught exception : " << ex.what();
+    }
+
+    io_svc->stop();
+    LOG(INFO) << ": echo-server stopped";
+}
+
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
+
+  std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
+  fibers::use_scheduling_algorithm<round_robin>(io_svc);
+
+  asio::signal_set signals(*io_svc, SIGINT, SIGTERM);
+
+  tcp::acceptor acc(*io_svc, tcp::endpoint( tcp::v4(), 9999) );
+
+  signals.async_wait(
+      [&](boost::system::error_code /*ec*/, int /*signo*/) {
+        // The server is stopped by cancelling all outstanding asynchronous
+        // operations. Once all operations have finished the io_context::run()
+        // call will exit.
+        acc.close();
+        io_svc->stop();
+        LOG(INFO) << "Signals close";
+      });
+
+
+  fibers::fiber srv_fb(server, io_svc, std::ref(acc));
+  //srv_fb.detach();
+
+  LOG(INFO) << "Active context is " << fibers::context::active();
+  io_svc->run();
+  DCHECK(srv_fb.joinable());
+
+  LOG(INFO) << "Server stopped";
+  srv_fb.join();
+  LOG(INFO) << "After join";
 
   return 0;
 }
