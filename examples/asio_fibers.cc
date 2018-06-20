@@ -2,8 +2,9 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-// #include "base/init.h"
-// #include "base/logging.h"
+#include "base/init.h"
+#include "base/logging.h"
+#include "strings/strcat.h"
 
 #include <experimental/optional>
 #include <boost/asio.hpp>
@@ -19,9 +20,6 @@
 using namespace boost;
 
 using asio::ip::tcp;
-
-#define LOG(x) std::cerr << std::endl
-#define DCHECK assert
 
 typedef std::shared_ptr< tcp::socket > socket_ptr;
 
@@ -150,7 +148,6 @@ class round_robin : public fibers::algo::algorithm {
                                       this_fiber::yield();
                                     });
       }
-      LOG(INFO) << "SuspendUntil";
       cnd_.notify_one();
     }
 //]
@@ -188,9 +185,7 @@ class round_robin : public fibers::algo::algorithm {
             // block this fiber till all pending (ready) fibers are processed
             // == round_robin::suspend_until() has been called
             std::unique_lock< fibers::mutex > lk( mtx_);
-            LOG(INFO) << "Before CndWait";
             cnd_.wait(lk);
-            LOG(INFO) << "After CndWait";
         } else {
             // run one handler inside io_service
             // if no handler available, block this thread
@@ -198,10 +193,8 @@ class round_robin : public fibers::algo::algorithm {
             if ( ! io_svc_->run_one() ) {
                 break;
             }
-            LOG(INFO) << "AfterRunOne";
         }
       }
-      LOG(INFO) << "RR loop ended";
     }
 };
 
@@ -232,6 +225,7 @@ void session(Connection* conn) {
         for (;;) {
             std::size_t length = sock->async_read_some(asio::buffer(data),
                                                        fibers::asio::yield[ec]);
+
             LOG(INFO) << "After async_read_some";
             if ( ec == asio::error::eof) {
                 LOG(INFO) << "Connection closed";
@@ -286,8 +280,8 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
               fibers::fiber(session, conn.release()).detach();
             }
         }
-    } catch ( std::exception const& ex) {
-        LOG(WARNING) << ": caught exception : " << ex.what();
+    } catch (std::exception const& ex) {
+      LOG(WARNING) << ": caught exception : " << ex.what();
     }
 
     LOG(INFO) << "Cleaning " << clist.size() << " connections";
@@ -305,8 +299,61 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
     LOG(INFO) << ": echo-server stopped";
 }
 
+
+/*****************************************************************************
+*   fiber function per client
+*****************************************************************************/
+void client( std::shared_ptr< boost::asio::io_service > const& io_svc, tcp::acceptor & a,
+             boost::fibers::barrier& barrier, unsigned iterations) {
+  LOG(INFO) << ": echo-client started";
+
+  for (unsigned count = 0; count < iterations; ++count) {
+    tcp::resolver resolver( * io_svc);
+    tcp::resolver::query query( tcp::v4(), "127.0.0.1", "9999");
+    tcp::resolver::iterator iterator = resolver.resolve( query);
+    tcp::socket s( *io_svc);
+    boost::asio::connect(s, iterator);
+    char msgbuf[512];
+    char reply[max_length];
+
+    for (unsigned msg = 0; msg < 1; ++msg) {
+        char* next = StrAppend(msgbuf, sizeof(msgbuf), {count, ".", msg});
+
+        LOG(INFO) << ": Sending: " << msgbuf;
+
+        boost::system::error_code ec;
+        asio::async_write(
+                s, asio::buffer(msgbuf, next - msgbuf),
+                fibers::asio::yield[ec]);
+        if ( ec == asio::error::eof) {
+          return; //connection closed cleanly by peer
+        } else if ( ec) {
+          throw system::system_error( ec); //some other error
+        }
+
+        size_t reply_length = s.async_read_some(
+                boost::asio::buffer(reply, max_length),
+                boost::fibers::asio::yield[ec]);
+        if ( ec == boost::asio::error::eof) {
+            return; //connection closed cleanly by peer
+        } else if ( ec) {
+            throw boost::system::system_error( ec); //some other error
+        }
+        LOG(INFO) << ": Reply  : ", std::string( reply, reply_length);
+      }
+  }
+  // done with all iterations, wait for rest of client fibers
+  if ( barrier.wait()) {
+    // exactly one barrier.wait() call returns true
+    // we're the lucky one
+    a.close();
+    LOG(INFO) << ": acceptor stopped";
+  }
+  LOG(INFO) << ": echo-client stopped";
+}
+
 int main(int argc, char **argv) {
-  // MainInitGuard guard(&argc, &argv);
+  MainInitGuard guard(&argc, &argv);
 
   std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
   fibers::use_scheduling_algorithm<round_robin>(io_svc);
@@ -333,7 +380,6 @@ int main(int argc, char **argv) {
   io_svc->run();
   DCHECK(srv_fb.joinable());
 
-  LOG(INFO) << "Server stopped";
   srv_fb.join();
   LOG(INFO) << "After join";
   return 0;
