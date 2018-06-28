@@ -455,6 +455,7 @@ set_property(TARGET TRDP::seastar APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES aio ${SEASTAR_LINK_LIBS}
              ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl rt gcc_s unwind)
 
+file(MAKE_DIRECTORY ${EVHTP_INCLUDE_DIR}/evhtp)
 set_property(TARGET TRDP::evhtp APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${EVHTP_INCLUDE_DIR}/evhtp
              )

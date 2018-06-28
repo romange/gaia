@@ -13,7 +13,7 @@ namespace http {
 
 using std::string;
 
-static const char kStaticFilesPrefix[] = "";
+static const char kStaticFilesPrefix[] = "https://rawcdn.githack.com/romange/gaia/master/util/http";
 
 static string GetTimerString(uint64 seconds) {
   char buf[128];
