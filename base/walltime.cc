@@ -27,7 +27,6 @@ void SleepForMilliseconds(uint32 milliseconds) {
 
 namespace base {
 
-
 static std::atomic<uint64_t> ms_long_counter = ATOMIC_VAR_INIT(0);
 static std::atomic_int timer_fd = ATOMIC_VAR_INIT(-1);
 
@@ -161,6 +160,33 @@ uint64 GetMonotonicJiffies() {
 
 uint64 GetMonotonicMicrosFast() {
   return ms_long_counter.load(std::memory_order_acquire) * 100;
+}
+
+void StringAppendStrftime(string* dst,
+                          const char* format,
+                          time_t when,
+                          bool local) {
+  struct tm tm;
+  bool conversion_error;
+  if (local) {
+    conversion_error = (localtime_r(&when, &tm) == NULL);
+  } else {
+    conversion_error = (gmtime_r(&when, &tm) == NULL);
+  }
+  if (conversion_error) {
+    // If we couldn't convert the time, don't append anything.
+    return;
+  }
+
+  char space[512];
+
+  size_t result = strftime(space, sizeof(space), format, &tm);
+
+  if (result < sizeof(space)) {
+    // It fit
+    dst->append(space, result);
+    return;
+  }
 }
 
 }  // namespace base

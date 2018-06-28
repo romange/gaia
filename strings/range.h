@@ -469,6 +469,10 @@ public:
     return Range(b_ + first, std::min(length, size() - first));
   }
 
+  Range substr(size_type first, size_type length = npos) const {
+    return subpiece(first, length);
+  }
+
   void pop_front() {
     assert(b_ < e_);
     ++b_;

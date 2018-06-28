@@ -35,10 +35,6 @@ inline MicrosecondsInt64 GetThreadTime() {
   return base::GetClockMicros<CLOCK_THREAD_CPUTIME_ID>();
 }
 
-}  // namespace base
-
-typedef double WallTime;
-
 // Append result to a supplied string.
 // If an error occurs during conversion 'dst' is not modified.
 void StringAppendStrftime(std::string* dst,
@@ -52,6 +48,13 @@ inline std::string LocalTimeNow(const char* format) {
   return result;
 }
 
+inline std::string PrintLocalTime(time_t seconds_epoch = time(NULL)) {
+  std::string result;
+  StringAppendStrftime(&result, "%d/%m/%Y %H:%M:%S %Z", seconds_epoch, true);
+  return result;
+}
+
+}  // namespace base
 
 // Returns the time since the Epoch measured in microseconds.
 inline MicrosecondsInt64 GetCurrentTimeMicros() {

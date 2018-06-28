@@ -258,6 +258,14 @@ add_third_party(
   LIB libdouble-conversion.a
 )
 
+add_third_party(evhtp
+  GIT_REPOSITORY https://github.com/romange/libevhtp-1
+# checking out the version that contains config support.
+  GIT_TAG 1.3.12-Fix
+  # BUILD_IN_SOURCE 1
+  CMAKE_PASS_FLAGS "-DEVHTP_DISABLE_SSL:STRING=ON  -DEVHTP_DISABLE_REGEX:STRING=ON"
+)
+
 set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
 set(BOOST_ROOT /opt/boost_1_67_0)
@@ -446,3 +454,8 @@ endif()
 set_property(TARGET TRDP::seastar APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES aio ${SEASTAR_LINK_LIBS}
              ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl rt gcc_s unwind)
+
+set_property(TARGET TRDP::evhtp APPEND PROPERTY
+             INTERFACE_INCLUDE_DIRECTORIES ${EVHTP_INCLUDE_DIR}/evhtp
+             )
+

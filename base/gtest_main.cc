@@ -81,22 +81,6 @@ std::string RandStr(const unsigned len) {
   return s;
 }
 
-string ProgramAbsoluteFileName() {
-  string res(2048, '\0');
-  size_t sz = readlink(kProcSelf, &res.front(), res.size());
-  CHECK_GT(sz, 0);
-  if (sz > kDeletedSuffixLen) {
-    // When binary was deleted, linux link contains kDeletedSuffix at the end.
-    // Lets strip it.
-    if (res.compare(sz - kDeletedSuffixLen, kDeletedSuffixLen, kDeletedSuffix) == 0) {
-      sz -= kDeletedSuffixLen;
-      res[sz] = '\0';
-    }
-  }
-  res.resize(sz);
-  return res;
-}
-
 string ProgramRunfilesPath() {
   return ProgramAbsoluteFileName().append(".runfiles/");
 }

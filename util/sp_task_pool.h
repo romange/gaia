@@ -9,13 +9,14 @@
 #include <mutex>
 #include <vector>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#include "base/ProducerConsumerQueue.h"
+#pragma GCC diagnostic pop
+
 #include <pthread.h>
 
-// NOTE: To consider to pull out those classes to gaia
-// or to use more lightweight dependency.
-#include <folly/ProducerConsumerQueue.h>
-#include <folly/experimental/EventCount.h>
-
+#include "base/event_count.h"
 #include "base/type_traits.h"
 #include "base/walltime.h"  // for GetMonotonicJiffies
 

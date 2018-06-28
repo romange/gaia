@@ -8,6 +8,12 @@
 #include <glog/logging.h>
 
 namespace base {
+std::string ProgramAbsoluteFileName();
+
+std::string ProgramBaseName();
+
+std::string MyUserName();
+
 
 class ConsoleLogSink : public google::LogSink {
 public:
