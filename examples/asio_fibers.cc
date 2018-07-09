@@ -20,9 +20,12 @@
 #include "util/http/varz_stats.h"
 
 using namespace boost;
+using namespace std;
 
 DEFINE_int32(http_port, 8080, "Port number.");
-DEFINE_int32(client, 0, "Port number.");
+DEFINE_string(connect, "", "");
+DEFINE_int32(count, 10, "");
+DEFINE_int32(num_connections, 1, "");
 
 using asio::ip::tcp;
 
@@ -264,7 +267,7 @@ void session(Connection* conn) {
 }
 
 
-void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) {
+void server(asio::io_service& io_svc, tcp::acceptor & a) {
     LOG(INFO) << ": echo-server started";
     ConnectionList clist;
     DCHECK(clist.empty());
@@ -272,7 +275,7 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
 
     try {
       for (;;) {
-          std::unique_ptr<Connection> conn(new Connection(io_svc.get(), &empty_list));
+          std::unique_ptr<Connection> conn(new Connection(&io_svc, &empty_list));
           system::error_code ec;
           a.async_accept(
                   conn->socket,
@@ -303,7 +306,7 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
     fibers::mutex mtx;
     std::unique_lock<fibers::mutex> lk(mtx);
     empty_list.wait(lk, [&clist] { return clist.empty(); });
-    io_svc->stop();
+    io_svc.stop();
     LOG(INFO) << ": echo-server stopped";
 }
 
@@ -311,15 +314,15 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
 /*****************************************************************************
 *   fiber function per client
 *****************************************************************************/
-void client(std::shared_ptr< boost::asio::io_service > const& io_svc,
+void client(boost::asio::io_service& io_svc,
             unsigned iterations, unsigned msg_count) {
   LOG(INFO) << ": echo-client started";
 
   for (unsigned count = 0; count < iterations; ++count) {
-    tcp::resolver resolver(*io_svc);
-    tcp::resolver::query query(tcp::v4(), "127.0.0.1", "9999");
+    tcp::resolver resolver(io_svc);
+    tcp::resolver::query query(tcp::v4(), FLAGS_connect, "9999");
     tcp::resolver::iterator iterator = resolver.resolve(query);
-    tcp::socket s( *io_svc);
+    tcp::socket s(io_svc);
     boost::asio::connect(s, iterator);
     char msgbuf[512];
     char reply[max_length];
@@ -352,7 +355,17 @@ void client(std::shared_ptr< boost::asio::io_service > const& io_svc,
   }
 
   LOG(INFO) << ": echo-client stopped";
-  io_svc->stop();
+}
+
+void client_pool(boost::asio::io_service& io_svc, unsigned num_clients) {
+  vector<fibers::fiber> client_fiber(num_clients);
+  for (unsigned i = 0; i < num_clients; ++i) {
+    client_fiber[i] = fibers::fiber(client, std::ref(io_svc), 1, FLAGS_count);
+  }
+  for (auto& f : client_fiber)
+    f.join();
+
+  io_svc.stop();
 }
 
 int main(int argc, char **argv) {
@@ -367,8 +380,8 @@ int main(int argc, char **argv) {
 
   fibers::fiber srv_fb;
 
-  if (FLAGS_client > 0) {
-    srv_fb = fibers::fiber(client, io_svc, 2, FLAGS_client);
+  if (!FLAGS_connect.empty()) {
+    srv_fb = fibers::fiber(client_pool, std::ref(*io_svc), FLAGS_num_connections);
   } else {
     http_server.reset(new http::Server(FLAGS_http_port));
     util::Status status = http_server->Start();
@@ -387,7 +400,7 @@ int main(int argc, char **argv) {
       });
 
 
-    srv_fb = fibers::fiber(server, io_svc, std::ref(*acceptor));
+    srv_fb = fibers::fiber(server, std::ref(*io_svc), std::ref(*acceptor));
   }
 
   LOG(INFO) << "Active context is " << fibers::context::active();
