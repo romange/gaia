@@ -216,7 +216,7 @@ struct Server::Rep {
   Rep(int p) : port(p) {
     htp  = evhtp_new(util::Executor::Default().ebase(), NULL);
     if (FLAGS_num_http_threads > 1) {
-      evhtp_use_threads(htp, NULL, FLAGS_num_http_threads, NULL);
+      evhtp_use_threads_wexit(htp, NULL, NULL, FLAGS_num_http_threads, NULL);
     }
   }
 

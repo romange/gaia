@@ -5,7 +5,8 @@
 #define _UTIL_SLIDING_COUNTER_H
 
 #include <atomic>
-#include <mutex>
+#include <vector>
+
 #include "base/atomic_wrapper.h"
 #include "base/integral_types.h"
 #include "base/logging.h"
@@ -19,15 +20,11 @@ public:
 protected:
   SlidingSecondBase();
 
-  static uint32 CurrentTime() { return current_time_global_.load(std::memory_order_relaxed); }
-
+  static uint32 CurrentTime();
 
   mutable base::atomic_wrapper<uint32> last_ts_;
-private:
-  static void InitTimeGlobal();
-  static void* UpdateTimeGlobal(void*);
 
-  static std::atomic<uint32> current_time_global_;
+ private:
 };
 
 template<typename T, unsigned NUM, unsigned PRECISION> class SlidingSecondCounterT
@@ -98,9 +95,14 @@ template<unsigned NUM, unsigned PRECISION> using SlidingSecondCounter =
 
 class QPSCount {
   // We store 1s resolution in 10 cells window.
-  // This way we can reliable read 8 already finished counts when we have another 2
+  // This way we can reliable read 9 already finished counts when we have another 1
   // to be filled up.
-  SlidingSecondCounter<10, 1> window_;
+public:
+  static constexpr unsigned kNum = 10;
+  static constexpr unsigned kPrecision = 1;
+
+private:
+  SlidingSecondCounter<kNum, kPrecision> window_;
 
 public:
   void Reset() { window_.Reset(); }
@@ -140,14 +142,12 @@ template<typename T, unsigned NUM, unsigned PRECISION>
   }
   if (last_ts_.compare_exchange_strong(last_ts, current_time, std::memory_order_acq_rel)) {
     return current_time % NUM;
-  } else {
-    return last_ts % NUM;
   }
+  return last_ts % NUM;
 }
 
 template<typename T, unsigned NUM, unsigned PRECISION>
-    T SlidingSecondCounterT<T, NUM, PRECISION>::SumLast(unsigned offset, unsigned count) const {
-  DCHECK_LT(offset, NUM);
+T SlidingSecondCounterT<T, NUM, PRECISION>::SumLast(unsigned offset, unsigned count) const {
   if (count > NUM - offset) {
     count = NUM - offset;
   }

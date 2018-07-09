@@ -16,12 +16,17 @@
 #include <boost/fiber/scheduler.hpp>
 
 #include "examples/yield.hpp"
+#include "util/http/http_server.h"
+#include "util/http/varz_stats.h"
 
 using namespace boost;
+
+DEFINE_int32(port, 8080, "Port number.");
 
 using asio::ip::tcp;
 
 typedef std::shared_ptr< tcp::socket > socket_ptr;
+http::VarzQps qps("echo-qps");
 
 
 typedef intrusive::list_member_hook<
@@ -354,6 +359,10 @@ void client( std::shared_ptr< boost::asio::io_service > const& io_svc, tcp::acce
 
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
+
+  http::Server http_server(FLAGS_port);
+  util::Status status = http_server.Start();
+  CHECK(status.ok()) << status;
 
   std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
   fibers::use_scheduling_algorithm<round_robin>(io_svc);

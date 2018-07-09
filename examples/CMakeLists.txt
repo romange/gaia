@@ -20,4 +20,4 @@ target_compile_definitions(asio_co PRIVATE BOOST_COROUTINES_NO_DEPRECATION_WARNI
 
 
 add_executable(asio_fibers asio_fibers.cc)
-cxx_link(asio_fibers base dl strings ${Boost_LIBRARIES})
+cxx_link(asio_fibers base http dl strings ${Boost_LIBRARIES})

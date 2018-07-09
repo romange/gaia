@@ -7,42 +7,26 @@
 #include "base/pthread_utils.h"
 
 #include <time.h>
+#include "base/init.h"
+#include "base/port.h"
 
 namespace util {
 
-static pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
-static pthread_t g_time_update_thread = 0;
-static bool g_test_used = false;
-
-std::atomic<uint32> SlidingSecondBase::current_time_global_ = ATOMIC_VAR_INIT(0);
+static uint32 g_test_used = kuint32max;
 
 SlidingSecondBase::SlidingSecondBase() {
-  pthread_once(&g_init_once, &SlidingSecondBase::InitTimeGlobal);
 }
 
-void SlidingSecondBase::InitTimeGlobal() {
-  if (!g_test_used) current_time_global_ = time(NULL);
-  g_time_update_thread = base::StartThread("UpdateTimeTh", &SlidingSecondBase::UpdateTimeGlobal,
-                                          nullptr);
-}
-
-void* SlidingSecondBase::UpdateTimeGlobal(void*) {
-  uint32 t = current_time_global_;
-  while(true) {
-    // To support unit testing - if current_time_global_ was out of sync from what to expect
-    uint32 new_val = time(NULL);
-    if (g_test_used ||
-        !current_time_global_.compare_exchange_strong(t, new_val, std::memory_order_acq_rel))
-      break;
-    t = new_val;
-    SleepForMilliseconds(100);
+uint32 SlidingSecondBase::CurrentTime() {
+  if (PREDICT_TRUE(g_test_used == kuint32max)) {
+    return base::GetMonotonicMicrosFast() / base::kNumMicrosPerSecond;
   }
-  return nullptr;
+  return g_test_used;
 }
+
 
 void SlidingSecondBase::SetCurrentTime_Test(uint32 time_val) {
-  g_test_used = true;
-  current_time_global_.store(time_val, std::memory_order_release);
+  g_test_used = time_val;
 }
 
 uint32 QPSCount::Get() const {
