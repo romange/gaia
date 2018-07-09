@@ -21,7 +21,8 @@
 
 using namespace boost;
 
-DEFINE_int32(port, 8080, "Port number.");
+DEFINE_int32(http_port, 8080, "Port number.");
+DEFINE_int32(client, 0, "Port number.");
 
 using asio::ip::tcp;
 
@@ -231,14 +232,16 @@ void session(Connection* conn) {
             std::size_t length = sock->async_read_some(asio::buffer(data),
                                                        fibers::asio::yield[ec]);
 
-            LOG(INFO) << "After async_read_some";
+            VLOG(1) << "After async_read_some";
             if ( ec == asio::error::eof) {
                 LOG(INFO) << "Connection closed";
                 break; //connection closed cleanly by peer
             } else if ( ec) {
               throw system::system_error( ec); //some other error
             }
-            LOG(INFO) << ": handled: " << std::string(data, length);
+            VLOG(1) << ": handled: " << std::string(data, length);
+            qps.Inc();
+
             asio::async_write(*sock, asio::buffer(data, length),
                               fibers::asio::yield[ec]);
             if ( ec == asio::error::eof) {
@@ -247,10 +250,11 @@ void session(Connection* conn) {
                 throw system::system_error( ec); //some other error
             }
         }
-        LOG(INFO) << ": connection closed";
+        VLOG(1) << ": connection closed";
     } catch ( std::exception const& ex) {
-        LOG(WARNING) << ": caught exception : ", ex.what();
+      LOG(WARNING) << ": caught exception : ", ex.what();
     }
+
     sock->close();
     conn->hook_.unlink();
     conn->on_exit->notify_one();
@@ -267,24 +271,23 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
     fibers::condition_variable empty_list;
 
     try {
+      for (;;) {
+          std::unique_ptr<Connection> conn(new Connection(io_svc.get(), &empty_list));
+          system::error_code ec;
+          a.async_accept(
+                  conn->socket,
+                  fibers::asio::yield[ec]);
 
-        for (;;) {
-            std::unique_ptr<Connection> conn(new Connection(io_svc.get(), &empty_list));
-            system::error_code ec;
-            a.async_accept(
-                    conn->socket,
-                    fibers::asio::yield[ec]);
+          if ( ec) {
+              throw system::system_error( ec); //some other error
+          } else {
+            clist.push_back(*conn);
+            DCHECK(!clist.empty());
 
-            if ( ec) {
-                throw system::system_error( ec); //some other error
-            } else {
-              clist.push_back(*conn);
-              DCHECK(!clist.empty());
-
-              DCHECK(conn->hook_.is_linked());
-              fibers::fiber(session, conn.release()).detach();
-            }
-        }
+            DCHECK(conn->hook_.is_linked());
+            fibers::fiber(session, conn.release()).detach();
+          }
+      }
     } catch (std::exception const& ex) {
       LOG(WARNING) << ": caught exception : " << ex.what();
     }
@@ -308,23 +311,23 @@ void server(const std::shared_ptr<asio::io_service>& io_svc, tcp::acceptor & a) 
 /*****************************************************************************
 *   fiber function per client
 *****************************************************************************/
-void client( std::shared_ptr< boost::asio::io_service > const& io_svc, tcp::acceptor & a,
-             boost::fibers::barrier& barrier, unsigned iterations) {
+void client(std::shared_ptr< boost::asio::io_service > const& io_svc,
+            unsigned iterations, unsigned msg_count) {
   LOG(INFO) << ": echo-client started";
 
   for (unsigned count = 0; count < iterations; ++count) {
-    tcp::resolver resolver( * io_svc);
-    tcp::resolver::query query( tcp::v4(), "127.0.0.1", "9999");
-    tcp::resolver::iterator iterator = resolver.resolve( query);
+    tcp::resolver resolver(*io_svc);
+    tcp::resolver::query query(tcp::v4(), "127.0.0.1", "9999");
+    tcp::resolver::iterator iterator = resolver.resolve(query);
     tcp::socket s( *io_svc);
     boost::asio::connect(s, iterator);
     char msgbuf[512];
     char reply[max_length];
 
-    for (unsigned msg = 0; msg < 1; ++msg) {
+    for (unsigned msg = 0; msg < msg_count; ++msg) {
         char* next = StrAppend(msgbuf, sizeof(msgbuf), {count, ".", msg});
 
-        LOG(INFO) << ": Sending: " << msgbuf;
+        VLOG(1) << ": Sending: " << msgbuf;
 
         boost::system::error_code ec;
         asio::async_write(
@@ -340,50 +343,52 @@ void client( std::shared_ptr< boost::asio::io_service > const& io_svc, tcp::acce
                 boost::asio::buffer(reply, max_length),
                 boost::fibers::asio::yield[ec]);
         if ( ec == boost::asio::error::eof) {
-            return; //connection closed cleanly by peer
+          return; //connection closed cleanly by peer
         } else if ( ec) {
-            throw boost::system::system_error( ec); //some other error
+          throw boost::system::system_error( ec); //some other error
         }
-        LOG(INFO) << ": Reply  : ", std::string( reply, reply_length);
+        VLOG(1) << "Reply: " << std::string(reply, reply_length) << " :" << reply_length;
       }
   }
-  // done with all iterations, wait for rest of client fibers
-  if ( barrier.wait()) {
-    // exactly one barrier.wait() call returns true
-    // we're the lucky one
-    a.close();
-    LOG(INFO) << ": acceptor stopped";
-  }
+
   LOG(INFO) << ": echo-client stopped";
+  io_svc->stop();
 }
 
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
 
-  http::Server http_server(FLAGS_port);
-  util::Status status = http_server.Start();
-  CHECK(status.ok()) << status;
-
   std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
   fibers::use_scheduling_algorithm<round_robin>(io_svc);
 
+  std::unique_ptr<http::Server> http_server;
   asio::signal_set signals(*io_svc, SIGINT, SIGTERM);
+  std::unique_ptr<tcp::acceptor> acceptor;
 
-  tcp::acceptor acc(*io_svc, tcp::endpoint( tcp::v4(), 9999) );
+  fibers::fiber srv_fb;
 
-  signals.async_wait(
-      [&](boost::system::error_code /*ec*/, int /*signo*/) {
+  if (FLAGS_client > 0) {
+    srv_fb = fibers::fiber(client, io_svc, 2, FLAGS_client);
+  } else {
+    http_server.reset(new http::Server(FLAGS_http_port));
+    util::Status status = http_server->Start();
+    CHECK(status.ok()) << status;
+
+    acceptor.reset(new tcp::acceptor(*io_svc, tcp::endpoint( tcp::v4(), 9999)));
+
+    signals.async_wait(
+      [a = acceptor.get()](boost::system::error_code /*ec*/, int /*signo*/) {
         // The server is stopped by cancelling all outstanding asynchronous
         // operations. Once all operations have finished the io_context::run()
         // call will exit.
-        acc.close();
+        a->close();
         // io_svc->stop();
         LOG(INFO) << "Signals close";
       });
 
 
-  fibers::fiber srv_fb(server, io_svc, std::ref(acc));
-  //srv_fb.detach();
+    srv_fb = fibers::fiber(server, io_svc, std::ref(*acceptor));
+  }
 
   LOG(INFO) << "Active context is " << fibers::context::active();
   io_svc->run();
