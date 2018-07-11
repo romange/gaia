@@ -19,5 +19,5 @@ cxx_link(asio_co fibers base absl_strings ${Boost_LIBRARIES})
 target_compile_definitions(asio_co PRIVATE BOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
 
-add_executable(asio_fibers asio_fibers.cc)
+add_executable(asio_fibers asio_fibers.cc io_context_pool.cc)
 cxx_link(asio_fibers base http dl strings ${Boost_LIBRARIES})

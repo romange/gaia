@@ -15,6 +15,7 @@
 #include <boost/fiber/operations.hpp>  // for this_fiber.
 #include <boost/fiber/scheduler.hpp>
 
+#include "examples/io_context_pool.h"
 #include "examples/yield.hpp"
 #include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
@@ -43,7 +44,7 @@ struct Connection {
   tcp::socket socket;
   fibers::condition_variable* on_exit;
 
-  Connection(asio::io_service* io_svc, fibers::condition_variable* cv )
+  Connection(asio::io_context* io_svc, fibers::condition_variable* cv )
     : socket(*io_svc), on_exit(cv) {}
 
 };
@@ -56,10 +57,10 @@ typedef intrusive::list<
                 intrusive::constant_time_size<false>
             > ConnectionList;
 
-
+#if 1
 class round_robin : public fibers::algo::algorithm {
  private:
-  std::shared_ptr< asio::io_service >      io_svc_;
+  std::shared_ptr< asio::io_context >      io_svc_;
   asio::steady_timer                       suspend_timer_;
 //]
   fibers::scheduler::ready_queue_type      rqueue_;
@@ -74,7 +75,7 @@ class round_robin : public fibers::algo::algorithm {
     // Required by add_service.
     static asio::execution_context::id  id;
 
-    // std::unique_ptr< asio::io_service::work >    work_;
+    // std::unique_ptr< asio::io_context::work >    work_;
     asio::executor_work_guard<asio::io_context::executor_type> work_;
 
     rr_service(asio::io_context& io_svc) : asio::io_context::service(io_svc),
@@ -210,6 +211,7 @@ class round_robin : public fibers::algo::algorithm {
 };
 
 asio::io_context::id round_robin::rr_service::id;
+#endif
 
 constexpr unsigned max_length = 1024;
 
@@ -257,8 +259,44 @@ void session(Connection* conn) {
     LOG(INFO) << "Session closed";
 }
 
+// Wrap canonical pattern for condition_variable + bool flag
+struct Done {
+ private:
+    fibers::condition_variable   cond;
+    fibers::mutex                mutex;
+    bool                         ready = false;
 
-void server(asio::io_service& io_svc, tcp::acceptor & a) {
+ public:
+  typedef std::shared_ptr< Done >     ptr;
+
+  void wait() {
+      std::unique_lock<fibers::mutex> lock( mutex);
+      cond.wait( lock, [this](){ return ready; });
+  }
+
+  void notify() {
+    {
+        std::unique_lock<fibers::mutex> lock( mutex);
+        ready = true;
+    } // release mutex
+    cond.notify_one();
+  }
+};
+
+struct ServerData {
+  explicit ServerData(asio::io_context& io_cntx2, Done* d) :
+    io_cntx(io_cntx2),
+    acceptor(io_cntx, tcp::endpoint(tcp::v4(), 9999)),
+    signals(io_cntx, SIGINT, SIGTERM), done(d) {
+  }
+
+  asio::io_context& io_cntx;
+  tcp::acceptor acceptor;
+  asio::signal_set signals;
+  Done* done;
+};
+
+void server(ServerData* sd) {
     LOG(INFO) << ": echo-server started";
     ConnectionList clist;
     DCHECK(clist.empty());
@@ -266,11 +304,13 @@ void server(asio::io_service& io_svc, tcp::acceptor & a) {
 
     try {
       for (;;) {
-          std::unique_ptr<Connection> conn(new Connection(&io_svc, &empty_list));
+          std::unique_ptr<Connection> conn(new Connection(&sd->io_cntx, &empty_list));
           system::error_code ec;
-          a.async_accept(conn->socket, fibers::asio::yield[ec]);
+          LOG(INFO) << "Before async_accept";
+          sd->acceptor.async_accept(conn->socket, fibers::asio::yield[ec]);
+          LOG(INFO) << "After async_accept";
 
-          if ( ec) {
+          if (ec) {
             throw system::system_error(ec); //some other error
           } else {
             clist.push_back(*conn);
@@ -295,7 +335,10 @@ void server(asio::io_service& io_svc, tcp::acceptor & a) {
     fibers::mutex mtx;
     std::unique_lock<fibers::mutex> lk(mtx);
     empty_list.wait(lk, [&clist] { return clist.empty(); });
-    io_svc.stop();
+
+    sd->done->notify();
+    delete sd;
+    // io_svc.stop();
     LOG(INFO) << ": echo-server stopped";
 }
 
@@ -303,7 +346,7 @@ void server(asio::io_service& io_svc, tcp::acceptor & a) {
 /*****************************************************************************
 *   fiber function per client
 *****************************************************************************/
-void client(boost::asio::io_service& io_svc, unsigned iterations, unsigned msg_count) {
+void client(boost::asio::io_context& io_svc, unsigned iterations, unsigned msg_count) {
   LOG(INFO) << ": echo-client started";
 
   for (unsigned count = 0; count < iterations; ++count) {
@@ -345,7 +388,7 @@ void client(boost::asio::io_service& io_svc, unsigned iterations, unsigned msg_c
   LOG(INFO) << ": echo-client stopped";
 }
 
-void client_pool(boost::asio::io_service& io_svc, unsigned num_clients) {
+void client_pool(boost::asio::io_context& io_svc, unsigned num_clients) {
   vector<fibers::fiber> client_fiber(num_clients);
   for (unsigned i = 0; i < num_clients; ++i) {
     client_fiber[i] = fibers::fiber(client, std::ref(io_svc), 1, FLAGS_count);
@@ -356,24 +399,50 @@ void client_pool(boost::asio::io_service& io_svc, unsigned num_clients) {
   io_svc.stop();
 }
 
+void start_driver(asio::io_context* io_cntx, IoContextPool* pool, Done* done) {
+  fibers::fiber srv_fb;
+
+  LOG(INFO) << "start_driver";
+
+  if (!FLAGS_connect.empty()) {
+    srv_fb = fibers::fiber(client_pool, std::ref(*io_cntx), FLAGS_num_connections);
+  } else {
+    ServerData* sd = new ServerData(*io_cntx, done);
+    sd->signals.async_wait(
+      [sd, pool](system::error_code /*ec*/, int /*signo*/) {
+        // The server is stopped by cancelling all outstanding asynchronous
+        // operations. Once all operations have finished the io_context::run()
+        // call will exit.
+        sd->acceptor.close();
+        //pool->Stop();
+        LOG(INFO) << "Signals close";
+      });
+
+    srv_fb = fibers::fiber(server, sd);
+  }
+
+  srv_fb.detach();
+}
+
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
 
-  std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
-  fibers::use_scheduling_algorithm<round_robin>(io_svc);
-
   std::unique_ptr<http::Server> http_server;
-  asio::signal_set signals(*io_svc, SIGINT, SIGTERM);
-  std::unique_ptr<tcp::acceptor> acceptor;
+  if (FLAGS_connect.empty()) {
+    /*http_server.reset(new http::Server(FLAGS_http_port));
+    util::Status status = http_server->Start();
+    CHECK(status.ok()) << status;*/
+  }
 
+  // std::shared_ptr<asio::io_service> io_svc = std::make_shared<asio::io_service >();
+  // fibers::use_scheduling_algorithm<round_robin>(io_svc);
+
+#if 0
   fibers::fiber srv_fb;
-
+  std::unique_ptr<tcp::acceptor> acceptor;
   if (!FLAGS_connect.empty()) {
     srv_fb = fibers::fiber(client_pool, std::ref(*io_svc), FLAGS_num_connections);
   } else {
-    http_server.reset(new http::Server(FLAGS_http_port));
-    util::Status status = http_server->Start();
-    CHECK(status.ok()) << status;
 
     acceptor.reset(new tcp::acceptor(*io_svc, tcp::endpoint( tcp::v4(), 9999)));
 
@@ -392,10 +461,28 @@ int main(int argc, char **argv) {
   }
 
   LOG(INFO) << "Active context is " << fibers::context::active();
-  io_svc->run();
   DCHECK(srv_fb.joinable());
+  #endif
 
-  srv_fb.join();
-  LOG(INFO) << "After join";
+  //io_svc->run();
+
+
+  IoContextPool pool(2);
+
+  asio::io_context& main_cntx = pool.GetIoContext();
+
+
+  pool.Run();
+  Done done;
+
+  asio::post(main_cntx, [&main_cntx, &pool, &done] {
+    start_driver(&main_cntx, &pool, &done); }
+  );
+
+  done.wait();
+
+  pool.Stop();
+  pool.Join();
+
   return 0;
 }
