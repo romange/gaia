@@ -14,7 +14,7 @@
 
 namespace file {
 
-using strings::SkipWhitespace;
+// using absl::SkipAs;
 using util::Status;
 using util::StatusObject;
 using namespace std;
@@ -106,9 +106,9 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
 
       if (use_scratch) {
         scratch->append(next_, ptr);
-        result->reset(*scratch);
+        *result = *scratch;
       } else {
-        result->assign(next_, ptr);
+        *result = StringPiece(next_, ptr - next_);
       }
       next_ = ptr + delta;
 
@@ -149,7 +149,7 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
   }
 
   if (use_scratch) {
-    result->reset(*scratch);
+    *result = *scratch;
   }
   return next_ != end_;
 }
@@ -174,7 +174,7 @@ bool CsvReader::Next(std::vector<StringPiece>* result) {
   while (true) {
     if (!reader_.Next(&line, &scratch_))
       return false;
-    StripWhiteSpace(&line);
+    line = absl::StripAsciiWhitespace(line);
     if (line.empty())
       continue;
     char* ptr = const_cast<char*>(line.data());

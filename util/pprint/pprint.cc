@@ -13,17 +13,16 @@
 #include "base/hash.h"
 
 #include "file/list_file.h"
-#include "file/sstable/sstable.h"
 #include "file/proto_writer.h"
 #include "strings/escaping.h"
 
 #include "util/plang/plang.h"
 #include "util/plang/plang_parser.hh"
 #include "util/plang/plang_scanner.h"
-#include "util/tools/pprint_utils.h"
+#include "util/pprint/pprint_utils.h"
 #include "util/json/pb2json.h"
 
-#include "util/map-util.h"
+#include "base/map-util.h"
 #include "util/sp_task_pool.h"
 
 DEFINE_string(protofiles, "", "");
@@ -42,6 +41,7 @@ DEFINE_int32(sample_factor, 0, "If bigger than 0 samples and outputs record once
 
 using namespace util::pprint;
 namespace gpc = gpb::compiler;
+using std::string;
 
 class ErrorCollector : public gpc::MultiFileErrorCollector {
   void AddError(const string& filenname, int line, int column, const string& message) {
@@ -122,7 +122,7 @@ class PrintTask {
   void operator()(const std::string& obj) {
     if (FLAGS_raw) {
       std::lock_guard<mutex> lock(shared_data_->m);
-      std::cout << strings::Utf8SafeCEscape(obj) << "\n";
+      std::cout << absl::Utf8SafeCEscape(obj) << "\n";
       return;
     }
     CHECK(local_msg_->ParseFromString(obj));

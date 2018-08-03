@@ -2,7 +2,7 @@ cxx_proto_lib(addressbook)
 cxx_test(proto_test addressbook_proto)
 
 add_library(plang plang.cc)
-cxx_link(plang TRDP::protobuf math plang_parser_bison)
+cxx_link(plang TRDP::protobuf strings math plang_parser_bison)
 
 flex_lib(plang_scanner)
 

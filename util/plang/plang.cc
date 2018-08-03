@@ -6,7 +6,7 @@
 #include <regex>
 
 #include "base/logging.h"
-#include "strings/util.h"
+#include "absl/strings/ascii.h"
 #include "util/math/mathutil.h"
 
 #include <google/protobuf/message.h>
@@ -14,6 +14,7 @@
 
 using std::string;
 using namespace std::placeholders;
+using strings::AsString;
 
 namespace plang {
 
@@ -45,10 +46,10 @@ static void RetrieveNode(
   PathState state;
   while(result.first != nullptr) {
     size_t next = path.find('.', start);
-    StringPiece part = path.subpiece(start, next - start);
+    StringPiece part = path.substr(start, next - start);
     VLOG(2) << "Looking for " << part << " in " << result.first->GetDescriptor()->name()
             << " next= " << next;
-    result.second = result.first->GetDescriptor()->FindFieldByName(part.as_string());
+    result.second = result.first->GetDescriptor()->FindFieldByName(AsString(part));
     CHECK(result.second != nullptr) << "Could not find field " << part;
     if (next == string::npos) {
       cb(result);
@@ -111,7 +112,7 @@ bool ExprValue::Equal(const ExprValue& other) const {
       case CPPTYPE_INT64:
         return val.enum_val->number() == other.val.int_val;
       case CPPTYPE_STRING:
-        return val.enum_val->name() == other.val.str.as_string();
+        return val.enum_val->name() == AsString(other.val.str);
       default:
         LOG(FATAL) << "Unsupported type for comparing with enum " << t2;
     }
@@ -353,7 +354,7 @@ void BinOp::eval(const gpb::Message& msg, ExprValueCb cb) const {
 
 FunctionTerm::FunctionTerm(const std::string& name, ArgList&& lst)
     : name_(name), args_(std::move(lst)) {
-  strings::LowerString(&name_);
+  absl::AsciiStrToLower(&name_);
 }
 
 FunctionTerm::~FunctionTerm() {

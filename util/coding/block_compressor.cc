@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 
-namespace puma {
+namespace util {
 
 using strings::ByteRange;
 using strings::MutableByteRange;
@@ -209,6 +209,6 @@ strings::ByteRange BlockDecompressor::GetDecompressedBlock() const {
   return ByteRange(buf_.get() + BLOCK_SIZE * bindex, decompress_size_);
 }
 
-}  // namespace puma
+}  // namespace util
 
 

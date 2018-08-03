@@ -136,22 +136,6 @@ class HumanReadableElapsedTime {
   //   -10         -> "-10 s"
   static string ToShortString(double seconds);
 
-  // Reverses ToShortString(). Note that calling these two functions in
-  // succession isn't a noop, since ToShortString() may round.
-  // This accepts multiple forms of units, but the abbreviated forms are
-  // us (microseconds), ms (milliseconds), s, m (minutes), h, d, w,
-  // M (month = 30 days), y
-  // This function is not particularly fast.  Use at performance peril.
-  // Only leading negative signs are allowed.
-  // Examples:
-  //   "1ms"        -> 0.001
-  //   "10 second"  -> 10
-  //   "10.8 days"  -> 933120.0
-  //   "1m 30s"     -> 90
-  //   "-10 sec"    -> -10
-  //   "18.3"       -> 18.3
-  //   "1M"         -> 2592000 (1 month = 30 days)
-  static bool ToDouble(const string& str, double* value);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(HumanReadableElapsedTime);

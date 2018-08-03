@@ -8,6 +8,7 @@
 #include "util/http/varz_stats.h"
 #include "util/proc_stats.h"
 #include "strings/strcat.h"
+#include "absl/strings/str_replace.h"
 
 namespace http {
 
@@ -47,7 +48,7 @@ std::string BuildStatusPage() {
   }, false);
 
   a += "</div>\n";
-  strings::GlobalReplaceSubstring("{s3_path}", kStaticFilesPrefix, &a);
+  a = absl::StrReplaceAll(a, { {"{s3_path}", kStaticFilesPrefix}});
 
   a += "<div class='styled_border'>\n";
   a += StatusLine("Status", "OK");

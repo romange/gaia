@@ -6,11 +6,13 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "strings/stringpiece.h"
 
-namespace puma {
+namespace util {
 
 using namespace std;
 using strings::ByteRange;
+using strings::ToByteRange;
 
 class BlockCompressorTest : public testing::Test {
  public:
@@ -28,8 +30,8 @@ TEST_F(BlockCompressorTest, Basic) {
   inp[1] = inp[0];
 
 
-  bc_.Add(StringPiece(inp[0].data(), inp[0].size()));
-  bc_.Add(StringPiece(inp[1].data(), inp[1].size()));
+  bc_.Add(ToByteRange(inp[0]));
+  bc_.Add(ToByteRange(inp[1]));
   bc_.Finalize();
 
   const auto& cb = bc_.compressed_blocks();
@@ -50,13 +52,13 @@ TEST_F(BlockCompressorTest, Basic) {
   }
   bc_.ClearCompressedData();
 
-  bc_.Add(StringPiece(inp[0].data(), inp[0].size()));
+  bc_.Add(ToByteRange(inp[0]));
 }
 
 
 TEST_F(BlockCompressorTest, Unaligned) {
   string inp = base::RandStr(16);
-  bc_.Add(StringPiece(inp));
+  bc_.Add(ToByteRange(inp));
   bc_.Finalize();
   uint32_t consumed;
   ASSERT_EQ(1, bc_.compressed_blocks().size());
@@ -64,5 +66,5 @@ TEST_F(BlockCompressorTest, Unaligned) {
   EXPECT_EQ(0, bdc_.Decompress(bc_.compressed_blocks().front(), &consumed));
 }
 
-}  // namespace puma
+}  // namespace util
 

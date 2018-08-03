@@ -10,6 +10,7 @@
 using util::Status;
 using util::StatusCode;
 using std::string;
+using strings::u8ptr;
 
 namespace file {
 
@@ -24,7 +25,7 @@ void MetaMapBlock::EncodeTo(std::string* dest) const {
 }
 
 Status MetaMapBlock::DecodeFrom(StringPiece input) {
-  const uint8* ptr = input.ubuf(), *limit = input.ubuf() + input.size();
+  const uint8* ptr = u8ptr(input), *limit = u8ptr(input) + input.size();
   uint32 sz = 0;
   if ((ptr = Varint::Parse32WithLimit(ptr, limit, &sz)) == nullptr) {
     return Status(StatusCode::IO_ERROR);

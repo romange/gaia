@@ -18,8 +18,8 @@ static std::vector<std::string> ReadIds() {
 
   StringPiece line;
   while (line_reader.Next(&line)) {
-    StripWhiteSpace(&line);
-    res.push_back(line.as_string());
+    line = absl::StripAsciiWhitespace(line);
+    res.push_back(strings::AsString(line));
     CHECK(!line.empty());
   }
   return res;

@@ -36,10 +36,12 @@
 
 #include "base/logging.h"
 #include "strings/join.h"
+#include "absl/strings/match.h"
 #include "strings/stringprintf.h"
 
 using std::vector;
 using util::Status;
+using strings::AsString;
 
 namespace file_util {
 
@@ -88,13 +90,13 @@ static void TraverseRecursivelyInternal(StringPiece path,
         TraverseRecursivelyInternal(current_name, cb, offset);
       } else {
         StringPiece cn(current_name);
-        cn.advance(offset);
+        cn.remove_prefix(offset);
         cb(cn);
       }
     }
     closedir(dir);
   } else if (S_ISREG(stats.st_mode)) {
-    path.advance(offset);
+    path.remove_prefix(offset);
     cb(path);
   } else {
     LOG(WARNING) << "unknown type " << stats.st_mode;
@@ -116,7 +118,7 @@ inline WriteFile* TryCreate(const char *directory_prefix) {
 
 string JoinPath(StringPiece dirname, StringPiece basename) {
   if ((!basename.empty() && basename[0] == '/') || dirname.empty()) {
-    return basename.ToString();
+    return AsString(basename);
   } else if (dirname[dirname.size() - 1] == '/') {
     return StrCat(dirname, basename);
   } else {
@@ -137,7 +139,7 @@ StringPiece DirName(StringPiece path) {
   if (file_name_pos == StringPiece::npos) {
     return path;
   }
-  return StringPiece(path, 0, file_name_pos);
+  return path.substr(0, file_name_pos);
 }
 
 WriteFile* OpenOrDie(StringPiece file_name) {
@@ -201,7 +203,7 @@ bool RecursivelyCreateDir(StringPiece path, int mode) {
     return false;
   }
 
-  return RecursivelyCreateDir(path.subpiece(0, slashpos), mode) &&
+  return RecursivelyCreateDir(path.substr(0, slashpos), mode) &&
          CreateDir(path, mode);
 }
 
@@ -237,7 +239,7 @@ void DeleteRecursively(StringPiece name) {
 
 void TraverseRecursively(StringPiece path, std::function<void(StringPiece)> cb) {
   CHECK(!path.empty());
-  uint32 factor = !path.ends_with("/");
+  uint32 factor = !absl::EndsWith(path, "/");
   TraverseRecursivelyInternal(path, cb, path.size() + factor);
 }
 

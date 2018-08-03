@@ -63,7 +63,7 @@ ProtoWriter::ProtoWriter(StringPiece filename, const gpb::Descriptor* dscr, Opti
 
     string file_name_buf;
     if (options_.max_entries_per_file > 0) {
-      base_name_ = filename.as_string();
+      base_name_ = strings::AsString(filename);
       file_name_buf = GetOutputFileName(base_name_, 0);
       filename = file_name_buf;
     }

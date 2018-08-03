@@ -31,6 +31,7 @@ using std::string;
 using util::Status;
 using util::StatusCode;
 using util::StatusObject;
+using strings::AsString;
 
 namespace file {
 
@@ -149,7 +150,7 @@ Status LocalFileImpl::Flush() {
 }  // namespace
 
 WriteFile::WriteFile(StringPiece name)
-    : create_file_name_(name.ToString()) { }
+    : create_file_name_(AsString(name)) { }
 
 WriteFile::~WriteFile() { }
 

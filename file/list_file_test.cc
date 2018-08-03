@@ -14,14 +14,18 @@
 #include "file/file_util.h"
 #include "base/fixed.h"
 #include "base/crc32c.h"
+#include "absl/strings/match.h"
 
 namespace file {
 
 using namespace list_file;
 
+using absl::StrContains;
 using util::Status;
 using std::vector;
 using std::string;
+using strings::AsString;
+using strings::u8ptr;
 using testing::ElementsAre;
 using testing::internal::CaptureStderr;
 using testing::internal::GetCapturedStderr;
@@ -130,7 +134,7 @@ protected:
     if (!reader_->ReadRecord(&record, &scratch)) {
       return "EOF";
     }
-    return record.as_string();
+    return AsString(record);
   }
 
   void SetupWriter(const ListWriter::Options& options, bool init_writer = true) {
@@ -163,8 +167,10 @@ protected:
 
   void FixChecksum(int header_offset, int len) {
     // Compute crc of type/data
-    StringPiece s(dest_->contents(), header_offset + list_offset_);
-    uint32_t crc = crc32c::Value(s.ubuf() + 8, 1 + len);
+    StringPiece s(dest_->contents());
+    s.remove_prefix(header_offset + list_offset_);
+
+    uint32_t crc = crc32c::Value(u8ptr(s) + 8, 1 + len);
     crc = crc32c::Mask(crc);
     coding::EncodeFixed32(crc, reinterpret_cast<uint8*>(
       &dest_->contents()[header_offset + list_offset_]));
@@ -346,7 +352,7 @@ TEST_F(LogTest, ReadError) {
   ASSERT_EQ("EOF", Read());
 
   ASSERT_GT(DroppedBytes(), 0);
-  ASSERT_TRUE(StringPiece(ReportMessage()).contains("read error"));
+  ASSERT_TRUE(StrContains(ReportMessage(), "read error"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -577,7 +583,7 @@ TEST_F(LogTest, Append) {
   StringPiece record;
   vector<string> results;
   while (reader.ReadRecord(&record, &buf)) {
-    results.push_back(record.as_string());
+    results.push_back(AsString(record));
   }
   EXPECT_THAT(results, ElementsAre("Foo", "Bar", "Roman", "R1"));
 }

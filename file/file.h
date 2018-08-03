@@ -62,8 +62,8 @@ class WriteFile {
 
   virtual util::Status Write(const uint8* buffer, uint64 length) MUST_USE_RESULT = 0 ;
 
-  util::Status Write(strings::StringPiece slice) MUST_USE_RESULT {
-    return Write(slice.ubuf(), slice.size());
+  util::Status Write(StringPiece slice) MUST_USE_RESULT {
+    return Write(reinterpret_cast<const uint8*>(slice.data()), slice.size());
   }
 
   // Returns the file name given during Create(...) call.

@@ -157,7 +157,7 @@ template<int N> class FastVarMapCounter {
   char buf_[N];
   char* suffix_;
 public:
-  FastVarMapCounter(VarzMapCount* map_count, std::initializer_list<AlphaNum> base)
+  FastVarMapCounter(VarzMapCount* map_count, std::initializer_list<absl::AlphaNum> base)
       : map_count_(*map_count) {
     suffix_ = StrAppend(buf_, N, base);
   }

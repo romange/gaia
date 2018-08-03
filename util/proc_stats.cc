@@ -7,6 +7,7 @@
 #include "base/walltime.h"
 #include "strings/numbers.h"
 #include "strings/strip.h"
+
 #include <unistd.h>
 #include <time.h>
 
@@ -40,7 +41,7 @@ static void InitCpuInfo() {
       continue;
     }
     StringPiece str(line, sep - line);
-    StripWhiteSpace(&str);
+    str = absl::StripAsciiWhitespace(str);
     if (str == kModelNameLine)
       ++CPU_NUM;
   }

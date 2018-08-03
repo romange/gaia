@@ -17,7 +17,7 @@
    The flow sequence is: Add*, Finalize. Can be applied multiple times for the same
    block compressor object.
 */
-namespace puma {
+namespace util {
 
 class BlockCompressor {
  public:
@@ -118,4 +118,4 @@ class BlockDecompressor {
 
 
 
-}  // namespace puma
+}  // namespace util

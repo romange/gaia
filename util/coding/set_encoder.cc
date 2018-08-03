@@ -121,7 +121,7 @@ uint8* encode_pair(uint16 a, uint16 b, uint8* dest) {
 // whether it's repeat or not. See header for more info.
 unsigned DeltaEncode16(const uint16* src, unsigned cnt, uint16* dest) {
   if (VLOG_IS_ON(3)) {
-    string tmp = JoinElementsIterator(src, src + cnt, ",");
+    string tmp = absl::StrJoin(src, src + cnt, ",");
     LOG(INFO) << "Adding " << cnt << ": " << tmp;
   }
   uint16* dest_orig = dest;
@@ -335,7 +335,7 @@ struct SeqDecoderBase::Zstd {
 };
 
 SeqEncoderBase::SeqEncoderBase() {
-  seq_map_.set_empty_key(StringPiece());
+  seq_map_.set_empty_key(ByteRange());
   dict_seq_map_.set_empty_key(strings::ByteRange());
 
   prev_block_.reserve(SEQ_BLOCK_SIZE);

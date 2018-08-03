@@ -12,6 +12,8 @@
 #include "strings/stringprintf.h"
 #include "strings/strip.h"
 
+using absl::StripLeadingAsciiWhitespace;
+
 namespace {
 
 template <typename T>
@@ -320,103 +322,4 @@ string HumanReadableElapsedTime::ToShortString(double seconds) {
   seconds /= 365.2425;
   StringAppendF(&human_readable, "%0.3g years", seconds);
   return human_readable;
-}
-
-bool HumanReadableElapsedTime::ToDouble(const string& str, double* value) {
-  struct TimeUnits {
-    const char* unit;  // unit name
-    double seconds;    // number of seconds in that unit (minutes => 60)
-  };
-
-  // These must be sorted in decreasing length.  In particulary, a
-  // string must exist before and of its substrings or the substring
-  // will match;
-  static const TimeUnits kUnits[] = {
-    // Long forms
-    { "microsecond", 0.000001 },
-    { "millisecond", 0.001 },
-    { "second", 1.0 },
-    { "minute", 60.0 },
-    { "hour", 3600.0 },
-    { "day", 86400.0 },
-    { "week", 7 * 86400.0 },
-    { "month", 30 * 86400.0 },
-    { "year", 365 * 86400.0 },
-
-    // Abbreviated forms
-    { "microsec", 0.000001 },
-    { "millisec", 0.001 },
-    { "sec", 1.0 },
-    { "min", 60.0 },
-    { "hr", 3600.0 },
-    { "dy", 86400.0 },
-    { "wk", 7 * 86400.0 },
-    { "mon", 30 * 86400.0 },
-    { "yr", 365 * 86400.0 },
-
-    // micro -> u
-    { "usecond", 0.000001 },
-    { "usec", 0.000001 },
-    // milli -> m
-    { "msecond", 0.001 },
-    { "msec", 0.001 },
-
-    // Ultra-short form
-    { "us", 0.000001 },
-    { "ms", 0.001 },
-    { "s", 1.0 },
-    { "m", 60.0 },
-    { "h", 3600.0 },
-    { "d", 86400.0 },
-    { "w", 7 * 86400.0 },
-    { "M", 30 * 86400.0 },  // upper-case M to disambiguate with minute
-    { "y", 365 * 86400.0 }
-  };
-
-  char* unit_start;     // Start of unit name.
-  double work_value = 0;
-  int sign = 1;
-  const char* interval_start = SkipLeadingWhiteSpace(str.c_str());
-  if (*interval_start == '-') {
-    sign = -1;
-    interval_start = SkipLeadingWhiteSpace(interval_start + 1);
-  } else if (*interval_start == '+') {
-    interval_start = SkipLeadingWhiteSpace(interval_start + 1);
-  }
-  if (!*interval_start) {
-    // Empty string and strings with just a sign are illegal.
-    return false;
-  }
-  do {
-    // Leading signs on individual values are not allowed.
-    if (*interval_start == '-' || *interval_start == '+') {
-      return false;
-    }
-    double factor = strtod(interval_start, &unit_start);
-    if (interval_start == unit_start) {
-      // Illegally formatted value, no values consumed by strtod.
-      return false;
-    }
-    unit_start = SkipLeadingWhiteSpace(unit_start);
-    bool found_unit = false;
-    for (uint32 i = 0; !found_unit && i < arrlen(kUnits); ++i) {
-      const size_t unit_len = strlen(kUnits[i].unit);
-      if (strncmp(unit_start, kUnits[i].unit, unit_len) == 0) {
-        work_value += factor * kUnits[i].seconds;
-        interval_start = unit_start + unit_len;
-        // Allowing pluralization of any unit (except empty string)
-        if (unit_len > 0 && *interval_start == 's') {
-            interval_start++;
-        }
-        found_unit = true;
-      }
-    }
-    if (!found_unit) {
-      return false;
-    }
-    interval_start = SkipLeadingWhiteSpace(interval_start);
-  } while (*interval_start);
-
-  *value = sign * work_value;
-  return true;
 }

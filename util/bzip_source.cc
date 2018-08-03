@@ -8,6 +8,7 @@
 #include "strings/strcat.h"
 
 namespace util {
+using strings::ByteRange;
 
 struct BzipSource::Rep {
   bz_stream stream;
@@ -42,13 +43,14 @@ StatusObject<size_t> BzipSource::ReadInternal(const strings::MutableByteRange& r
     rep_->stream.avail_in = res.obj;
     int res_code = BZ2_bzDecompress(&rep_->stream);
     if (res_code != BZ_OK && res_code != BZ_STREAM_END) {
-      return Status(StatusCode::IO_ERROR, StrCat("BZip error ", res_code));
+      return Status(StatusCode::IO_ERROR, absl::StrCat("BZip error ", res_code));
     }
 
     if (rep_->stream.avail_in > 0) {
       CHECK_EQ(0, rep_->stream.avail_out);
 
-      sub_stream_->Prepend(StringPiece(rep_->stream.next_in, rep_->stream.avail_in));
+      sub_stream_->Prepend(ByteRange(reinterpret_cast<unsigned char*>(rep_->stream.next_in),
+                                     rep_->stream.avail_in));
     }
   } while (reinterpret_cast<unsigned char*>(rep_->stream.next_out) != range.end());
 

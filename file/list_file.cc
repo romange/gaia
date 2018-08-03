@@ -15,6 +15,8 @@
 #include "base/coder.h"
 
 using strings::ByteRange;
+using strings::AsString;
+using strings::u8ptr;
 using util::Status;
 using util::StatusCode;
 
@@ -25,7 +27,7 @@ namespace file {
     case list_file::kCompressionZlib:
       return cmprss::ZLIB_METHOD;
     case list_file::kCompressionLZ4:
-      return cmprss::LZ4_METHOD;    
+      return cmprss::LZ4_METHOD;
   }
   LOG(ERROR) << "Unknown compression " << m;
   return cmprss::UNKNOWN_METHOD;
@@ -49,7 +51,7 @@ public:
   void SetCrcAndLength(const uint8* ptr, size_t length);
 
   Status Write(util::Sink* sink) const {
-    return sink->Append(strings::StringPiece(buf_, kBlockHeaderSize));
+    return sink->Append(strings::ByteRange(buf_, kBlockHeaderSize));
   }
 };
 
@@ -88,7 +90,7 @@ public:
     encode(val);
   }
 
-  StringPiece slice() const { return StringPiece(buf_, sz_); }
+  StringPiece slice() const { return strings::FromBuf(buf_, sz_); }
   uint8 size() const { return sz_; }
   void encode(uint32 val) {
     sz_ = Varint::Encode32(buf_, val) - buf_;
@@ -109,7 +111,7 @@ public:
   }
 
   Status Write(util::Sink* sink) {
-    StringPiece pc(buf_, sizeof(buf_));
+    strings::ByteRange pc(buf_, sizeof(buf_));
 
     RETURN_IF_ERROR(sink->Append(pc));
     if (!meta_.empty()) {
@@ -187,7 +189,7 @@ void ListWriter::Construct() {
     compress_func_ = GetCompress(options_.compress_method);
     CHECK(bound_f && compress_func_);
     compress_buf_size_ = bound_f(block_size_);
-    
+
     compress_buf_.reset(new uint8[compress_buf_size_ + 1]); // +1 for compression method byte.
   }
 }
@@ -200,7 +202,7 @@ ListWriter::~ListWriter() {
 // Adds user provided meta information about the file. Must be called before Init.
 void ListWriter::AddMeta(StringPiece key, StringPiece value) {
   CHECK(!init_called_);
-  meta_[key.as_string()] = value.as_string();
+  meta_[AsString(key)] = AsString(value);
 }
 
 Status ListWriter::Init() {
@@ -259,7 +261,7 @@ Status ListWriter::AddRecord(StringPiece record) {
     if (block_leftover() <= kBlockHeaderSize) {
       // Block trailing bytes. Just fill them with zeroes.
       uint8 kBlockFilling[kBlockHeaderSize] = {0};
-      RETURN_IF_ERROR(dest_->Append(StringPiece(kBlockFilling, block_leftover())));
+      RETURN_IF_ERROR(dest_->Append(ByteRange(kBlockFilling, block_leftover())));
       block_offset_ = 0;
       block_leftover_ = block_size_;
     }
@@ -271,10 +273,10 @@ Status ListWriter::AddRecord(StringPiece record) {
         fragment_length = block_leftover() - kBlockHeaderSize;
         type = kMiddleType;
       }
-      RETURN_IF_ERROR(EmitPhysicalRecord(type, record.ubuf(), fragment_length));
+      RETURN_IF_ERROR(EmitPhysicalRecord(type, u8ptr(record.data()), fragment_length));
       if (type == kLastType)
         return Status::OK;
-      record.advance(fragment_length);
+      record.remove_prefix(fragment_length);
       continue;
     }
     if (record_size_total + kArrayRecordMaxHeaderSize < block_leftover()) {
@@ -287,13 +289,13 @@ Status ListWriter::AddRecord(StringPiece record) {
     }
     if (kBlockHeaderSize + record.size() <= block_leftover()) {
       // We have space for one record in this block but not for the array.
-      return EmitPhysicalRecord(kFullType, record.ubuf(), record.size());
+      return EmitPhysicalRecord(kFullType, u8ptr(record), record.size());
     }
     // We must fragment.
     fragmenting = true;
     const size_t fragment_length = block_leftover() - kBlockHeaderSize;
-    RETURN_IF_ERROR(EmitPhysicalRecord(kFirstType, record.ubuf(), fragment_length));
-    record.advance(fragment_length);
+    RETURN_IF_ERROR(EmitPhysicalRecord(kFirstType, u8ptr(record), fragment_length));
+    record.remove_prefix(fragment_length);
   };
   return Status(StatusCode::INTERNAL_ERROR, "Should not reach here");
 }
@@ -310,7 +312,7 @@ Status ListWriter::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t 
   // Format the header
   BlockHeader block_header(type);
 
-  if (options_.use_compression && length > 64) {   
+  if (options_.use_compression && length > 64) {
     size_t compressed_length = compress_buf_size_;
     auto status = compress_func_(options_.compress_level, ptr, length,
                                  compress_buf_.get() + 1, &compressed_length);
@@ -324,14 +326,14 @@ Status ListWriter::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t 
         ptr = compress_buf_.get();
         compression_savings_ += (length - compressed_length);
         length = compressed_length + 1;
-      }      
+      }
     }
   }
   block_header.SetCrcAndLength(ptr, length);
 
   // Write the header and the payload
   RETURN_IF_ERROR(block_header.Write(dest_.get()));
-  RETURN_IF_ERROR(dest_->Append(StringPiece(strings::ByteRange(ptr, length))));
+  RETURN_IF_ERROR(dest_->Append(strings::ByteRange(ptr, length)));
 
   bytes_added_ += (kBlockHeaderSize + length);
   block_offset_ += (kBlockHeaderSize + length);

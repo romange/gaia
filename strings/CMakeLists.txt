@@ -1,7 +1,7 @@
-add_library(strings ascii_ctype.cc charset.cc join.cc human_readable.cc escaping.cc
-            strcat.cc stringpiece.cc range.cc stringprintf.cc split.cc strip.cc util.cc numbers.cc strtoint.cc
+add_library(strings ascii_ctype.cc charset.cc human_readable.cc
+            stringpiece.cc range.cc split.cc strcat.cc stringprintf.cc numbers.cc strtoint.cc
             unique_strings.cc utf8/rune.c)
-target_link_libraries(strings base)
+target_link_libraries(strings base absl_strings)
 add_dependencies(strings sparsehash_project)
 
 add_library(strpmr strpmr.cc)

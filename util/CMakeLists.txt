@@ -15,7 +15,7 @@ cxx_test(executor_test threads LABELS CI)
 cxx_test(sp_task_pool_test base threads util LABELS CI)
 
 add_library(fibers sq_threadpool.cc)
-cxx_link(fibers base status ${Boost_LIBRARIES})
+cxx_link(fibers base status strings ${Boost_LIBRARIES})
 
 add_library(proc_stats proc_stats.cc)
 cxx_link(proc_stats strings)

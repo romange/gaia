@@ -5,12 +5,17 @@
 #include <gperftools/profiler.h>
 #include <gflags/gflags.h>
 
+#include "base/logging.h"
 #include "base/walltime.h"
 #include "strings/human_readable.h"
 #include "strings/numbers.h"
 #include "strings/split.h"
 #include "strings/strcat.h"
 #include "util/http/http_server.h"
+
+using std::string;
+using std::vector;
+using strings::AsString;
 
 namespace http {
 namespace {
@@ -150,9 +155,9 @@ void FilezHandler(const Request& request, Response* response) {
     response->Send(HTTP_UNAUTHORIZED);
     return;
   }
-  if (file_name.ends_with(".svg")) {
+  if (absl::EndsWith(file_name, ".svg")) {
     response->SetContentType("image/svg+xml");
-  } else if (file_name.ends_with(".html")) {
+  } else if (absl::EndsWith(file_name, ".html")) {
     response->SetContentType(Response::kHtmlMime);
   } else {
     response->SetContentType(Response::kTextMime);
@@ -190,12 +195,12 @@ void FlagzHandler(const Request& request, Response* response) {
       string res = google::SetCommandLineOption(flag_name.data(), value.data());
       response->AppendContent("Flag ").AppendContent(res);
       if (flag_name == "vmodule") {
-        vector<StringPiece> parts = strings::Split(value, ",", strings::SkipEmpty());
+        vector<StringPiece> parts = absl::StrSplit(value, ",", absl::SkipEmpty());
         for (StringPiece p : parts) {
           size_t sep = p.find('=');
           int32 level = 0;
           if (sep != StringPiece::npos && safe_strto32(p.substr(sep + 1), &level)) {
-            string module_expr = p.substr(0, sep).as_string();
+            string module_expr = AsString(p.substr(0, sep));
             int prev = google::SetVLOGLevel(module_expr.c_str(), level);
             LOG(INFO) << "Setting module " << module_expr << " to loglevel " << level
                       << ", prev: " << prev;

@@ -27,12 +27,16 @@ DEFINE_bool(skip_value_escaping, false, "");
 DEFINE_string(root_node, "", "");
 
 using std::cout;
+using std::string;
+using std::vector;
+
+using absl::StrCat;
 
 namespace util {
 namespace pprint {
 
 FdPath::FdPath(const gpb::Descriptor* root, StringPiece path) {
-  std::vector<StringPiece> parts = strings::Split(path, ".");
+  std::vector<StringPiece> parts = absl::StrSplit(path, ".");
   CHECK(!parts.empty()) << path;
   const gpb::Descriptor* cur_descr = root;
   for (size_t j = 0; j < parts.size(); ++j) {
@@ -42,7 +46,8 @@ FdPath::FdPath(const gpb::Descriptor* root, StringPiece path) {
     if (safe_strtou32(parts[j], &tag_id)) {
       field = cur_descr->FindFieldByNumber(tag_id);
     } else {
-      field = cur_descr->FindFieldByName(parts[j].as_string());
+      string tmp(parts[j].data(), parts[j].size());
+      field = cur_descr->FindFieldByName(tmp);
     }
 
     CHECK(field) << "Can not find tag id " << parts[j];
@@ -175,8 +180,8 @@ public:
         return "\"Not work safe!\"";
       }
     }
-    const string& val2 = FLAGS_skip_value_escaping ? val : strings::Utf8SafeCEscape(val);
-    return StrCat("\"", val2, "\"");
+    const string& val2 = FLAGS_skip_value_escaping ? val : absl::Utf8SafeCEscape(val);
+    return absl::StrCat("\"", val2, "\"");
   }
 };
 
@@ -202,7 +207,7 @@ Printer::Printer(const gpb::Descriptor* descriptor): type_name_(descriptor->full
   // printer_.SetUseUtf8StringEscaping(true);
 
 
-  std::vector<StringPiece> tags = strings::Split(FLAGS_csv, ",", strings::SkipWhitespace());
+  std::vector<StringPiece> tags = absl::StrSplit(FLAGS_csv, ",", absl::SkipWhitespace());
   if (tags.empty()) {
     printer_.SetInitialIndentLevel(1);
     printer_.SetSingleLineMode(FLAGS_short);

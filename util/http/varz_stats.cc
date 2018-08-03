@@ -9,6 +9,8 @@
 #include "strings/stringprintf.h"
 
 using std::string;
+using absl::StrAppend;
+using strings::AsString;
 
 namespace http {
 
@@ -145,7 +147,7 @@ VarzListNode::AnyValue VarzMapCount::GetData() const {
   AnyValue::Map result;
   rw_spinlock_.lock_shared();
   for (const auto& k_v : map_counts_) {
-    result.emplace_back(k_v.first.as_string(), AnyValue(k_v.second));
+    result.emplace_back(AsString(k_v.first), AnyValue(k_v.second));
   }
   rw_spinlock_.unlock_shared();
   typedef AnyValue::Map::value_type vt;
@@ -170,7 +172,7 @@ VarzListNode::AnyValue VarzMapAverage5m::GetData() const {
     double avg = count > 0 ? double(sum) / count : 0;
     items.emplace_back("average", AnyValue(avg));
 
-    result.emplace_back(k_v.first.as_string(), AnyValue(items));
+    result.emplace_back(AsString(k_v.first), AnyValue(items));
   }
 
   return AnyValue(std::move(result));

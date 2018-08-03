@@ -13,12 +13,17 @@
 #include "base/crc32c.h"
 #include "file/compressors.h"
 
+#include "absl/strings/match.h"
+
 namespace file {
 
 using util::Status;
 using util::StatusCode;
 using file::ReadonlyFile;
 using std::string;
+using strings::u8ptr;
+using strings::AsString;
+using strings::FromBuf;
 using namespace ::util;
 using namespace list_file;
 
@@ -56,7 +61,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
   if (!ReadHeader()) return false;
 
   scratch->clear();
-  record->clear();
+  *record = StringPiece();
   bool in_fragmented_record = false;
   StringPiece fragment;
 
@@ -64,16 +69,16 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
     if (array_records_ > 0) {
       uint32 item_size = 0;
       const uint8* aend = reinterpret_cast<const uint8*>(array_store_.end());
-      const uint8* item_ptr = Varint::Parse32WithLimit(array_store_.ubuf(), aend,
+      const uint8* item_ptr = Varint::Parse32WithLimit(u8ptr(array_store_), aend,
                                                        &item_size);
       const uint8* next_rec_ptr = item_ptr + item_size;
       if (item_ptr == nullptr || next_rec_ptr > aend) {
         ReportCorruption(array_store_.size(), "invalid array record");
         array_records_ = 0;
       } else {
-        read_header_bytes_ += item_ptr - array_store_.ubuf();
-        array_store_.advance(next_rec_ptr - array_store_.ubuf());
-        *record = StringPiece(item_ptr, item_size);
+        read_header_bytes_ += item_ptr - u8ptr(array_store_);
+        array_store_.remove_prefix(next_rec_ptr - u8ptr(array_store_));
+        *record = StringPiece(strings::charptr(item_ptr), item_size);
         read_data_bytes_ += item_size;
         --array_records_;
         return true;
@@ -94,7 +99,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "partial record without end(2)");
         }
-        scratch->assign(fragment.as_string());
+        *scratch = AsString(fragment);
         in_fragmented_record = true;
 
         break;
@@ -125,14 +130,14 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
           ReportCorruption(scratch->size(), "partial record without end(4)");
         }
         uint32 array_records = 0;
-        const uint8* array_ptr = Varint::Parse32WithLimit(fragment.ubuf(),
-              fragment.ubuf() + fragment.size(), &array_records);
+        const uint8* array_ptr = Varint::Parse32WithLimit(u8ptr(fragment),
+              u8ptr(fragment) + fragment.size(), &array_records);
         if (array_ptr == nullptr || array_records == 0) {
           ReportCorruption(fragment.size(), "invalid array record");
         } else {
-          read_header_bytes_ += array_ptr - fragment.ubuf();
+          read_header_bytes_ += array_ptr - u8ptr(fragment);
           array_records_ = array_records;
-          array_store_ = StringPiece(array_ptr, fragment.end() - strings::charptr(array_ptr));
+          array_store_ = FromBuf(array_ptr, fragment.end() - strings::charptr(array_ptr));
           VLOG(2) << "Read array with count " << array_records;
         }
       }
@@ -183,10 +188,10 @@ Status list_file::HeaderParser::Parse(
     return res.status;
 
   offset_ = kListFileHeaderSize;
-  StringPiece header(buf, kListFileHeaderSize);
+  StringPiece header = FromBuf(buf, kListFileHeaderSize);
 
   if (res.obj != kListFileHeaderSize ||
-      !header.starts_with(StringPiece(kMagicString, kMagicStringSize)) ||
+      !absl::StartsWith(header, StringPiece(kMagicString, kMagicStringSize)) ||
       buf[kMagicStringSize] == 0 || buf[kMagicStringSize] > 100 ) {
     return Status(StatusCode::IO_ERROR, "Invalid header");
   }
@@ -357,7 +362,7 @@ unsigned int ListReader::ReadPhysicalRecord(StringPiece* result) {
       data_ptr = uncompress_buf_.get();
     }
 
-    *result = strings::StringPiece(data_ptr, length);
+    *result = FromBuf(data_ptr, length);
     return type & 0xF;
   }
 }

@@ -128,7 +128,7 @@ struct IsCharPointer<const char*> {
 /**
  * Range abstraction keeping a pair of iterators. We couldn't use
  * boost's similar range abstraction because we need an API identical
- * with the former StringPiece class, which is used by a lot of other
+ * with the former StringPiece2 class, which is used by a lot of other
  * code. This abstraction does fulfill the needs of boost's
  * range-oriented algorithms though.
  *
@@ -149,7 +149,7 @@ public:
   typedef typename std::iterator_traits<Iter>::reference reference;
   using remove_const_type = typename std::remove_const<value_type>::type;
   /**
-   * For MutableStringPiece and MutableByteRange we define StringPiece
+   * For MutableStringPiece2 and MutableByteRange we define StringPiece2
    * and ByteRange as const_range_type (for everything else its just
    * identity). We do that to enable operations such as find with
    * args which are const.
@@ -227,7 +227,7 @@ public:
       : Range(other.subpiece(first, length))
     { }
 
-  // Allow implicit conversion from Range<const char*> (aka StringPiece) to
+  // Allow implicit conversion from Range<const char*> (aka StringPiece2) to
   // Range<const unsigned char*> (aka ByteRange), as they're both frequently
   // used to represent ranges of bytes.  Allow explicit conversion in the other
   // direction.
@@ -299,7 +299,7 @@ public:
    * Allow explicit construction of Range() from a std::array of a
    * convertible type.
    *
-   * For instance, this allows constructing StringPiece from a
+   * For instance, this allows constructing StringPiece2 from a
    * std::array<char, N> or a std::array<const char, N>
    */
   template <
@@ -663,7 +663,7 @@ public:
    * range. Returns false if 'replacements' does not fit. Example use:
    *
    * char in[] = "buffer";
-   * auto msp = MutablesStringPiece(input);
+   * auto msp = MutablesStringPiece2(input);
    * EXPECT_TRUE(msp.replaceAt(2, "tt"));
    * EXPECT_EQ(msp, "butter");
    *
@@ -691,7 +691,7 @@ public:
    * Example use:
    *
    * char in[] = "buffer";
-   * auto msp = MutablesStringPiece(input);
+   * auto msp = MutablesStringPiece2(input);
    * EXPECT_EQ(msp.replaceAll("ff","tt"), 1);
    * EXPECT_EQ(msp, "butter");
    */
@@ -728,7 +728,7 @@ public:
    *
    * Example:
    *
-   *  folly::StringPiece s("sample string for split_next");
+   *  folly::StringPiece2 s("sample string for split_next");
    *  auto p = s.split_step(' ');
    *
    *  // prints "string for split_next"
@@ -739,7 +739,7 @@ public:
    *
    * Example 2:
    *
-   *  void tokenize(StringPiece s, char delimiter) {
+   *  void tokenize(StringPiece2 s, char delimiter) {
    *    while (!s.empty()) {
    *      cout << s.split_step(delimiter);
    *    }
@@ -787,8 +787,8 @@ public:
    *
    * Example:
    *
-   *  void do_some_parsing(folly::StringPiece s) {
-   *    auto version = s.split_step(' ', [&](folly::StringPiece x) {
+   *  void do_some_parsing(folly::StringPiece2 s) {
+   *    auto version = s.split_step(' ', [&](folly::StringPiece2 x) {
    *      if (x.empty()) {
    *        throw std::invalid_argument("empty string");
    *      }
@@ -799,11 +799,11 @@ public:
    *  }
    *
    *  struct Foo {
-   *    void parse(folly::StringPiece s) {
+   *    void parse(folly::StringPiece2 s) {
    *      s.split_step(' ', parse_field, bar, 10);
    *      s.split_step('\t', parse_field, baz, 20);
    *
-   *      auto const kludge = [](folly::StringPiece x, int &out, int def) {
+   *      auto const kludge = [](folly::StringPiece2 x, int &out, int def) {
    *        if (x == "null") {
    *          out = 0;
    *        } else {
@@ -821,7 +821,7 @@ public:
    *    int gaz;
    *    int foo;
    *
-   *    static parse_field(folly::StringPiece s, int &out, int def) {
+   *    static parse_field(folly::StringPiece2 s, int &out, int def) {
    *      try {
    *        out = folly::to<int>(s);
    *      } catch (std::exception const &) {
@@ -905,13 +905,13 @@ inline bool operator!=(const Range<Iter>& lhs, const Range<Iter>& rhs) {
 }
 
 
-typedef Range<const char*> StringPiece;
+typedef Range<const char*> StringPiece2;
 typedef Range<char*> MutableStringPiece;
 typedef Range<const unsigned char*> ByteRange;
 typedef Range<unsigned char*> MutableByteRange;
 
 inline std::ostream& operator<<(std::ostream& os,
-                                const StringPiece piece) {
+                                const StringPiece2 piece) {
   os.write(piece.start(), std::streamsize(piece.size()));
   return os;
 }
@@ -923,20 +923,20 @@ inline std::ostream& operator<<(std::ostream& os,
 }
 
 /**
- * Specializations of comparison operators for StringPiece
+ * Specializations of comparison operators for StringPiece2
  */
 
 namespace detail {
 
 template <class A, class B>
-struct ComparableAsStringPiece {
+struct ComparableAsStringPiece2 {
   enum {
     value =
-    (std::is_convertible<A, StringPiece>::value
-     && std::is_same<B, StringPiece>::value)
+    (std::is_convertible<A, StringPiece2>::value
+     && std::is_same<B, StringPiece2>::value)
     ||
-    (std::is_convertible<B, StringPiece>::value
-     && std::is_same<A, StringPiece>::value)
+    (std::is_convertible<B, StringPiece2>::value
+     && std::is_same<A, StringPiece2>::value)
   };
 };
 
@@ -947,9 +947,9 @@ struct ComparableAsStringPiece {
  */
 template <class T, class U>
 typename
-std::enable_if<detail::ComparableAsStringPiece<T, U>::value, bool>::type
+std::enable_if<detail::ComparableAsStringPiece2<T, U>::value, bool>::type
 operator==(const T& lhs, const U& rhs) {
-  return StringPiece(lhs) == StringPiece(rhs);
+  return StringPiece2(lhs) == StringPiece2(rhs);
 }
 
 
@@ -958,9 +958,9 @@ operator==(const T& lhs, const U& rhs) {
  */
 template <class T, class U>
 typename
-std::enable_if<detail::ComparableAsStringPiece<T, U>::value, bool>::type
+std::enable_if<detail::ComparableAsStringPiece2<T, U>::value, bool>::type
 operator<(const T& lhs, const U& rhs) {
-  return StringPiece(lhs) < StringPiece(rhs);
+  return StringPiece2(lhs) < StringPiece2(rhs);
 }
 
 /**
@@ -968,9 +968,9 @@ operator<(const T& lhs, const U& rhs) {
  */
 template <class T, class U>
 typename
-std::enable_if<detail::ComparableAsStringPiece<T, U>::value, bool>::type
+std::enable_if<detail::ComparableAsStringPiece2<T, U>::value, bool>::type
 operator>(const T& lhs, const U& rhs) {
-  return StringPiece(lhs) > StringPiece(rhs);
+  return StringPiece2(lhs) > StringPiece2(rhs);
 }
 
 /**
@@ -978,9 +978,9 @@ operator>(const T& lhs, const U& rhs) {
  */
 template <class T, class U>
 typename
-std::enable_if<detail::ComparableAsStringPiece<T, U>::value, bool>::type
+std::enable_if<detail::ComparableAsStringPiece2<T, U>::value, bool>::type
 operator<=(const T& lhs, const U& rhs) {
-  return StringPiece(lhs) <= StringPiece(rhs);
+  return StringPiece2(lhs) <= StringPiece2(rhs);
 }
 
 /**
@@ -988,9 +988,9 @@ operator<=(const T& lhs, const U& rhs) {
  */
 template <class T, class U>
 typename
-std::enable_if<detail::ComparableAsStringPiece<T, U>::value, bool>::type
+std::enable_if<detail::ComparableAsStringPiece2<T, U>::value, bool>::type
 operator>=(const T& lhs, const U& rhs) {
-  return StringPiece(lhs) >= StringPiece(rhs);
+  return StringPiece2(lhs) >= StringPiece2(rhs);
 }
 
 /**
@@ -1054,22 +1054,22 @@ size_t qfind(const Range<Iter>& haystack,
 
 namespace detail {
 
-size_t qfind_first_byte_of_charset(const StringPiece haystack,
-                                   const StringPiece needles);
+size_t qfind_first_byte_of_charset(const StringPiece2 haystack,
+                                   const StringPiece2 needles);
 
-size_t qfind_first_not_of_charset(const StringPiece haystack,
-                                   const StringPiece needles);
+size_t qfind_first_not_of_charset(const StringPiece2 haystack,
+                                   const StringPiece2 needles);
 
-inline size_t qfind_first_byte_of_std(const StringPiece haystack,
-                                      const StringPiece needles) {
+inline size_t qfind_first_byte_of_std(const StringPiece2 haystack,
+                                      const StringPiece2 needles) {
   auto ret = std::find_first_of(haystack.begin(), haystack.end(),
                                 needles.begin(), needles.end(),
                                 [](char a, char b) { return a == b; });
   return ret == haystack.end() ? std::string::npos : ret - haystack.begin();
 }
 
-inline size_t qfind_first_byte_of(const StringPiece haystack,
-                                  const StringPiece needles) {
+inline size_t qfind_first_byte_of(const StringPiece2 haystack,
+                                  const StringPiece2 needles) {
   if (UNLIKELY(needles.empty() || haystack.empty())) {
     return std::string::npos;
   }
@@ -1084,8 +1084,8 @@ inline size_t qfind_first_byte_of(const StringPiece haystack,
   return qfind_first_byte_of_std(haystack, needles);
 }
 
-inline size_t find_first_not_of(const StringPiece haystack,
-                                const StringPiece needles) {
+inline size_t find_first_not_of(const StringPiece2 haystack,
+                                const StringPiece2 needles) {
   if (UNLIKELY(needles.empty() || haystack.empty())) {
     return haystack.empty() ? std::string::npos : 0;
   }
@@ -1151,7 +1151,7 @@ size_t rfind(const Range<Iter>& haystack,
   return std::string::npos;
 }
 
-// specialization for StringPiece
+// specialization for StringPiece2
 template <>
 inline size_t qfind(const Range<const char*>& haystack, const char& needle) {
   // memchr expects a not-null pointer, early return if the range is empty.
@@ -1205,7 +1205,7 @@ size_t qfind_first_of(const Range<Iter>& haystack,
   return qfind_first_of(haystack, needles, AsciiCaseSensitive());
 }
 
-// specialization for StringPiece
+// specialization for StringPiece2
 template <>
 inline size_t qfind_first_of(const Range<const char*>& haystack,
                              const Range<const char*>& needles) {
@@ -1216,11 +1216,11 @@ inline size_t qfind_first_of(const Range<const char*>& haystack,
 template <>
 inline size_t qfind_first_of(const Range<const unsigned char*>& haystack,
                              const Range<const unsigned char*>& needles) {
-  return detail::qfind_first_byte_of(StringPiece(haystack),
-                                     StringPiece(needles));
+  return detail::qfind_first_byte_of(StringPiece2(haystack),
+                                     StringPiece2(needles));
 }
 
 
 }  // namespace strings
 
-using strings::StringPiece;
+// using strings::StringPiece2;

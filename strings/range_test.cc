@@ -1,6 +1,9 @@
 #include <array>
 #include <gtest/gtest.h>
+
+#include "base/integral_types.h"
 #include "base/logging.h"
+
 #include "strings/stringpiece.h"
 #include "strings/split.h"
 
@@ -20,12 +23,6 @@ TEST_F(StringPieceTest, Length) {
   EXPECT_EQ(4, slice.size());
   EXPECT_EQ(3, slice[1]);
   EXPECT_EQ(3, pc.rfind('o'));
-}
-TEST_F(StringPieceTest, Split) {
-  StringPiece foo("foo.bar.goo");
-  StringPiece m(".");
-  foo.find(m);
-  vector<string> package_parts = strings::Split(foo, ".");
 }
 
 TEST_F(StringPieceTest, Range) {
