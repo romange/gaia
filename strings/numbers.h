@@ -5,8 +5,9 @@
 //
 // Modified by roman
 //
-#ifndef STRINGS_NUMBERS_H_
-#define STRINGS_NUMBERS_H_
+#pragma once
+
+#include "absl/strings/numbers.h"
 
 #include <cinttypes>
 #include <cstring>
@@ -17,49 +18,38 @@
 #include <vector>
 
 #include "base/integral_types.h"
+
 #include "base/port.h"  // for MUST_USE_RESULT
+
 #include "strings/stringpiece.h"
-
-
-// Convert a fingerprint to 16 hex digits.
-std::string FpToString(Fprint fp);
 
 // Convert strings to numeric values, with strict error checking.
 // Leading and trailing spaces are not allowed.
 // Negative inputs are not allowed for unsigned ints (unlike strtoul).
 // Numbers must be in base 10; see the _base variants below for other bases.
 // Returns false on errors (including overflow/underflow).
-bool safe_strto32(StringPiece str, int32* value);
-bool safe_strto64(StringPiece str, int64* value);
-bool safe_strtou32(StringPiece str, uint32* value);
-bool safe_strtou64(StringPiece str, uint64* value);
+inline bool safe_strto32(StringPiece str, int32* value) {
+  return absl::SimpleAtoi<int32>(str, value);
+}
+
+inline bool safe_strto64(StringPiece str, int64* value) {
+  return absl::SimpleAtoi<int64>(str, value);
+}
+inline bool safe_strtou32(StringPiece str, uint32* value) {
+  return absl::SimpleAtoi<uint32>(str, value);
+}
+inline bool safe_strtou64(StringPiece str, uint64* value) {
+  return absl::SimpleAtoi<uint64>(str, value);
+}
+
 // Convert strings to floating point values.
 // Leading and trailing spaces are allowed.
 // Values may be rounded on over- and underflow.
 bool safe_strtof(StringPiece str, float* value);
 bool safe_strtod(StringPiece str, double* value);
 
-// Parses with a fixed base between 2 and 36. For base 16, leading "0x" is ok.
-// If base is set to 0, its value is inferred from the beginning of str:
-// "0x" means base 16, "0" means base 8, otherwise base 10 is used.
-bool safe_strto32_base(StringPiece str, int32* value, int base);
-bool safe_strto64_base(StringPiece str, int64* value, int base);
-bool safe_strtou32_base(StringPiece str, uint32* value, int base);
-bool safe_strtou64_base(StringPiece str, uint64* value, int base);
 
-// u64tostr_base36()
-//    The inverse of safe_strtou64_base, converts the number agument to
-//    a string representation in base-36.
-//    Conversion fails if buffer is too small to to hold the string and
-//    terminating NUL.
-//    Returns number of bytes written, not including terminating NUL.
-//    Return value 0 indicates error.
-size_t u64tostr_base36(uint64 number, size_t buf_size, char* buffer);
-
-// Similar to atoi(s), except s could be like "16k", "32M", "2G", "4t".
-uint64 atoi_kmgt(const char* s);
-inline uint64 atoi_kmgt(const std::string& s) { return atoi_kmgt(s.c_str()); }
-
+#if 0
 // ----------------------------------------------------------------------
 // FastIntToBuffer()
 // FastHexToBuffer()
@@ -162,6 +152,8 @@ int HexDigitsPrefix(const char* buf, int num_digits);
 //    Eliminates all leading zeroes (unless the string itself is composed
 //    of nothing but zeroes, in which case one is kept: 0...0 becomes 0).
 void ConsumeStrayLeadingZeroes(std::string* str);
+
+#endif
 
 // ----------------------------------------------------------------------
 // ParseLeadingInt32Value
@@ -310,66 +302,7 @@ struct strict_autodigit_greater
   }
 };
 
-// ----------------------------------------------------------------------
-// SimpleItoa()
-//    Description: converts an integer to a string.
-//    Faster than printf("%d").
-//
-//    Return value: string
-// ----------------------------------------------------------------------
-inline std::string SimpleItoa(int32 i) {
-  char buf[16];  // Longest is -2147483648
-  return std::string(buf, FastInt32ToBufferLeft(i, buf));
-}
 
-// We need this overload because otherwise SimpleItoa(5U) wouldn't compile.
-inline std::string SimpleItoa(uint32 i) {
-  char buf[16];  // Longest is 4294967295
-  return std::string(buf, FastUInt32ToBufferLeft(i, buf));
-}
-
-inline std::string SimpleItoa(int64 i) {
-  char buf[32];  // Longest is -9223372036854775808
-  return std::string(buf, FastInt64ToBufferLeft(i, buf));
-}
-
-// We need this overload because otherwise SimpleItoa(5ULL) wouldn't compile.
-inline std::string SimpleItoa(uint64 i) {
-  char buf[32];  // Longest is 18446744073709551615
-  return std::string(buf, FastUInt64ToBufferLeft(i, buf));
-}
-
-// SimpleAtoi converts a string to an integer.
-// Uses safe_strto?() for actual parsing, so strict checking is
-// applied, which is to say, the string must be a base-10 integer, optionally
-// followed or preceded by whitespace, and value has to be in the range of
-// the corresponding integer type.
-//
-// Returns true if parsing was successful.
-template <typename int_type>
-bool MUST_USE_RESULT SimpleAtoi(const char* s, int_type* out) {
-  // Must be of integer type (not pointer type), with more than 16-bitwidth.
-  static_assert(sizeof(*out) == 4 || sizeof(*out) == 8,
-                 "SimpleAtoiWorksWith32Or64BitInts");
-  if (std::numeric_limits<int_type>::is_signed) {  // Signed
-    if (sizeof(*out) == 64 / 8) {  // 64-bit
-      return safe_strto64(s, reinterpret_cast<int64*>(out));
-    } else {  // 32-bit
-      return safe_strto32(s, reinterpret_cast<int32*>(out));
-    }
-  } else {  // Unsigned
-    if (sizeof(*out) == 64 / 8) {  // 64-bit
-      return safe_strtou64(s, reinterpret_cast<uint64*>(out));
-    } else {  // 32-bit
-      return safe_strtou32(s, reinterpret_cast<uint32*>(out));
-    }
-  }
-}
-
-template <typename int_type>
-bool MUST_USE_RESULT SimpleAtoi(const std::string& s, int_type* out) {
-  return SimpleAtoi(s.c_str(), out);
-}
 
 // ----------------------------------------------------------------------
 // SimpleDtoa()
@@ -402,112 +335,6 @@ char* FloatToBuffer(float i, char* buffer);
 static const int kDoubleToBufferSize = 32;
 static const int kFloatToBufferSize = 24;
 
-// ----------------------------------------------------------------------
-// SimpleItoaWithCommas()
-//    Description: converts an integer to a string.
-//    Puts commas every 3 spaces.
-//    Faster than printf("%d")?
-//
-//    Return value: string
-// ----------------------------------------------------------------------
-std::string SimpleItoaWithCommas(int32 i);
-std::string SimpleItoaWithCommas(uint32 i);
-std::string SimpleItoaWithCommas(int64 i);
-std::string SimpleItoaWithCommas(uint64 i);
 
-// ----------------------------------------------------------------------
-// ItoaKMGT()
-//    Description: converts an integer to a string
-//    Truncates values to K, G, M or T as appropriate
-//    Opposite of atoi_kmgt()
-//    e.g. 3000 -> 2K   57185920 -> 45M
-//
-//    Return value: string
-// ----------------------------------------------------------------------
-std::string ItoaKMGT(int64 i);
 
-// ----------------------------------------------------------------------
-// ParseDoubleRange()
-//    Parse an expression in 'text' of the form: <double><sep><double>
-//    where <double> may be a double-precision number and <sep> is a
-//    single char or "..", and must be one of the chars in parameter
-//    'separators', which may contain '-' or '.' (which means "..") or
-//    any chars not allowed in a double. If allow_unbounded_markers,
-//    <double> may also be a '?' to indicate unboundedness (if on the
-//    left of <sep>, means unbounded below; if on the right, means
-//    unbounded above). Depending on num_required_bounds, which may be
-//    0, 1, or 2, <double> may also be the empty string, indicating
-//    unboundedness. If require_separator is false, then a single
-//    <double> is acceptable and is parsed as a range bounded from
-//    below. We also check that the character following the range must
-//    be in acceptable_terminators. If null_terminator_ok, then it is
-//    also OK if the range ends in \0 or after len chars. If
-//    allow_currency is true, the first <double> may be optionally
-//    preceded by a '$', in which case *is_currency will be true, and
-//    the second <double> may similarly be preceded by a '$'. In these
-//    cases, the '$' will be ignored (otherwise it's an error). If
-//    allow_comparators is true, the expression in 'text' may also be
-//    of the form <comparator><double>, where <comparator> is '<' or
-//    '>' or '<=' or '>='. separators and require_separator are
-//    ignored in this format, but all other parameters function as for
-//    the first format. Return true if the expression parsed
-//    successfully; false otherwise. If successful, output params are:
-//    'end', which points to the char just beyond the expression;
-//    'from' and 'to' are set to the values of the <double>s, and are
-//    -inf and inf (or unchanged, depending on dont_modify_unbounded)
-//    if unbounded. Output params are undefined if false is
-//    returned. len is the input length, or -1 if text is
-//    '\0'-terminated, which is more efficient.
-// ----------------------------------------------------------------------
-struct DoubleRangeOptions {
-  const char* separators;
-  bool require_separator;
-  const char* acceptable_terminators;
-  bool null_terminator_ok;
-  bool allow_unbounded_markers;
-  uint32 num_required_bounds;
-  bool dont_modify_unbounded;
-  bool allow_currency;
-  bool allow_comparators;
-};
 
-// NOTE: The instruction below creates a Module titled
-// NumbersFunctions within the auto-generated Doxygen documentation.
-// This instruction is needed to expose global functions that are not
-// within a namespace.
-//
-bool ParseDoubleRange(const char* text, int len, const char** end,
-                      double* from, double* to, bool* is_currency,
-                      const DoubleRangeOptions& opts);
-
-// END DOXYGEN SplitFunctions grouping
-/* @} */
-
-// These functions are deprecated.
-// Do not use in new code.
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf or SimpleFtoa.
-std::string FloatToString(float f, const char* format);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf or SimpleItoa.
-std::string IntToString(int i, const char* format);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf or SimpleItoa.
-std::string Int64ToString(int64 i64, const char* format);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf or SimpleItoa.
-std::string UInt64ToString(uint64 ui64, const char* format);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf.
-std::string FloatToString(float f);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf.
-std::string IntToString(int i);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf.
-std::string Int64ToString(int64 i64);
-
-// DEPRECATED(wadetregaskis).  Just call StringPrintf.
-std::string UInt64ToString(uint64 ui64);
-
-#endif  // STRINGS_NUMBERS_H_

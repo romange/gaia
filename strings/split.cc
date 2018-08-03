@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "strings/stringpiece.h"
-#include "strings/ascii_ctype.h"
+
 
 using std::vector;
 using std::string;
@@ -26,7 +26,7 @@ void SplitCSVLineWithDelimiter(char* line, char delimiter,
 
   for (; line < end_of_line; line++) {
     // Skip leading whitespace, unless said whitespace is the delimiter.
-    while (ascii_isspace(*line) && *line != delimiter)
+    while (absl::ascii_isspace(*line) && *line != delimiter)
       ++line;
 
     if (*line == '"' && delimiter == ',') {     // Quoted value...
@@ -50,7 +50,7 @@ void SplitCSVLineWithDelimiter(char* line, char delimiter,
       if (!line) line = end_of_line;
       // Skip all trailing whitespace, unless said whitespace is the delimiter.
       for (end = line; end > start; --end) {
-        if (!ascii_isspace(end[-1]) || end[-1] == delimiter)
+        if (!absl::ascii_isspace(end[-1]) || end[-1] == delimiter)
           break;
       }
     }

@@ -5,6 +5,7 @@
 
 #include <mutex>
 #include "base/walltime.h"
+#include "strings/stringpiece.h"
 #include "strings/numbers.h"
 #include "strings/strip.h"
 

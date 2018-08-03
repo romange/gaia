@@ -24,9 +24,13 @@ using std::string;
 #include "base/integral_types.h"
 
 #include "base/logging.h"
-#include "strings/stringprintf.h"
 #include "strings/strtoint.h"
-#include "strings/ascii_ctype.h"
+#include "strings/stringprintf.h"
+
+#include "absl/strings/ascii.h"
+
+using absl::ascii_isspace;
+using absl::ascii_toupper;
 
 // Reads a <double> in *text, which may not be whitespace-initiated.
 // *len is the length, or -1 if text is '\0'-terminated, which is more
@@ -127,6 +131,7 @@ static inline char EatAChar(const char** text, int* len,
   return '\0';  // no match; no update
 }
 
+#if 0
 // Parse an expression in 'text' of the form: <comparator><double> or
 // <double><sep><double> See full comments in header file.
 bool ParseDoubleRange(const char* text, int len, const char** end,
@@ -283,6 +288,8 @@ void ConsumeStrayLeadingZeroes(string *const str) {
     str->erase(0, remove);
   }
 }
+
+#endif
 
 // ----------------------------------------------------------------------
 // ParseLeadingInt32Value()
@@ -443,68 +450,6 @@ double ParseLeadingDoubleValue(const char *str, double deflt) {
   } else {
     return value;
   }
-}
-
-// ----------------------------------------------------------------------
-// ParseLeadingBoolValue()
-//    A recognizer of boolean string values. Returns the parsed value
-//    if a valid value is found; else returns deflt.  This skips leading
-//    whitespace, is case insensitive, and recognizes these forms:
-//    0/1, false/true, no/yes, n/y
-// --------------------------------------------------------------------
-bool ParseLeadingBoolValue(const char *str, bool deflt) {
-  static const int kMaxLen = 5;
-  char value[kMaxLen + 1];
-  // Skip whitespace
-  while (ascii_isspace(*str)) {
-    ++str;
-  }
-  int len = 0;
-  for (; len <= kMaxLen && ascii_isalnum(*str); ++str)
-    value[len++] = ascii_tolower(*str);
-  if (len == 0 || len > kMaxLen)
-    return deflt;
-  value[len] = '\0';
-  switch (len) {
-    case 1:
-      if (value[0] == '0' || value[0] == 'n')
-        return false;
-      if (value[0] == '1' || value[0] == 'y')
-        return true;
-      break;
-    case 2:
-      if (!strcmp(value, "no"))
-        return false;
-      break;
-    case 3:
-      if (!strcmp(value, "yes"))
-        return true;
-      break;
-    case 4:
-      if (!strcmp(value, "true"))
-        return true;
-      break;
-    case 5:
-      if (!strcmp(value, "false"))
-        return false;
-      break;
-  }
-  return deflt;
-}
-
-
-// ----------------------------------------------------------------------
-// FpToString()
-// FloatToString()
-// IntToString()
-//    Convert various types to their string representation, possibly padded
-//    with spaces, using snprintf format specifiers.
-// ----------------------------------------------------------------------
-
-string FpToString(Fprint fp) {
-  char buf[17];
-  snprintf(buf, sizeof(buf), "%016" PRIu64 "x", fp);
-  return string(buf);
 }
 
 namespace {
@@ -708,59 +653,6 @@ bool safe_strto64_base(StringPiece str,
   return safe_int_internal<int64>(str.begin(), str.end(), base, v);
 }
 
-bool safe_strto32(StringPiece str, int32* value) {
-  return safe_int_internal<int32>(str.begin(), str.end(), 10, value);
-}
-
-bool safe_strtou32(StringPiece str, uint32* value) {
-  return safe_uint_internal<uint32>(str.begin(), str.end(), 10, value);
-}
-
-bool safe_strto64(StringPiece str, int64* value) {
-  return safe_int_internal<int64>(str.begin(), str.end(), 10, value);
-}
-
-bool safe_strtou64(StringPiece str, uint64* value) {
-  return safe_uint_internal<uint64>(str.begin(), str.end(), 10, value);
-}
-
-bool safe_strtou32_base(StringPiece str,
-                        uint32* value, int base) {
-  return safe_uint_internal<uint32>(str.begin(), str.end(), base, value);
-}
-
-bool safe_strtou64_base(StringPiece str,
-                        uint64* value, int base) {
-  return safe_uint_internal<uint64>(str.begin(), str.end(), base, value);
-}
-
-
-// ----------------------------------------------------------------------
-// u64tostr_base36()
-//    Converts unsigned number to string representation in base-36.
-// --------------------------------------------------------------------
-size_t u64tostr_base36(uint64 number, size_t buf_size, char* buffer) {
-  CHECK_GT(buf_size, 0);
-  CHECK(buffer);
-  static const char kAlphabet[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-
-  buffer[buf_size - 1] = '\0';
-  size_t result_size = 1;
-
-  do {
-    if (buf_size == result_size) {  // Ran out of space.
-      return 0;
-    }
-    int remainder = number % 36;
-    number /= 36;
-    buffer[buf_size - result_size - 1] = kAlphabet[remainder];
-    result_size++;
-  } while (number);
-
-  memmove(buffer, buffer + buf_size - result_size, result_size);
-
-  return result_size - 1;
-}
 
 bool safe_strtof(StringPiece str, float* value) {
   char* endptr;
@@ -815,74 +707,7 @@ uint64 atoi_kmgt(const char* s) {
   return n * scale;
 }
 
-// ----------------------------------------------------------------------
-// FastIntToBuffer()
-// FastInt64ToBuffer()
-// FastHexToBuffer()
-// FastHex64ToBuffer()
-// FastHex32ToBuffer()
-// FastTimeToBuffer()
-//    These are intended for speed.  FastHexToBuffer() assumes the
-//    integer is non-negative.  FastHexToBuffer() puts output in
-//    hex rather than decimal.  FastTimeToBuffer() puts the output
-//    into RFC822 format.  If time is 0, uses the current time.
-//
-//    FastHex64ToBuffer() puts a 64-bit unsigned value in hex-format,
-//    padded to exactly 16 bytes (plus one byte for '\0')
-//
-//    FastHex32ToBuffer() puts a 32-bit unsigned value in hex-format,
-//    padded to exactly 8 bytes (plus one byte for '\0')
-//
-//       All functions take the output buffer as an arg.  FastInt()
-//    uses at most 22 bytes, FastTime() uses exactly 30 bytes.
-//    They all return a pointer to the beginning of the output,
-//    which may not be the beginning of the input buffer.  (Though
-//    for FastTimeToBuffer(), we guarantee that it is.)
-// ----------------------------------------------------------------------
 
-char *FastInt64ToBuffer(int64 i, char* buffer) {
-  FastInt64ToBufferLeft(i, buffer);
-  return buffer;
-}
-
-// Offset into buffer where FastInt32ToBuffer places the end of string
-// null character.  Also used by FastInt32ToBufferLeft
-
-char *FastInt32ToBuffer(int32 i, char* buffer) {
-  FastInt32ToBufferLeft(i, buffer);
-  return buffer;
-}
-
-char *FastHexToBuffer(int i, char* buffer) {
-  CHECK_GE(i, 0) << "FastHexToBuffer() wants non-negative integers, not " << i;
-
-  static const char *hexdigits = "0123456789abcdef";
-  char *p = buffer + 21;
-  *p-- = '\0';
-  do {
-    *p-- = hexdigits[i & 15];   // mod by 16
-    i >>= 4;                    // divide by 16
-  } while (i > 0);
-  return p + 1;
-}
-
-char *InternalFastHexToBuffer(uint64 value, char* buffer, int num_byte) {
-  static const char *hexdigits = "0123456789abcdef";
-  buffer[num_byte] = '\0';
-  for (int i = num_byte - 1; i >= 0; i--) {
-    buffer[i] = hexdigits[value & 0xf];
-    value >>= 4;
-  }
-  return buffer;
-}
-
-char *FastHex64ToBuffer(uint64 value, char* buffer) {
-  return InternalFastHexToBuffer(value, buffer, 16);
-}
-
-char *FastHex32ToBuffer(uint32 value, char* buffer) {
-  return InternalFastHexToBuffer(value, buffer, 8);
-}
 
 const char two_ASCII_digits[100][2] = {
   {'0', '0'}, {'0', '1'}, {'0', '2'}, {'0', '3'}, {'0', '4'},
@@ -1006,75 +831,6 @@ char* FastUInt32ToBufferLeft(uint32 u, char* buffer) {
   goto sublt100_000_000;
 }
 
-char* FastInt32ToBufferLeft(int32 i, char* buffer) {
-  uint32 u = i;
-  if (i < 0) {
-    *buffer++ = '-';
-    // We need to do the negation in modular (i.e., "unsigned")
-    // arithmetic; MSVC++ apprently warns for plain "-u", so
-    // we write the equivalent expression "0 - u" instead.
-    u = 0 - u;
-  }
-  return FastUInt32ToBufferLeft(u, buffer);
-}
-
-char* FastUInt64ToBufferLeft(uint64 u64, char* buffer) {
-  int digits;
-  const char *ASCII_digits = NULL;
-
-  uint32 u = static_cast<uint32>(u64);
-  if (u == u64) return FastUInt32ToBufferLeft(u, buffer);
-
-  uint64 top_11_digits = u64 / 1000000000;
-  buffer = FastUInt64ToBufferLeft(top_11_digits, buffer);
-  u = u64 - (top_11_digits * 1000000000);
-
-  digits = u / 10000000;  // 10,000,000
-  DCHECK_LT(digits, 100);
-  ASCII_digits = two_ASCII_digits[digits];
-  buffer[0] = ASCII_digits[0];
-  buffer[1] = ASCII_digits[1];
-  buffer += 2;
-  u -= digits * 10000000;  // 10,000,000
-  digits = u / 100000;  // 100,000
-  ASCII_digits = two_ASCII_digits[digits];
-  buffer[0] = ASCII_digits[0];
-  buffer[1] = ASCII_digits[1];
-  buffer += 2;
-  u -= digits * 100000;  // 100,000
-  digits = u / 1000;  // 1,000
-  ASCII_digits = two_ASCII_digits[digits];
-  buffer[0] = ASCII_digits[0];
-  buffer[1] = ASCII_digits[1];
-  buffer += 2;
-  u -= digits * 1000;  // 1,000
-  digits = u / 10;
-  ASCII_digits = two_ASCII_digits[digits];
-  buffer[0] = ASCII_digits[0];
-  buffer[1] = ASCII_digits[1];
-  buffer += 2;
-  u -= digits * 10;
-  digits = u;
-  *buffer++ = '0' + digits;
-  *buffer = 0;
-  return buffer;
-}
-
-char* FastInt64ToBufferLeft(int64 i, char* buffer) {
-  uint64 u = i;
-  if (i < 0) {
-    *buffer++ = '-';
-    u = 0 - u;
-  }
-  return FastUInt64ToBufferLeft(u, buffer);
-}
-
-int HexDigitsPrefix(const char* buf, int num_digits) {
-  for (int i = 0; i < num_digits; i++)
-    if (!ascii_isxdigit(buf[i]))
-      return 0;  // This also detects end of string as '\0' is not xdigit.
-  return 1;
-}
 
 // ----------------------------------------------------------------------
 // AutoDigitStrCmp

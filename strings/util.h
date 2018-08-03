@@ -27,16 +27,10 @@
 
 
 #include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include <functional>
 #include <string>
-#include <vector>
 
 #include "base/integral_types.h"
-#include "base/port.h"
 #include "strings/stringpiece.h"
 
 // Newer functions.
