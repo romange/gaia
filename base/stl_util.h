@@ -9,54 +9,6 @@
 
 #include "base/integral_types.h"
 
-#if 0
-// This is a wrapper for an STL allocator which keeps a count of the
-// active bytes allocated by this class of allocators.  This is NOT
-// THREAD SAFE.  This should only be used in situations where you can
-// ensure that only a single thread performs allocation and
-// deallocation.
-template <typename T, typename Alloc = std::allocator<T> >
-class STLCountingAllocator : public Alloc {
- public:
-  typedef typename Alloc::pointer pointer;
-  typedef typename Alloc::size_type size_type;
-
-  STLCountingAllocator() : bytes_used_(NULL) { }
-  STLCountingAllocator(int64* b) : bytes_used_(b) {}
-
-  // Constructor used for rebinding
-  template <class U>
-  STLCountingAllocator(const STLCountingAllocator<U>& x)
-      : Alloc(x),
-        bytes_used_(x.bytes_used()) {
-  }
-
-  pointer allocate(size_type n, std::allocator<void>::const_pointer hint = 0) {
-    assert(bytes_used_ != NULL);
-    *bytes_used_ += n * sizeof(T);
-    return Alloc::allocate(n, hint);
-  }
-
-  void deallocate(pointer p, size_type n) {
-    Alloc::deallocate(p, n);
-    assert(bytes_used_ != NULL);
-    *bytes_used_ -= n * sizeof(T);
-  }
-
-  // Rebind allows an allocator<T> to be used for a different type
-  template <class U> struct rebind {
-    typedef STLCountingAllocator<U,
-                                 typename Alloc::template
-                                 rebind<U>::other> other;
-  };
-
-  int64* bytes_used() const { return bytes_used_; }
-
- private:
-  int64* bytes_used_;
-};
-
-#endif
 
 template<typename T> std::ostream& operator<<(std::ostream& o, const std::vector<T>& vec) {
   o << "[";

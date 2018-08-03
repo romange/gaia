@@ -1,7 +1,7 @@
 // Copyright 2017, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include "util/coding/coder.h"
+#include "base/coder.h"
 #include <random>
 
 #include "base/flit.h"
