@@ -14,13 +14,14 @@
 
 #include "file/list_file.h"
 #include "file/proto_writer.h"
+#include "absl/strings/match.h"
 #include "strings/escaping.h"
 
 #include "util/plang/plang.h"
 #include "util/plang/plang_parser.hh"
 #include "util/plang/plang_scanner.h"
 #include "util/pprint/pprint_utils.h"
-#include "util/json/pb2json.h"
+#include "util/pb2json.h"
 
 #include "base/map-util.h"
 #include "util/sp_task_pool.h"
@@ -42,6 +43,7 @@ DEFINE_int32(sample_factor, 0, "If bigger than 0 samples and outputs record once
 using namespace util::pprint;
 namespace gpc = gpb::compiler;
 using std::string;
+using strings::AsString;
 
 class ErrorCollector : public gpc::MultiFileErrorCollector {
   void AddError(const string& filenname, int line, int column, const string& message) {
@@ -139,10 +141,7 @@ class PrintTask {
     }
 
     if (FLAGS_json) {
-      util::Pb2JsonOptions opts;
-      opts.enum_as_ints = true;
-
-      string str = util::Pb2Json(*local_msg_, opts);
+      string str = util::Pb2Json(*local_msg_);
       std::cout << str << "\n";
     } else {
       shared_data_->printer->Output(*local_msg_);
@@ -194,38 +193,8 @@ int main(int argc, char **argv) {
     const string kEmptyKey;
     std::unique_ptr<gpb::Message> tmp_msg;
 
-    if (path.ends_with(".sst")) {
-      auto res = file::ReadonlyFile::Open(path);
-      CHECK(res.status.ok()) << res.status;
-      std::unique_ptr<file::ReadonlyFile> file(res.obj);
-      auto res2 = sstable::Table::Open(sstable::ReadOptions(), file.get());
-      CHECK(res2.status.ok()) << res2.status.ToString();
-      std::unique_ptr<sstable::Table> table(res2.obj);
-      std::unique_ptr<sstable::Iterator> it(table->NewIterator());
-      const auto& meta = table->GetMeta();
-      ptype = FindWithDefault(meta, file::kProtoTypeKey, kEmptyKey);
-      fd_set = FindWithDefault(meta, file::kProtoSetKey, kEmptyKey);
-      if (!ptype.empty() && !fd_set.empty()) {
-        tmp_msg.reset(AllocateMsgByMeta(ptype, fd_set));
-      } else {
-        tmp_msg.reset(AllocateMsgFromDescr(FindDescriptor()));
-      }
-
-      Printer printer(tmp_msg->GetDescriptor());
-      const char* key_delim = " : ";
-      if (!FLAGS_csv.empty()) {
-        key_delim = ",";
-      }
-      for (it->SeekToFirst(); it->Valid(); it->Next()) {
-        CHECK(tmp_msg->ParseFromArray(it->value().data(), it->value().size()));
-        if (test_expr && !plang::EvaluateBoolExpr(*test_expr, *tmp_msg))
-          continue;
-
-        std::cout << strings::CHexEscape(it->key()) << key_delim;
-        printer.Output(*tmp_msg);
-        // std::cout << it->key().data() << ": " << it->value().size() << std::endl;
-      }
-      CHECK(file->Close().ok());
+    if (absl::EndsWith(path, ".sst")) {
+      LOG(FATAL) << "Not supported " << path;
     } else {
       file::ListReader reader(argv[i]);
       string record_buf;
@@ -280,9 +249,9 @@ int main(int argc, char **argv) {
 
       while (reader.ReadRecord(&record, &record_buf)) {
         if (FLAGS_parallel) {
-          pool->RunTask(record.as_string());
+          pool->RunTask(AsString(record));
         } else {
-          pool->RunInline(record.as_string());
+          pool->RunInline(AsString(record));
         }
       }
       if (pool)

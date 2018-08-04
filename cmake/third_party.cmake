@@ -240,6 +240,7 @@ add_third_party(
                     -DRAPIDJSON_BUILD_DOC=OFF"
   LIB "none"
 )
+set(RAPIDJSON_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/rapidjson/include)
 
 add_third_party(
   xxhash
@@ -443,7 +444,7 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       )
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
-include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR})
+include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
 
 set_property(TARGET TRDP::seastar APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${SEASTAR_INCLUDE_DIR}/fmt)

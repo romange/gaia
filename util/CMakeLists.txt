@@ -5,6 +5,9 @@ cxx_proto_lib(status PY)
 add_library(util zlib_source.cc bzip_source.cc
             sinksource.cc zstd_sinksource.cc)
 
+add_library(pb2json pb2json.cc)
+cxx_link(pb2json strings TRDP::protobuf)
+
 cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
 
 
@@ -22,6 +25,7 @@ cxx_link(proc_stats strings)
 
 cxx_test(sinksource_test strings util LABELS CI)
 cxx_test(sq_threadpool_test base fibers LABELS CI)
+cxx_test(pb2json_test pb2json addressbook_proto LABELS CI)
 
 add_subdirectory(http)
 add_subdirectory(math)
