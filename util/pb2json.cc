@@ -178,6 +178,7 @@ void PrintRepeated(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
 std::string Pb2Json(const ::google::protobuf::Message& msg) {
   rj::StringBuffer sb;
   RapidWriter rw(sb);
+  rw.SetMaxDecimalPlaces(9);
 
   Pb2JsonInternal(msg, &rw);
   return string(sb.GetString(), sb.GetSize());
