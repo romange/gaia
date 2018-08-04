@@ -25,6 +25,26 @@ TEST_F(Pb2JsonTest, Basic) {
   EXPECT_EQ(R"({"name":"Roman","id":5,"account":{"bank_name":"Leumi"},"dval":0.0})", res);
 }
 
+TEST_F(Pb2JsonTest, Unicode) {
+  Person person;
+  person.set_name("Роман");
+  person.mutable_account()->set_bank_name("לאומי");
+  person.set_id(5);
+
+  string res = Pb2Json(person);
+  EXPECT_EQ(R"({"name":"Роман","id":5,"account":{"bank_name":"לאומי"},"dval":0.0})", res);
+}
+
+TEST_F(Pb2JsonTest, Escape) {
+  Person person;
+  person.set_name("\x01\"");
+  person.mutable_account()->set_bank_name("\\");
+  person.set_id(5);
+
+  string res = Pb2Json(person);
+  EXPECT_EQ(R"({"name":"\u0001\"","id":5,"account":{"bank_name":"\\"},"dval":0.0})", res);
+}
+
 const char* kExpected = R"({"name":"","id":0,"phone":[{"number":"1","type":"HOME"},)"
                         R"({"number":"2","type":"WORK"}],"tag":["good","young"],"dval":0.0})";
 
