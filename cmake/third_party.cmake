@@ -233,6 +233,15 @@ set(SPARSE_HASH_INCLUDE_DIR ${SPARSE_HASH_DIR}/include)
 
 
 add_third_party(
+  rapidjson
+  GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
+  # GIT_SUBMODULES third_party/foo
+  CMAKE_PASS_FLAGS "-DRAPIDJSON_BUILD_TESTS=OFF -DRAPIDJSON_BUILD_EXAMPLES=OFF \
+                    -DRAPIDJSON_BUILD_DOC=OFF"
+  LIB "none"
+)
+
+add_third_party(
   xxhash
   GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
   GIT_TAG v0.6.4
