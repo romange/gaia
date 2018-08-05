@@ -15,8 +15,8 @@
 #include <boost/fiber/operations.hpp>  // for this_fiber.
 #include <boost/fiber/scheduler.hpp>
 
-#include "examples/io_context_pool.h"
-#include "examples/yield.hpp"
+#include "util/asio/io_context_pool.h"
+#include "util/asio/yield.hpp"
 #include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
 
@@ -29,6 +29,7 @@ DEFINE_int32(count, 10, "");
 DEFINE_int32(num_connections, 1, "");
 
 using asio::ip::tcp;
+using util::IoContextPool;
 
 typedef std::shared_ptr< tcp::socket > socket_ptr;
 http::VarzQps qps("echo-qps");
@@ -145,7 +146,7 @@ class AcceptServer {
  public:
 
   explicit AcceptServer(IoContextPool* pool) :
-    pool_(pool), io_cntx_(pool->GetIoContext()),
+    pool_(pool), io_cntx_(pool->GetNextContext()),
     acceptor_(io_cntx_, tcp::endpoint(tcp::v4(), 9999)),
     signals_(io_cntx_, SIGINT, SIGTERM) {
       signals_.async_wait(
@@ -181,7 +182,7 @@ void AcceptServer::AcceptFiber() {
 
   try {
     for (;;) {
-        auto& io_cntx = pool_->GetIoContext();
+        auto& io_cntx = pool_->GetNextContext();
         std::unique_ptr<Connection> conn(new Connection(&io_cntx, &empty_list));
         system::error_code ec;
         acceptor_.async_accept(conn->socket(), fibers::asio::yield[ec]);
@@ -281,7 +282,7 @@ void client_pool(IoContextPool* pool) {
 
   vector<Done> done_arr(kNumClients);
   for (unsigned i = 0; i < kNumClients; ++i) {
-    auto& cntx = pool->GetIoContext();
+    auto& cntx = pool->GetNextContext();
     cntx.post([&cntx, done = &done_arr[i]] {
       fibers::fiber(client, std::ref(cntx), 1, FLAGS_count, done).detach();
     });

@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "examples/io_context_pool.h"
+#include "util/asio/io_context_pool.h"
 
 #include <condition_variable>
 
@@ -12,6 +12,7 @@
 
 using namespace boost;
 
+namespace util {
 namespace {
 
 class round_robin : public fibers::algo::algorithm {
@@ -124,7 +125,6 @@ class round_robin : public fibers::algo::algorithm {
 //]
 
   void notify() noexcept {
-    LOG(INFO) << "Notify";
     // Something has happened that should wake one or more fibers BEFORE
     // suspend_timer_ expires. Reset the timer to cause it to fire
     // immediately, causing the run_one() call to return. In theory we
@@ -150,28 +150,22 @@ class round_robin : public fibers::algo::algorithm {
 
  private:
     void loop() {
-      LOG(INFO) << "LoopStart";
       while (!io_svc_->stopped()) {
         if (has_ready_fibers() ) {
-            //LOG(INFO) << "BeforePoll";
-            // run all pending handlers in round_robin
           while (io_svc_->poll());
 
           // block this fiber till all pending (ready) fibers are processed
           // == round_robin::suspend_until() has been called
           std::unique_lock<fibers::mutex > lk(mtx_);
           cnd_.wait(lk);
-            // LOG(INFO) << "AfterWait";
         } else {
             // run one handler inside io_context
             // if no handler available, block this thread
             if (!io_svc_->run_one() ) {
                 break;
             }
-            // LOG(INFO) << "AfterRunOne";
         }
       }
-      LOG(INFO) << "IoScvStopped";
     }
 };
 
@@ -179,10 +173,12 @@ asio::io_context::id round_robin::rr_service::id;
 
 }
 
+thread_local size_t IoContextPool::context_indx_ = 0;
 
 IoContextPool::IoContextPool(std::size_t pool_size)
   : context_arr_(pool_size), thread_arr_(pool_size) {
-
+  if (pool_size == 0)
+    pool_size = std::thread::hardware_concurrency();
   for (size_t i = 0; i < pool_size; ++i) {
     context_arr_[i] = std::make_shared<asio::io_context>();
   }
@@ -192,23 +188,11 @@ void IoContextPool::Run() {
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].tid = base::StartThread("IoPool",
       [this, i]() {
+        context_indx_ = i;
         fibers::use_scheduling_algorithm<round_robin>(context_arr_[i]);
 
-        // LOG(INFO) << "Before io_context_run " << i;
         context_arr_[i]->run();
-        LOG(INFO) << "After io_context_run " << i;
       });
-
-    /*std::condition_variable cv;
-    asio::post(*context_arr_[i], [&cv, tinfo = &thread_arr_[i] ] () mutable {
-      tinfo->loop_running = true;
-      cv.notify_one();}
-    );*/
-
-    /*std::mutex mtx;
-    std::unique_lock<std::mutex> lk(mtx);
-    cv.wait(lk, [tinfo = &thread_arr_[i]] { return tinfo->loop_running;});
-    LOG(INFO) << "After wait " << i;*/
   }
 }
 
@@ -224,7 +208,7 @@ void IoContextPool::Join() {
   }
 }
 
-asio::io_context& IoContextPool::GetIoContext() {
+asio::io_context& IoContextPool::GetNextContext() {
   // Use a round-robin scheme to choose the next io_context to use.
   boost::asio::io_context& io_context = *context_arr_[next_io_context_];
   ++next_io_context_;
@@ -232,3 +216,5 @@ asio::io_context& IoContextPool::GetIoContext() {
     next_io_context_ = 0;
   return io_context;
 }
+
+}  // namespace util
