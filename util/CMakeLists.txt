@@ -7,6 +7,7 @@ add_library(util zlib_source.cc bzip_source.cc
 
 add_library(pb2json pb2json.cc)
 cxx_link(pb2json strings TRDP::protobuf)
+add_dependencies(pb2json rapidjson_project)
 
 cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
 
