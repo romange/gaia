@@ -16,7 +16,9 @@
 #include <boost/fiber/scheduler.hpp>
 
 #include "util/asio/io_context_pool.h"
-#include "util/asio/yield.hpp"
+#include "util/asio/connection.h"
+#include "util/asio/yield.h"
+#include "util/fibers_done.h"
 #include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
 
@@ -31,161 +33,49 @@ DEFINE_int32(num_connections, 1, "");
 using asio::ip::tcp;
 using util::IoContextPool;
 
-typedef std::shared_ptr< tcp::socket > socket_ptr;
-http::VarzQps qps("echo-qps");
-
-
-typedef intrusive::list_member_hook<
-    intrusive::link_mode<intrusive::auto_unlink>> connection_hook;
-
-class Connection {
-  tcp::socket socket_;
-  fibers::condition_variable* on_exit_;
-
- public:
-  connection_hook hook_;
-
-  Connection(asio::io_context* io_svc, fibers::condition_variable* cv )
-    : socket_(*io_svc), on_exit_(cv) {}
-
-  void Run() {
-    auto& cntx = socket_.get_io_context();
-    cntx.post([this] {
-      fibers::fiber(&Connection::Session, this).detach();
-    });
-  }
-
-  tcp::socket& socket() { return socket_;}
- private:
-  void Session();
-};
-
-typedef intrusive::list<
-                Connection,
-                intrusive::member_hook<
-                    Connection, connection_hook, &Connection::hook_>,
-                intrusive::linear<true>, intrusive::cache_last< true >,
-                intrusive::constant_time_size<false>
-            > ConnectionList;
-
-
-constexpr unsigned max_length = 1024;
-
-/*****************************************************************************
-*   fiber function per server connection
-*****************************************************************************/
-void Connection::Session() {
-  try {
-    char data[max_length];
-    boost::system::error_code ec;
-
-    for (;;) {
-      std::size_t length = socket_.async_read_some(asio::buffer(data),
-                                                 fibers::asio::yield[ec]);
-
-      VLOG(1) << "After async_read_some";
-      if ( ec == asio::error::eof) {
-          LOG(INFO) << "Connection closed";
-          break; //connection closed cleanly by peer
-      } else if ( ec) {
-        throw system::system_error( ec); //some other error
-      }
-      VLOG(1) << ": handled: " << std::string(data, length);
-      qps.Inc();
-
-      asio::async_write(socket_, asio::buffer(data, length),
-                        fibers::asio::yield[ec]);
-      if ( ec == asio::error::eof) {
-          break; //connection closed cleanly by peer
-      } else if ( ec) {
-          throw system::system_error( ec); //some other error
-      }
-    }
-    VLOG(1) << ": connection closed";
-  } catch ( std::exception const& ex) {
-    LOG(WARNING) << ": caught exception : ", ex.what();
-  }
-
-  socket_.close();
-  hook_.unlink();
-  on_exit_->notify_one();
-
-  delete this;
-  LOG(INFO) << "Session closed";
-}
-
-// Wrap canonical pattern for condition_variable + bool flag
-struct Done {
- private:
-    fibers::condition_variable   cond;
-    fibers::mutex                mutex;
-    bool                         ready = false;
-
- public:
-  Done() {}
-  Done(const Done&) = delete;
-  void operator=(const Done&) = delete;
-
-  typedef std::shared_ptr< Done >     ptr;
-
-  void wait() {
-      std::unique_lock<fibers::mutex> lock( mutex);
-      cond.wait( lock, [this](){ return ready; });
-  }
-
-  void notify() {
-    {
-        std::unique_lock<fibers::mutex> lock( mutex);
-        ready = true;
-    } // release mutex
-    cond.notify_one();
-  }
-};
-
 class AcceptServer {
  public:
-
-  explicit AcceptServer(IoContextPool* pool) :
-    pool_(pool), io_cntx_(pool->GetNextContext()),
-    acceptor_(io_cntx_, tcp::endpoint(tcp::v4(), 9999)),
-    signals_(io_cntx_, SIGINT, SIGTERM) {
-      signals_.async_wait(
-      [this](system::error_code /*ec*/, int /*signo*/) {
-        // The server is stopped by cancelling all outstanding asynchronous
-        // operations. Once all operations have finished the io_context::run()
-        // call will exit.
-        acceptor_.close();
-
-        LOG(INFO) << "Signals close";
-      });
-  }
+  AcceptServer(unsigned short port, IoContextPool* pool);
 
   void Run();
   void Wait();
 
  private:
-
   void AcceptFiber();
 
   IoContextPool* pool_;
   asio::io_context& io_cntx_;
   tcp::acceptor acceptor_;
   asio::signal_set signals_;
-  Done done_;
+  util::fibers::Done done_;
 };
 
+
+AcceptServer::AcceptServer(unsigned short port, IoContextPool* pool)
+     :pool_(pool), io_cntx_(pool->GetNextContext()),
+      acceptor_(io_cntx_, tcp::endpoint(tcp::v4(), port)),
+      signals_(io_cntx_, SIGINT, SIGTERM) {
+  signals_.async_wait(
+  [this](system::error_code /*ec*/, int /*signo*/) {
+    // The server is stopped by cancelling all outstanding asynchronous
+    // operations. Once all operations have finished the io_context::run()
+    // call will exit.
+    acceptor_.close();
+  });
+}
+
 void AcceptServer::AcceptFiber() {
-  LOG(INFO) << ": echo-server started";
-  ConnectionList clist;
+  util::ConnectionList clist;
   DCHECK(clist.empty());
   fibers::condition_variable empty_list;
+  using util::Connection;
 
   try {
     for (;;) {
         auto& io_cntx = pool_->GetNextContext();
         std::unique_ptr<Connection> conn(new Connection(&io_cntx, &empty_list));
         system::error_code ec;
-        acceptor_.async_accept(conn->socket(), fibers::asio::yield[ec]);
+        acceptor_.async_accept(conn->socket(), util::fibers::yield[ec]);
 
         if (ec) {
           throw system::system_error(ec); //some other error
@@ -234,9 +124,9 @@ void AcceptServer::Wait() {
 *   fiber function per client
 *****************************************************************************/
 void client(boost::asio::io_context& io_svc,
-            unsigned iterations, unsigned msg_count, Done* done) {
+            unsigned iterations, unsigned msg_count, util::fibers::Done* done) {
   LOG(INFO) << ": echo-client started";
-
+  constexpr unsigned max_length = 1024;
   for (unsigned count = 0; count < iterations; ++count) {
     tcp::resolver resolver(io_svc);
     tcp::resolver::query query(tcp::v4(), FLAGS_connect, "9999");
@@ -254,7 +144,7 @@ void client(boost::asio::io_context& io_svc,
         boost::system::error_code ec;
         asio::async_write(
                 s, asio::buffer(msgbuf, next - msgbuf),
-                fibers::asio::yield[ec]);
+                util::fibers::yield[ec]);
         if ( ec == asio::error::eof) {
           return; //connection closed cleanly by peer
         } else if ( ec) {
@@ -262,8 +152,7 @@ void client(boost::asio::io_context& io_svc,
         }
 
         size_t reply_length = s.async_read_some(
-                boost::asio::buffer(reply, max_length),
-                boost::fibers::asio::yield[ec]);
+                boost::asio::buffer(reply, max_length), util::fibers::yield[ec]);
         if ( ec == boost::asio::error::eof) {
           return; //connection closed cleanly by peer
         } else if ( ec) {
@@ -280,7 +169,7 @@ void client(boost::asio::io_context& io_svc,
 void client_pool(IoContextPool* pool) {
   const uint32 kNumClients = FLAGS_num_connections;
 
-  vector<Done> done_arr(kNumClients);
+  vector<util::fibers::Done> done_arr(kNumClients);
   for (unsigned i = 0; i < kNumClients; ++i) {
     auto& cntx = pool->GetNextContext();
     cntx.post([&cntx, done = &done_arr[i]] {
@@ -306,7 +195,7 @@ int main(int argc, char **argv) {
     http_server.reset(new http::Server(FLAGS_http_port));
     util::Status status = http_server->Start();
     CHECK(status.ok()) << status;
-    accept_server.reset(new AcceptServer(&pool));
+    accept_server.reset(new AcceptServer(4999, &pool));
     accept_server->Run();
 
     accept_server->Wait();

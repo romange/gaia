@@ -4,19 +4,11 @@
 //    (See accompanying file LICENSE_1_0.txt or copy at
 //          http://www.boost.org/LICENSE_1_0.txt)
 
+#pragma once
+#include <boost/system/error_code.hpp>
 
-#ifndef BOOST_FIBERS_ASIO_YIELD_HPP
-#define BOOST_FIBERS_ASIO_YIELD_HPP
-
-#include <boost/config.hpp>
-
-#ifdef BOOST_HAS_ABI_HEADERS
-#  include BOOST_ABI_PREFIX
-#endif
-
-namespace boost {
+namespace util {
 namespace fibers {
-namespace asio {
 
 //[fibers_asio_yield_t
 class yield_t {
@@ -45,19 +37,12 @@ public:
     // ptr to bound error_code instance if any
     boost::system::error_code   *   ec_{ nullptr };
 };
+
+/// canonical instance
+extern thread_local yield_t yield;
 //]
 
-//[fibers_asio_yield
-// canonical instance
-thread_local yield_t yield{};
-//]
-
-}}}
-
-#ifdef BOOST_HAS_ABI_HEADERS
-#  include BOOST_ABI_SUFFIX
-#endif
+}  // namespace fibers
+}  // namespace util
 
 #include "detail/yield.hpp"
-
-#endif // BOOST_FIBERS_ASIO_YIELD_HPP
