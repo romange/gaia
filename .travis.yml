@@ -5,8 +5,8 @@ os: linux
 
 cache:
   directories:
-  - /opt/boost_1_66_0
-
+  - /opt/boost_1_67_0
+  - third_party
 
 matrix:
   include:
