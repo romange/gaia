@@ -6,7 +6,7 @@
 #include <boost/fiber/condition_variable.hpp>
 
 namespace util {
-namespace fibers {
+namespace fibers_ext {
 
 // Wrap canonical pattern for condition_variable + bool flag
 class Done {

@@ -8,7 +8,7 @@
 #include <boost/system/error_code.hpp>
 
 namespace util {
-namespace fibers {
+namespace fibers_ext {
 
 //[fibers_asio_yield_t
 class yield_t {
@@ -42,7 +42,7 @@ public:
 extern thread_local yield_t yield;
 //]
 
-}  // namespace fibers
+}  // namespace fibers_ext
 }  // namespace util
 
 #include "detail/yield.hpp"

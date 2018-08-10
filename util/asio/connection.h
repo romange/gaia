@@ -12,10 +12,7 @@ namespace util {
 using namespace boost::asio;
 namespace intr = ::boost::intrusive;
 
-class Connection {
-  ip::tcp::socket socket_;
-  boost::fibers::condition_variable& on_exit_;
-
+class ConnectionHandler {
  public:
   // auto_unlink allows unlinking from the container during the destruction of
   // of hook without holding the reference to the container itself.
@@ -25,24 +22,33 @@ class Connection {
 
   connection_hook hook_;
 
-  Connection(io_context* io_svc, boost::fibers::condition_variable* cv);
+  ConnectionHandler(io_context* io_svc, boost::fibers::condition_variable* done);
 
+  virtual ~ConnectionHandler();
+
+  // Can be trigerred from any thread. Schedules RunInIOThread to run in io_context loop.
   void Run();
 
   ip::tcp::socket& socket() { return socket_;}
 
-  typedef intr::member_hook<Connection, connection_hook, &Connection::hook_> member_hook_t;
+  typedef intr::member_hook<ConnectionHandler, connection_hook, &ConnectionHandler::hook_>
+    member_hook_t;
 
+ protected:
+  // Should not block the thread. Can fiber-block (fiber friendly).
+  virtual boost::system::error_code HandleRequest() = 0;
+
+  ip::tcp::socket socket_;
+  boost::fibers::condition_variable& on_exit_;
  private:
-  void Session();
-  boost::system::error_code HandleOne();
+  void RunInIOThread();
 };
 
 // TODO: Do we need list or slist?
 typedef intr::list<
-                Connection,
-                Connection::member_hook_t,
-                intr::constant_time_size<false>> ConnectionList;
+                ConnectionHandler,
+                ConnectionHandler::member_hook_t,
+                intr::constant_time_size<false>> ConnectionHandlerList;
 
 
 }  // namespace util

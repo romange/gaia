@@ -21,7 +21,7 @@
 
 
 namespace util {
-namespace fibers {
+namespace fibers_ext {
 namespace detail {
 
 namespace fbs = ::boost::fibers;
@@ -232,7 +232,9 @@ private:
 };
 //]
 
-}}}
+}
+}
+}
 
 namespace boost {
 namespace asio {
@@ -243,14 +245,14 @@ namespace asio {
 // yield_handler, constructs this async_result specialization from it, then
 // returns the result of calling its get() method.
 template< typename T >
-class async_result<util::fibers::detail::yield_handler< T > > :
-    public util::fibers::detail::async_result_base {
+class async_result<util::fibers_ext::detail::yield_handler< T > > :
+    public util::fibers_ext::detail::async_result_base {
 public:
     // type returned by get()
     typedef T type;
 
-    explicit async_result( util::fibers::detail::yield_handler< T > & h) :
-        util::fibers::detail::async_result_base{ h } {
+    explicit async_result( util::fibers_ext::detail::yield_handler< T > & h) :
+        util::fibers_ext::detail::async_result_base{ h } {
         // Inject ptr to our value_ member into yield_handler<>: result will
         // be stored here.
         h.value_ = & value_;
@@ -258,7 +260,7 @@ public:
 
     // asio async method returns result of calling get()
     type get() {
-        util::fibers::detail::async_result_base::get();
+        util::fibers_ext::detail::async_result_base::get();
         return std::move( value_);
     }
 
@@ -271,13 +273,13 @@ private:
 // Without the need to handle a passed value, our yield_handler<void>
 // specialization is just like async_result_base.
 template<>
-class async_result< util::fibers::detail::yield_handler< void > > :
-    public util::fibers::detail::async_result_base {
+class async_result< util::fibers_ext::detail::yield_handler< void > > :
+    public util::fibers_ext::detail::async_result_base {
 public:
     typedef void type;
 
-    explicit async_result( util::fibers::detail::yield_handler< void > & h):
-        util::fibers::detail::async_result_base{ h } {
+    explicit async_result( util::fibers_ext::detail::yield_handler< void > & h):
+        util::fibers_ext::detail::async_result_base{ h } {
     }
 };
 //]
@@ -286,16 +288,16 @@ public:
 // When 'yield' is passed as a completion handler which accepts no parameters,
 // use yield_handler<void>.
 template< typename ReturnType >
-struct handler_type<util::fibers::yield_t, ReturnType() >
-{ typedef util::fibers::detail::yield_handler< void >    type; };
+struct handler_type<util::fibers_ext::yield_t, ReturnType() >
+{ typedef util::fibers_ext::detail::yield_handler< void >    type; };
 
 // Handler type specialisation for fibers::asio::yield.
 // When 'yield' is passed as a completion handler which accepts a data
 // parameter, use yield_handler<parameter type> to return that parameter to
 // the caller.
 template< typename ReturnType, typename Arg1 >
-struct handler_type< util::fibers::yield_t, ReturnType( Arg1) >
-{ typedef util::fibers::detail::yield_handler< Arg1 >    type; };
+struct handler_type< util::fibers_ext::yield_t, ReturnType( Arg1) >
+{ typedef util::fibers_ext::detail::yield_handler< Arg1 >    type; };
 
 //[asio_handler_type
 // Handler type specialisation for fibers::asio::yield.
@@ -303,8 +305,8 @@ struct handler_type< util::fibers::yield_t, ReturnType( Arg1) >
 // error_code, use yield_handler<void>. yield_handler will take care of the
 // error_code one way or another.
 template< typename ReturnType >
-struct handler_type< util::fibers::yield_t, ReturnType( boost::system::error_code) >
-{ typedef util::fibers::detail::yield_handler< void >    type; };
+struct handler_type< util::fibers_ext::yield_t, ReturnType( boost::system::error_code) >
+{ typedef util::fibers_ext::detail::yield_handler< void >    type; };
 //]
 
 // Handler type specialisation for fibers::asio::yield.
@@ -313,7 +315,7 @@ struct handler_type< util::fibers::yield_t, ReturnType( boost::system::error_cod
 // just the parameter to the caller. yield_handler will take care of the
 // error_code one way or another.
 template< typename ReturnType, typename Arg2 >
-struct handler_type< util::fibers::yield_t, ReturnType( boost::system::error_code, Arg2) >
-{ typedef util::fibers::detail::yield_handler< Arg2 >    type; };
+struct handler_type< util::fibers_ext::yield_t, ReturnType( boost::system::error_code, Arg2) >
+{ typedef util::fibers_ext::detail::yield_handler< Arg2 >    type; };
 
 }}

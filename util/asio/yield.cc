@@ -5,7 +5,7 @@
 #include "util/asio/yield.h"
 
 namespace util {
-namespace fibers {
+namespace fibers_ext {
 
 /// canonical instance
 thread_local yield_t yield{};

@@ -10,6 +10,9 @@
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/scheduler.hpp>
 
+#include "base/logging.h"
+#include "base/pthread_utils.h"
+
 using namespace boost;
 
 namespace util {
@@ -18,12 +21,12 @@ namespace {
 class round_robin : public fibers::algo::algorithm {
  private:
   std::shared_ptr< asio::io_service>      io_svc_;
-  asio::steady_timer                       suspend_timer_;
+  asio::steady_timer                      suspend_timer_;
 //]
-  fibers::scheduler::ready_queue_type      rqueue_;
-  fibers::mutex                            mtx_;
-  fibers::condition_variable               cnd_;
-  std::size_t                                     counter_{ 0 };
+  fibers::scheduler::ready_queue_type     rqueue_;
+  fibers::mutex                           mtx_;
+  fibers::condition_variable              cnd_;
+  std::size_t                             counter_{ 0 };
 
  public:
   // [asio_rr_service_top
@@ -46,7 +49,7 @@ class round_robin : public fibers::algo::algorithm {
 
     void shutdown_service() final {
       work_.reset();
-      LOG(INFO) << "Work reset";
+      VLOG(1) << "Work reset";
     }
   };
 //]

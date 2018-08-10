@@ -8,7 +8,6 @@
 #include <thread>
 
 #include <boost/asio.hpp>
-#include "base/pthread_utils.h"
 
 namespace util {
 
