@@ -7,7 +7,6 @@
 #include <boost/asio/write.hpp>
 
 #include "base/logging.h"
-#include "util/asio/yield.h"
 
 using boost::fibers::condition_variable;
 using boost::fibers::fiber;
