@@ -30,6 +30,7 @@ DEFINE_int32(http_port, 8080, "Port number.");
 DEFINE_string(connect, "", "");
 DEFINE_int32(count, 10, "");
 DEFINE_int32(num_connections, 1, "");
+DEFINE_int32(io_threads, 0, "");
 
 using asio::ip::tcp;
 using util::IoContextPool;
@@ -137,7 +138,11 @@ int main(int argc, char **argv) {
   std::unique_ptr<http::Server> http_server;
   std::unique_ptr<util::AcceptServer> accept_server;
 
-  IoContextPool pool(4);
+  unsigned io_threads = FLAGS_io_threads;
+  if (io_threads == 0)
+    io_threads = thread::hardware_concurrency();
+  LOG(INFO) << "Running with " << io_threads << " threads";
+  IoContextPool pool(io_threads);
   pool.Run();
 
   if (FLAGS_connect.empty()) {
