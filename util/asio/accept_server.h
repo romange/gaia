@@ -9,7 +9,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/signal_set.hpp>
 
-#include "util/asio/connection.h"
+#include "util/asio/connection_handler.h"
 #include "util/fibers_done.h"
 
 namespace util {

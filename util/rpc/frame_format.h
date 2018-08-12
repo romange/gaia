@@ -34,8 +34,6 @@ namespace rpc {
 class Frame {
   static const uint32 kHeaderVal;
 
-  unsigned WriteNoHeader(uint8* dest) const;
-  void LoadSizes(const uint8* input, uint8 cs, uint8 ms);
 public:
   typedef ::boost::asio::ip::tcp::socket socket_t;
 

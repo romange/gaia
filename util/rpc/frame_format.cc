@@ -44,23 +44,6 @@ std::ostream& operator<<(std::ostream& o, const Frame& frame) {
 
 const uint32 Frame::kHeaderVal =  LittleEndian::Load32(kHeader);
 
-unsigned Frame::WriteNoHeader(uint8* dest) const {
-  const uint8 msg_bytes_minus1 = SizeByteCountMinus1(msg_size);
-  const uint8 cntrl_bytes_minus1 = SizeByteCountMinus1(control_size);
-
-  DCHECK_LT(msg_bytes_minus1, 4);
-  DCHECK_LT(cntrl_bytes_minus1, 4);
-
-  uint8 version = cntrl_bytes_minus1 | (msg_bytes_minus1 << 2) | (0 << 4);
-  *dest++ = version;
-
-  LittleEndian::Store64(dest, rpc_id); dest += 7;
-  LittleEndian::Store32(dest, control_size); dest += cntrl_bytes_minus1 + 1;
-  LittleEndian::Store32(dest, msg_size);
-
-  return 1 /* version */ + 7 /* rpc_id */ + cntrl_bytes_minus1 + msg_bytes_minus1 + 2;
-}
-
 
 inline constexpr uint32 byte_mask(uint8 n) { return (1UL << (n + 1) * 8) - 1;}
 

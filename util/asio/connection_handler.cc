@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "util/asio/connection.h"
+#include "util/asio/connection_handler.h"
 
 #include <boost/asio/write.hpp>
 

@@ -12,6 +12,7 @@ namespace util {
 using namespace boost::asio;
 namespace intr = ::boost::intrusive;
 
+// An instance of this class handles a single connection in fiber.
 class ConnectionHandler {
  public:
   // auto_unlink allows unlinking from the container during the destruction of

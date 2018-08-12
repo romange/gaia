@@ -1,0 +1,4 @@
+third_party/*
+!third_party/libs/
+boost_1_67_0/*
+!boost_1_67_0/stage/lib/*
