@@ -8,7 +8,6 @@
 
 #include <google/protobuf/message.h>
 
-#include "util/asio/connection_handler.h"
 #include "util/asio/accept_server.h"
 #include "util/status.h"
 
@@ -16,7 +15,6 @@ namespace util {
 
 class AcceptServer;
 class IoContextPool;
-class RpcConnectionHandler;
 
 class RpcServiceDescriptor {
  public:
@@ -47,22 +45,27 @@ class RpcServiceInterface {
  public:
   virtual ~RpcServiceInterface() {};
 
-  // The ownership goes to caller.
+  // The ownership is passed to the caller.
   virtual RpcServiceDescriptor* GetDescriptor() const;
 };
+
 
 class RpcServer {
  public:
   RpcServer(unsigned short port);
   ~RpcServer();
 
+  void BindTo(RpcServiceInterface* iface);
+
   void Run(IoContextPool* pool);
   void Wait();
 
+ protected:
+
  private:
+  unsigned short port_ = 0;
   std::unique_ptr<AcceptServer> acc_server_;
   std::unique_ptr<RpcServiceDescriptor> service_descr_;
-  AcceptServer::ConnectionFactory cf_;
 };
 
 }  // namespace util

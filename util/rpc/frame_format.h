@@ -10,13 +10,6 @@
 
 #include <boost/asio/ip/tcp.hpp>
 
-
-namespace google {
-namespace protobuf {
-class MessageLite;
-}  // namespace protobuf
-}  // namespace google
-
 namespace util {
 namespace rpc {
 /*
@@ -46,8 +39,7 @@ public:
 
   enum { kMinByteSize = 4 + 1 + 7 + 2, kMaxByteSize = 4 + 1 + 7 + 4*2 };
 
-  util::Status Write(socket_t* outp) const;
-  util::Status Read(socket_t* input);
+  ::boost::system::error_code Read(socket_t* input);
 
   bool operator==(const Frame& other) const {
     return other.rpc_id == rpc_id && other.control_size == control_size &&
@@ -59,8 +51,6 @@ public:
   uint32 total_size() const { return control_size + msg_size; }
 };
 
-util::Status ReadPacket(Frame::socket_t* input, Frame* frame,
-                        std::string* control, std::string* msg);
 
 }  // namespace rpc
 }  // namespace util

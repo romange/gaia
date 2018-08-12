@@ -20,6 +20,7 @@ namespace rpc {
 using util::Status;
 using util::StatusCode;
 using namespace boost;
+using namespace system;
 
 namespace gpb = ::google::protobuf;
 
@@ -47,50 +48,48 @@ const uint32 Frame::kHeaderVal =  LittleEndian::Load32(kHeader);
 
 inline constexpr uint32 byte_mask(uint8 n) { return (1UL << (n + 1) * 8) - 1;}
 
-Status Frame::Read(socket_t* input) {
-  uint8 buf[kMinByteSize + 4 + 4 + /* a little extra */ 8];
+error_code Frame::Read(socket_t* input) {
+  uint8 buf[kMaxByteSize + /* a little extra */ 8];
 
-  system::error_code ec;
+  error_code ec;
   size_t read = asio::async_read(*input, asio::buffer(buf), asio::transfer_exactly(kMinByteSize),
                                  yield[ec]);
   if (ec) {
-    goto fail;
+    return ec;
   }
+
   DCHECK_EQ(kMinByteSize, read);
   if (kHeaderVal !=  LittleEndian::Load32(buf)) {
-    return Status("Bad header");
+    return errc::make_error_code(errc::illegal_byte_sequence);
   }
   if (buf[4] >> 4 != 0) { // version check
-    return Status("Unsupported version");
+    return errc::make_error_code(errc::illegal_byte_sequence);
   }
 
   rpc_id = UNALIGNED_LOAD64(buf + 4);
   rpc_id >>= 8;
-  {
-    const uint8 sz_len = buf[4] & 15;
-    const uint8 control_sz_len_minus1 = sz_len & 3;
-    const uint8 msg_sz_len_minus1 = sz_len >> 2;
 
-    // We stored 2 necessary bytes of boths lens, if it was not enough lets fill em up.
-    if (sz_len) {
-      asio::async_read(*input, asio::buffer(buf + kMinByteSize, kMaxByteSize),
-                       asio::transfer_exactly(control_sz_len_minus1 + msg_sz_len_minus1),
-                       yield[ec]);
-      if (ec) {
-        goto fail;
-      }
+  const uint8 sz_len = buf[4] & 15;
+  const uint8 control_sz_len_minus1 = sz_len & 3;
+  const uint8 msg_sz_len_minus1 = sz_len >> 2;
+
+  // We stored 2 necessary bytes of boths lens, if it was not enough lets fill em up.
+  if (sz_len) {
+    asio::async_read(*input, asio::buffer(buf + kMinByteSize, kMaxByteSize - kMinByteSize),
+                     asio::transfer_exactly(control_sz_len_minus1 + msg_sz_len_minus1),
+                     yield[ec]);
+    if (ec) {
+      return ec;
     }
-
-    VLOG(2) << "Frame::Read " << kMinByteSize + control_sz_len_minus1 + msg_sz_len_minus1;
-
-    control_size = LittleEndian::Load32(buf + 12) & byte_mask(control_sz_len_minus1);
-    msg_size = LittleEndian::Load32(buf + 12 + control_sz_len_minus1 + 1) &
-        byte_mask(msg_sz_len_minus1);
-
-  return Status::OK;
   }
-fail:
-  return Status(StatusCode::IO_ERROR, ec.message());
+
+  VLOG(2) << "Frame::Read " << kMinByteSize + control_sz_len_minus1 + msg_sz_len_minus1;
+
+  control_size = LittleEndian::Load32(buf + 12) & byte_mask(control_sz_len_minus1);
+  msg_size = LittleEndian::Load32(buf + 12 + control_sz_len_minus1 + 1) &
+      byte_mask(msg_sz_len_minus1);
+
+  return error_code{};
 }
 
 #if 0
