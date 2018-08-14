@@ -142,6 +142,7 @@ int main(int argc, char **argv) {
   if (io_threads == 0)
     io_threads = thread::hardware_concurrency();
   LOG(INFO) << "Running with " << io_threads << " threads";
+
   IoContextPool pool(io_threads);
   pool.Run();
 

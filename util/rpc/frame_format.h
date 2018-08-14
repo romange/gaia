@@ -17,10 +17,10 @@ namespace rpc {
     header str ("URPC") - 4 bytes
     uint8 version + control size length + message size length 1 byte (4bits + 2bits + 2bits)
     uint56 rpc_id - LE56
-    control_size - LE of control size length
+    header_size - LE of control size length
     message size - LE on message size length
-    BLOB char[control_size + message_size]:
-      PB - control packet of size control_size
+    BLOB char[header_size + message_size]:
+      PB - control packet of size header_size
       PB - message request of size message_size
 */
 
@@ -31,24 +31,24 @@ public:
   typedef ::boost::asio::ip::tcp::socket socket_t;
 
   uint64 rpc_id;
-  uint32 control_size;
-  uint32 msg_size;
+  uint32 header_size;
+  uint32 letter_size;
 
   Frame() {}
-  Frame(uint64 r, uint32 cs, uint32 ms) : rpc_id(r), control_size(cs), msg_size(ms) {}
+  Frame(uint64 r, uint32 cs, uint32 ms) : rpc_id(r), header_size(cs), letter_size(ms) {}
 
   enum { kMinByteSize = 4 + 1 + 7 + 2, kMaxByteSize = 4 + 1 + 7 + 4*2 };
 
   ::boost::system::error_code Read(socket_t* input);
 
   bool operator==(const Frame& other) const {
-    return other.rpc_id == rpc_id && other.control_size == control_size &&
-        other.msg_size == msg_size;
+    return other.rpc_id == rpc_id && other.header_size == header_size &&
+        other.letter_size == letter_size;
   }
 
   friend std::ostream& operator<<(std::ostream& o, const Frame& frame);
 
-  uint32 total_size() const { return control_size + msg_size; }
+  uint32 total_size() const { return header_size + letter_size; }
 };
 
 

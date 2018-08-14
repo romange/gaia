@@ -25,21 +25,23 @@ using fibers_ext::yield;
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
-  RpcConnectionHandler(const RpcServiceDescriptor* descr,  asio::io_context* io_svc,
-                       fibers::condition_variable* done);
+  RpcConnectionHandler(asio::io_context* io_svc,  // not owned.
+                       fibers::condition_variable* done,  // not owned
+                       // owned by the instance.
+                       RpcConnectionBridge* bridge);
 
   system::error_code HandleRequest() final override;
 
  private:
-  base::PODArray<uint8_t> control_, payload_;
-  const RpcServiceDescriptor* descr_ = nullptr;
+  base::PODArray<uint8_t> header_, letter_;
+  std::unique_ptr<RpcConnectionBridge> bridge_;
 };
 
 
-RpcConnectionHandler::RpcConnectionHandler(const RpcServiceDescriptor* descr,
-                                           asio::io_context* io_svc,
-                                           fibers::condition_variable* done)
-    : ConnectionHandler(io_svc, done), descr_(descr) {
+RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
+                                           fibers::condition_variable* done,
+                                           RpcConnectionBridge* bridge)
+    : ConnectionHandler(io_svc, done), bridge_(bridge) {
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
@@ -48,22 +50,26 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   if (ec)
     return ec;
 
-  if (frame.control_size == 0) {
+  if (frame.header_size == 0) {
     return errc::make_error_code(errc::protocol_error);
   }
 
-  control_.resize(frame.control_size);
+  header_.resize(frame.header_size);
+  size_t sz;
 
-  asio::async_read(socket_, asio::buffer(control_.data(), frame.control_size),
-                   asio::transfer_exactly(frame.control_size), yield[ec]);
+  std::array<asio::mutable_buffer, 2> buffers =
+    {asio::mutable_buffer{header_.data(), frame.header_size},
+     asio::mutable_buffer{letter_.data(), frame.letter_size}};
+
+  sz = asio::async_read(socket_, buffers, yield[ec]);
   if (ec) return ec;
+  CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
-  asio::async_read(socket_, asio::buffer(payload_.data(), frame.msg_size),
-                   asio::transfer_exactly(frame.msg_size), yield[ec]);
-  if (ec) return ec;
-
-
-  return ec;
+  Status status = bridge_->HandleEnvelope(&header_, &letter_);
+  if (!status.ok()) {
+    return errc::make_error_code(errc::bad_message);
+  }
+  return system::error_code{};
 }
 
 RpcServer::RpcServer(unsigned short port) : port_(port) {
@@ -74,14 +80,23 @@ RpcServer::~RpcServer() {
 
 }
 
+void RpcServer::BindTo(RpcServiceInterface* iface) {
+  cf_ = [iface](io_context* cntx, fibers::condition_variable* done) -> RpcConnectionHandler* {
+    RpcConnectionBridge* bridge = iface->CreateConnectionBridge();
+    return new RpcConnectionHandler(cntx, done, bridge);
+  };
+}
 
 void RpcServer::Run(IoContextPool* pool) {
-  acc_server_.reset(new AcceptServer(port_, pool, nullptr));
+  CHECK(cf_) << "Must call BindTo before running Run(...)";
+
+  acc_server_.reset(new AcceptServer(port_, pool, cf_));
   acc_server_->Run();
 }
 
 void RpcServer::Wait() {
-
+  acc_server_->Wait();
+  cf_ = nullptr;
 }
 
 }  // namespace util

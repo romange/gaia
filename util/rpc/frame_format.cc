@@ -38,8 +38,8 @@ inline uint8 SizeByteCountMinus1(uint32 size) {
 }  // namespace
 
 std::ostream& operator<<(std::ostream& o, const Frame& frame) {
-  o << "{ rpc_id " << frame.rpc_id << ", control_size: " << frame.control_size
-    << ", msg_size: " << frame.msg_size << " }";
+  o << "{ rpc_id " << frame.rpc_id << ", header_size: " << frame.header_size
+    << ", letter_size: " << frame.letter_size << " }";
   return o;
 }
 
@@ -85,8 +85,8 @@ error_code Frame::Read(socket_t* input) {
 
   VLOG(2) << "Frame::Read " << kMinByteSize + control_sz_len_minus1 + msg_sz_len_minus1;
 
-  control_size = LittleEndian::Load32(buf + 12) & byte_mask(control_sz_len_minus1);
-  msg_size = LittleEndian::Load32(buf + 12 + control_sz_len_minus1 + 1) &
+  header_size = LittleEndian::Load32(buf + 12) & byte_mask(control_sz_len_minus1);
+  letter_size = LittleEndian::Load32(buf + 12 + control_sz_len_minus1 + 1) &
       byte_mask(msg_sz_len_minus1);
 
   return error_code{};
@@ -102,11 +102,11 @@ Status ReadPacket(Frame::socket_t* input,
   }
 
   VLOG(1) << "ReadPacket. Frame: " << *frame;
-  control->resize(frame->control_size);
-  msg->resize(frame->msg_size);
+  control->resize(frame->header_size);
+  msg->resize(frame->letter_size);
 
-  if (!(st = input->readAll((uint8*)&control->front(), frame->control_size)).ok() ||
-      !(st = input->readAll((uint8*)&msg->front(), frame->msg_size)).ok()) {
+  if (!(st = input->readAll((uint8*)&control->front(), frame->header_size)).ok() ||
+      !(st = input->readAll((uint8*)&msg->front(), frame->letter_size)).ok()) {
     if (st.code() == StatusCode::IO_END_OF_FILE)
       return StatusCode::IO_ERROR; // EOF in the middle of the message is an error
     return st;

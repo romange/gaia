@@ -8,47 +8,36 @@
 
 #include <google/protobuf/message.h>
 
+#include "base/pod_array.h"
 #include "util/asio/accept_server.h"
 #include "util/status.h"
+#include "strings/stringpiece.h"
 
 namespace util {
 
 class AcceptServer;
 class IoContextPool;
 
-class RpcServiceDescriptor {
+
+class RpcConnectionBridge {
  public:
-  using Message = ::google::protobuf::Message;
+  virtual ~RpcConnectionBridge() {}
 
-  struct MethodInfo {
-    std::string name;
-    Message* request;
-    Message* response;
-
-    std::function<Status(Message*, Message*)> client_method;
-
-    MethodInfo() {}
-    MethodInfo(std::string n, Message* req, Message* resp,
-               std::function<Status(Message*, Message*)> c)
-        : name(std::move(n)), request(req), response(resp), client_method(c) {}
-  };
-
-  const std::vector<MethodInfo>& methods() { return methods_; }
-
-protected:
-  virtual MethodInfo* GetMethodByHash(uint32_t hash) = 0;
-
-  std::vector<MethodInfo> methods_;
+  // header and letter are input/output parameters.
+  // HandleEnvelope reads first the input and if everything is parsed fine, it sends
+  // back another header, letter pair.
+  virtual Status HandleEnvelope(base::PODArray<uint8_t>* header,
+                                base::PODArray<uint8_t>* letter) = 0;
 };
 
 class RpcServiceInterface {
  public:
   virtual ~RpcServiceInterface() {};
 
-  // The ownership is passed to the caller.
-  virtual RpcServiceDescriptor* GetDescriptor() const;
+  // A factory method creating a handler that should handles requests for a single connection.
+  // The ownership over handler is passed to the caller.
+  virtual RpcConnectionBridge* CreateConnectionBridge() = 0;
 };
-
 
 class RpcServer {
  public:
@@ -65,7 +54,7 @@ class RpcServer {
  private:
   unsigned short port_ = 0;
   std::unique_ptr<AcceptServer> acc_server_;
-  std::unique_ptr<RpcServiceDescriptor> service_descr_;
+  AcceptServer::ConnectionFactory cf_;
 };
 
 }  // namespace util
