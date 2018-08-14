@@ -6,8 +6,14 @@ include(CTest)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 enable_language(CXX C)
 
-# Set targets in folders
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+# Check target architecture
+if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "Gaia requires a 64bit target architecture.")
+endif()
+
+if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+  message(FATAL_ERROR "Requires running on linux, found ${CMAKE_SYSTEM_NAME} instead")
+endif()
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
