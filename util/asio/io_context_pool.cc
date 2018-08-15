@@ -178,10 +178,12 @@ asio::io_context::id round_robin::rr_service::id;
 
 thread_local size_t IoContextPool::context_indx_ = 0;
 
-IoContextPool::IoContextPool(std::size_t pool_size)
-  : context_arr_(pool_size), thread_arr_(pool_size) {
+IoContextPool::IoContextPool(std::size_t pool_size) {
   if (pool_size == 0)
     pool_size = std::thread::hardware_concurrency();
+  context_arr_.resize(pool_size);
+  thread_arr_.resize(pool_size);
+
   for (size_t i = 0; i < pool_size; ++i) {
     context_arr_[i] = std::make_shared<asio::io_context>();
   }
