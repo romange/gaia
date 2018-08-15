@@ -8,10 +8,15 @@
 #include "base/logging.h"
 #include "base/walltime.h"
 
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+
 #include "util/asio/io_context_pool.h"
 #include "util/rpc/rpc_server.h"
 
 namespace util {
+
+using namespace boost;
+using asio::ip::tcp;
 
 class RpcTestBridge final : public RpcConnectionBridge {
  public:
@@ -32,30 +37,37 @@ class RpcTestInterface final : public RpcServiceInterface {
 class RpcServerTest : public testing::Test {
 protected:
   static void SetUpTestCase() {
-    rpc_server_.reset(new RpcServer(0));
     pool_.reset(new IoContextPool);
   }
 
   static void TearDownTestCase() {
-    rpc_server_.reset();
+    pool_.reset();
   }
 
   void SetUp() override {
     service_.reset(new RpcTestInterface);
+    rpc_server_.reset(new RpcServer(0));
+    rpc_server_->BindTo(service_.get());
+    rpc_server_->Run(pool_.get());
   }
 
   void TearDown() override {}
 
   std::unique_ptr<RpcTestInterface> service_;
-  static std::unique_ptr<RpcServer> rpc_server_;
+  std::unique_ptr<RpcServer> rpc_server_;
   static std::unique_ptr<IoContextPool> pool_;
 };
 
-std::unique_ptr<RpcServer> RpcServerTest::rpc_server_;
 std::unique_ptr<IoContextPool> RpcServerTest::pool_;
 
 TEST_F(RpcServerTest, Basic) {
+  auto& cntx = pool_->GetNextContext();
+  tcp::socket sock(cntx);
+  tcp::endpoint endpoint(tcp::v4(), rpc_server_->port());
+  system::error_code ec;
+  sock.connect(endpoint, ec);
 
+  EXPECT_EQ(system::error_code{}, ec);
 }
 
 }  // namespace util

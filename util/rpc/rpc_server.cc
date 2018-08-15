@@ -92,6 +92,7 @@ void RpcServer::Run(IoContextPool* pool) {
 
   acc_server_.reset(new AcceptServer(port_, pool, cf_));
   acc_server_->Run();
+  port_ = acc_server_->port();
 }
 
 void RpcServer::Wait() {

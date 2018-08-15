@@ -16,9 +16,21 @@ using asio::ip::tcp;
 
 AcceptServer::AcceptServer(unsigned short port, IoContextPool* pool, ConnectionFactory cf)
      :pool_(pool), io_cntx_(pool->GetNextContext()),
-      acceptor_(io_cntx_, tcp::endpoint(tcp::v4(), port)),
+      acceptor_(io_cntx_),
       signals_(io_cntx_, SIGINT, SIGTERM),
       cf_(cf) {
+  tcp::endpoint endpoint(tcp::v4(), port);
+  acceptor_.open(endpoint.protocol());
+  acceptor_.set_option(tcp::acceptor::reuse_address(true));
+  acceptor_.bind(endpoint);
+
+  constexpr int kMaxBacklogPendingConnections = 64;
+  acceptor_.listen(kMaxBacklogPendingConnections);
+  tcp::endpoint le = acceptor_.local_endpoint();
+  port_ = le.port();
+
+  LOG(INFO) << "AcceptServer - listening on port " << port_;
+
   signals_.async_wait(
   [this](system::error_code /*ec*/, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous

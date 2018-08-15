@@ -48,6 +48,7 @@ class RpcServer {
 
   void Run(IoContextPool* pool);
   void Wait();
+  unsigned short port() const { return port_; }
 
  protected:
 

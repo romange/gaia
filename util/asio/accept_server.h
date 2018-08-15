@@ -29,6 +29,7 @@ class AcceptServer {
   void Run();
   void Wait();
 
+  unsigned short port() const { return port_;}
  private:
   void RunInIOThread();
 
@@ -45,6 +46,7 @@ class AcceptServer {
   ::boost::asio::signal_set signals_;
   fibers_ext::Done done_;
   ConnectionFactory cf_;
+  unsigned short port_;
 };
 
 }  // namespace util
