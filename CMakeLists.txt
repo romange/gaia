@@ -36,7 +36,7 @@ set(BUILD_TESTING OFF)
 set(CCTZ_INCLUDE_DIRS ${CCTZ_INCLUDE_DIR})
 set(GOLD_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-implicit-fallthrough")
 add_subdirectory(abseil-cpp)
 set(CMAKE_CXX_FLAGS "${GOLD_CXX_FLAGS}")
 

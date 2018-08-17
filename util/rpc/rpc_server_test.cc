@@ -80,14 +80,15 @@ TEST_F(RpcServerTest, Basic) {
   sock.connect(endpoint, ec);
   ASSERT_EQ(system::error_code{}, ec);
 
-  string control("hello"), message("world!");
+  string control("Hello "), message("world!!!");
+
   size_t sz = asio::write(sock, make_buffer_seq(control, message), ec);
-  LOG(INFO) << "After sockwrite";
+  LOG(INFO) << "After sockwrite " << sz;
 
   ASSERT_EQ(system::error_code{}, ec);
   EXPECT_EQ(control.size() + message.size(), sz);
 
-  //sz = asio::read(sock, make_buffer_seq(control, message), ec);
+  sz = asio::read(sock, make_buffer_seq(control, message), ec);
   // ASSERT_EQ(system::error_code{}, ec);
 }
 

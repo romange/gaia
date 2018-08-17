@@ -46,7 +46,7 @@ RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
-  VLOG(2) << "RpcConnectionHandler::HandleRequest " << socket_.local_endpoint();
+  VLOG(2) << "RpcConnectionHandler " << socket_.remote_endpoint();
 
   rpc::Frame frame;
   system::error_code ec = frame.Read(&socket_);

@@ -59,7 +59,7 @@ void AcceptServer::RunInIOThread() {
          CHECK(!handler);
          break; // TODO: To refine it.
       } else {
-        VLOG(1) << "Accepted socket " << handler->socket().local_endpoint();
+        VLOG(1) << "Accepted socket " << handler->socket().remote_endpoint();
         CHECK_NOTNULL(handler);
         clist.push_back(*handler);
         DCHECK(!clist.empty());
@@ -104,11 +104,11 @@ auto AcceptServer::AcceptFiber(fibers::condition_variable* done) -> AcceptResult
 
 
 void AcceptServer::Run() {
-  was_run_ = true;
   asio::post(io_cntx_, [this] {
       fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this);
       srv_fb.detach();
     });
+  was_run_ = true;
 }
 
 void AcceptServer::Wait() {

@@ -33,7 +33,7 @@ void ConnectionHandler::Run() {
 void ConnectionHandler::RunInIOThread() {
   VLOG(1) << "ConnectionHandler::RunInIOThread";
   try {
-    while (true) {
+    while (socket_.is_open()) {
       system::error_code ec = HandleRequest();
       if (ec) {
         if (ec != asio::error::eof) {

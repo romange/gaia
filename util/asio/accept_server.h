@@ -28,7 +28,11 @@ class AcceptServer {
   ~AcceptServer();
 
   void Run();
-  void Stop() { acceptor_.close(); }
+
+  void Stop() {
+    acceptor_.close();
+    signals_.cancel();
+  }
 
   void Wait();
 
