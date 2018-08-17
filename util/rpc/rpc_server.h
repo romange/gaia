@@ -47,6 +47,9 @@ class RpcServer {
   void BindTo(RpcServiceInterface* iface);
 
   void Run(IoContextPool* pool);
+
+  void Stop();
+
   void Wait();
   unsigned short port() const { return port_; }
 

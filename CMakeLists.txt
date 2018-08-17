@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.4)
 
 # package information
 set(PACKAGE_NAME      "gaia")
@@ -34,7 +34,11 @@ endif ()
 set(ABSL_CCTZ_TARGET TRDP::cctz)
 set(BUILD_TESTING OFF)
 set(CCTZ_INCLUDE_DIRS ${CCTZ_INCLUDE_DIR})
+set(GOLD_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
 add_subdirectory(abseil-cpp)
+set(CMAKE_CXX_FLAGS "${GOLD_CXX_FLAGS}")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(base)

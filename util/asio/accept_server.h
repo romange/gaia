@@ -25,8 +25,11 @@ class AcceptServer {
                                            condition_variable* done)> ConnectionFactory;
 
   AcceptServer(unsigned short port, IoContextPool* pool, ConnectionFactory cf);
+  ~AcceptServer();
 
   void Run();
+  void Stop() { acceptor_.close(); }
+
   void Wait();
 
   unsigned short port() const { return port_;}
@@ -46,6 +49,7 @@ class AcceptServer {
   ::boost::asio::signal_set signals_;
   fibers_ext::Done done_;
   ConnectionFactory cf_;
+  bool was_run_ = false;
   unsigned short port_;
 };
 

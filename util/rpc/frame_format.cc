@@ -4,7 +4,6 @@
 
 #include "util/rpc/frame_format.h"
 
-#include <boost/asio/completion_condition.hpp>
 #include <boost/asio/read.hpp>
 
 #include "base/bits.h"
@@ -29,10 +28,7 @@ namespace {
 constexpr uint8 kHeader[] = "URPC";
 
 inline uint8 SizeByteCountMinus1(uint32 size) {
-  if (size > 255) {
-    return Bits::FindMSBSetNonZero(size) / 8;
-  }
-  return 0;
+  return size <= 255 ? 0 : Bits::FindMSBSetNonZero(size) / 8;
 }
 
 }  // namespace
@@ -52,7 +48,7 @@ error_code Frame::Read(socket_t* input) {
   uint8 buf[kMaxByteSize + /* a little extra */ 8];
 
   error_code ec;
-  size_t read = asio::async_read(*input, asio::buffer(buf), asio::transfer_exactly(kMinByteSize),
+  size_t read = asio::async_read(*input, asio::buffer(buf, kMinByteSize),
                                  yield[ec]);
   if (ec) {
     return ec;
@@ -62,6 +58,7 @@ error_code Frame::Read(socket_t* input) {
   if (kHeaderVal !=  LittleEndian::Load32(buf)) {
     return errc::make_error_code(errc::illegal_byte_sequence);
   }
+
   if (buf[4] >> 4 != 0) { // version check
     return errc::make_error_code(errc::illegal_byte_sequence);
   }
@@ -90,6 +87,26 @@ error_code Frame::Read(socket_t* input) {
       byte_mask(msg_sz_len_minus1);
 
   return error_code{};
+}
+
+unsigned Frame::Write(uint8* dest) const {
+  LittleEndian::Store32(dest, kHeaderVal);
+  dest += 4;
+  const uint8 msg_bytes_minus1 = SizeByteCountMinus1(letter_size);
+  const uint8 cntrl_bytes_minus1 = SizeByteCountMinus1(header_size);
+
+  DCHECK_LT(msg_bytes_minus1, 4);
+  DCHECK_LT(cntrl_bytes_minus1, 4);
+
+  uint64_t version = cntrl_bytes_minus1 | (msg_bytes_minus1 << 2) | (0 << 4);
+
+  LittleEndian::Store64(dest, (rpc_id << 8) | version); dest += 8;
+
+  LittleEndian::Store32(dest, header_size);
+  dest += (cntrl_bytes_minus1 + 1);
+  LittleEndian::Store32(dest, letter_size);
+
+  return 4 + 1 /* version */ + 7 /* rpc_id */ + cntrl_bytes_minus1 + msg_bytes_minus1 + 2;
 }
 
 #if 0

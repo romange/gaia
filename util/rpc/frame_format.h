@@ -46,9 +46,13 @@ public:
         other.letter_size == letter_size;
   }
 
-  friend std::ostream& operator<<(std::ostream& o, const Frame& frame);
+  // friend std::ostream& operator<<(std::ostream& o, const Frame& frame);
 
   uint32 total_size() const { return header_size + letter_size; }
+
+  // dest must be at least kMaxByteSize size.
+  // Returns the exact number of bytes written to the buffer (less or equal to kMaxByteSize).
+  unsigned Write(uint8* dest) const;
 };
 
 

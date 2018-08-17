@@ -10,9 +10,10 @@
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/completion_condition.hpp>
 #include <boost/asio/read.hpp>
-
+#include <boost/asio/write.hpp>
 #include "util/asio/connection_handler.h"
 #include "util/asio/accept_server.h"
+#include "util/asio/asio_utils.h"
 #include "util/asio/yield.h"
 
 #include "util/rpc/frame_format.h"
@@ -45,8 +46,11 @@ RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
+  VLOG(2) << "RpcConnectionHandler::HandleRequest " << socket_.local_endpoint();
+
   rpc::Frame frame;
   system::error_code ec = frame.Read(&socket_);
+  VLOG(1) << "Frame read " << ec;
   if (ec)
     return ec;
 
@@ -55,13 +59,12 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
 
   header_.resize(frame.header_size);
+  letter_.resize(frame.letter_size);
+
   size_t sz;
 
-  std::array<asio::mutable_buffer, 2> buffers =
-    {asio::mutable_buffer{header_.data(), frame.header_size},
-     asio::mutable_buffer{letter_.data(), frame.letter_size}};
-
-  sz = asio::async_read(socket_, buffers, yield[ec]);
+  auto rbuf_seq = make_buffer_seq(header_, letter_);
+  sz = asio::async_read(socket_, rbuf_seq, yield[ec]);
   if (ec) return ec;
   CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
@@ -69,6 +72,17 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   if (!status.ok()) {
     return errc::make_error_code(errc::bad_message);
   }
+
+  frame.header_size = header_.size();
+  frame.letter_size = letter_.size();
+  uint8_t buf[rpc::Frame::kMaxByteSize];
+  auto fsz = frame.Write(buf);
+
+  auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
+  sz = asio::async_write(socket_, wbuf_seq, yield[ec]);
+  if (ec) return ec;
+  CHECK_EQ(sz, frame.header_size + frame.letter_size + fsz);
+
   return system::error_code{};
 }
 
@@ -77,7 +91,6 @@ RpcServer::RpcServer(unsigned short port) : port_(port) {
 }
 
 RpcServer::~RpcServer() {
-
 }
 
 void RpcServer::BindTo(RpcServiceInterface* iface) {
@@ -93,6 +106,11 @@ void RpcServer::Run(IoContextPool* pool) {
   acc_server_.reset(new AcceptServer(port_, pool, cf_));
   acc_server_->Run();
   port_ = acc_server_->port();
+}
+
+void RpcServer::Stop() {
+  CHECK(acc_server_);
+  acc_server_->Stop();
 }
 
 void RpcServer::Wait() {

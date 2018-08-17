@@ -31,6 +31,7 @@ void ConnectionHandler::Run() {
 *   fiber function per server connection
 *****************************************************************************/
 void ConnectionHandler::RunInIOThread() {
+  VLOG(1) << "ConnectionHandler::RunInIOThread";
   try {
     while (true) {
       system::error_code ec = HandleRequest();
