@@ -3,6 +3,7 @@
 //
 #include <chrono>
 #include <memory>
+#include <experimental/optional>
 
 #include "base/gtest.h"
 #include "base/logging.h"
@@ -56,6 +57,12 @@ protected:
     rpc_server_.reset(new RpcServer(0));
     rpc_server_->BindTo(service_.get());
     rpc_server_->Run(pool_.get());
+    sock_.reset(new tcp::socket(pool_->GetNextContext()));
+
+    tcp::endpoint endpoint(tcp::v4(), rpc_server_->port());
+
+    sock_->connect(endpoint, ec_);
+    CHECK(!ec_) << ec_.message();
   }
 
   void TearDown() override {
@@ -65,31 +72,23 @@ protected:
   std::unique_ptr<RpcTestInterface> service_;
   std::unique_ptr<RpcServer> rpc_server_;
   static std::unique_ptr<IoContextPool> pool_;
+  std::unique_ptr<tcp::socket> sock_;
+  system::error_code ec_;
 };
 
 std::unique_ptr<IoContextPool> RpcServerTest::pool_;
 
 
-TEST_F(RpcServerTest, Basic) {
-  asio::io_context cntx;
-  // cntx.run();
-  // auto& cntx = pool_->GetNextContext();
-  tcp::socket sock(cntx);
-  tcp::endpoint endpoint(tcp::v4(), rpc_server_->port());
-  system::error_code ec;
-  sock.connect(endpoint, ec);
-  ASSERT_EQ(system::error_code{}, ec);
-
+TEST_F(RpcServerTest, BadHeader) {
+  // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
 
-  size_t sz = asio::write(sock, make_buffer_seq(control, message), ec);
-  LOG(INFO) << "After sockwrite " << sz;
-
-  ASSERT_EQ(system::error_code{}, ec);
+  size_t sz = asio::write(*sock_, make_buffer_seq(control, message), ec_);
+  ASSERT_FALSE(ec_);
   EXPECT_EQ(control.size() + message.size(), sz);
 
-  sz = asio::read(sock, make_buffer_seq(control, message), ec);
-  // ASSERT_EQ(system::error_code{}, ec);
+  sz = asio::read(*sock_, make_buffer_seq(control, message), ec_);
+  ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
 }  // namespace util

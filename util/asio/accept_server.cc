@@ -72,13 +72,13 @@ void AcceptServer::RunInIOThread() {
     LOG(WARNING) << ": caught exception : " << ex.what();
   }
 
-  LOG(INFO) << "Cleaning " << clist.size() << " connections";
+  VLOG(1) << "Cleaning " << clist.size() << " connections";
 
   for (auto it = clist.begin(); it != clist.end(); ++it) {
     it->socket().close();
   }
 
-  LOG(INFO) << "Waiting for connections to close";
+  VLOG(1) << "Waiting for connections to close";
 
   fibers::mutex mtx;
   std::unique_lock<fibers::mutex> lk(mtx);
