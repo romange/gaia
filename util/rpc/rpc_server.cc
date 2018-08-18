@@ -19,6 +19,8 @@
 #include "util/rpc/frame_format.h"
 
 namespace util {
+namespace rpc {
+
 using namespace boost;
 using namespace system;
 using std::string;
@@ -29,19 +31,19 @@ class RpcConnectionHandler : public ConnectionHandler {
   RpcConnectionHandler(asio::io_context* io_svc,  // not owned.
                        fibers::condition_variable* done,  // not owned
                        // owned by the instance.
-                       RpcConnectionBridge* bridge);
+                       ConnectionBridge* bridge);
 
   system::error_code HandleRequest() final override;
 
  private:
   base::PODArray<uint8_t> header_, letter_;
-  std::unique_ptr<RpcConnectionBridge> bridge_;
+  std::unique_ptr<ConnectionBridge> bridge_;
 };
 
 
 RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
                                            fibers::condition_variable* done,
-                                           RpcConnectionBridge* bridge)
+                                           ConnectionBridge* bridge)
     : ConnectionHandler(io_svc, done), bridge_(bridge) {
 }
 
@@ -86,21 +88,21 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   return system::error_code{};
 }
 
-RpcServer::RpcServer(unsigned short port) : port_(port) {
+Server::Server(unsigned short port) : port_(port) {
 
 }
 
-RpcServer::~RpcServer() {
+Server::~Server() {
 }
 
-void RpcServer::BindTo(RpcServiceInterface* iface) {
-  cf_ = [iface](io_context* cntx, fibers::condition_variable* done) -> RpcConnectionHandler* {
-    RpcConnectionBridge* bridge = iface->CreateConnectionBridge();
+void Server::BindTo(ServiceInterface* iface) {
+  cf_ = [iface](io_context* cntx, fibers::condition_variable* done) -> ConnectionHandler* {
+    ConnectionBridge* bridge = iface->CreateConnectionBridge();
     return new RpcConnectionHandler(cntx, done, bridge);
   };
 }
 
-void RpcServer::Run(IoContextPool* pool) {
+void Server::Run(IoContextPool* pool) {
   CHECK(cf_) << "Must call BindTo before running Run(...)";
 
   acc_server_.reset(new AcceptServer(port_, pool, cf_));
@@ -108,14 +110,15 @@ void RpcServer::Run(IoContextPool* pool) {
   port_ = acc_server_->port();
 }
 
-void RpcServer::Stop() {
+void Server::Stop() {
   CHECK(acc_server_);
   acc_server_->Stop();
 }
 
-void RpcServer::Wait() {
+void Server::Wait() {
   acc_server_->Wait();
   cf_ = nullptr;
 }
 
+}  // namespace rpc
 }  // namespace util

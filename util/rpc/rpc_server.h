@@ -18,10 +18,11 @@ namespace util {
 class AcceptServer;
 class IoContextPool;
 
+namespace rpc {
 
-class RpcConnectionBridge {
+class ConnectionBridge {
  public:
-  virtual ~RpcConnectionBridge() {}
+  virtual ~ConnectionBridge() {}
 
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
@@ -30,35 +31,34 @@ class RpcConnectionBridge {
                                 base::PODArray<uint8_t>* letter) = 0;
 };
 
-class RpcServiceInterface {
+class ServiceInterface {
  public:
-  virtual ~RpcServiceInterface() {};
+  virtual ~ServiceInterface() {}
 
   // A factory method creating a handler that should handles requests for a single connection.
   // The ownership over handler is passed to the caller.
-  virtual RpcConnectionBridge* CreateConnectionBridge() = 0;
+  virtual ConnectionBridge* CreateConnectionBridge() = 0;
 };
 
-class RpcServer {
+class Server {
  public:
-  RpcServer(unsigned short port);
-  ~RpcServer();
+  explicit Server(unsigned short port);
+  ~Server();
 
-  void BindTo(RpcServiceInterface* iface);
+  void BindTo(ServiceInterface* iface);
 
   void Run(IoContextPool* pool);
 
   void Stop();
 
   void Wait();
-  unsigned short port() const { return port_; }
-
- protected:
+  uint16_t port() const { return port_; }
 
  private:
-  unsigned short port_ = 0;
+  uint16_t port_ = 0;
   std::unique_ptr<AcceptServer> acc_server_;
   AcceptServer::ConnectionFactory cf_;
 };
+}  // namespace rpc
 
 }  // namespace util

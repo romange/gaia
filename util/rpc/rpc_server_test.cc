@@ -16,14 +16,16 @@
 #include "util/asio/io_context_pool.h"
 #include "util/asio/asio_utils.h"
 #include "util/rpc/rpc_server.h"
+#include "util/rpc/frame_format.h"
 
 namespace util {
+namespace rpc {
 
 using namespace std;
 using namespace boost;
 using asio::ip::tcp;
 
-class RpcTestBridge final : public RpcConnectionBridge {
+class TestBridge final : public ConnectionBridge {
  public:
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
@@ -34,13 +36,13 @@ class RpcTestBridge final : public RpcConnectionBridge {
   }
 };
 
-class RpcTestInterface final : public RpcServiceInterface {
+class TestInterface final : public ServiceInterface {
  public:
-  RpcConnectionBridge* CreateConnectionBridge() override { return new RpcTestBridge{}; }
+  ConnectionBridge* CreateConnectionBridge() override { return new TestBridge{}; }
 };
 
-class RpcServerTest : public testing::Test {
-protected:
+class ServerTest : public testing::Test {
+ protected:
   static void SetUpTestCase() {
     pool_.reset(new IoContextPool);
     pool_->Run();
@@ -53,8 +55,8 @@ protected:
   }
 
   void SetUp() override {
-    service_.reset(new RpcTestInterface);
-    rpc_server_.reset(new RpcServer(0));
+    service_.reset(new TestInterface);
+    rpc_server_.reset(new Server(0));
     rpc_server_->BindTo(service_.get());
     rpc_server_->Run(pool_.get());
     sock_.reset(new tcp::socket(pool_->GetNextContext()));
@@ -69,17 +71,17 @@ protected:
     rpc_server_.reset();
   }
 
-  std::unique_ptr<RpcTestInterface> service_;
-  std::unique_ptr<RpcServer> rpc_server_;
+  std::unique_ptr<TestInterface> service_;
+  std::unique_ptr<Server> rpc_server_;
   static std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<tcp::socket> sock_;
   system::error_code ec_;
 };
 
-std::unique_ptr<IoContextPool> RpcServerTest::pool_;
+std::unique_ptr<IoContextPool> ServerTest::pool_;
 
 
-TEST_F(RpcServerTest, BadHeader) {
+TEST_F(ServerTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
 
@@ -91,4 +93,27 @@ TEST_F(RpcServerTest, BadHeader) {
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
+TEST_F(ServerTest, Basic) {
+  // Must be large enough to pass the initial RPC server read.
+  string header("Hello "), message("world!!!");
+
+  uint8_t buf[Frame::kMaxByteSize];
+
+  Frame frame(1, header.size(), message.size());
+  size_t fr_sz = frame.Write(buf);
+
+  size_t sz = asio::write(*sock_, make_buffer_seq(asio::buffer(buf, fr_sz), header, message), ec_);
+  ASSERT_FALSE(ec_);
+  EXPECT_EQ(fr_sz + header.size() + message.size(), sz);
+
+  ec_ = frame.Read(sock_.get());
+  ASSERT_FALSE(ec_);
+  EXPECT_EQ(frame.header_size, header.size());
+  EXPECT_EQ(frame.letter_size, message.size());
+
+  sz = asio::read(*sock_, make_buffer_seq(header, message), ec_);
+  ASSERT_FALSE(ec_) << ec_.message();
+}
+
+}  // namespace rpc
 }  // namespace util
