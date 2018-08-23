@@ -190,8 +190,8 @@ public:
 // Specialize asio_handler_invoke hook to ensure that any exceptions thrown
 // from the handler are propagated back to the caller
 template< typename Fn, typename T >
-void asio_handler_invoke( Fn fn, yield_handler< T > * h) {
-        fn();
+void asio_handler_invoke(Fn&& fn, yield_handler<T>*) {
+    fn();
 }
 
 //[fibers_asio_async_result_base

@@ -70,7 +70,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   if (ec) return ec;
   CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
-  Status status = bridge_->HandleEnvelope(&header_, &letter_);
+  Status status = bridge_->HandleEnvelope(frame.rpc_id, &header_, &letter_);
   if (!status.ok()) {
     return errc::make_error_code(errc::bad_message);
   }

@@ -27,7 +27,7 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual Status HandleEnvelope(base::PODArray<uint8_t>* header,
+  virtual Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
                                 base::PODArray<uint8_t>* letter) = 0;
 };
 
@@ -59,6 +59,6 @@ class Server {
   std::unique_ptr<AcceptServer> acc_server_;
   AcceptServer::ConnectionFactory cf_;
 };
-}  // namespace rpc
 
+}  // namespace rpc
 }  // namespace util
