@@ -1,1 +1,13 @@
 -isystem/opt/boost_1_67_0/include/
+-I.
+-Igenfiles
+-Iabseil-cpp
+-Ithird_party/libs/benchmark/include
+-Ithird_party/libs/gtest/include
+-Ithird_party/libs/gflags/include
+-Ithird_party/libs/glog/include
+-Ithird_party/libs/dconv/include
+-Ithird_party/libs/folly/include
+-Ithird_party/libs/zstd/include
+-Ithird_party/libs/protobuf/include
+-Ithird_party/libs/pmr/include

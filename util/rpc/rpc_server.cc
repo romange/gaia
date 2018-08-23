@@ -15,7 +15,6 @@
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/yield.h"
-
 #include "util/rpc/frame_format.h"
 
 namespace util {

@@ -33,5 +33,5 @@ class Done {
   bool                                  ready_ = false;
 };
 
-}  // namespace fibers
+}  // namespace fibers_ext
 }  // namespace util

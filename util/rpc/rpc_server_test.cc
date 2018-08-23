@@ -3,7 +3,6 @@
 //
 #include <chrono>
 #include <memory>
-#include <experimental/optional>
 
 #include "base/gtest.h"
 #include "base/logging.h"
@@ -15,6 +14,7 @@
 
 #include "util/asio/io_context_pool.h"
 #include "util/asio/asio_utils.h"
+#include "util/asio/channel.h"
 #include "util/rpc/rpc_server.h"
 #include "util/rpc/frame_format.h"
 
@@ -114,6 +114,22 @@ TEST_F(ServerTest, Basic) {
   sz = asio::read(*sock_, make_buffer_seq(header, message), ec_);
   ASSERT_FALSE(ec_) << ec_.message();
 }
+
+
+TEST_F(ServerTest, Socket) {
+  tcp::resolver resolver{pool_->GetNextContext()};
+  auto result = resolver.resolve(tcp::v4(), "localhost", std::to_string(rpc_server_->port()));
+  ASSERT_EQ(1, result.size());
+
+  ASSERT_TRUE(result.begin() != result.end());
+  const auto& ep = *result.begin();
+  Channel channel(pool_->GetNextContext());
+
+  system::error_code ec = channel.Connect(ep, 100);
+  ASSERT_FALSE(ec);
+}
+
+
 
 }  // namespace rpc
 }  // namespace util

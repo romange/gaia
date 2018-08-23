@@ -32,11 +32,12 @@ void ConnectionHandler::Run() {
 *****************************************************************************/
 void ConnectionHandler::RunInIOThread() {
   VLOG(1) << "ConnectionHandler::RunInIOThread";
+  system::error_code ec;
   try {
     while (socket_.is_open()) {
-      system::error_code ec = HandleRequest();
+      ec = HandleRequest();
       if (ec) {
-        if (ec != asio::error::eof) {
+        if (ec != error::eof && ec != error::operation_aborted) {
           LOG(WARNING) << "Error : " << ec.message();
         }
         break;
@@ -47,7 +48,8 @@ void ConnectionHandler::RunInIOThread() {
     ex.what();
   }
 
-  socket_.close();
+  if (socket_.is_open())
+    socket_.close();  // Could be closed already.
   hook_.unlink();   // We unlink manually because we delete 'this' later.
   on_exit_.notify_one();
 

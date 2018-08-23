@@ -30,7 +30,8 @@ class AcceptServer {
   void Run();
 
   void Stop() {
-    acceptor_.close();
+    // No need to close acceptor because signals.cancel will trigger its callback that
+    // will close it anyway.
     signals_.cancel();
   }
 
