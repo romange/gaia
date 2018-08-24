@@ -44,6 +44,7 @@ class ConnectionHandler {
  public:
   using io_context = ::boost::asio::io_context;
   using socket_t = ::boost::asio::ip::tcp::socket;
+  typedef ::boost::intrusive_ptr<ConnectionHandler>  ptr_t;
 
   detail::connection_hook hook_;
 
@@ -61,14 +62,26 @@ class ConnectionHandler {
   typedef detail::intr::member_hook<ConnectionHandler, detail::connection_hook,
                                     &ConnectionHandler::hook_> member_hook_t;
 
+  friend void intrusive_ptr_add_ref(ConnectionHandler * ctx) noexcept {
+    ctx->use_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  friend void intrusive_ptr_release(ConnectionHandler * ctx) noexcept {
+    if (1 == ctx->use_count_.fetch_sub(1, std::memory_order_release) ) {
+      std::atomic_thread_fence( std::memory_order_acquire);
+      delete ctx;
+    }
+  }
  protected:
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
   socket_t socket_;
   ConnectionServerNotifier* notifier_;
+
  private:
   void RunInIOThread();
+  std::atomic<std::uint32_t>  use_count_{0};
 };
 
 // TODO: Do we need list or slist?

@@ -127,6 +127,9 @@ TEST_F(ServerTest, Socket) {
 
   system::error_code ec = channel.Connect(ep, 100);
   ASSERT_FALSE(ec);
+  std::string send_msg(500, 'a');
+  size_t sz = asio::write(channel.socket(), make_buffer_seq(send_msg), ec_);
+  EXPECT_EQ(500, sz);
 }
 
 

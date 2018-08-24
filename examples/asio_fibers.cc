@@ -35,20 +35,21 @@ DEFINE_int32(io_threads, 0, "");
 using asio::ip::tcp;
 using util::IoContextPool;
 using util::fibers_ext::yield;
+using util::ConnectionServerNotifier;
 
 http::VarzQps qps("echo-qps");
 
 
 class PingConnectionHandler : public util::ConnectionHandler {
  public:
-  PingConnectionHandler(asio::io_context* io_svc, boost::fibers::condition_variable* done);
+  PingConnectionHandler(asio::io_context* io_svc, ConnectionServerNotifier* done);
 
   boost::system::error_code HandleRequest() final override;
 };
 
 PingConnectionHandler::PingConnectionHandler(
-  asio::io_context* io_svc, boost::fibers::condition_variable* done)
-    : util::ConnectionHandler(io_svc, done) {
+  asio::io_context* io_svc, ConnectionServerNotifier* notifier)
+    : util::ConnectionHandler(io_svc, notifier) {
 }
 
 boost::system::error_code PingConnectionHandler::HandleRequest() {
@@ -150,7 +151,7 @@ int main(int argc, char **argv) {
     http_server.reset(new http::Server(FLAGS_http_port));
     util::Status status = http_server->Start();
     CHECK(status.ok()) << status;
-    auto cf = [](asio::io_context* cntx, fibers::condition_variable* done) {
+    auto cf = [](asio::io_context* cntx, ConnectionServerNotifier* done) {
       return new PingConnectionHandler(cntx, done);
     };
     accept_server.reset(new util::AcceptServer(9999, &pool, cf));

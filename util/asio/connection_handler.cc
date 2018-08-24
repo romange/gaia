@@ -33,8 +33,9 @@ ConnectionHandler::~ConnectionHandler() {
 
 void ConnectionHandler::Run() {
   auto& cntx = socket_.get_io_context();
-  cntx.post([this] {
-    fiber(&ConnectionHandler::RunInIOThread, this).detach();
+  cntx.post([guard = ptr_t(this)] {
+    // As long as fiber is running, 'this' is protected from deletion.
+    fiber(&ConnectionHandler::RunInIOThread, std::move(guard)).detach();
   });
 }
 
@@ -63,15 +64,17 @@ void ConnectionHandler::RunInIOThread() {
     socket_.close(ec);
 
   notifier_->Unlink(&hook_);
-  delete this;
 }
 
 void ConnectionHandler::Close() {
   auto& cntx = socket_.get_executor().context();
-  cntx.post([this] {
+  // We guard increment the reference of this to allow safe callback execution even if
+  // RunInIOThread released the ownership.
+  cntx.post([guard = ptr_t(this)] {
     system::error_code ec;
-    socket_.close(ec);
-    LOG_IF(INFO, !ec) << "Error closing socket " << ec.message();
+    if (guard->socket_.is_open())
+      guard->socket_.close(ec);
+    LOG_IF(INFO, ec) << "Error closing socket " << ec.message();
   });
 }
 

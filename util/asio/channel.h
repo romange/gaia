@@ -8,11 +8,16 @@ namespace util {
 
 class Channel {
  public:
-  explicit Channel(boost::asio::io_context& cntx) : sock_(cntx, boost::asio::ip::tcp::v4()) {}
+  using io_context = boost::asio::io_context;
+  using socket_t = boost::asio::ip::tcp::socket;
+
+  explicit Channel(io_context& cntx) : sock_(cntx, boost::asio::ip::tcp::v4()) {}
+
   boost::system::error_code Connect(const boost::asio::ip::tcp::endpoint& endpoint, uint32_t ms);
 
+  socket_t& socket() { return sock_; }
  private:
-  boost::asio::ip::tcp::socket sock_;
+  socket_t sock_;
   bool is_connected_ = false;
 };
 

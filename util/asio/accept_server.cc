@@ -88,7 +88,7 @@ void AcceptServer::RunInIOThread() {
 
   done_.notify();
 
-  LOG(INFO) << ": echo-server stopped";
+  LOG(INFO) << ": Accept server stopped";
 }
 
 auto AcceptServer::AcceptFiber(ConnectionServerNotifier* notifier) -> AcceptResult {
