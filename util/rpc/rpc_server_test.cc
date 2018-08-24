@@ -59,11 +59,10 @@ class ServerTest : public testing::Test {
     rpc_server_.reset(new Server(0));
     rpc_server_->BindTo(service_.get());
     rpc_server_->Run(pool_.get());
-    sock_.reset(new tcp::socket(pool_->GetNextContext()));
-
+    channel_.reset(new Channel(pool_->GetNextContext()));
     tcp::endpoint endpoint(tcp::v4(), rpc_server_->port());
 
-    sock_->connect(endpoint, ec_);
+    ec_ = channel_->Connect(endpoint, 100);
     CHECK(!ec_) << ec_.message();
   }
 
@@ -74,7 +73,7 @@ class ServerTest : public testing::Test {
   std::unique_ptr<TestInterface> service_;
   std::unique_ptr<Server> rpc_server_;
   static std::unique_ptr<IoContextPool> pool_;
-  std::unique_ptr<tcp::socket> sock_;
+  std::unique_ptr<Channel> channel_;
   system::error_code ec_;
 };
 
@@ -84,34 +83,30 @@ std::unique_ptr<IoContextPool> ServerTest::pool_;
 TEST_F(ServerTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
-
-  size_t sz = asio::write(*sock_, make_buffer_seq(control, message), ec_);
+  ec_ = channel_->Write(make_buffer_seq(control, message));
   ASSERT_FALSE(ec_);
-  EXPECT_EQ(control.size() + message.size(), sz);
 
-  sz = asio::read(*sock_, make_buffer_seq(control, message), ec_);
+  asio::read(channel_->socket(), make_buffer_seq(control, message), ec_);
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
 TEST_F(ServerTest, Basic) {
   // Must be large enough to pass the initial RPC server read.
   string header("Hello "), message("world!!!");
-
   uint8_t buf[Frame::kMaxByteSize];
 
   Frame frame(1, header.size(), message.size());
   size_t fr_sz = frame.Write(buf);
 
-  size_t sz = asio::write(*sock_, make_buffer_seq(asio::buffer(buf, fr_sz), header, message), ec_);
+  ec_ = channel_->Write(make_buffer_seq(asio::buffer(buf, fr_sz), header, message));
   ASSERT_FALSE(ec_);
-  EXPECT_EQ(fr_sz + header.size() + message.size(), sz);
 
-  ec_ = frame.Read(sock_.get());
+  ec_ = frame.Read(&channel_->socket());
   ASSERT_FALSE(ec_);
   EXPECT_EQ(frame.header_size, header.size());
   EXPECT_EQ(frame.letter_size, message.size());
 
-  sz = asio::read(*sock_, make_buffer_seq(header, message), ec_);
+  asio::read(channel_->socket(), make_buffer_seq(header, message), ec_);
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
@@ -128,8 +123,9 @@ TEST_F(ServerTest, Socket) {
   system::error_code ec = channel.Connect(ep, 100);
   ASSERT_FALSE(ec);
   std::string send_msg(500, 'a');
-  size_t sz = asio::write(channel.socket(), make_buffer_seq(send_msg), ec_);
-  EXPECT_EQ(500, sz);
+  ec_ = channel.Write(make_buffer_seq(send_msg));
+
+  ASSERT_FALSE(ec_);
 }
 
 

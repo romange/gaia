@@ -75,17 +75,16 @@ void AcceptServer::RunInIOThread() {
 
   VLOG(1) << "Cleaning " << clist.size() << " connections";
 
-  // We protect clist because we iterate over it and other threads could potentiall unlink
-  // from it.
+  // We protect clist because we iterate over it and other threads could potentialy change it.
   auto lock = notifier.Lock();
   for (auto it = clist.begin(); it != clist.end(); ++it) {
     it->Close();
   }
 
   VLOG(1) << "Waiting for connections to close";
-
   notifier.Wait(lock, [&clist] { return clist.empty(); });
 
+  // Notify that AcceptThread has stopped.
   done_.notify();
 
   LOG(INFO) << ": Accept server stopped";
