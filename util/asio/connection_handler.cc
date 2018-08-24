@@ -8,13 +8,24 @@
 
 #include "base/logging.h"
 
-using boost::fibers::condition_variable;
-using boost::fibers::fiber;
 using namespace boost;
+using namespace boost::asio;
+using fibers::condition_variable;
+using fibers::fiber;
+
 namespace util {
 
-ConnectionHandler::ConnectionHandler(io_context* io_svc, condition_variable* cv )
-    : socket_(*io_svc), on_exit_(*CHECK_NOTNULL(cv)) {
+
+void ConnectionServerNotifier::Unlink(detail::connection_hook* hook) {
+  {
+    auto lock = Lock();
+    hook->unlink();   // We unlink manually because we delete 'this' later.
+  }
+  cnd_.notify_one();
+}
+
+ConnectionHandler::ConnectionHandler(io_context* io_svc, ConnectionServerNotifier* notifier)
+    : socket_(*io_svc), notifier_(CHECK_NOTNULL(notifier)) {
 }
 
 ConnectionHandler::~ConnectionHandler() {
@@ -49,11 +60,20 @@ void ConnectionHandler::RunInIOThread() {
   }
 
   if (socket_.is_open())
-    socket_.close();  // Could be closed already.
-  hook_.unlink();   // We unlink manually because we delete 'this' later.
-  on_exit_.notify_one();
+    socket_.close(ec);
 
+  notifier_->Unlink(&hook_);
   delete this;
 }
+
+void ConnectionHandler::Close() {
+  auto& cntx = socket_.get_executor().context();
+  cntx.post([this] {
+    system::error_code ec;
+    socket_.close(ec);
+    LOG_IF(INFO, !ec) << "Error closing socket " << ec.message();
+  });
+}
+
 
 }  // namespace util

@@ -46,15 +46,16 @@ AcceptServer::~AcceptServer() {
 }
 
 void AcceptServer::RunInIOThread() {
+  // We assume here that intrusive list is thread-safe, i.e. I can safely push_back from one
+  // thread and unlink from another different items. Based on scarce documentation it seems to be fine.
   util::ConnectionHandlerList clist;
   DCHECK(clist.empty());
-  condition_variable empty_list;
-
+  ConnectionServerNotifier notifier;
   system::error_code ec;
   util::ConnectionHandler* handler = nullptr;
   try {
     for (;;) {
-       std::tie(handler,ec) = AcceptFiber(&empty_list);
+       std::tie(handler,ec) = AcceptFiber(&notifier);
        if (ec) {
          CHECK(!handler);
          break; // TODO: To refine it.
@@ -74,25 +75,26 @@ void AcceptServer::RunInIOThread() {
 
   VLOG(1) << "Cleaning " << clist.size() << " connections";
 
+  // We protect clist because we iterate over it and other threads could potentiall unlink
+  // from it.
+  auto lock = notifier.Lock();
   for (auto it = clist.begin(); it != clist.end(); ++it) {
-    it->socket().close();
+    it->Close();
   }
 
   VLOG(1) << "Waiting for connections to close";
 
-  fibers::mutex mtx;
-  std::unique_lock<fibers::mutex> lk(mtx);
-  empty_list.wait(lk, [&clist] { return clist.empty(); });
+  notifier.Wait(lock, [&clist] { return clist.empty(); });
 
   done_.notify();
 
   LOG(INFO) << ": echo-server stopped";
 }
 
-auto AcceptServer::AcceptFiber(fibers::condition_variable* done) -> AcceptResult {
+auto AcceptServer::AcceptFiber(ConnectionServerNotifier* notifier) -> AcceptResult {
   auto& io_cntx = pool_->GetNextContext();
 
-  std::unique_ptr<util::ConnectionHandler> conn(cf_(&io_cntx, done));
+  std::unique_ptr<util::ConnectionHandler> conn(cf_(&io_cntx, notifier));
   system::error_code ec;
   acceptor_.async_accept(conn->socket(), fibers_ext::yield[ec]);
 

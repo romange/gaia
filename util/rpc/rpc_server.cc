@@ -24,11 +24,12 @@ using namespace boost;
 using namespace system;
 using std::string;
 using fibers_ext::yield;
+using boost::asio::io_context;
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
   RpcConnectionHandler(asio::io_context* io_svc,  // not owned.
-                       fibers::condition_variable* done,  // not owned
+                       ConnectionServerNotifier* notifier,  // not owned
                        // owned by the instance.
                        ConnectionBridge* bridge);
 
@@ -41,9 +42,9 @@ class RpcConnectionHandler : public ConnectionHandler {
 
 
 RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
-                                           fibers::condition_variable* done,
+                                           ConnectionServerNotifier* notifier,
                                            ConnectionBridge* bridge)
-    : ConnectionHandler(io_svc, done), bridge_(bridge) {
+    : ConnectionHandler(io_svc, notifier), bridge_(bridge) {
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
@@ -95,9 +96,9 @@ Server::~Server() {
 }
 
 void Server::BindTo(ServiceInterface* iface) {
-  cf_ = [iface](io_context* cntx, fibers::condition_variable* done) -> ConnectionHandler* {
+  cf_ = [iface](io_context* cntx, ConnectionServerNotifier* notifier) -> ConnectionHandler* {
     ConnectionBridge* bridge = iface->CreateConnectionBridge();
-    return new RpcConnectionHandler(cntx, done, bridge);
+    return new RpcConnectionHandler(cntx, notifier, bridge);
   };
 }
 

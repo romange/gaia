@@ -22,7 +22,7 @@ class AcceptServer {
   typedef ::boost::fibers::condition_variable condition_variable;
 
   typedef std::function<ConnectionHandler*(io_context* cntx,
-                                           condition_variable* done)> ConnectionFactory;
+                                           ConnectionServerNotifier* notifier)> ConnectionFactory;
 
   AcceptServer(unsigned short port, IoContextPool* pool, ConnectionFactory cf);
   ~AcceptServer();
@@ -46,7 +46,7 @@ class AcceptServer {
   typedef std::tuple<ConnectionHandler*, ::boost::system::error_code>
     AcceptResult;
 
-  AcceptResult AcceptFiber(condition_variable* done);
+  AcceptResult AcceptFiber(ConnectionServerNotifier* done);
 
   IoContextPool* pool_;
   io_context& io_cntx_;
