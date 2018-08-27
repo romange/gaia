@@ -32,6 +32,7 @@ class TestBridge final : public ConnectionBridge {
   // back another header, letter pair.
   Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
                         base::PODArray<uint8_t>* letter) override {
+    LOG(INFO) << "Got " << rpc_id << ", hs=" << header->size() << ", ls=" << letter->size();
     return Status::OK;
   }
 };
@@ -59,21 +60,21 @@ class ServerTest : public testing::Test {
     rpc_server_.reset(new Server(0));
     rpc_server_->BindTo(service_.get());
     rpc_server_->Run(pool_.get());
-    channel_.reset(new Channel(pool_->GetNextContext()));
-    tcp::endpoint endpoint(tcp::v4(), rpc_server_->port());
-
-    ec_ = channel_->Connect(endpoint, 100);
+    channel_.reset(new ClientChannel(pool_->GetNextContext(), "127.0.0.1",
+                   std::to_string(rpc_server_->port())));
+    ec_ = channel_->Connect(100);
     CHECK(!ec_) << ec_.message();
   }
 
   void TearDown() override {
     rpc_server_.reset();
+    channel_.reset();
   }
 
   std::unique_ptr<TestInterface> service_;
   std::unique_ptr<Server> rpc_server_;
   static std::unique_ptr<IoContextPool> pool_;
-  std::unique_ptr<Channel> channel_;
+  std::unique_ptr<ClientChannel> channel_;
   system::error_code ec_;
 };
 
@@ -112,20 +113,28 @@ TEST_F(ServerTest, Basic) {
 
 
 TEST_F(ServerTest, Socket) {
-  tcp::resolver resolver{pool_->GetNextContext()};
-  auto result = resolver.resolve(tcp::v4(), "localhost", std::to_string(rpc_server_->port()));
-  ASSERT_EQ(1, result.size());
-
-  ASSERT_TRUE(result.begin() != result.end());
-  const auto& ep = *result.begin();
-  Channel channel(pool_->GetNextContext());
-
-  system::error_code ec = channel.Connect(ep, 100);
-  ASSERT_FALSE(ec);
   std::string send_msg(500, 'a');
-  ec_ = channel.Write(make_buffer_seq(send_msg));
-
+  ec_ = channel_->Write(make_buffer_seq(send_msg));
   ASSERT_FALSE(ec_);
+
+  Frame frame;
+
+  ec_ = channel_->Read([&frame] (tcp::socket& s) {
+    return frame.Read(&s);
+  });
+  ASSERT_TRUE(ec_) << ec_.message();
+
+  uint8_t buf[Frame::kMaxByteSize];
+  frame.header_size = send_msg.size();
+  uint64_t fs = frame.Write(buf);
+  while (ec_) {
+    SleepForMilliseconds(10);
+    ec_ = channel_->Write(make_buffer_seq(asio::buffer(buf, fs), send_msg));
+  }
+  ec_ = channel_->Read([&frame] (tcp::socket& s) {
+    return frame.Read(&s);
+  });
+  ASSERT_FALSE(ec_) << ec_.message();
 }
 
 

@@ -34,12 +34,10 @@ public:
   uint32 header_size;
   uint32 letter_size;
 
-  Frame() {}
+  Frame() : rpc_id(1), header_size(0), letter_size(0) {}
   Frame(uint64 r, uint32 cs, uint32 ms) : rpc_id(r), header_size(cs), letter_size(ms) {}
 
   enum { kMinByteSize = 4 + 1 + 7 + 2, kMaxByteSize = 4 + 1 + 7 + 4*2 };
-
-  ::boost::system::error_code Read(socket_t* input);
 
   bool operator==(const Frame& other) const {
     return other.rpc_id == rpc_id && other.header_size == header_size &&
@@ -53,6 +51,8 @@ public:
   // dest must be at least kMaxByteSize size.
   // Returns the exact number of bytes written to the buffer (less or equal to kMaxByteSize).
   unsigned Write(uint8* dest) const;
+
+  ::boost::system::error_code Read(socket_t* input);
 };
 
 
