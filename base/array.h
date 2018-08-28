@@ -43,6 +43,7 @@ class array {
       for (size_t i = 0; i < N; ++i) {
         this->operator[](i) = a[i];
       }
+      return *this;
     }
 
     array(const array& a) {
@@ -51,18 +52,18 @@ class array {
       }
     }
 
-    constexpr static std::size_t size() { return N;}
-
     reference operator[](std::size_t i) { return *reinterpret_cast<pointer>(&array_[i]);}
 
     const_reference operator[](std::size_t i) const {
      return *reinterpret_cast<const_pointer>(&array_[i]);
     }
+
     iterator begin() { return reinterpret_cast<pointer>(array_.begin()); }
     iterator end() { return reinterpret_cast<pointer>(array_.end()); }
     const_iterator begin() const { return reinterpret_cast<const_pointer>(array_.begin()); }
     const_iterator end() const { return reinterpret_cast<const_pointer>(array_.end()); }
 
+    constexpr static std::size_t size() { return N;}
  private:
     typedef typename std::aligned_storage<sizeof(value_type),
                                           std::alignment_of<value_type>::value>::type storage_type;

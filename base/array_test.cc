@@ -49,6 +49,10 @@ TEST(ArrayTest, String) {
   for (const auto& s : d) {
     EXPECT_EQ("ccccc", s);
   }
+  d = a;
+  for (const auto& s : d) {
+    EXPECT_EQ("Roman", s);
+  }
 }
 
 TEST(ArrayTest, Destruct) {
