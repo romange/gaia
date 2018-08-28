@@ -51,7 +51,7 @@ class array {
       }
     }
 
-    constexpr std::size_t size() const { return N;}
+    constexpr static std::size_t size() { return N;}
 
     reference operator[](std::size_t i) { return *reinterpret_cast<pointer>(&array_[i]);}
 
