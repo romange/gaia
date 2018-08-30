@@ -17,9 +17,7 @@ namespace util {
 using chrono::milliseconds;
 namespace error = asio::error;
 
-ClientChannel::~ClientChannel() {
-  shutting_down_ = true;
-  sock_.close();
+ClientChannel::Impl::~Impl() {
   resolver_.cancel();
 
   std::unique_lock<mutex> l(shd_mu_);
@@ -28,8 +26,14 @@ ClientChannel::~ClientChannel() {
   shd_cnd_.wait(l, [this] { return !reconnect_active_;});
 }
 
+ClientChannel::~ClientChannel() {
+  impl_->shutting_down_ = true;
+  sock_.close();
+  impl_.reset();
+}
+
 system::error_code ClientChannel::Connect(uint32_t ms) {
-  CHECK(!hostname_.empty());
+  CHECK(!impl_->hostname_.empty());
 
   asio::steady_timer timer(sock_.get_executor().context(), milliseconds(ms));
 
@@ -38,7 +42,7 @@ system::error_code ClientChannel::Connect(uint32_t ms) {
       // Only then cancel the socket.
       if (!timer_ec && status_ == asio::error::not_connected) {
         sock_.cancel();
-        resolver_.cancel();
+        impl_->resolver_.cancel();
       }
     });
   ResolveAndConnect(timer.expiry());
@@ -55,10 +59,9 @@ void ClientChannel::ResolveAndConnect(const time_point& until) {
   auto sleep_dur = 100ms;
   VLOG(1) << "ClientChannel::ResolveAndConnect";
 
-  while (!shutting_down_ && status_ && steady_clock::now() < until) {
+  while (!impl_->shutting_down_ && status_ && steady_clock::now() < until) {
     system::error_code resolve_ec;
-    auto results = resolver_.async_resolve(tcp::v4(), hostname_, service_,
-                                           fibers_ext::yield[resolve_ec]);
+    auto results = impl_->Resolve(fibers_ext::yield[resolve_ec]);
     if (!resolve_ec) {
       for (auto& ep : results) {
         sock_.async_connect(ep, fibers_ext::yield[status_]);
@@ -67,7 +70,7 @@ void ClientChannel::ResolveAndConnect(const time_point& until) {
       }
     }
     time_point now = steady_clock::now();
-    if (shutting_down_ || now + 2ms >= until) {
+    if (impl_->shutting_down_ || now + 2ms >= until) {
       status_ = error::operation_aborted;
       return;
     }
@@ -82,15 +85,15 @@ void ClientChannel::ResolveAndConnect(const time_point& until) {
 }
 
 void ClientChannel::HandleErrorStatus() {
-  CHECK(!reconnect_active_);
+  CHECK(!impl_->reconnect_active_);
 
-  std::lock_guard<mutex> guard(shd_mu_);
-  if (shutting_down_) {
+  std::lock_guard<mutex> guard(impl_->shd_mu_);
+  if (impl_->shutting_down_) {
     return;
   }
 
   LOG(WARNING) << "Got " << status_.message() << ", reconnecting";
-  reconnect_active_ = true;
+  impl_->reconnect_active_ = true;
 
   sock_.get_executor().context().post([this] {
     fibers::fiber(&ClientChannel::ReconnectFiber, this).detach();
@@ -99,13 +102,11 @@ void ClientChannel::HandleErrorStatus() {
 
 void ClientChannel::ReconnectFiber() {
   ResolveAndConnect(steady_clock::now() + 30s);
-  shd_mu_.lock();
-  reconnect_active_ = false;
-  bool shd = shutting_down_;
-  shd_mu_.unlock();
+
+  bool shd = impl_->UpdateDisconnect();
 
   if (shd) {
-    shd_cnd_.notify_one();
+    impl_->shd_cnd_.notify_one();
   } else {
     if (status_)
       HandleErrorStatus();
