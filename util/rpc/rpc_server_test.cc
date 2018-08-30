@@ -12,11 +12,10 @@
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-#include "util/asio/io_context_pool.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/channel.h"
-#include "util/rpc/rpc_server.h"
 #include "util/rpc/frame_format.h"
+#include "util/rpc/rpc_test_utils.h"
 
 namespace util {
 namespace rpc {
@@ -25,60 +24,7 @@ using namespace std;
 using namespace boost;
 using asio::ip::tcp;
 
-class TestBridge final : public ConnectionBridge {
- public:
-  // header and letter are input/output parameters.
-  // HandleEnvelope reads first the input and if everything is parsed fine, it sends
-  // back another header, letter pair.
-  Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
-                        base::PODArray<uint8_t>* letter) override {
-    LOG(INFO) << "Got " << rpc_id << ", hs=" << header->size() << ", ls=" << letter->size();
-    return Status::OK;
-  }
-};
 
-class TestInterface final : public ServiceInterface {
- public:
-  ConnectionBridge* CreateConnectionBridge() override { return new TestBridge{}; }
-};
-
-class ServerTest : public testing::Test {
- protected:
-  static void SetUpTestCase() {
-    pool_.reset(new IoContextPool);
-    pool_->Run();
-  }
-
-  static void TearDownTestCase() {
-    pool_->Stop();
-    pool_->Join();
-    pool_.reset();
-  }
-
-  void SetUp() override {
-    service_.reset(new TestInterface);
-    rpc_server_.reset(new Server(0));
-    rpc_server_->BindTo(service_.get());
-    rpc_server_->Run(pool_.get());
-    channel_.reset(new ClientChannel(pool_->GetNextContext(), "127.0.0.1",
-                   std::to_string(rpc_server_->port())));
-    ec_ = channel_->Connect(100);
-    CHECK(!ec_) << ec_.message();
-  }
-
-  void TearDown() override {
-    rpc_server_.reset();
-    channel_.reset();
-  }
-
-  std::unique_ptr<TestInterface> service_;
-  std::unique_ptr<Server> rpc_server_;
-  static std::unique_ptr<IoContextPool> pool_;
-  std::unique_ptr<ClientChannel> channel_;
-  system::error_code ec_;
-};
-
-std::unique_ptr<IoContextPool> ServerTest::pool_;
 
 
 TEST_F(ServerTest, BadHeader) {
