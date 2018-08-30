@@ -54,6 +54,13 @@ system::error_code ClientChannel::Connect(uint32_t ms) {
   return status_;
 }
 
+void ClientChannel::Shutdown() {
+  if (!impl_)
+    return;
+  impl_->shutting_down_ = true;
+  sock_.cancel();
+}
+
 using namespace std::chrono_literals;
 using chrono::steady_clock;
 

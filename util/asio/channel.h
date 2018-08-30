@@ -33,8 +33,12 @@ class ClientChannel {
   ClientChannel& operator=(ClientChannel&&) = default;
 
   error_code Connect(uint32_t ms);
+  void Shutdown();
 
   socket_t& socket() { return sock_; }
+
+  bool is_open() const { return !status_ && impl_ && !impl_->shutting_down_; }
+  bool is_shut_down() const { return !impl_ || impl_->shutting_down_; }
 
   template<typename BufferSequence> error_code Write(const BufferSequence& seq) {
     if (status_)
@@ -48,6 +52,7 @@ class ClientChannel {
   template<typename BufferSequence> error_code Read(const BufferSequence& seq) {
     if (status_)
       return status_;
+
     std::lock_guard<mutex> guard(impl_->rmu_);
     basio::async_read(sock_, seq, fibers_ext::yield[status_]);
     if (status_) HandleErrorStatus();
