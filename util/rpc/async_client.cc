@@ -25,8 +25,8 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 }  // namespace
 
 
-fibers::future<AsyncClient::error_code> AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
-                                                                  base::PODArray<uint8_t>* letter) {
+auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter)
+  -> future_code_t {
   Frame frame(rpc_id_, header->size(), letter->size());
   uint8_t buf[Frame::kMaxByteSize];
   size_t bsz = frame.Write(buf);

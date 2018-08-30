@@ -14,14 +14,14 @@ namespace rpc {
 class AsyncClient {
  public:
   using error_code = ClientChannel::error_code;
-
+  using future_code_t = ::boost::fibers::future<error_code>;
   AsyncClient(ClientChannel&& channel) : channel_(std::move(channel)) {
     SetupReadFiber();
   }
 
   // Write path is "fiber-synchronous", i.e. done in calling fiber.
   // Which means we should not run this function from io_context loop. From dedicated fiber is fine.
-  ::boost::fibers::future<error_code> SendEnvelope(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter);
+  future_code_t SendEnvelope(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter);
 
  private:
   void SetupReadFiber();

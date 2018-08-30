@@ -27,6 +27,8 @@ ClientChannel::Impl::~Impl() {
 }
 
 ClientChannel::~ClientChannel() {
+  if (!impl_)
+    return;
   impl_->shutting_down_ = true;
   sock_.close();
   impl_.reset();
