@@ -49,15 +49,21 @@ auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
     return res;
   }
 
-  Frame frame(rpc_id_++, header->size(), letter->size());
-  uint8_t buf[Frame::kMaxByteSize];
-  size_t bsz = frame.Write(buf);
+  // This section must be atomic so that rpc ids will be sent in increasing order.
+  auto cb = [&](tcp::socket& sock) -> error_code {
+    Frame frame(rpc_id_++, header->size(), letter->size());
+    uint8_t buf[Frame::kMaxByteSize];
+    size_t bsz = frame.Write(buf);
 
 
-  calls_.emplace_back(frame.rpc_id, std::move(p), header, letter);
+    calls_.emplace_back(frame.rpc_id, std::move(p), header, letter);
+    error_code ec;
+    asio::async_write(sock, make_buffer_seq(asio::buffer(buf, bsz), *header, *letter),
+                      fibers_ext::yield[ec]);
+    return ec;
+  };
 
-  // -- I assume that this section is atomic, and calls contains rpc in strictly increasing order.
-  error_code ec = channel_.Write(make_buffer_seq(asio::buffer(buf, bsz), *header, *letter));
+  error_code ec = channel_.Write(std::move(cb));
   if (ec) {
     FlushPendingCalls(ec);
   }
@@ -87,15 +93,18 @@ auto AsyncClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   error_code ec = f.Read(sock);
   if (ec) return ec;
 
+  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << sock->native_handle();
   if (calls_.empty() || calls_.front().rpc_id != f.rpc_id) {
     LOG(WARNING) << "Unexpected id " << f.rpc_id;
+    LOG_IF(WARNING, !calls_.empty()) << "Expecting " << calls_.front().rpc_id;
+
     base::PODArray<uint8_t> buf;
     buf.resize(f.header_size);
     asio::async_read(*sock, asio::buffer(buf), fibers_ext::yield[ec]);
     if (ec) return ec;
     buf.resize(f.letter_size);
     asio::async_read(*sock, asio::buffer(buf), fibers_ext::yield[ec]);
-    if (ec) return ec;
+    return ec;
   }
 
   PendingCall call = std::move(calls_.front());

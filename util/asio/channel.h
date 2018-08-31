@@ -40,6 +40,17 @@ class ClientChannel {
   bool is_open() const { return !status_ && impl_ && !impl_->shutting_down_; }
   bool is_shut_down() const { return !impl_ || impl_->shutting_down_; }
 
+  template<typename Func> error_code Write(Func&& f) {
+    if (status_)
+      return status_;
+
+    std::lock_guard<mutex> guard(impl_->wmu_);
+    status_ = f(sock_);
+    if (status_) HandleErrorStatus();
+    return status_;
+  }
+
+
   template<typename BufferSequence> error_code Write(const BufferSequence& seq) {
     if (status_)
       return status_;

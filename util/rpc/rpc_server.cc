@@ -37,6 +37,7 @@ class RpcConnectionHandler : public ConnectionHandler {
 
  private:
   BufferType header_, letter_;
+  uint64_t last_rpc_id_ = 0;
   std::unique_ptr<ConnectionBridge> bridge_;
 };
 
@@ -55,6 +56,9 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   VLOG(2) << "Frame read " << ec;
   if (ec)
     return ec;
+
+  DCHECK_LT(last_rpc_id_, frame.rpc_id);
+  last_rpc_id_ = frame.rpc_id;
 
   header_.resize(frame.header_size);
   letter_.resize(frame.letter_size);
@@ -77,6 +81,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   auto fsz = frame.Write(buf);
 
   auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
+  VLOG(1) << "Writing frame " << frame.rpc_id;
   sz = asio::async_write(socket_, wbuf_seq, yield[ec]);
   if (ec) return ec;
   CHECK_EQ(sz, frame.header_size + frame.letter_size + fsz);

@@ -41,8 +41,9 @@ class PingBridge final : public rpc::ConnectionBridge {
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
   Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
-                                base::PODArray<uint8_t>* letter) override {
+                        base::PODArray<uint8_t>* letter) override {
     qps.Inc();
+    VLOG(1) << "RpcId: " << rpc_id;
     return Status::OK;
   }
 };
@@ -52,6 +53,8 @@ class PingInterface final : public rpc::ServiceInterface {
   rpc::ConnectionBridge* CreateConnectionBridge() override { return new PingBridge{}; }
 };
 
+std::atomic_ulong latency_ms(0);
+std::atomic_ulong latency_count(0);
 
 void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
   rpc::BufferType header, letter;
@@ -60,14 +63,22 @@ void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
   char msgbuf[64];
 
   char* start = reinterpret_cast<char*>(letter.data());
+  auto tp = chrono::steady_clock::now();
   for (unsigned msg = 0; msg < msg_count; ++msg) {
-    char* next = StrAppend(start, letter.size(), {index, ".", msg});
+    char* next = StrAppend(start, letter.size(), index, ".", msg);
     letter.resize(next - start);
 
     VLOG(1) << ": Sending: " << msgbuf;
 
     AsyncClient::future_code_t fec = client->SendEnvelope(&header, &letter);
     system::error_code ec = fec.get();
+
+    auto last = chrono::steady_clock::now();
+    chrono::milliseconds ms = chrono::duration_cast<chrono::milliseconds>(last - tp);
+
+    latency_count.fetch_add(1, std::memory_order_relaxed);
+    latency_ms.fetch_add(ms.count(), std::memory_order_relaxed);
+    tp = last;
 
     if ( ec == asio::error::eof) {
       return; //connection closed cleanly by peer
@@ -114,6 +125,7 @@ void client_pool(IoContextPool* pool) {
       f.wait();
   }
   LOG(INFO) << "Pool ended";
+  cout << "Average latency is " << double(latency_ms.load()) / (latency_count + 1) << endl;
 }
 
 int main(int argc, char **argv) {
@@ -144,6 +156,7 @@ int main(int argc, char **argv) {
 
   pool.Stop();
   pool.Join();
+
 
   return 0;
 }

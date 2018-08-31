@@ -3,12 +3,9 @@
 #include "strings/strcat.h"
 
 #include "base/logging.h"
-// #include "base/stl_util.h"
 
-using absl::AlphaNum;
-
-char* StrAppend(char* dest, unsigned n, std::initializer_list<AlphaNum> list) {
-  for (const AlphaNum& val : list) {
+char* StrAppend(char* dest, unsigned n, std::initializer_list<absl::string_view> list) {
+  for (const auto& val : list) {
     if (val.size() >= n)
       break;
     memcpy(dest, val.data(), val.size());
