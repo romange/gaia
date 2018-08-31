@@ -53,27 +53,15 @@ class PingInterface final : public rpc::ServiceInterface {
 };
 
 
-/*****************************************************************************
-*   fiber function per client
-*****************************************************************************/
-void RunClient(boost::asio::io_context& context,
-            unsigned msg_count, util::fibers_ext::Done* done) {
-  LOG(INFO) << ": echo-client started";
-  constexpr unsigned max_length = 1024;
-  ClientChannel channel(context, FLAGS_connect, "9999");
-  system::error_code ec = channel.Connect(1000);
-  CHECK(!ec) << ec;
-
-  std::unique_ptr<AsyncClient> client(new AsyncClient(std::move(channel)));
+void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
   rpc::BufferType header, letter;
   letter.resize(64);
 
-  const int count = 1;
   char msgbuf[64];
 
   char* start = reinterpret_cast<char*>(letter.data());
   for (unsigned msg = 0; msg < msg_count; ++msg) {
-    char* next = StrAppend(start, letter.size(), {count, ".", msg});
+    char* next = StrAppend(start, letter.size(), {index, ".", msg});
     letter.resize(next - start);
 
     VLOG(1) << ": Sending: " << msgbuf;
@@ -87,6 +75,26 @@ void RunClient(boost::asio::io_context& context,
       LOG(ERROR) << "Error: " << ec;
     }
   }
+}
+
+/*****************************************************************************
+*   fiber function per client
+*****************************************************************************/
+void RunClient(boost::asio::io_context& context,
+            unsigned msg_count, util::fibers_ext::Done* done) {
+  LOG(INFO) << ": echo-client started";
+
+  ClientChannel channel(context, FLAGS_connect, "9999");
+  system::error_code ec = channel.Connect(1000);
+  CHECK(!ec) << ec;
+
+  std::unique_ptr<AsyncClient> client(new AsyncClient(std::move(channel)));
+  std::vector<fibers::fiber> drivers(FLAGS_num_connections);
+  for (size_t i = 0; i < drivers.size(); ++i) {
+    drivers[i] = fibers::fiber(&Driver, client.get(), i, msg_count);
+  }
+  for (auto& f : drivers)
+    f.join();
 
   client.reset();
   done->notify();
