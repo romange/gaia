@@ -1,7 +1,6 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-
 #pragma once
 
 #include <memory>
@@ -20,6 +19,8 @@ class IoContextPool;
 
 namespace rpc {
 
+typedef base::PODArray<uint8_t> BufferType;
+
 class ConnectionBridge {
  public:
   virtual ~ConnectionBridge() {}
@@ -27,8 +28,7 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
-                                base::PODArray<uint8_t>* letter) = 0;
+  virtual Status HandleEnvelope(uint64_t rpc_id, BufferType* header, BufferType* letter) = 0;
 };
 
 class ServiceInterface {

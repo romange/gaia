@@ -36,7 +36,7 @@ class RpcConnectionHandler : public ConnectionHandler {
   system::error_code HandleRequest() final override;
 
  private:
-  base::PODArray<uint8_t> header_, letter_;
+  BufferType header_, letter_;
   std::unique_ptr<ConnectionBridge> bridge_;
 };
 
@@ -52,13 +52,9 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   rpc::Frame frame;
   system::error_code ec = frame.Read(&socket_);
-  VLOG(1) << "Frame read " << ec;
+  VLOG(2) << "Frame read " << ec;
   if (ec)
     return ec;
-
-  if (frame.header_size == 0) {
-    return errc::make_error_code(errc::protocol_error);
-  }
 
   header_.resize(frame.header_size);
   letter_.resize(frame.letter_size);

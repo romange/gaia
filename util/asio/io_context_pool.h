@@ -14,6 +14,8 @@ namespace util {
 /// A pool of io_context objects.
 class IoContextPool {
 public:
+  using io_context = ::boost::asio::io_context;
+
   IoContextPool(const IoContextPool&) = delete;
   void operator=(const IoContextPool&) = delete;
 
@@ -34,6 +36,9 @@ public:
 
   /// Get an io_context to use.
   boost::asio::io_context& GetNextContext();
+
+  io_context& operator[](size_t i) { return *context_arr_[i];}
+  size_t size() const { return context_arr_.size(); }
 
 private:
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
