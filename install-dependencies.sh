@@ -14,7 +14,7 @@ install_boost() {
     wget -nv http://dl.bintray.com/boostorg/release/1.67.0/source/$BOOST.tar.bz2 \
         && tar -xjf $BOOST.tar.bz2
 
-    cd $BOOST && ./bootstrap.sh --prefix=/opt/$BOOST --without-libraries=graph_parallel,graph,wave,test,mpi,python
+    cd $BOOST && ./bootstrap.sh --prefix=/opt/boost --without-libraries=graph_parallel,graph,wave,test,mpi,python
     ./b2 --link=shared cxxflags="-std=c++14 -Wno-deprecated-declarations"  --variant=release --threading=multi \
          --without-test --without-python -j4
     ./b2 install -d0

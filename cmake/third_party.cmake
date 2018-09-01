@@ -143,15 +143,7 @@ add_third_party(
   DEPENDS gflags_project
   GIT_REPOSITORY https://github.com/google/glog.git
   GIT_TAG v0.3.5
-  PATCH_COMMAND autoreconf --force --install  # needed to refresh toolchain
-
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure
-       #--disable-rtti we can not use rtti because of the fucking thrift.
-       --with-gflags=${THIRD_PARTY_LIB_DIR}/gflags
-       --enable-frame-pointers
-       --prefix=${THIRD_PARTY_LIB_DIR}/glog
-       --enable-static=yes --enable-shared=no
-       CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}
+  CMAKE_PASS_FLAGS "-DBUILD_TESTING=OFF"
 )
 
 
@@ -283,8 +275,13 @@ add_third_party(evhtp
 
 set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
-set(BOOST_ROOT /opt/boost_1_67_0)
-find_package(Boost 1.67.0 REQUIRED COMPONENTS coroutine fiber context system thread)
+
+set(BOOST_ROOT /usr/local)
+find_package(Boost 1.67.0 QUIET COMPONENTS coroutine fiber context system thread)
+if (NOT Boost_FOUND)
+  set(BOOST_ROOT /opt/boost)
+  find_package(Boost 1.67.0 REQUIRED COMPONENTS coroutine fiber context system thread)
+endif()
 
 set(LDFOLLY "-L${Boost_LIBRARY_DIR} -L${GFLAGS_LIB_DIR} -L${GLOG_LIB_DIR} -L${DCONV_LIB_DIR} -Wl,-rpath,${Boost_LIBRARY_DIR} -Wl,-rpath,${GFLAGS_LIB_DIR}")
 set(CXXFOLLY "-g  -I${GFLAGS_INCLUDE_DIR} -I${GLOG_INCLUDE_DIR} -I${DCONV_INCLUDE_DIR} -I${GTEST_INCLUDE_DIR}")

@@ -34,21 +34,7 @@
 #include "base/port.h"
 
 inline uint64 gbswap_64(uint64 host_int) {
-#if defined(__GNUC__) && defined(__x86_64__) && !defined(__APPLE__)
-  // Adapted from /usr/include/byteswap.h.  Not available on Mac.
-  if (__builtin_constant_p(host_int)) {
-    return __bswap_constant_64(host_int);
-  } else {
-    uint64 result;
-    __asm__("bswap %0" : "=r" (result) : "0" (host_int));
-    return result;
-  }
-#elif defined(bswap_64)
-  return bswap_64(host_int);
-#else
-  return static_cast<uint64>(bswap_32(static_cast<uint32>(host_int >> 32))) |
-    (static_cast<uint64>(bswap_32(static_cast<uint32>(host_int))) << 32);
-#endif  // bswap_64
+  return __builtin_bswap64(host_int);
 }
 
 #ifdef IS_LITTLE_ENDIAN
@@ -225,7 +211,7 @@ class LittleEndian {
   // The caller needs to guarantee that 1 <= len <= 8.
   static uint64 Load64VariableLength(const void * const p, int len) {
     assert(len >= 1 && len <= 8);
-    const char * const buf = static_cast<const char * const>(p);
+    const char * const buf = static_cast<const char *>(p);
     uint64 val = 0;
     --len;
     do {
