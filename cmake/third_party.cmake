@@ -1,10 +1,15 @@
-set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set(THIRD_PARTY_DIR "${CMAKE_CURRENT_BINARY_DIR}/third_party")
 
 SET_DIRECTORY_PROPERTIES(PROPERTIES EP_PREFIX ${THIRD_PARTY_DIR})
 
 Include(ExternalProject)
 
 set(THIRD_PARTY_LIB_DIR "${THIRD_PARTY_DIR}/libs")
+file(MAKE_DIRECTORY ${THIRD_PARTY_LIB_DIR})
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${THIRD_PARTY_LIB_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libs")
+
 set(THIRD_PARTY_CXX_FLAGS "-std=c++11 -O3 -DNDEBUG -fPIC")
 
 find_package(Threads REQUIRED)
@@ -35,13 +40,13 @@ function(add_third_party name)
   endif()
 
   set(_DIR ${THIRD_PARTY_DIR}/${name})
-  set(_IROOT ${THIRD_PARTY_LIB_DIR}/${name})
+  set(INSTALL_ROOT ${THIRD_PARTY_LIB_DIR}/${name})
 
   if (parsed_LIB)
     set(LIB_FILES "")
 
     foreach (_file ${parsed_LIB})
-      LIST(APPEND LIB_FILES "${_IROOT}/lib/${_file}")
+      LIST(APPEND LIB_FILES "${INSTALL_ROOT}/lib/${_file}")
       if (${_file} MATCHES ".*\.so$")
         set(LIB_TYPE SHARED)
       elseif (${_file} MATCHES ".*\.a$")
@@ -53,7 +58,7 @@ function(add_third_party name)
       endif()
     endforeach(_file)
   else()
-    set(LIB_PREFIX "${_IROOT}/lib/lib${name}.")
+    set(LIB_PREFIX "${INSTALL_ROOT}/lib/lib${name}.")
 
     if(parsed_SHARED)
       set(LIB_TYPE SHARED)
@@ -67,7 +72,7 @@ function(add_third_party name)
   ExternalProject_Add(${name}_project
     DOWNLOAD_DIR ${_DIR}
     SOURCE_DIR ${_DIR}
-    INSTALL_DIR ${_IROOT}
+    INSTALL_DIR ${INSTALL_ROOT}
     UPDATE_COMMAND ""
 
     BUILD_COMMAND ${parsed_BUILD_COMMAND}
@@ -84,23 +89,23 @@ function(add_third_party name)
     BUILD_BYPRODUCTS ${LIB_FILES}
 
     # we need those CMAKE_ARGS for cmake based 3rd party projects.
-    CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${_IROOT}
-        -DCMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=${_IROOT}
+    CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${INSTALL_ROOT}
+        -DCMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=${INSTALL_ROOT}
         -DCMAKE_BUILD_TYPE:STRING=Release
         -DBUILD_TESTING=OFF
         -DCMAKE_C_FLAGS:STRING=-O3 -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
-        -DCMAKE_INSTALL_PREFIX:PATH=${_IROOT}
+        -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_ROOT}
         ${list_CMAKE_ARGS}
     ${parsed_UNPARSED_ARGUMENTS}
   )
 
   string(TOUPPER ${name} uname)
-  file(MAKE_DIRECTORY ${_IROOT}/include)
+  file(MAKE_DIRECTORY ${INSTALL_ROOT}/include)
 
-  set("${uname}_INCLUDE_DIR" "${_IROOT}/include" PARENT_SCOPE)
+  set("${uname}_INCLUDE_DIR" "${INSTALL_ROOT}/include" PARENT_SCOPE)
 
   if (LIB_TYPE)
-    set("${uname}_LIB_DIR" "${_IROOT}/lib" PARENT_SCOPE)
+    set("${uname}_LIB_DIR" "${INSTALL_ROOT}/lib" PARENT_SCOPE)
     list(LENGTH LIB_FILES LIB_LEN)
     if (${LIB_LEN} GREATER 1)
       foreach (_file ${LIB_FILES})
@@ -110,13 +115,13 @@ function(add_third_party name)
         add_library(TRDP::${tname} ${LIB_TYPE} IMPORTED)
         add_dependencies(TRDP::${tname} ${name}_project)
         set_target_properties(TRDP::${tname} PROPERTIES IMPORTED_LOCATION ${_file}
-                              INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+                              INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_ROOT}/include)
       endforeach(_file)
     else()
         add_library(TRDP::${name} ${LIB_TYPE} IMPORTED)
         add_dependencies(TRDP::${name} ${name}_project)
         set_target_properties(TRDP::${name} PROPERTIES IMPORTED_LOCATION ${LIB_FILES}
-                              INTERFACE_INCLUDE_DIRECTORIES ${_IROOT}/include)
+                              INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_ROOT}/include)
     endif()
   endif()
 endfunction()
