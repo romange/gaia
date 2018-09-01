@@ -5,7 +5,7 @@ set -e
 apt install -y cmake libevent-dev libunwind-dev zip flex bison ninja-build autoconf-archive
 
 # for folly & proxygen. gperf is not related to gperftools.
-apt install -y autoconf-archive gperf curl
+apt install -y gperf curl
 
 BOOST_VER=boost_1_67_0
 
