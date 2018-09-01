@@ -25,8 +25,6 @@ using namespace boost;
 using asio::ip::tcp;
 
 
-
-
 TEST_F(ServerTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");

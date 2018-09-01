@@ -13,12 +13,24 @@ namespace util {
 namespace basio = ::boost::asio;
 
 class ClientChannel {
+  template<typename T> using is_cbuf_t =
+      typename std::enable_if<basio::is_const_buffer_sequence<T>::value>::type;
+
+  template<typename T> using is_mbuf_t =
+      typename std::enable_if<basio::is_mutable_buffer_sequence<T>::value>::type;
  public:
+
   using io_context = basio::io_context;
   using socket_t = basio::ip::tcp::socket;
   using mutex = boost::fibers::mutex;
   using error_code = boost::system::error_code;
   using time_point = std::chrono::steady_clock::time_point;
+
+  template<typename T> using check_ec_t =
+      typename std::enable_if<std::is_same<error_code, T>::value, error_code>::type;
+  template<typename Func> using socket_callable_t =
+        check_ec_t<decltype(std::declval<Func>()(std::declval<socket_t&>()))>;
+
 
   ClientChannel(io_context& cntx, const std::string& hostname, const std::string& service)
     : sock_(cntx, basio::ip::tcp::v4()), impl_(new Impl(cntx, hostname, service)) {
@@ -40,18 +52,8 @@ class ClientChannel {
   bool is_open() const { return !status_ && impl_ && !impl_->shutting_down_; }
   bool is_shut_down() const { return !impl_ || impl_->shutting_down_; }
 
-  template<typename Func> error_code Write(Func&& f) {
-    if (status_)
-      return status_;
-
-    std::lock_guard<mutex> guard(impl_->wmu_);
-    status_ = f(sock_);
-    if (status_) HandleErrorStatus();
-    return status_;
-  }
-
-
-  template<typename BufferSequence> error_code Write(const BufferSequence& seq) {
+  template<typename BufferSequence> error_code Write(const BufferSequence& seq,
+                                                     is_cbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
     std::lock_guard<mutex> guard(impl_->wmu_);
@@ -60,7 +62,18 @@ class ClientChannel {
     return status_;
   }
 
-  template<typename BufferSequence> error_code Read(const BufferSequence& seq) {
+  // Returns error_code, checks that f is callable on socket&
+  template<typename Func> socket_callable_t<Func> Write(Func&& f) {
+    if (status_)
+      return status_;
+    std::lock_guard<mutex> guard(impl_->wmu_);
+    status_ = f(sock_);
+    if (status_) HandleErrorStatus();
+    return status_;
+  }
+
+  template<typename BufferSequence> error_code Read(const BufferSequence& seq,
+                                                    is_mbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
 
