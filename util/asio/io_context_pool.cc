@@ -18,7 +18,12 @@ using namespace boost;
 namespace util {
 namespace {
 
-class round_robin : public fibers::algo::algorithm {
+// TODO: to add priorities.
+// See https://www.boost.org/doc/libs/1_68_0/libs/fiber/doc/html/fiber/custom.html#custom
+// We need it in order to prioritize client rpc read path, loop() fibers - higher
+// and connection acceptor fiber lower
+// than normal operations. For this we need 3 predefined priorities: HIGH,NORMAL, NICED.
+class round_robin final : public fibers::algo::algorithm {
  private:
   std::shared_ptr< asio::io_service>      io_svc_;
   asio::steady_timer                      suspend_timer_;
@@ -65,38 +70,36 @@ class round_robin : public fibers::algo::algorithm {
     asio::post(*io_svc_, [this] () mutable { this->loop();});
   }
 
-  void awakened(fibers::context * ctx) noexcept {
-      BOOST_ASSERT( nullptr != ctx);
-      BOOST_ASSERT( ! ctx->ready_is_linked() );
+  void awakened(fibers::context * ctx) noexcept override {
+      DCHECK( ! DCHECK_NOTNULL(ctx)->ready_is_linked() );
       ctx->ready_link( rqueue_); /*< fiber, enqueue on ready queue >*/
       if ( ! ctx->is_context( fibers::type::dispatcher_context) ) {
-          ++counter_;
+        ++counter_;
       }
       // VLOG(1) << "awakened: " << ctx->get_id();
   }
 
-  fibers::context* pick_next() noexcept {
+  fibers::context* pick_next() noexcept override {
     fibers::context * ctx( nullptr);
-    if (!rqueue_.empty() ) { /*<
-        pop an item from the ready queue
-    >*/
+    if (!rqueue_.empty() ) {
+        // pop an item from the ready queue
         ctx = & rqueue_.front();
         rqueue_.pop_front();
-        BOOST_ASSERT( nullptr != ctx);
-        BOOST_ASSERT( fibers::context::active() != ctx);
-        if ( ! ctx->is_context(fibers::type::dispatcher_context) ) {
-            --counter_;
+        DCHECK_NOTNULL(ctx);
+        DCHECK( fibers::context::active() != ctx);
+        if ( !ctx->is_context(fibers::type::dispatcher_context) ) {
+          --counter_;
         }
     }
     //  VLOG_IF(1, ctx) << ctx->get_id();
     return ctx;
   }
 
-  bool has_ready_fibers() const noexcept {
-      return 0 < counter_;
+  bool has_ready_fibers() const noexcept override {
+    return 0 < counter_;
   }
 
-  void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept final {
+  void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
     VLOG(1) << "suspend_until " << abs_time.time_since_epoch().count();
 
       // Set a timer so at least one handler will eventually fire, causing
@@ -105,18 +108,18 @@ class round_robin : public fibers::algo::algorithm {
     // Each expires_at(time_point) call cancels any previous pending
     // call. We could inadvertently spin like this:
     // dispatcher calls suspend_until() with earliest wake time
-    // suspend_until() sets suspend_timer_
-    // lambda loop calls run_one()
+    // suspend_until() sets suspend_timer_,
+    // loop() calls run_one()
     // some other asio handler runs before timer expires
-    // run_one() returns to lambda loop
-    // lambda loop yields to dispatcher
+    // run_one() returns to loop()
+    // loop() yields to dispatcher
     // dispatcher finds no ready fibers
     // dispatcher calls suspend_until() with SAME wake time
     // suspend_until() sets suspend_timer_ to same time, canceling
     // previous async_wait()
-    // lambda loop calls run_one()
+    // loop() calls run_one()
     // asio calls suspend_timer_ handler with operation_aborted
-    // run_one() returns to lambda loop... etc. etc.
+    // run_one() returns to loop()... etc. etc.
     // So only actually set the timer when we're passed a DIFFERENT
     // abs_time value.
         suspend_timer_.expires_at( abs_time);
@@ -128,7 +131,7 @@ class round_robin : public fibers::algo::algorithm {
   }
 //]
 
-  void notify() noexcept {
+  void notify() noexcept override {
     // Something has happened that should wake one or more fibers BEFORE
     // suspend_timer_ expires. Reset the timer to cause it to fire
     // immediately, causing the run_one() call to return. In theory we
@@ -159,7 +162,12 @@ class round_robin : public fibers::algo::algorithm {
           while (io_svc_->poll());
 
           // block this fiber till all pending (ready) fibers are processed
-          // == round_robin::suspend_until() has been called
+          // == round_robin::suspend_until() has been called.
+
+          // TODO: We might want to limit the number of processed fibers per iterations
+          // based on their priority and count to allow better responsiveness
+          // for handling io_svc requests. For example, to process all HIGH, and then limit
+          // all other fibers.
           std::unique_lock<fibers::mutex > lk(mtx_);
           cnd_.wait(lk);
         } else {
