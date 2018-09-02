@@ -10,6 +10,8 @@ set(PROJECT_CONTACT romange@gmail.com)
 
 project(${PACKAGE_NAME})
 
+option (ONLY_THIRD_PARTY "Build third party only")
+
 # Check target architecture
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Gaia requires a 64bit target architecture.")
@@ -36,14 +38,16 @@ set(BUILD_TESTING OFF)
 set(CCTZ_INCLUDE_DIRS ${CCTZ_INCLUDE_DIR})
 set(GOLD_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
-add_subdirectory(abseil-cpp)
-set(CMAKE_CXX_FLAGS "${GOLD_CXX_FLAGS}")
-
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-add_subdirectory(base)
-add_subdirectory(strings)
-add_subdirectory(util)
-add_subdirectory(file)
-add_subdirectory(examples)
 
+if (NOT ONLY_THIRD_PARTY)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
+  add_subdirectory(abseil-cpp)
+  set(CMAKE_CXX_FLAGS "${GOLD_CXX_FLAGS}")
+
+  add_subdirectory(base)
+  add_subdirectory(strings)
+  add_subdirectory(util)
+  add_subdirectory(file)
+  add_subdirectory(examples)
+endif()
