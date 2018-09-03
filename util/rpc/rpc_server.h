@@ -28,7 +28,8 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual Status HandleEnvelope(uint64_t rpc_id, BufferType* header, BufferType* letter) = 0;
+  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, BufferType* header,
+                                        BufferType* letter) = 0;
 };
 
 class ServiceInterface {
