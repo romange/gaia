@@ -423,6 +423,12 @@ add_third_party(seastar
 #     INSTALL_COMMAND rm -rf ./include/boost && cd  ${THIRD_PARTY_PATH} && cp -r boost_1_64_0/boost ./include/
 #     )
 
+function(declare_shared_lib name path)
+  set(_target TRDP::${name})
+  add_library(${_target} SHARED IMPORTED)
+  set_property(TARGET ${_target} PROPERTY IMPORTED_LOCATION ${path}/lib${name}.so)
+  add_dependencies(${_target} ${ARGN})
+endfunction()
 
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}
@@ -472,3 +478,4 @@ set_property(TARGET TRDP::evhtp APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${EVHTP_INCLUDE_DIR}/evhtp
              )
 
+declare_shared_lib(protoc ${PROTOBUF_LIB_DIR} protobuf_project)
