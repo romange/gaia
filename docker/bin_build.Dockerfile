@@ -24,6 +24,7 @@ RUN ldd -r /pkg/$TARGET | grep "/build/third_party" | awk '{print $3}' | \
 
 FROM romange/u18prod
 ARG TARGET
-RUN echo $TARGET
 COPY --from=bin /pkg/ /app/
-RUN ldconfig /app
+RUN ldconfig /app && ln -s $TARGET start_app
+ENV PATH /app:$PATH
+ENTRYPOINT ["start_app"]
