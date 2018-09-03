@@ -18,7 +18,7 @@ FROM src as bin
 # Now really building the target. Previous containers will be reused between the builds.
 ARG TARGET
 
-RUN ninja -j4 $TARGET && strip $TARGET && mv $TARGET /pkg/
+RUN echo "Building ${TARGET}" && ninja -j4 $TARGET && strip $TARGET && mv $TARGET /pkg/
 RUN ldd -r /pkg/$TARGET | grep "/build/third_party" | awk '{print $3}' | \
     while read n; do cp -nH $n /pkg/; done
 
@@ -27,4 +27,5 @@ ARG TARGET
 COPY --from=bin /pkg/ /app/
 RUN ldconfig /app && ln -s $TARGET start_app
 ENV PATH /app:$PATH
+
 ENTRYPOINT ["start_app"]
