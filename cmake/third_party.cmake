@@ -186,8 +186,8 @@ set(PROTOBUF_DIR ${THIRD_PARTY_LIB_DIR}/protobuf)
 set(PROTOC ${PROTOBUF_DIR}/bin/protoc)
 add_third_party(
     protobuf
-    GIT_REPOSITORY https://github.com/romange/protobuf.git
-    GIT_TAG roman_cxx11_move-3.0.0-beta-2
+    GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
+    GIT_TAG v3.6.1
     PATCH_COMMAND ./autogen.sh
 
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no

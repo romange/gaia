@@ -148,20 +148,20 @@ function(cxx_proto_lib name)
   GET_FILENAME_COMPONENT(absolute_proto_name ${name}.proto ABSOLUTE)
 
   # Message("Current2 ${name} ${cxx_out_files} ${gen_rel_path} ${CMAKE_SOURCE_DIR}")
-  CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS" ${ARGN})
+  CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS;PLUGIN_ARGS" ${ARGN})
   set(prefix_command ${PROTOC} ${absolute_proto_name} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${CMAKE_SOURCE_DIR})
   set(py_command cat /dev/null)
   if (parsed_PY)
     set(py_command ${prefix_command} --proto_path=${PROTOBUF_INCLUDE_DIR} --python_out=${ROOT_GEN_DIR})
   endif()
 
-  set(plugins_arg "")
+  set(plugins_arg "${parsed_PLUGIN_ARGS}")
   set(proj_depends "protobuf_project")
   ADD_CUSTOM_COMMAND(
            OUTPUT ${cxx_out_files}
            COMMAND ${PROTOC} ${absolute_proto_name}
                    --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${PROTOBUF_INCLUDE_DIR}
-                   --cpp_out=${ROOT_GEN_DIR} --cpp_opt=cxx11  ${plugins_arg}
+                   --cpp_out=${ROOT_GEN_DIR} ${plugins_arg}
            COMMAND ${py_command}
            COMMAND touch ${gen_dir}/__init__.py
            DEPENDS ${name}.proto DEPENDS ${proj_depends} ${parsed_DEPENDS}
