@@ -194,7 +194,7 @@ add_third_party(
         CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} --prefix=${PROTOBUF_DIR}
     COMMAND make clean
     BUILD_IN_SOURCE 1
-    SHARED_PRODUCT
+    LIB libprotobuf.so libprotoc.so
 )
 
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/proto_python_setup.cmd"
@@ -412,23 +412,6 @@ add_third_party(seastar
   BUILD_IN_SOURCE 1
 )
 
-#set(Boost_DEBUG ON)
-# ExternalProject_Add(
-#     boost_project
-#     DOWNLOAD_DIR ${THIRD_PARTY_PATH}
-#     DOWNLOAD_COMMAND  wget https://dl.bintray.com/boostorg/release/1.64.0/source/boost_1_64_0.tar.gz -O boost_1_64_0.tar.gz
-#     CONFIGURE_COMMAND cd ${THIRD_PARTY_PATH}/ && tar xzf boost_1_64_0.tar.gz && cd boost_1_64_0 &&
-#         ./bootstrap.sh --with-libraries=system,regex,filesystem,python,test,random --with-python=${PYTHON_CMD}  --with-python-root=${PYTHON_INSTALL_DIR} --with-python-version=2.7
-#     BUILD_COMMAND cd ${THIRD_PARTY_PATH}/boost_1_64_0 && ./b2 cxxflags=-fPIC --with-system --with-regex --with-filesystem --with-test --with-random --with-python include=${PYTHON_INCLUDE_DIR}/python2.7
-#     INSTALL_COMMAND rm -rf ./include/boost && cd  ${THIRD_PARTY_PATH} && cp -r boost_1_64_0/boost ./include/
-#     )
-
-function(declare_shared_lib name path)
-  set(_target TRDP::${name})
-  add_library(${_target} SHARED IMPORTED)
-  set_property(TARGET ${_target} PROPERTY IMPORTED_LOCATION ${path}/lib${name}.so)
-  add_dependencies(${_target} ${ARGN})
-endfunction()
 
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}
@@ -477,5 +460,3 @@ file(MAKE_DIRECTORY ${EVHTP_INCLUDE_DIR}/evhtp)
 set_property(TARGET TRDP::evhtp APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${EVHTP_INCLUDE_DIR}/evhtp
              )
-
-declare_shared_lib(protoc ${PROTOBUF_LIB_DIR} protobuf_project)
