@@ -68,13 +68,6 @@ ELSE()
   MESSAGE(FATAL_ERROR "Unsupported build type '${CMAKE_BUILD_TYPE}'")
 ENDIF()
 
-# -fuse-ld=gold does not work for some reason - it does not load fast_malloc lib.
-# set(LINKER_FLAGS "")
-# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINKER_FLAGS}")
-# set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${LINKER_FLAGS}")
-# set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${LINKER_FLAGS}")
-
-
 set(ROOT_GEN_DIR ${CMAKE_SOURCE_DIR}/genfiles)
 file(MAKE_DIRECTORY ${ROOT_GEN_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ROOT_GEN_DIR})
@@ -147,16 +140,16 @@ function(cxx_proto_lib name)
 
   GET_FILENAME_COMPONENT(absolute_proto_name ${name}.proto ABSOLUTE)
 
-  # Message("Current2 ${name} ${cxx_out_files} ${gen_rel_path} ${CMAKE_SOURCE_DIR}")
-  CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS;PLUGIN_ARGS" ${ARGN})
+  CMAKE_PARSE_ARGUMENTS(parsed "PY" "" "DEPENDS;PLUGIN_ARGS;EXT_GEN_FILES" ${ARGN})
   set(prefix_command ${PROTOC} ${absolute_proto_name} --proto_path=${PROJECT_SOURCE_DIR} --proto_path=${CMAKE_SOURCE_DIR})
   set(py_command cat /dev/null)
   if (parsed_PY)
     set(py_command ${prefix_command} --proto_path=${PROTOBUF_INCLUDE_DIR} --python_out=${ROOT_GEN_DIR})
   endif()
-
+  LIST(APPEND cxx_out_files ${parsed_EXT_GEN_FILES})
   set(plugins_arg "${parsed_PLUGIN_ARGS}")
   set(proj_depends "protobuf_project")
+
   ADD_CUSTOM_COMMAND(
            OUTPUT ${cxx_out_files}
            COMMAND ${PROTOC} ${absolute_proto_name}
@@ -164,9 +157,11 @@ function(cxx_proto_lib name)
                    --cpp_out=${ROOT_GEN_DIR} ${plugins_arg}
            COMMAND ${py_command}
            COMMAND touch ${gen_dir}/__init__.py
+           COMMAND CLICOLOR_FORCE=1 ${CMAKE_COMMAND} -E cmake_echo_color --blue --bold "Generating sources '${cxx_out_files}'"
+           COMMAND CLICOLOR_FORCE=1 ${CMAKE_COMMAND} -E cmake_echo_color --green --bold "from '${absolute_proto_name}'"
            DEPENDS ${name}.proto DEPENDS ${proj_depends} ${parsed_DEPENDS}
-           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-           COMMENT "Generating sources ${cxx_out_files} from ${absolute_proto_name}" VERBATIM)
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
   set_source_files_properties(${cxx_out_files}
                               PROPERTIES GENERATED TRUE)
   set(lib_name "${name}_proto")
