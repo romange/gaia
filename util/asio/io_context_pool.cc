@@ -85,8 +85,7 @@ class round_robin final : public fibers::algo::algorithm {
         // pop an item from the ready queue
         ctx = & rqueue_.front();
         rqueue_.pop_front();
-        DCHECK_NOTNULL(ctx);
-        DCHECK( fibers::context::active() != ctx);
+        DCHECK(ctx && fibers::context::active() != ctx);
         if ( !ctx->is_context(fibers::type::dispatcher_context) ) {
           --counter_;
         }
