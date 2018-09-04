@@ -12,3 +12,4 @@
 -Ithird_party/libs/protobuf/include
 -Ithird_party/libs/pmr/include
 -Ithird_party/libs/sparsehash/include
+-Ithird_party/libs/xxhash/include
