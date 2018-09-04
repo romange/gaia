@@ -26,7 +26,7 @@ static std::vector<std::string> ReadIds() {
 }
 
 class HashTest : public testing::Test {
-protected:
+ protected:
 };
 
 TEST_F(HashTest, Basic) {

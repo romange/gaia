@@ -11,9 +11,9 @@
 #include <boost/asio/completion_condition.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
-#include "util/asio/connection_handler.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
+#include "util/asio/connection_handler.h"
 #include "util/asio/yield.h"
 #include "util/rpc/frame_format.h"
 
@@ -22,13 +22,13 @@ namespace rpc {
 
 using namespace boost;
 using namespace system;
-using std::string;
-using fibers_ext::yield;
 using boost::asio::io_context;
+using fibers_ext::yield;
+using std::string;
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
-  RpcConnectionHandler(asio::io_context* io_svc,  // not owned.
+  RpcConnectionHandler(asio::io_context* io_svc,            // not owned.
                        ConnectionServerNotifier* notifier,  // not owned
                        // owned by the instance.
                        ConnectionBridge* bridge);
@@ -40,7 +40,6 @@ class RpcConnectionHandler : public ConnectionHandler {
   uint64_t last_rpc_id_ = 0;
   std::unique_ptr<ConnectionBridge> bridge_;
 };
-
 
 RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
                                            ConnectionServerNotifier* notifier,
@@ -67,7 +66,9 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   auto rbuf_seq = make_buffer_seq(header_, letter_);
   sz = asio::async_read(socket_, rbuf_seq, yield[ec]);
-  if (ec) return ec;
+  if (ec)
+    return ec;
+
   CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
   Status status = bridge_->HandleEnvelope(frame.rpc_id, &header_, &letter_);
@@ -83,14 +84,15 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
   VLOG(1) << "Writing frame " << frame.rpc_id;
   sz = asio::async_write(socket_, wbuf_seq, yield[ec]);
-  if (ec) return ec;
+  if (ec)
+    return ec;
+
   CHECK_EQ(sz, frame.header_size + frame.letter_size + fsz);
 
   return system::error_code{};
 }
 
 Server::Server(unsigned short port) : port_(port) {
-
 }
 
 Server::~Server() {

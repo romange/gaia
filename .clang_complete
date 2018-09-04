@@ -1,4 +1,4 @@
--isystem/opt/boost_1_67_0/include/
+-isystem/opt/boost/include/
 -I.
 -Igenfiles
 -Iabseil-cpp

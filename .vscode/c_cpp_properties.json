@@ -1,0 +1,22 @@
+{
+  "configurations": [
+    {
+      "name": "Linux",
+      "defines": [],
+      "compilerPath": "/usr/bin/clang++",
+      "includePath": [
+        "${workspaceFolder}/abseil-cpp",
+        "${workspaceFolder}/third_party/libs/protobuf/include",
+        "${workspaceFolder}/third_party/libs/glog/include",
+        "${workspaceFolder}/third_party/libs/gflags/include",
+        "${workspaceFolder}/third_party/libs/pmr/include",
+        "${workspaceFolder}/third_party/libs/sparsehash/include",
+        "${workspaceFolder}/third_party/libs/zstd/include",
+        "${workspaceFolder}/third_party/libs/benchmark/include",
+        "${workspaceFolder}/third_party/libs/gtest/include",
+        "${default}"
+      ]
+    }
+  ],
+  "version": 4
+}
