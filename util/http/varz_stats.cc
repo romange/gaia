@@ -8,8 +8,8 @@
 #include "strings/strcat.h"
 #include "strings/stringprintf.h"
 
-using std::string;
 using absl::StrAppend;
+using std::string;
 using strings::AsString;
 
 namespace http {
@@ -24,9 +24,7 @@ static std::string KeyValueWithStyle(StringPiece key, StringPiece val) {
   return res;
 }
 
-
-VarzListNode::VarzListNode(const char* name)
-  : name_(name), prev_(nullptr) {
+VarzListNode::VarzListNode(const char* name) : name_(name), prev_(nullptr) {
   mguard guard(g_varz_mutex);
   next_ = global_list();
   if (next_) {
@@ -56,14 +54,14 @@ string VarzListNode::AnyValue::Format(bool is_json) const {
     switch (type) {
       case STRING:
         StrAppend(&result, "\"", str, "\"");
-      break;
+        break;
       case NUM:
       case TIME:
         StrAppend(&result, num);
-      break;
+        break;
       case DOUBLE_T:
         StrAppend(&result, dbl);
-      break;
+        break;
       case MAP:
         result.append("{ ");
         for (const auto& k_v : key_value_array) {
@@ -71,39 +69,39 @@ string VarzListNode::AnyValue::Format(bool is_json) const {
         }
         result.back() = ' ';
         result.append("}");
-      break;
+        break;
     }
   } else {
-     switch (type) {
+    switch (type) {
       case STRING:
         StrAppend(&result, "<span class='value_text'> ", str, " </span>\n");
-      break;
+        break;
       case NUM:
         StrAppend(&result, "<span class='value_text'> ", num, " </span>\n");
-      break;
+        break;
       case DOUBLE_T:
         StrAppend(&result, "<span class='value_text'> ", dbl, " </span>\n");
-      break;
+        break;
       case TIME:
         StrAppend(&result, "<span class='value_text'> ", base::PrintLocalTime(num), " </span>\n");
-      break;
+        break;
       case MAP:
         for (const auto& k_v : key_value_array) {
           StrAppend(&result, KeyValueWithStyle(k_v.first, k_v.second.Format(is_json)));
         }
-      break;
+        break;
     }
   }
   return result;
 }
 
-VarzListNode* & VarzListNode::global_list() {
+VarzListNode*& VarzListNode::global_list() {
   static VarzListNode* varz_global_list = nullptr;
   return varz_global_list;
 }
 
-void VarzListNode::IterateValues(
-  std::function<void(const std::string&, const std::string&)> cb, bool is_json) {
+void VarzListNode::IterateValues(std::function<void(const std::string&, const std::string&)> cb,
+                                 bool is_json) {
   {
     mguard guard(g_varz_mutex);
     for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
@@ -112,6 +110,20 @@ void VarzListNode::IterateValues(
       }
     }
   }
+}
+
+auto VarzMapCount::ReadLockAndFindOrInsert(StringPiece key) -> Map::iterator {
+  rw_spinlock_.lock_shared();
+  auto it = map_counts_.find(key);
+  if (it != map_counts_.end())
+    return it;
+
+  rw_spinlock_.unlock_shared();
+
+  rw_spinlock_.lock();
+  auto res = map_counts_.emplace(key, base::atomic_wrapper<long>(0));
+  rw_spinlock_.unlock_and_lock_shared();
+  return res.first;
 }
 
 void VarzMapCount::IncBy(StringPiece key, int32 delta) {
@@ -124,24 +136,21 @@ void VarzMapCount::IncBy(StringPiece key, int32 delta) {
     return;
   }
 
-  rw_spinlock_.lock_shared();
-  auto it = map_counts_.find(key);
-  if (it == map_counts_.end()) {
-    rw_spinlock_.unlock_shared();
-
-    rw_spinlock_.lock();
-    auto res = map_counts_.emplace(key, base::atomic_wrapper<long>(delta));
-    if (res.second) {
-      rw_spinlock_.unlock();
-      return;
-    }
-    rw_spinlock_.unlock_and_lock_shared();
-    it = res.first;
-  }
+  auto it = ReadLockAndFindOrInsert(key);
   it->second.fetch_add(delta, std::memory_order_relaxed);
   rw_spinlock_.unlock_shared();
 }
 
+void VarzMapCount::Set(StringPiece key, int32 value) {
+  if (key.empty()) {
+    LOG(DFATAL) << "Empty varz key";
+    return;
+  }
+
+  auto it = ReadLockAndFindOrInsert(key);
+  it->second.store(value, std::memory_order_relaxed);
+  rw_spinlock_.unlock_shared();
+}
 
 VarzListNode::AnyValue VarzMapCount::GetData() const {
   AnyValue::Map result;
@@ -151,9 +160,8 @@ VarzListNode::AnyValue VarzMapCount::GetData() const {
   }
   rw_spinlock_.unlock_shared();
   typedef AnyValue::Map::value_type vt;
-  std::sort(result.begin(), result.end(), [](const vt& l, const vt& r) {
-    return l.first < r.first;
-  });
+  std::sort(result.begin(), result.end(),
+            [](const vt& l, const vt& r) { return l.first < r.first; });
 
   return AnyValue(std::move(result));
 }
