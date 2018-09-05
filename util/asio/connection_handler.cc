@@ -16,23 +16,29 @@ using fibers::fiber;
 namespace util {
 
 
-void ConnectionServerNotifier::Unlink(detail::connection_hook* hook) {
+void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
+  bool is_empty = false;
   {
     auto lock = Lock();
-    hook->unlink();   // We unlink manually because we delete 'this' later.
+    list_->erase(ListType::s_iterator_to(*item));
+    is_empty = list_->empty();
   }
-  cnd_.notify_one();
+  if (is_empty)
+    cnd_.notify_one();
 }
 
-ConnectionHandler::ConnectionHandler(io_context* io_svc, ConnectionServerNotifier* notifier)
-    : socket_(*io_svc), notifier_(CHECK_NOTNULL(notifier)) {
+ConnectionHandler::ConnectionHandler(io_context* io_svc) noexcept
+    : socket_(*io_svc) {
 }
 
 ConnectionHandler::~ConnectionHandler() {
 }
 
 void ConnectionHandler::Run() {
+  CHECK(notifier_);
+
   auto& cntx = socket_.get_io_context();
+
   cntx.post([guard = ptr_t(this)] {
     // As long as fiber is running, 'this' is protected from deletion.
     fiber(&ConnectionHandler::RunInIOThread, std::move(guard)).detach();
@@ -57,19 +63,26 @@ void ConnectionHandler::RunInIOThread() {
     }
     VLOG(1) << ": ConnectionHandler closed";
   } catch ( std::exception const& ex) {
-    ex.what();
+    LOG(ERROR) << ex.what();
   }
 
   if (socket_.is_open())
     socket_.close(ec);
 
-  notifier_->Unlink(&hook_);
+  notifier_->Unlink(this);
+
+  // RunInIOThread runs as lambda packaged with ptr_t guard on this. Once the lambda finishes,
+  // it releases the ownership over this.
 }
 
 void ConnectionHandler::Close() {
   auto& cntx = socket_.get_executor().context();
-  // We guard increment the reference of this to allow safe callback execution even if
-  // RunInIOThread released the ownership.
+
+  // We close asynchronously via the thread that owns the socket to ensure thread-safety
+  // for that connection.
+
+  // We use intrusive guard to increment the reference of this in order to allow
+  // safe callback execution even if RunInIOThread released the ownership.
   cntx.post([guard = ptr_t(this)] {
     system::error_code ec;
     if (guard->socket_.is_open())

@@ -9,46 +9,38 @@
 
 namespace util {
 
+class ConnectionHandler;
+
 namespace detail {
-namespace intr = ::boost::intrusive;
+using namespace ::boost::intrusive;
 
 // auto_unlink allows unlinking from the container during the destruction of
 // of hook without holding the reference to the container itself.
 // Requires that the container won't have O(1) size function.
-typedef intr::list_member_hook<
-        intr::link_mode<intr::auto_unlink>> connection_hook;
+typedef slist_member_hook<link_mode<safe_link>> connection_hook;
+
 }  // namespace detail
 
-
-class ConnectionServerNotifier {
-  boost::fibers::condition_variable cnd_;
-  boost::fibers::mutex mu_;
-
- public:
-  explicit ConnectionServerNotifier() {}
-
-  void Unlink(detail::connection_hook* hook);
-
-  std::unique_lock<boost::fibers::mutex> Lock() {
-    return std::unique_lock<boost::fibers::mutex>(mu_);
-  }
-
-  template<typename Predicate >
-  void Wait(std::unique_lock<boost::fibers::mutex>& lock, Predicate pred) {
-    cnd_.wait(lock, pred);
-  }
-};
 
 // An instance of this class handles a single connection in fiber.
 class ConnectionHandler {
  public:
+  using ptr_t = ::boost::intrusive_ptr<ConnectionHandler>;
   using io_context = ::boost::asio::io_context;
   using socket_t = ::boost::asio::ip::tcp::socket;
-  typedef ::boost::intrusive_ptr<ConnectionHandler>  ptr_t;
+  using connection_hook_t = detail::connection_hook;
 
-  detail::connection_hook hook_;
+  connection_hook_t hook_;
 
-  ConnectionHandler(io_context* io_svc, ConnectionServerNotifier* channel);
+  using member_hook_t = detail::member_hook<ConnectionHandler, detail::connection_hook,
+                                            &ConnectionHandler::hook_> ;
+
+  using ListType =
+      detail::slist<ConnectionHandler, ConnectionHandler::member_hook_t,
+                    detail::constant_time_size<true>, detail::cache_last<true>>;
+  class Notifier;
+
+  explicit ConnectionHandler(io_context* io_svc) noexcept;
 
   virtual ~ConnectionHandler();
 
@@ -59,36 +51,50 @@ class ConnectionHandler {
 
   socket_t& socket() { return socket_;}
 
-  typedef detail::intr::member_hook<ConnectionHandler, detail::connection_hook,
-                                    &ConnectionHandler::hook_> member_hook_t;
 
-  friend void intrusive_ptr_add_ref(ConnectionHandler * ctx) noexcept {
+  friend void intrusive_ptr_add_ref(ConnectionHandler* ctx) noexcept {
     ctx->use_count_.fetch_add(1, std::memory_order_relaxed);
   }
 
-  friend void intrusive_ptr_release(ConnectionHandler * ctx) noexcept {
+  friend void intrusive_ptr_release(ConnectionHandler* ctx) noexcept {
     if (1 == ctx->use_count_.fetch_sub(1, std::memory_order_release) ) {
       std::atomic_thread_fence( std::memory_order_acquire);
       delete ctx;
     }
   }
+
+  // Fiber-safe wrapper around the list.
+  // Allows locking on the list or wait till it becomes empty.
+  class Notifier {
+    boost::fibers::condition_variable cnd_;
+    boost::fibers::mutex mu_;
+    ListType* list_;
+   public:
+    explicit Notifier(ListType* list) : list_(list) {}
+
+    void Unlink(ConnectionHandler* me) noexcept;
+
+    std::unique_lock<boost::fibers::mutex> Lock() noexcept {
+      return std::unique_lock<boost::fibers::mutex>(mu_);
+    }
+
+    void WaitTillEmpty(std::unique_lock<boost::fibers::mutex>& lock) noexcept {
+      cnd_.wait(lock, [this] { return list_->empty(); });
+    }
+  };
+
+  void Init(Notifier* notifier) { notifier_ = notifier; }
  protected:
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
   socket_t socket_;
-  ConnectionServerNotifier* notifier_;
 
  private:
   void RunInIOThread();
+
+  Notifier* notifier_ = nullptr;
   std::atomic<std::uint32_t>  use_count_{0};
 };
-
-// TODO: Do we need list or slist?
-typedef detail::intr::list<
-                ConnectionHandler,
-                ConnectionHandler::member_hook_t,
-                detail::intr::constant_time_size<false>> ConnectionHandlerList;
-
 
 }  // namespace util
