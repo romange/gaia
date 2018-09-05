@@ -369,6 +369,12 @@ add_third_party(blosc
   CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON -DDEACTIVATE_ZSTD=ON"
 )
 
+add_third_party(
+    nanoflann
+    GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
+    GIT_TAG v1.2.3
+)
+
 
 set(DYNASM_DIR ${THIRD_PARTY_LIB_DIR}/dynasm)
 set(DYNASM_COMPILER ${DYNASM_DIR}/bin/minilua)

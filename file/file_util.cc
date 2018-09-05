@@ -23,10 +23,10 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <stdio.h>
-#include <sys/stat.h>
 #include <sys/sendfile.h>  // sendfile
-#include <wordexp.h>
+#include <sys/stat.h>
 #include <zlib.h>
 
 #include <memory>
@@ -34,14 +34,15 @@
 
 #include "base/walltime.h"
 
+#include "absl/strings/match.h"
 #include "base/logging.h"
 #include "strings/join.h"
-#include "absl/strings/match.h"
 #include "strings/stringprintf.h"
 
 using std::vector;
-using util::Status;
 using strings::AsString;
+using util::Status;
+using util::StatusCode;
 
 namespace file_util {
 
@@ -56,24 +57,23 @@ static string error_str(int err) {
     return string(result);
 }
 
-static void TraverseRecursivelyInternal(StringPiece path,
-                                        std::function<void(StringPiece)> cb, uint32 offset) {
+static void TraverseRecursivelyInternal(StringPiece path, std::function<void(StringPiece)> cb,
+                                        uint32 offset) {
   struct stat stats;
   if (stat(path.data(), &stats) != 0) {
-    LOG(ERROR) << "TraverseRecursively failed for " << path << "  with error "
-               << error_str(errno);
+    LOG(ERROR) << "TraverseRecursively failed for " << path << "  with error " << error_str(errno);
     return;
   }
 
-  char buf[offsetof(struct dirent, d_name) + NAME_MAX + 1 ];
+  char buf[offsetof(struct dirent, d_name) + NAME_MAX + 1];
   struct dirent* entry = new (buf) dirent;
 
   if (S_ISDIR(stats.st_mode)) {
     string current_name;
     DIR* dir = opendir(path.data());
     if (dir == NULL) {
-      LOG(ERROR) << "TraverseRecursively: error opening dir " << path << ", error: "
-                  << error_str(errno);
+      LOG(ERROR) << "TraverseRecursively: error opening dir " << path
+                 << ", error: " << error_str(errno);
       return;
     }
     while (true) {
@@ -103,7 +103,7 @@ static void TraverseRecursivelyInternal(StringPiece path,
   }
 }
 
-inline WriteFile* TryCreate(const char *directory_prefix) {
+inline WriteFile* TryCreate(const char* directory_prefix) {
   // Attempt to create a temporary file.
   string filename;
   if (!TempFile::TempFilename(directory_prefix, &filename))
@@ -152,7 +152,6 @@ WriteFile* OpenOrDie(StringPiece file_name) {
   return fp;
 }
 
-
 bool ReadFileToString(StringPiece name, string* output) {
   auto res = file::ReadonlyFile::Open(name);
   if (!res.ok())
@@ -178,13 +177,10 @@ void ReadFileToStringOrDie(StringPiece name, string* output) {
 
 void WriteStringToFileOrDie(StringPiece contents, StringPiece name) {
   FILE* file = fopen(name.data(), "wb");
-  CHECK(file != NULL)
-      << "fopen(" << name << ", \"wb\"): " << strerror(errno);
-  CHECK_EQ(fwrite(contents.data(), 1, contents.size(), file),
-                  contents.size())
+  CHECK(file != NULL) << "fopen(" << name << ", \"wb\"): " << strerror(errno);
+  CHECK_EQ(fwrite(contents.data(), 1, contents.size(), file), contents.size())
       << "fwrite(" << name << "): " << strerror(errno);
-  CHECK(fclose(file) == 0)
-      << "fclose(" << name << "): " << strerror(errno);
+  CHECK(fclose(file) == 0) << "fclose(" << name << "): " << strerror(errno);
 }
 
 bool CreateDir(StringPiece name, int mode) {
@@ -192,9 +188,11 @@ bool CreateDir(StringPiece name, int mode) {
 }
 
 bool RecursivelyCreateDir(StringPiece path, int mode) {
-  if (CreateDir(path, mode)) return true;
+  if (CreateDir(path, mode))
+    return true;
 
-  if (file::Exists(path)) return false;
+  if (file::Exists(path))
+    return false;
 
   // Try creating the parent.
   string::size_type slashpos = path.rfind('/');
@@ -203,8 +201,7 @@ bool RecursivelyCreateDir(StringPiece path, int mode) {
     return false;
   }
 
-  return RecursivelyCreateDir(path.substr(0, slashpos), mode) &&
-         CreateDir(path, mode);
+  return RecursivelyCreateDir(path.substr(0, slashpos), mode) && CreateDir(path, mode);
 }
 
 void DeleteRecursively(StringPiece name) {
@@ -214,14 +211,16 @@ void DeleteRecursively(StringPiece name) {
   // Use opendir()!  Yay!
   // lstat = Don't follow symbolic links.
   struct stat stats;
-  if (lstat(name.data(), &stats) != 0) return;
+  if (lstat(name.data(), &stats) != 0)
+    return;
 
   if (S_ISDIR(stats.st_mode)) {
     DIR* dir = opendir(name.data());
     if (dir != NULL) {
       while (true) {
         struct dirent* entry = readdir(dir);
-        if (entry == NULL) break;
+        if (entry == NULL)
+          break;
         string entry_name = entry->d_name;
         if (entry_name != "." && entry_name != "..") {
           DeleteRecursively(StrCat(name, "/", entry_name));
@@ -251,11 +250,10 @@ int64_t LocalFileSize(StringPiece path) {
   return statbuf.st_size;
 }
 
-
 // Tries to create a tempfile in directory 'directory_prefix' or get a
 // directory from GetExistingTempDirectories().
 /* static */
-WriteFile* TempFile::Create(const char *directory_prefix) {
+WriteFile* TempFile::Create(const char* directory_prefix) {
   // If directory_prefix is not provided an already-existing temp directory
   // will be used
   if (!(directory_prefix && *directory_prefix)) {
@@ -272,17 +270,16 @@ WriteFile* TempFile::Create(const char *directory_prefix) {
 }
 
 // Creates a temporary file name using standard library utilities.
-static inline void TempFilenameInDir(const char *directory_prefix,
-                                     string *filename) {
+static inline void TempFilenameInDir(const char* directory_prefix, string* filename) {
   int32 tid = static_cast<int32>(pthread_self());
   int32 pid = static_cast<int32>(getpid());
   int64 now_usec = GetCurrentTimeMicros();
-  *filename = JoinPath(directory_prefix, StringPrintf("tempfile-%x-%d-%" PRId64 "x",
-                       tid, pid, now_usec));
+  *filename =
+      JoinPath(directory_prefix, StringPrintf("tempfile-%x-%d-%" PRId64 "x", tid, pid, now_usec));
 }
 
 /* static */
-bool TempFile::TempFilename(const char *directory_prefix, string *filename) {
+bool TempFile::TempFilename(const char* directory_prefix, string* filename) {
   CHECK(filename != NULL);
   filename->clear();
 
@@ -309,56 +306,66 @@ bool TempFile::TempFilename(const char *directory_prefix, string *filename) {
     }
   }
 
-  LOG(ERROR) << "Couldn't find a suitable TempFile anywhere. Tried "
-             << dirs.size() << " directories";
+  LOG(ERROR) << "Couldn't find a suitable TempFile anywhere. Tried " << dirs.size()
+             << " directories";
   return false;
 }
 
 /* static */
-string TempFile::TempFilename(const char *directory_prefix) {
+string TempFile::TempFilename(const char* directory_prefix) {
   string file_name;
   CHECK(TempFilename(directory_prefix, &file_name))
       << "Could not create temporary file with prefix: " << directory_prefix;
   return file_name;
 }
 
+// callback funcion for use of glob() at following ExpandFiles() and StatFiles() functions.
+int errfunc(const char* epath, int eerrno) {
+  LOG(ERROR) << "Error in glob() path: <" << epath << ">. errno: " << eerrno;
+  return 0;
+}
+
 vector<string> ExpandFiles(StringPiece path) {
   vector<string> res;
-
-  wordexp_t we;
-  const int r = wordexp(path.data(), &we, 0);
-  CHECK_EQ(0, r);
-
-  for (size_t i = 0; i < we.we_wordc; i++) {
-    res.push_back(we.we_wordv[i]);
+  glob_t glob_result;
+  int rv = glob(path.data(), 0, errfunc, &glob_result);
+  CHECK(!rv || rv == GLOB_NOMATCH) << rv;
+  for (size_t i = 0; i < glob_result.gl_pathc; i++) {
+    res.push_back(glob_result.gl_pathv[i]);
   }
-  wordfree(&we);
+  globfree(&glob_result);
 
   return res;
 }
 
 // Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
-std::vector<file::StatShort> StatFiles(StringPiece path) {
-  std::vector<file::StatShort> res;
+Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res) {
+  CHECK_NOTNULL(res);
+  glob_t glob_result;
+  int rv = glob(path.data(), 0, errfunc, &glob_result);
+  if (rv && rv != GLOB_NOMATCH) {
+    return Status(StatusCode::IO_ERROR, strerror(rv));
+  }
 
-  wordexp_t we;
-
-  const int r = wordexp(path.data(), &we, 0);
-  CHECK_EQ(0, r);
-  char** w = we.we_wordv;
   struct stat statbuf;
-  for (size_t i = 0; i < we.we_wordc; i++) {
-    if (stat(w[i], &statbuf) == 0) {
-      file::StatShort sshort{w[i], statbuf.st_mtime, statbuf.st_size};
-      res.push_back(sshort);
+  for (size_t i = 0; i < glob_result.gl_pathc; i++) {
+    if (stat(glob_result.gl_pathv[i], &statbuf) == 0) {
+      file::StatShort sshort{glob_result.gl_pathv[i], statbuf.st_mtime, statbuf.st_size};
+      res->push_back(sshort);
     } else {
-      LOG(WARNING) << "Bad stat for " << w[i];
+      LOG(WARNING) << "Bad stat for " << glob_result.gl_pathv[i];
     }
   }
-  wordfree(&we);
-  return res;
+  globfree(&glob_result);
+  return Status::OK;
 }
 
+std::vector<file::StatShort> StatFiles(StringPiece path) {
+  std::vector<file::StatShort> res;
+  Status rv = StatFilesSafe(path, &res);
+  CHECK(rv.ok()) << rv;
+  return res;
+}
 
 void CompressToGzip(StringPiece file, uint8_t compress_level) {
   util::StatusObject<file::ReadonlyFile*> src = file::ReadonlyFile::Open(file);
@@ -409,11 +416,10 @@ void CopyFileOrDie(StringPiece src, StringPiece dest_path) {
   int dest = open(dest_path.data(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
   CHECK_GT(dest, 0);
 
-
   CHECK_GE(sendfile(dest, source, 0, stat_source.st_size), 0);
 
   close(source);
   close(dest);
 }
 
-}  // file_util
+}  // namespace file_util
