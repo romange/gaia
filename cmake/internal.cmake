@@ -168,7 +168,7 @@ function(cxx_proto_lib name)
   add_library(${lib_name} ${cxx_out_files})
   target_link_libraries(${lib_name} ${parsed_DEPENDS} TRDP::protobuf)
   add_include(${lib_name} ${PROTOBUF_INCLUDE_DIR})
-  add_compile_flag(${lib_name} "-DGOOGLE_PROTOBUF_NO_RTTI -Wno-unused-parameter -fno-rtti")
+  add_compile_flag(${lib_name} "-DGOOGLE_PROTOBUF_NO_RTTI -Wno-unused-parameter")
 endfunction()
 
 function(flex_lib name)
