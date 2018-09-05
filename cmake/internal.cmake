@@ -52,7 +52,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -march=broadwell -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-malloc -fno-builtin-calloc ")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-realloc -fno-builtin-free")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -Wno-unused-parameter")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing -DGOOGLE_PROTOBUF_NO_RTTI")
 
 # Need -fPIC in order to link against shared libraries. For example when creating python modules.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
@@ -168,7 +168,7 @@ function(cxx_proto_lib name)
   add_library(${lib_name} ${cxx_out_files})
   target_link_libraries(${lib_name} ${parsed_DEPENDS} TRDP::protobuf)
   add_include(${lib_name} ${PROTOBUF_INCLUDE_DIR})
-  add_compile_flag(${lib_name} "-DGOOGLE_PROTOBUF_NO_RTTI -Wno-unused-parameter")
+  add_compile_flag(${lib_name} "-DGOOGLE_PROTOBUF_NO_RTTI -Wno-unused-parameter -fno-rtti")
 endfunction()
 
 function(flex_lib name)
@@ -200,8 +200,8 @@ function(bison_lib name)
   cur_gen_dir(gen_dir)
   set(lib_name "${name}_bison")
   add_library(${lib_name} ${gen_dir}/${name}.cc)
-  add_compile_flag(${lib_name} "-frtti")
   set(full_path_cc ${gen_dir}/${name}.cc ${gen_dir}/${name}.hh)
+
   ADD_CUSTOM_COMMAND(
            OUTPUT ${full_path_cc}
            COMMAND mkdir -p ${gen_dir}

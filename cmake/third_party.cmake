@@ -10,7 +10,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${THIRD_PARTY_LIB_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libs")
 
-set(THIRD_PARTY_CXX_FLAGS "-std=c++11 -O3 -DNDEBUG -fPIC")
+set(THIRD_PARTY_CXX_FLAGS "-std=c++14 -O3 -DNDEBUG -fPIC -DGOOGLE_PROTOBUF_NO_RTTI")
 
 find_package(Threads REQUIRED)
 find_library (UNWIND_LIBRARY NAMES unwind DOC "unwind library")
@@ -191,7 +191,7 @@ add_third_party(
     PATCH_COMMAND ./autogen.sh
 
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
-        CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} --prefix=${PROTOBUF_DIR}
+        "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"  --prefix=${PROTOBUF_DIR}
     COMMAND make clean
     BUILD_IN_SOURCE 1
     LIB libprotobuf.so libprotoc.so

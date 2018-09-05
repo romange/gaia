@@ -4,6 +4,7 @@
 #ifndef _PLANG_H
 #define _PLANG_H
 
+#include <functional>
 #include <memory>
 
 #include "base/integral_types.h"

@@ -1,5 +1,5 @@
 cxx_proto_lib(addressbook)
-cxx_test(proto_test addressbook_proto)
+cxx_test(proto_test addressbook_proto LABELS CI)
 
 add_library(plang plang.cc)
 cxx_link(plang TRDP::protobuf strings math plang_parser_bison)
