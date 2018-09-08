@@ -13,7 +13,7 @@ RUN echo "PATH IS: $PATH"
 RUN echo "DIST ${DIST}" && cmake -L -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
                                     -DONLY_THIRD_PARTY=ON -GNinja /src
 RUN ninja -j4 protobuf_project glog_project sparsehash_project gperf_project zstd_project \
-    evhtp_project lz4_project xxhash_project
+    evhtp_project lz4_project xxhash_project gtest_project pmr_project
 
 FROM third_party as src
 COPY ./ /src/
