@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "util/rpc/rpc_server.h"
+#include "util/rpc/rpc_connection.h"
 
 #include "base/logging.h"
 #include "base/pod_array.h"

@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "base/gtest.h"
-#include "util/rpc/rpc_server.h"
+#include "util/rpc/rpc_connection.h"
 #include "util/asio/io_context_pool.h"
 
 namespace util {

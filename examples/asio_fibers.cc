@@ -12,7 +12,7 @@
 #include "util/asio/yield.h"
 #include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
-#include "util/rpc/rpc_server.h"
+#include "util/rpc/rpc_connection.h"
 #include "util/rpc/async_client.h"
 
 using namespace boost;
