@@ -88,35 +88,13 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   return system::error_code{};
 }
 
-Server::Server(unsigned short port) : port_(port) {
-}
 
-Server::~Server() {
-}
-
-void Server::BindTo(ServiceInterface* iface) {
-  cf_ = [iface]() -> ConnectionHandler* {
-    ConnectionBridge* bridge = iface->CreateConnectionBridge();
+uint16_t ServiceInterface::Listen(uint16_t port, AcceptServer* acc_server) {
+  AcceptServer::ConnectionFactory cf = [this]() -> ConnectionHandler* {
+    ConnectionBridge* bridge = CreateConnectionBridge();
     return new RpcConnectionHandler(bridge);
   };
-}
-
-void Server::Run(IoContextPool* pool) {
-  CHECK(cf_) << "Must call BindTo before running Run(...)";
-
-  acc_server_.reset(new AcceptServer(pool));
-  port_ = acc_server_->AddListener(port_, cf_);
-  acc_server_->Run();
-}
-
-void Server::Stop() {
-  CHECK(acc_server_);
-  acc_server_->Stop();
-}
-
-void Server::Wait() {
-  acc_server_->Wait();
-  cf_ = nullptr;
+  return acc_server->AddListener(port, std::move(cf));
 }
 
 }  // namespace rpc

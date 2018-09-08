@@ -39,26 +39,8 @@ class ServiceInterface {
   // A factory method creating a handler that should handles requests for a single connection.
   // The ownership over handler is passed to the caller.
   virtual ConnectionBridge* CreateConnectionBridge() = 0;
-};
 
-class Server {
- public:
-  explicit Server(unsigned short port);
-  ~Server();
-
-  void BindTo(ServiceInterface* iface);
-
-  void Run(IoContextPool* pool);
-
-  void Stop();
-
-  void Wait();
-  uint16_t port() const { return port_; }
-
- private:
-  uint16_t port_ = 0;
-  std::unique_ptr<AcceptServer> acc_server_;
-  AcceptServer::ConnectionFactory cf_;
+  uint16_t Listen(uint16_t port, AcceptServer* acc_server);
 };
 
 }  // namespace rpc

@@ -21,17 +21,18 @@ void ServerTest::SetUp() {
   pool_.reset(new IoContextPool);
   pool_->Run();
   service_.reset(new TestInterface);
-  rpc_server_.reset(new Server(0));
-  rpc_server_->BindTo(service_.get());
-  rpc_server_->Run(pool_.get());
+  server_.reset(new AcceptServer(pool_.get()));
+  uint16_t port = service_->Listen(0, server_.get());
+
+  server_->Run();
   channel_.reset(new ClientChannel(pool_->GetNextContext(), "127.0.0.1",
-                 std::to_string(rpc_server_->port())));
+                 std::to_string(port)));
   ec_ = channel_->Connect(100);
   CHECK(!ec_) << ec_.message();
 }
 
 void ServerTest::TearDown() {
-  rpc_server_.reset();
+  server_.reset();
   channel_.reset();
   pool_->Stop();
   pool_->Join();

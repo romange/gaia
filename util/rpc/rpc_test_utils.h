@@ -38,7 +38,7 @@ class ServerTest : public testing::Test {
   void TearDown() override;
 
   std::unique_ptr<TestInterface> service_;
-  std::unique_ptr<Server> rpc_server_;
+  std::unique_ptr<AcceptServer> server_;
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<ClientChannel> channel_;
   ::boost::system::error_code ec_;

@@ -10,7 +10,6 @@
 
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
-#include "util/fibers_done.h"
 #include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
 #include "util/rpc/rpc_server.h"
@@ -107,7 +106,7 @@ void RunClient(boost::asio::io_context& context,
     f.join();
 
   client.reset();
-  done->notify();
+  done->Notify();
   LOG(INFO) << ": echo-client stopped";
 }
 
@@ -121,7 +120,7 @@ void client_pool(IoContextPool* pool) {
       });
     }
     for (auto& f : done_arr)
-      f.wait();
+      f.Wait();
   }
   LOG(INFO) << "Pool ended";
   cout << "Average latency is " << double(latency_ms.load()) / (latency_count + 1) << endl;
@@ -145,9 +144,10 @@ int main(int argc, char **argv) {
     CHECK(status.ok()) << status;
 
     PingInterface pi;
-    rpc::Server server(9999);
-    server.BindTo(&pi);
-    server.Run(&pool);
+    util::AcceptServer server(&pool);
+    pi.Listen(9999, &server);
+
+    server.Run();
     server.Wait();
   } else {
     client_pool(&pool);
