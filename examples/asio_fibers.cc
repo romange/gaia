@@ -29,7 +29,6 @@ DEFINE_int32(io_threads, 0, "");
 using asio::ip::tcp;
 using util::IoContextPool;
 using util::fibers_ext::yield;
-using util::ConnectionServerNotifier;
 using rpc::AsyncClient;
 
 http::VarzQps qps("echo-qps");
