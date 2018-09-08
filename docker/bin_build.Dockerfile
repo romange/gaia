@@ -1,4 +1,5 @@
-FROM romange/cpp-dev18 as third_party
+ARG DIST=18
+FROM romange/boost-builder:${DIST} as third_party
 
 # To allow caching third_party libs via "minimal" build.
 # We do not use ARG here, not even reference it here because otherwise it would cause cache misses
