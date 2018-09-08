@@ -22,9 +22,11 @@ AcceptServer::AcceptServer(IoContextPool* pool)
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
-    for (auto& l : listeners_)
-      l.acceptor.close();
-
+    for (auto& l : listeners_) {
+      if (l.acceptor.is_open())
+        l.acceptor.close();
+    }
+    
     bc_.Dec();
   });
 }
