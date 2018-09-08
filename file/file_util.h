@@ -49,13 +49,14 @@ void DeleteRecursively(StringPiece name);
 
 void TraverseRecursively(StringPiece path, std::function<void(StringPiece)> cb);
 
-int64_t LocalFileSize(StringPiece path);   // In bytes.
+int64_t LocalFileSize(StringPiece path);  // In bytes.
 
 // Uses glob rules for local file system and the usual ls expansion for s3.
 std::vector<std::string> ExpandFiles(StringPiece path);
 
 // Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
 std::vector<file::StatShort> StatFiles(StringPiece path);
+util::Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res);
 
 // Creates 'file.gz', compresses file, once successful, deletes it. fails on any error.
 void CompressToGzip(StringPiece file, uint8_t compress_level = 2);
@@ -71,7 +72,7 @@ class TempFile {
   //
   // Returns: a new File*, opened for read/write or NULL if it couldn't create
   // one.
-  static file::WriteFile* Create(const char *directory_prefix);
+  static file::WriteFile* Create(const char* directory_prefix);
 
   // The following method returns a temporary-looking filename. Be
   // advised that it might change behavior in the future and the
@@ -83,13 +84,11 @@ class TempFile {
   // localtime, cycle counts, hostname, pid and tid, to ensure
   // uniqueness. Returns: true if 'filename' contains a unique
   // filename, otherwise false (and 'filename' is left unspecified).
-  static bool TempFilename(const char *directory_prefix, std::string *filename);
+  static bool TempFilename(const char* directory_prefix, std::string* filename);
 
   // Similar as above but returns the file name rather than writing it to
   // an output argument.
-  static std::string TempFilename(const char *directory_prefix);
+  static std::string TempFilename(const char* directory_prefix);
 };
 
-
-
-};
+};  // namespace file_util
