@@ -14,29 +14,18 @@ namespace util {
 using namespace boost;
 using asio::ip::tcp;
 
-AcceptServer::AcceptServer(unsigned short port, IoContextPool* pool, ConnectionFactory cf)
-     :pool_(pool), io_cntx_(pool->GetNextContext()),
-      acceptor_(io_cntx_),
-      signals_(io_cntx_, SIGINT, SIGTERM),
-      cf_(cf) {
-  tcp::endpoint endpoint(tcp::v4(), port);
-  acceptor_.open(endpoint.protocol());
-  acceptor_.set_option(tcp::acceptor::reuse_address(true));
-  acceptor_.bind(endpoint);
-
-  constexpr int kMaxBacklogPendingConnections = 64;
-  acceptor_.listen(kMaxBacklogPendingConnections);
-  tcp::endpoint le = acceptor_.local_endpoint();
-  port_ = le.port();
-
-  LOG(INFO) << "AcceptServer - listening on port " << port_;
+AcceptServer::AcceptServer(IoContextPool* pool)
+     :pool_(pool), signals_(pool->GetNextContext(), SIGINT, SIGTERM), bc_(1) {
 
   signals_.async_wait(
   [this](system::error_code /*ec*/, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
-    acceptor_.close();
+    for (auto& l : listeners_)
+      l.acceptor.close();
+
+    bc_.Dec();
   });
 }
 
@@ -45,7 +34,19 @@ AcceptServer::~AcceptServer() {
   Wait();
 }
 
-void AcceptServer::RunInIOThread() {
+unsigned short AcceptServer::AddListener(unsigned short port, ConnectionFactory cf) {
+  CHECK(!was_run_);
+
+  tcp::endpoint endpoint(tcp::v4(), port);
+  listeners_.emplace_back(&pool_->GetNextContext(), endpoint, std::move(cf));
+  auto& listener = listeners_.back();
+
+  LOG(INFO) << "AcceptServer - listening on port " << listener.port;
+
+  return listener.port;
+}
+
+void AcceptServer::RunInIOThread(Listener* listener) {
   util::ConnectionHandler::ListType clist;
 
   // wrap it to allow thread-safe and consistent access to the list.
@@ -55,7 +56,7 @@ void AcceptServer::RunInIOThread() {
   util::ConnectionHandler* handler = nullptr;
   try {
     for (;;) {
-       std::tie(handler,ec) = AcceptFiber(&notifier);
+       std::tie(handler,ec) = AcceptFiber(listener, &notifier);
        if (ec) {
          CHECK(!handler);
          break; // TODO: To refine it.
@@ -89,38 +90,48 @@ void AcceptServer::RunInIOThread() {
   }
 
   // Notify that AcceptThread has stopped.
-  done_.notify();
+  bc_.Dec();
 
-  LOG(INFO) << ": Accept server stopped";
+  LOG(INFO) << "Accept server stopped";
 }
 
-auto AcceptServer::AcceptFiber(ConnectionHandler::Notifier* notifier) -> AcceptResult {
+auto AcceptServer::AcceptFiber(Listener* listener, ConnectionHandler::Notifier* notifier)
+   -> AcceptResult {
   auto& io_cntx = pool_->GetNextContext();
 
-  std::unique_ptr<util::ConnectionHandler> conn(cf_(&io_cntx));
-  conn->Init(notifier);
-
   system::error_code ec;
-  acceptor_.async_accept(conn->socket(), fibers_ext::yield[ec]);
+  tcp::socket sock(io_cntx);
+  listener->acceptor.async_accept(sock, fibers_ext::yield[ec]);
 
   if (ec)
     return AcceptResult(nullptr, ec);
-  else
-    return AcceptResult(conn.release(), ec);
+  ConnectionHandler* conn = listener->cf();
+  conn->Init(std::move(sock), notifier);
+
+  return AcceptResult(conn, ec);
 }
 
 
 void AcceptServer::Run() {
-  asio::post(io_cntx_, [this] {
-      fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this);
+  CHECK(!listeners_.empty());
+
+  bc_.Add(listeners_.size());
+
+  for (auto& listener : listeners_) {
+    Listener* ptr = &listener;
+
+    io_context& io_cntx = ptr->acceptor.get_executor().context();
+    asio::post(io_cntx, [this, ptr] {
+      fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this, ptr);
       srv_fb.detach();
     });
+  }
   was_run_ = true;
 }
 
 void AcceptServer::Wait() {
   if (was_run_)
-    done_.wait();
+    bc_.Wait();
 }
 
 }  // namespace util

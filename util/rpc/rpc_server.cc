@@ -28,9 +28,8 @@ using std::string;
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
-  RpcConnectionHandler(asio::io_context* io_svc,            // not owned.
-                       // owned by the instance.
-                       ConnectionBridge* bridge);
+  // bridge is owned by RpcConnectionHandler instance.
+  RpcConnectionHandler(ConnectionBridge* bridge);
 
   system::error_code HandleRequest() final override;
 
@@ -40,16 +39,15 @@ class RpcConnectionHandler : public ConnectionHandler {
   std::unique_ptr<ConnectionBridge> bridge_;
 };
 
-RpcConnectionHandler::RpcConnectionHandler(asio::io_context* io_svc,
-                                           ConnectionBridge* bridge)
-    : ConnectionHandler(io_svc), bridge_(bridge) {
+RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
+    : bridge_(bridge) {
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
-  VLOG(2) << "RpcConnectionHandler " << socket_.remote_endpoint();
+  VLOG(2) << "RpcConnectionHandler " << socket_->remote_endpoint();
 
   rpc::Frame frame;
-  system::error_code ec = frame.Read(&socket_);
+  system::error_code ec = frame.Read(&socket_.value());
   VLOG(2) << "Frame read " << ec;
   if (ec)
     return ec;
@@ -63,7 +61,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   size_t sz;
 
   auto rbuf_seq = make_buffer_seq(header_, letter_);
-  sz = asio::async_read(socket_, rbuf_seq, yield[ec]);
+  sz = asio::async_read(*socket_, rbuf_seq, yield[ec]);
   if (ec)
     return ec;
 
@@ -81,7 +79,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
   VLOG(1) << "Writing frame " << frame.rpc_id;
-  sz = asio::async_write(socket_, wbuf_seq, yield[ec]);
+  sz = asio::async_write(*socket_, wbuf_seq, yield[ec]);
   if (ec)
     return ec;
 
@@ -97,18 +95,18 @@ Server::~Server() {
 }
 
 void Server::BindTo(ServiceInterface* iface) {
-  cf_ = [iface](io_context* cntx) -> ConnectionHandler* {
+  cf_ = [iface]() -> ConnectionHandler* {
     ConnectionBridge* bridge = iface->CreateConnectionBridge();
-    return new RpcConnectionHandler(cntx, bridge);
+    return new RpcConnectionHandler(bridge);
   };
 }
 
 void Server::Run(IoContextPool* pool) {
   CHECK(cf_) << "Must call BindTo before running Run(...)";
 
-  acc_server_.reset(new AcceptServer(port_, pool, cf_));
+  acc_server_.reset(new AcceptServer(pool));
+  port_ = acc_server_->AddListener(port_, cf_);
   acc_server_->Run();
-  port_ = acc_server_->port();
 }
 
 void Server::Stop() {

@@ -10,7 +10,7 @@
 #include <boost/asio/signal_set.hpp>
 
 #include "util/asio/connection_handler.h"
-#include "util/fibers_done.h"
+#include "util/fibers_ext.h"
 
 namespace util {
 
@@ -21,9 +21,9 @@ class AcceptServer {
   typedef ::boost::asio::io_context io_context;
   typedef ::boost::fibers::condition_variable condition_variable;
 
-  using ConnectionFactory = std::function<ConnectionHandler*(io_context* cntx)> ;
+  using ConnectionFactory = std::function<ConnectionHandler*()> ;
 
-  AcceptServer(unsigned short port, IoContextPool* pool, ConnectionFactory cf);
+  explicit AcceptServer(IoContextPool* pool);
   ~AcceptServer();
 
   void Run();
@@ -36,25 +36,42 @@ class AcceptServer {
 
   void Wait();
 
-  unsigned short port() const { return port_;}
+  // Returns the port number to which the listener was bound.
+  unsigned short AddListener(unsigned short port, ConnectionFactory cf);
+
  private:
-  void RunInIOThread();
+  using acceptor = ::boost::asio::ip::tcp::acceptor;
+  using endpoint = ::boost::asio::ip::tcp::endpoint;
+  struct Listener;
+
+  void RunInIOThread(Listener* listener);
 
   // Should really be std::expected or std::experimental::fundamental_v3::expected
   // when upgrade the compiler.
   typedef std::tuple<ConnectionHandler*, ::boost::system::error_code>
     AcceptResult;
 
-  AcceptResult AcceptFiber(ConnectionHandler::Notifier* done);
+  AcceptResult AcceptFiber(Listener* listener, ConnectionHandler::Notifier* done);
 
   IoContextPool* pool_;
-  io_context& io_cntx_;
-  ::boost::asio::ip::tcp::acceptor acceptor_;
+
+  struct Listener {
+    ::boost::asio::ip::tcp::acceptor acceptor;
+    ConnectionFactory cf;
+    unsigned short port;
+
+    Listener(io_context* cntx, const endpoint& ep,
+             ConnectionFactory cf2) : acceptor(*cntx, ep), cf(std::move(cf2)) {
+      port = acceptor.local_endpoint().port();
+    }
+  };
+
   ::boost::asio::signal_set signals_;
-  fibers_ext::Done done_;
-  ConnectionFactory cf_;
+  fibers_ext::BlockingCounter bc_;
+
   bool was_run_ = false;
-  unsigned short port_;
+
+  std::vector<Listener> listeners_;
 };
 
 }  // namespace util

@@ -6,6 +6,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/fiber/condition_variable.hpp>
 #include <boost/intrusive/list.hpp>
+#include <experimental/optional>
 
 namespace util {
 
@@ -40,7 +41,7 @@ class ConnectionHandler {
                     detail::constant_time_size<true>, detail::cache_last<true>>;
   class Notifier;
 
-  explicit ConnectionHandler(io_context* io_svc) noexcept;
+  explicit ConnectionHandler() noexcept;
 
   virtual ~ConnectionHandler();
 
@@ -49,7 +50,7 @@ class ConnectionHandler {
 
   void Close();
 
-  socket_t& socket() { return socket_;}
+  socket_t& socket() { return *socket_;}
 
 
   friend void intrusive_ptr_add_ref(ConnectionHandler* ctx) noexcept {
@@ -83,12 +84,16 @@ class ConnectionHandler {
     }
   };
 
-  void Init(Notifier* notifier) { notifier_ = notifier; }
+  void Init(socket_t&& sock, Notifier* notifier) {
+    socket_.emplace(std::move(sock));
+    notifier_ = notifier;
+  }
+
  protected:
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
-  socket_t socket_;
+  std::experimental::optional<socket_t> socket_;
 
  private:
   void RunInIOThread();

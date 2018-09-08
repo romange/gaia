@@ -16,12 +16,12 @@ class Done {
 
   void operator=(const Done&) = delete;
 
-  void wait() {
+  void Wait() {
     std::unique_lock<::boost::fibers::mutex> lock(mutex_);
     cond_.wait(lock, [this]() { return ready_; });
   }
 
-  void notify() {
+  void Notify() {
     mutex_.lock();
     ready_ = true;
     mutex_.unlock();
@@ -31,6 +31,39 @@ class Done {
   ::boost::fibers::condition_variable   cond_;
   ::boost::fibers::mutex                mutex_;
   bool                                  ready_ = false;
+};
+
+class BlockingCounter {
+ public:
+  using mutex = ::boost::fibers::mutex;
+
+  explicit BlockingCounter(unsigned count) : count_(count) {}
+
+  void Add(unsigned delta) {
+    std::lock_guard<mutex> g(mutex_);
+    count_ += delta;
+  }
+
+  void Dec() {
+    if (0 == count_)  // should not happen
+      return;
+
+    std::lock_guard<mutex> g(mutex_);
+    --count_;
+    if (count_ == 0)
+      cond_.notify_one();
+  }
+
+  void Wait() {
+    std::unique_lock<::boost::fibers::mutex> lock(mutex_);
+    cond_.wait(lock, [this] { return count_ == 0; });
+  }
+
+ private:
+  unsigned count_;
+
+  ::boost::fibers::condition_variable   cond_;
+  ::boost::fibers::mutex                mutex_;
 };
 
 }  // namespace fibers_ext

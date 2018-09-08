@@ -27,8 +27,7 @@ void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
     cnd_.notify_one();
 }
 
-ConnectionHandler::ConnectionHandler(io_context* io_svc) noexcept
-    : socket_(*io_svc) {
+ConnectionHandler::ConnectionHandler() noexcept {
 }
 
 ConnectionHandler::~ConnectionHandler() {
@@ -37,7 +36,7 @@ ConnectionHandler::~ConnectionHandler() {
 void ConnectionHandler::Run() {
   CHECK(notifier_);
 
-  auto& cntx = socket_.get_io_context();
+  auto& cntx = socket_->get_io_context();
 
   cntx.post([guard = ptr_t(this)] {
     // As long as fiber is running, 'this' is protected from deletion.
@@ -49,10 +48,12 @@ void ConnectionHandler::Run() {
 *   fiber function per server connection
 *****************************************************************************/
 void ConnectionHandler::RunInIOThread() {
+  CHECK(socket_);
+
   VLOG(1) << "ConnectionHandler::RunInIOThread";
   system::error_code ec;
   try {
-    while (socket_.is_open()) {
+    while (socket_->is_open()) {
       ec = HandleRequest();
       if (ec) {
         if (ec != error::eof && ec != error::operation_aborted) {
@@ -66,8 +67,8 @@ void ConnectionHandler::RunInIOThread() {
     LOG(ERROR) << ex.what();
   }
 
-  if (socket_.is_open())
-    socket_.close(ec);
+  if (socket_->is_open())
+    socket_->close(ec);
 
   notifier_->Unlink(this);
 
@@ -76,7 +77,7 @@ void ConnectionHandler::RunInIOThread() {
 }
 
 void ConnectionHandler::Close() {
-  auto& cntx = socket_.get_executor().context();
+  auto& cntx = socket_->get_executor().context();
 
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
@@ -85,8 +86,8 @@ void ConnectionHandler::Close() {
   // safe callback execution even if RunInIOThread released the ownership.
   cntx.post([guard = ptr_t(this)] {
     system::error_code ec;
-    if (guard->socket_.is_open())
-      guard->socket_.close(ec);
+    if (guard->socket_->is_open())
+      guard->socket_->close(ec);
     LOG_IF(INFO, ec) << "Error closing socket " << ec.message();
   });
 }

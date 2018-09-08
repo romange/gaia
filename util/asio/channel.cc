@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "util/asio/channel.h"
-#include "util/fibers_done.h"
 
 
 using namespace boost;
