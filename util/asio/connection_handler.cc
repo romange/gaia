@@ -57,7 +57,7 @@ void ConnectionHandler::RunInIOThread() {
       ec = HandleRequest();
       if (ec) {
         if (ec != error::eof && ec != error::operation_aborted) {
-          LOG(WARNING) << "Error : " << ec.message();
+          LOG(WARNING) << "Error : " << ec.message() << ", " << ec.category().name() << "/" << ec.value();
         }
         break;
       }
