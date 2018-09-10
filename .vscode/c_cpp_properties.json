@@ -14,7 +14,8 @@
         "${workspaceFolder}/third_party/libs/zstd/include",
         "${workspaceFolder}/third_party/libs/benchmark/include",
         "${workspaceFolder}/third_party/libs/gtest/include",
-        "${workspaceFolder}", 
+        "${workspaceFolder}/third_party/libs/gperf/include",
+        "${workspaceFolder}",
         "${workspaceFolder}/genfiles",
         "${default}"
       ]
