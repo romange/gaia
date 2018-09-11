@@ -1,8 +1,10 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#include <boost/beast/http/message.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include "strings/unique_strings.h"
 #include "util/asio/connection_handler.h"
-#include "strings/stringpiece.h"
 
 namespace util {
 namespace http {
@@ -15,17 +17,33 @@ typedef std::vector<std::pair<StringPiece, StringPiece>> QueryArgs;
 
 class HttpHandler : public ConnectionHandler {
  public:
+  typedef ::boost::beast::http::string_body  BodyType;
+  typedef ::boost::beast::http::response<BodyType> Response;
+
+  typedef std::function < void(const QueryArgs&, Response*)> RequestCb;
+
   HttpHandler();
 
   boost::system::error_code HandleRequest() final override;
+
+  // Returns true if a callback was registered.
+  bool RegisterCb(StringPiece path, bool protect, RequestCb cb);
+
  private:
-  virtual bool Authorize(StringPiece key, StringPiece value) const {
+ virtual bool Authorize(StringPiece key, StringPiece value) const {
     return true;
   }
 
   bool Authorize(const QueryArgs& args) const;
+  void HandleRequestInternal(StringPiece target, Response* dest);
 
   const char* favicon_;
+
+  struct CbInfo {
+    bool is_protected;
+    RequestCb cb;
+  };
+  StringPieceMap<CbInfo> cb_map_;
 };
 
 }  // namespace http

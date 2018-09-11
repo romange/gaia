@@ -4,7 +4,6 @@
 
 #include "base/walltime.h"
 #include "strings/util.h"
-#include "util/http/http_server.h"
 #include "util/http/varz_stats.h"
 #include "util/proc_stats.h"
 #include "strings/strcat.h"

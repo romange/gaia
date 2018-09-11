@@ -38,12 +38,12 @@ inline system::error_code to_asio(system::error_code ec) {
   return ec;
 }
 
-inline std::pair<StringPiece, StringPiece> Parse(::boost::string_view str) {
+inline std::pair<StringPiece, StringPiece> Parse(StringPiece str) {
   std::pair<StringPiece, StringPiece> res;
   size_t pos = str.find('?');
-  res.first = as_absl(str.substr(0, pos));
-  if (pos != ::boost::string_view::npos) {
-    res.second = as_absl(str.substr(pos + 1));
+  res.first = str.substr(0, pos);
+  if (pos != StringPiece::npos) {
+    res.second = str.substr(pos + 1);
   }
   return res;
 }
@@ -130,44 +130,48 @@ system::error_code HttpHandler::HandleRequest() {
   if (ec) {
     return to_asio(ec);
   }
-  h2::response<h2::string_body> response{h2::status::ok, request.version()};
+  Response response{h2::status::ok, request.version()};
   response.set(h2::field::server, "GAIA");
-
+  response.keep_alive(request.keep_alive());
   VLOG(1) << "Full Url: " << request.target();
 
-  if (request.target() == "/favicon.ico") {
-    response.set(h2::field::location, favicon_);
-    response.result(h2::status::moved_permanently);
-  } else {
-    StringPiece path, query;
-    tie(path, query) = Parse(request.target());
-    auto args = SplitQuery(query);
+  HandleRequestInternal(as_absl(request.target()), &response);
 
-    if (path == "/") {
-      response.set(h2::field::content_type, kHtmlMime);
-      response.keep_alive(request.keep_alive());
-      response.body() = ::http::BuildStatusPage();
-    } else if (path == "/flagz") {
-      if (Authorize(args)) {
-        ParseFlagz(args, &response);
-      } else {
-        response.result(h2::status::unauthorized);
-      }
-    } else {
-      if (VLOG_IS_ON(1)) {
-        LOG(INFO) << "Target: " << request.target();
-        auto formater = [](string* dest, const auto& f) {
-          absl::StrAppend(dest, as_absl(f.name_string()), ":", as_absl(f.value()));
-        };
-        string str = absl::StrJoin(request, ",", formater);
-        VLOG(1) << "Fields: " << str;
-      }
-    }
-  }
   response.prepare_payload();
   h2::async_write(*socket_, response, yield[ec]);
 
   return to_asio(ec);
+}
+
+void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
+  if (target == "/favicon.ico") {
+    resp->set(h2::field::location, favicon_);
+    resp->result(h2::status::moved_permanently);
+    return;
+  }
+  StringPiece path, query;
+  tie(path, query) = Parse(target);
+  auto args = SplitQuery(query);
+
+  if (path == "/") {
+    resp->set(h2::field::content_type, kHtmlMime);
+    resp->body() = ::http::BuildStatusPage();
+    return;
+  }
+  if (path == "/flagz") {
+    if (Authorize(args)) {
+      ParseFlagz(args, resp);
+    } else {
+      resp->result(h2::status::unauthorized);
+    }
+    return;
+  }
+  auto it = cb_map_.find(path);
+  if (it == cb_map_.end() || (it->second.is_protected && !Authorize(args))) {
+    resp->result(h2::status::unauthorized);
+  } else {
+    it->second.cb(args, resp);
+  }
 }
 
 bool HttpHandler::Authorize(const QueryArgs& args) const {
@@ -176,6 +180,12 @@ bool HttpHandler::Authorize(const QueryArgs& args) const {
       return true;
   }
   return false;
+}
+
+bool HttpHandler::RegisterCb(StringPiece path, bool protect, RequestCb cb) {
+  CbInfo info{protect, cb};
+  auto res = cb_map_.emplace(path, info);
+  return res.second;
 }
 
 }  // namespace http
