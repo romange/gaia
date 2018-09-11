@@ -223,10 +223,15 @@ void IoContextPool::Join() {
 
 asio::io_context& IoContextPool::GetNextContext() {
   // Use a round-robin scheme to choose the next io_context to use.
-  boost::asio::io_context& io_context = *context_arr_[next_io_context_];
-  ++next_io_context_;
-  if (next_io_context_ == context_arr_.size())
+  DCHECK_LT(next_io_context_, context_arr_.size());
+  uint32_t index = next_io_context_.load();
+  boost::asio::io_context& io_context = *context_arr_[index++];
+
+  // Not-perfect round-robind since this function is non-transactional but it's valid.
+  if (index == context_arr_.size())
     next_io_context_ = 0;
+  else
+    next_io_context_ = index;
   return io_context;
 }
 

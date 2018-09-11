@@ -44,14 +44,14 @@ RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
-  VLOG(2) << "RpcConnectionHandler " << socket_->remote_endpoint();
+  VLOG(2) << "RpcConnectionHandler " << socket_->remote_endpoint() << "/" << socket_->is_open();
 
   rpc::Frame frame;
   system::error_code ec = frame.Read(&socket_.value());
-  VLOG(2) << "Frame read " << ec;
-  if (ec)
+  if (ec) {
     return ec;
-
+  }
+  DCHECK_NE(-1, socket_->native_handle());
   DCHECK_LT(last_rpc_id_, frame.rpc_id);
   last_rpc_id_ = frame.rpc_id;
 
@@ -62,8 +62,11 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   auto rbuf_seq = make_buffer_seq(header_, letter_);
   sz = asio::async_read(*socket_, rbuf_seq, yield[ec]);
-  if (ec)
+  if (ec) {
+    VLOG(1) << "async_read " << ec << " /" << socket_->native_handle();
     return ec;
+  }
+  DCHECK_NE(-1, socket_->native_handle());
 
   CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
@@ -78,10 +81,12 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   auto fsz = frame.Write(buf);
 
   auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
-  VLOG(1) << "Writing frame " << frame.rpc_id;
+  VLOG(2) << "Writing frame " << frame.rpc_id;
   sz = asio::async_write(*socket_, wbuf_seq, yield[ec]);
-  if (ec)
+  if (ec) {
+    VLOG(1) << "async_write " << ec;
     return ec;
+  }
 
   CHECK_EQ(sz, frame.header_size + frame.letter_size + fsz);
 

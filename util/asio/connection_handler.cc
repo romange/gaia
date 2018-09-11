@@ -50,14 +50,16 @@ void ConnectionHandler::Run() {
 void ConnectionHandler::RunInIOThread() {
   CHECK(socket_);
 
-  VLOG(1) << "ConnectionHandler::RunInIOThread";
+  VLOG(1) << "ConnectionHandler::RunInIOThread. socket " << socket_->native_handle();
   system::error_code ec;
+  is_open_ = socket_->is_open();
   try {
-    while (socket_->is_open()) {
+    while (is_open_) {
       ec = HandleRequest();
       if (ec) {
         if (ec != error::eof && ec != error::operation_aborted) {
-          LOG(WARNING) << "Error : " << ec.message() << ", " << ec.category().name() << "/" << ec.value();
+          LOG(WARNING) << "Error : " << ec.message() << ", "
+                       << ec.category().name() << "/" << ec.value();
         }
         break;
       }
@@ -79,15 +81,18 @@ void ConnectionHandler::RunInIOThread() {
 void ConnectionHandler::Close() {
   auto& cntx = socket_->get_executor().context();
 
+  is_open_ = false;
+
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
-
   // We use intrusive guard to increment the reference of this in order to allow
   // safe callback execution even if RunInIOThread released the ownership.
   cntx.post([guard = ptr_t(this)] {
     system::error_code ec;
-    if (guard->socket_->is_open())
-      guard->socket_->close(ec);
+    if (guard->socket_->is_open()) {
+      VLOG(1) << "Closing socket " << guard->socket_->native_handle();
+      guard->socket_->cancel(ec);
+    }
     LOG_IF(INFO, ec) << "Error closing socket " << ec.message();
   });
 }

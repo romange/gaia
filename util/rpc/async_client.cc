@@ -49,8 +49,13 @@ auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
     return res;
   }
 
+  if (channel_.status()) {
+    p.set_value(channel_.status());
+    return res;
+  }
+
   // This section must be atomic so that rpc ids will be sent in increasing order.
-  auto cb = [&](tcp::socket& sock) -> error_code {
+  auto cb = [this, header, letter, p = std::move(p)](tcp::socket& sock) mutable -> error_code {
     Frame frame(rpc_id_++, header->size(), letter->size());
     uint8_t buf[Frame::kMaxByteSize];
     size_t bsz = frame.Write(buf);

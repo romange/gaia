@@ -94,7 +94,7 @@ class ConnectionHandler {
   virtual boost::system::error_code HandleRequest() = 0;
 
   std::experimental::optional<socket_t> socket_;
-
+  bool is_open_ = false;
  private:
   void RunInIOThread();
 

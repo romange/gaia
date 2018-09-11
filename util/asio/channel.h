@@ -63,9 +63,8 @@ class ClientChannel {
   }
 
   // Returns error_code, checks that f is callable on socket&
+  // The function is guaranteed to call 'f'.
   template<typename Func> socket_callable_t<Func> Write(Func&& f) {
-    if (status_)
-      return status_;
     std::lock_guard<mutex> guard(impl_->wmu_);
     status_ = f(sock_);
     if (status_) HandleErrorStatus();
@@ -83,9 +82,8 @@ class ClientChannel {
     return status_;
   }
 
+  // The function is guaranteed to call 'f'.
   template<typename Func> error_code Read(Func&& f) {
-    if (status_)
-      return status_;
     std::lock_guard<mutex> guard(impl_->rmu_);
     status_ = f(sock_);
     if (status_) HandleErrorStatus();
@@ -93,6 +91,8 @@ class ClientChannel {
   }
 
   io_context& context() { return sock_.get_executor().context(); }
+  error_code status() const { return status_; }
+
  private:
   void ResolveAndConnect(const time_point& until);
   void HandleErrorStatus();

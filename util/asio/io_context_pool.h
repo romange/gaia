@@ -34,7 +34,7 @@ public:
   // Blocks the current thread until Stop is called and all the pool threads exited.
   void Join();
 
-  /// Get an io_context to use.
+  /// Get an io_context to use. Thread-safe.
   boost::asio::io_context& GetNextContext();
 
   io_context& operator[](size_t i) { return *context_arr_[i];}
@@ -53,7 +53,7 @@ private:
   std::vector<TInfo> thread_arr_;
 
   /// The next io_context to use for a connection.
-  std::size_t next_io_context_ = 0;
+  std::atomic_uint_fast32_t next_io_context_{0};
   thread_local static size_t context_indx_;
 };
 

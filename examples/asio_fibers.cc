@@ -10,7 +10,7 @@
 
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
-#include "util/http/http_server.h"
+#include "util/http/http_conn_handler.h"
 #include "util/http/varz_stats.h"
 #include "util/rpc/rpc_connection.h"
 #include "util/rpc/async_client.h"
@@ -30,7 +30,7 @@ using util::IoContextPool;
 using util::fibers_ext::yield;
 using rpc::AsyncClient;
 
-http::VarzQps qps("echo-qps");
+::http::VarzQps qps("echo-qps");
 
 
 class PingBridge final : public rpc::ConnectionBridge {
@@ -81,7 +81,8 @@ void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
     if ( ec == asio::error::eof) {
       return; //connection closed cleanly by peer
     } else if (ec) {
-      LOG(ERROR) << "Error: " << ec;
+      LOG(ERROR) << "Error: " << ec << " " << ec.message();
+      break;
     }
   }
 }
@@ -128,23 +129,23 @@ void client_pool(IoContextPool* pool) {
 
 int main(int argc, char **argv) {
   MainInitGuard guard(&argc, &argv);
-
-  std::unique_ptr<http::Server> http_server;
   unsigned io_threads = FLAGS_io_threads;
   if (io_threads == 0)
     io_threads = thread::hardware_concurrency();
   LOG(INFO) << "Running with " << io_threads << " threads";
 
   IoContextPool pool(io_threads);
+  util::AcceptServer server(&pool);
+
   pool.Run();
 
   if (FLAGS_connect.empty()) {
-    http_server.reset(new http::Server(FLAGS_http_port));
-    util::Status status = http_server->Start();
-    CHECK(status.ok()) << status;
+    uint16_t port = server.AddListener(FLAGS_http_port,
+        [] { return new util::http::HttpHandler(); });
+    LOG(INFO) << "Started http server on port " << port;
 
     PingInterface pi;
-    util::AcceptServer server(&pool);
+
     pi.Listen(9999, &server);
 
     server.Run();
@@ -155,7 +156,6 @@ int main(int argc, char **argv) {
 
   pool.Stop();
   pool.Join();
-
 
   return 0;
 }
