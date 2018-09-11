@@ -141,8 +141,7 @@ add_third_party(
 add_third_party(
   glog
   DEPENDS gflags_project
-  GIT_REPOSITORY https://github.com/google/glog.git
-  GIT_TAG v0.3.5
+  GIT_REPOSITORY https://github.com/romange/glog.git
   CMAKE_PASS_FLAGS "-DBUILD_TESTING=OFF"
 )
 
