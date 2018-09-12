@@ -113,7 +113,7 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
 
 }  // namespace
 
-HttpHandler::HttpHandler() {
+HttpHandler::HttpHandler(CallbackRegistry* registry) : registry_(registry) {
   favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/favicon-32x32.png";
   resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/master/util/http";
 }
@@ -164,11 +164,13 @@ void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
     }
     return;
   }
-  auto it = cb_map_.find(path);
-  if (it == cb_map_.end() || (it->second.is_protected && !Authorize(args))) {
-    resp->result(h2::status::unauthorized);
-  } else {
-    it->second.cb(args, resp);
+  if (registry_) {
+    auto it = registry_->cb_map_.find(path);
+    if (it == registry_->cb_map_.end() || (it->second.is_protected && !Authorize(args))) {
+      resp->result(h2::status::unauthorized);
+    } else {
+      it->second.cb(args, resp);
+    }
   }
 }
 
@@ -180,7 +182,7 @@ bool HttpHandler::Authorize(const QueryArgs& args) const {
   return false;
 }
 
-bool HttpHandler::RegisterCb(StringPiece path, bool protect, RequestCb cb) {
+bool CallbackRegistry::RegisterCb(StringPiece path, bool protect, HttpHandler::RequestCb cb) {
   CbInfo info{protect, cb};
   auto res = cb_map_.emplace(path, info);
   return res.second;

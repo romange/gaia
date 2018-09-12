@@ -15,19 +15,17 @@ namespace http {
 // In case there is not '=' delimiter, only the first field is filled.
 typedef std::vector<std::pair<StringPiece, StringPiece>> QueryArgs;
 
+class CallbackRegistry;
+
 class HttpHandler : public ConnectionHandler {
  public:
-  typedef ::boost::beast::http::string_body  BodyType;
+  typedef ::boost::beast::http::string_body BodyType;
   typedef ::boost::beast::http::response<BodyType> Response;
-
   typedef std::function < void(const QueryArgs&, Response*)> RequestCb;
 
-  HttpHandler();
+  HttpHandler(CallbackRegistry* registry = nullptr);
 
   boost::system::error_code HandleRequest() final override;
-
-  // Returns true if a callback was registered.
-  bool RegisterCb(StringPiece path, bool protect, RequestCb cb);
 
  protected:
   virtual bool Authorize(StringPiece key, StringPiece value) const {
@@ -40,10 +38,22 @@ class HttpHandler : public ConnectionHandler {
   bool Authorize(const QueryArgs& args) const;
   void HandleRequestInternal(StringPiece target, Response* dest);
 
+  CallbackRegistry* registry_;
+};
 
+// Should be one per process. HandlerFactory should pass it to HttpHandler's c-tor once
+// the registry is finalized. Currently does not support on the fly updates - requires
+// multi-threading support.
+class CallbackRegistry {
+  friend class HttpHandler;
+ public:
+  // Returns true if a callback was registered.
+  bool RegisterCb(StringPiece path, bool protect, HttpHandler::RequestCb cb);
+
+ private:
   struct CbInfo {
     bool is_protected;
-    RequestCb cb;
+    HttpHandler::RequestCb cb;
   };
   StringPieceMap<CbInfo> cb_map_;
 };
