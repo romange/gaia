@@ -13,6 +13,8 @@
 #include "strings/stringpiece.h"
 #include "util/http/http_status_code.h"
 
+#error Deprecated.
+
 namespace http {
 
 class Request {

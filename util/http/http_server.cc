@@ -35,7 +35,7 @@ using std::vector;
 using std::string;
 using namespace std::placeholders;
 
-extern string BuildStatusPage();
+extern string BuildStatusPage(const char* resource_prefix);
 extern string BuildStatusPageJson();
 
 namespace {

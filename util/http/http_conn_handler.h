@@ -29,15 +29,17 @@ class HttpHandler : public ConnectionHandler {
   // Returns true if a callback was registered.
   bool RegisterCb(StringPiece path, bool protect, RequestCb cb);
 
- private:
- virtual bool Authorize(StringPiece key, StringPiece value) const {
+ protected:
+  virtual bool Authorize(StringPiece key, StringPiece value) const {
     return true;
   }
+  const char* favicon_;
+  const char* resource_prefix_;
 
+ private:
   bool Authorize(const QueryArgs& args) const;
   void HandleRequestInternal(StringPiece target, Response* dest);
 
-  const char* favicon_;
 
   struct CbInfo {
     bool is_protected;

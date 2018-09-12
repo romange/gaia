@@ -11,12 +11,9 @@
 #include "base/logging.h"
 #include "strings/stringpiece.h"
 #include "util/asio/yield.h"
+#include "util/http/status_page.h"
 
 using namespace std;
-
-namespace http {
-extern string BuildStatusPage();
-}
 
 namespace util {
 namespace http {
@@ -117,7 +114,8 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
 }  // namespace
 
 HttpHandler::HttpHandler() {
-  favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/logo.png";
+  favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/favicon-32x32.png";
+  resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/master/util/http";
 }
 
 system::error_code HttpHandler::HandleRequest() {
@@ -155,7 +153,7 @@ void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
 
   if (path == "/") {
     resp->set(h2::field::content_type, kHtmlMime);
-    resp->body() = ::http::BuildStatusPage();
+    resp->body() = BuildStatusPage(resource_prefix_);
     return;
   }
   if (path == "/flagz") {
