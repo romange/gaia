@@ -1,6 +1,8 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#pragma once
+
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include "strings/unique_strings.h"
@@ -23,7 +25,7 @@ class HttpHandler : public ConnectionHandler {
   typedef ::boost::beast::http::response<BodyType> Response;
   typedef std::function < void(const QueryArgs&, Response*)> RequestCb;
 
-  HttpHandler(CallbackRegistry* registry = nullptr);
+  HttpHandler(const CallbackRegistry* registry = nullptr);
 
   boost::system::error_code HandleRequest() final override;
 
@@ -38,7 +40,7 @@ class HttpHandler : public ConnectionHandler {
   bool Authorize(const QueryArgs& args) const;
   void HandleRequestInternal(StringPiece target, Response* dest);
 
-  CallbackRegistry* registry_;
+  const CallbackRegistry* registry_;
 };
 
 // Should be one per process. HandlerFactory should pass it to HttpHandler's c-tor once
