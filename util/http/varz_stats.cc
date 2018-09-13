@@ -11,12 +11,13 @@
 using absl::StrAppend;
 using std::string;
 using strings::AsString;
+using util::VarzValue;
 
 namespace http {
 
 typedef std::lock_guard<std::mutex> mguard;
 
-static std::mutex g_varz_mutex;
+std::mutex VarzListNode::g_varz_mutex;
 
 static std::string KeyValueWithStyle(StringPiece key, StringPiece val) {
   string res("<span class='key_text'>");
@@ -47,47 +48,47 @@ VarzListNode::~VarzListNode() {
   }
 }
 
-string VarzListNode::AnyValue::Format(bool is_json) const {
+string VarzListNode::Format(const AnyValue& av, bool is_json) {
   string result;
 
   if (is_json) {
-    switch (type) {
-      case STRING:
-        StrAppend(&result, "\"", str, "\"");
+    switch (av.type) {
+      case VarzValue::STRING:
+        StrAppend(&result, "\"", av.str, "\"");
         break;
-      case NUM:
-      case TIME:
-        StrAppend(&result, num);
+      case VarzValue::NUM:
+      case VarzValue::TIME:
+        StrAppend(&result, av.num);
         break;
-      case DOUBLE_T:
-        StrAppend(&result, dbl);
+      case VarzValue::DOUBLE:
+        StrAppend(&result, av.dbl);
         break;
-      case MAP:
+      case VarzValue::MAP:
         result.append("{ ");
-        for (const auto& k_v : key_value_array) {
-          StrAppend(&result, "\"", k_v.first, "\": ", k_v.second.Format(is_json), ",");
+        for (const auto& k_v : av.key_value_array) {
+          StrAppend(&result, "\"", k_v.first, "\": ", Format(k_v.second, is_json), ",");
         }
         result.back() = ' ';
         result.append("}");
         break;
     }
   } else {
-    switch (type) {
-      case STRING:
-        StrAppend(&result, "<span class='value_text'> ", str, " </span>\n");
+    switch (av.type) {
+      case VarzValue::STRING:
+        StrAppend(&result, "<span class='value_text'> ", av.str, " </span>\n");
         break;
-      case NUM:
-        StrAppend(&result, "<span class='value_text'> ", num, " </span>\n");
+      case VarzValue::NUM:
+        StrAppend(&result, "<span class='value_text'> ", av.num, " </span>\n");
         break;
-      case DOUBLE_T:
-        StrAppend(&result, "<span class='value_text'> ", dbl, " </span>\n");
+      case VarzValue::DOUBLE:
+        StrAppend(&result, "<span class='value_text'> ", av.dbl, " </span>\n");
         break;
-      case TIME:
-        StrAppend(&result, "<span class='value_text'> ", base::PrintLocalTime(num), " </span>\n");
+      case VarzValue::TIME:
+        StrAppend(&result, "<span class='value_text'> ", base::PrintLocalTime(av.num), " </span>\n");
         break;
-      case MAP:
-        for (const auto& k_v : key_value_array) {
-          StrAppend(&result, KeyValueWithStyle(k_v.first, k_v.second.Format(is_json)));
+      case VarzValue::MAP:
+        for (const auto& k_v : av.key_value_array) {
+          StrAppend(&result, KeyValueWithStyle(k_v.first, Format(k_v.second, is_json)));
         }
         break;
     }
@@ -98,18 +99,6 @@ string VarzListNode::AnyValue::Format(bool is_json) const {
 VarzListNode*& VarzListNode::global_list() {
   static VarzListNode* varz_global_list = nullptr;
   return varz_global_list;
-}
-
-void VarzListNode::IterateValues(std::function<void(const std::string&, const std::string&)> cb,
-                                 bool is_json) {
-  {
-    mguard guard(g_varz_mutex);
-    for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
-      if (node->name_ != nullptr) {
-        cb(node->name_, node->GetData().Format(is_json));
-      }
-    }
-  }
 }
 
 auto VarzMapCount::ReadLockAndFindOrInsert(StringPiece key) -> Map::iterator {
@@ -152,21 +141,21 @@ void VarzMapCount::Set(StringPiece key, int32 value) {
   rw_spinlock_.unlock_shared();
 }
 
-VarzListNode::AnyValue VarzMapCount::GetData() const {
+VarzValue VarzMapCount::GetData() const {
   AnyValue::Map result;
   rw_spinlock_.lock_shared();
   for (const auto& k_v : map_counts_) {
-    result.emplace_back(AsString(k_v.first), AnyValue(k_v.second));
+    result.emplace_back(AsString(k_v.first), VarzValue::FromInt(k_v.second));
   }
   rw_spinlock_.unlock_shared();
   typedef AnyValue::Map::value_type vt;
   std::sort(result.begin(), result.end(),
             [](const vt& l, const vt& r) { return l.first < r.first; });
 
-  return AnyValue(std::move(result));
+  return AnyValue{std::move(result)};
 }
 
-VarzListNode::AnyValue VarzMapAverage5m::GetData() const {
+VarzValue VarzMapAverage5m::GetData() const {
   std::lock_guard<std::mutex> lock(mutex_);
   AnyValue::Map result;
 
@@ -174,16 +163,16 @@ VarzListNode::AnyValue VarzMapAverage5m::GetData() const {
     AnyValue::Map items;
     int64 count = k_v.second.second.Sum();
     int64 sum = k_v.second.first.Sum();
-    items.emplace_back("count", AnyValue(count));
-    items.emplace_back("sum", AnyValue(sum));
+    items.emplace_back("count", VarzValue::FromInt(count));
+    items.emplace_back("sum", VarzValue::FromInt(sum));
 
     double avg = count > 0 ? double(sum) / count : 0;
-    items.emplace_back("average", AnyValue(avg));
+    items.emplace_back("average", VarzValue::FromDouble(avg));
 
     result.emplace_back(AsString(k_v.first), AnyValue(items));
   }
 
-  return AnyValue(std::move(result));
+  return AnyValue{std::move(result)};
 }
 
 void VarzMapAverage5m::IncBy(StringPiece key, int32 delta) {
@@ -193,15 +182,15 @@ void VarzMapAverage5m::IncBy(StringPiece key, int32 delta) {
   val.second.Inc();
 }
 
-VarzListNode::AnyValue VarzCount::GetData() const {
-  return AnyValue(val_.load());
+VarzValue VarzCount::GetData() const {
+  return VarzValue::FromInt(val_.load());
 }
 
-VarzListNode::AnyValue VarzQps::GetData() const {
-  return AnyValue(int64(val_.Get()));
+VarzValue VarzQps::GetData() const {
+  return VarzValue::FromInt(val_.Get());
 }
 
-VarzListNode::AnyValue VarzFunction::GetData() const {
+VarzValue VarzFunction::GetData() const {
   AnyValue::Map result = cb_();
   return AnyValue(result);
 }

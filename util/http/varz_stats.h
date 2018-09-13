@@ -16,6 +16,7 @@
 #include "strings/stringpiece.h"
 #include "strings/unique_strings.h"
 #include "util/stats/sliding_counter.h"
+#include "util/stats/varz_value.h"
 
 #define DEFINE_VARZ(type, name) http::type name(#name)
 
@@ -23,45 +24,34 @@ namespace http {
 
 class VarzListNode {
  public:
+  typedef util::VarzValue AnyValue;
+
   explicit VarzListNode(const char* name);
   virtual ~VarzListNode();
 
-  // Appends string representations of each active node in the list to res.
+  // New interface. Func is a function accepting 'const char*' and VarzValue&&.
+  template<typename Func> static void Iterate(Func&& f);
+
+  // Old interface. Appends string representations of each active node in the list to res.
   // Used for outputting the current state.
   static void IterateValues(std::function<void(const std::string&, const std::string&)> cb,
-                            bool is_json);
-
-  struct AnyValue {
-    typedef std::vector<std::pair<std::string, AnyValue>> Map;
-
-    int64 num;
-    double dbl;
-    Map key_value_array;
-    std::string str;
-    enum { NUM, STRING, MAP, DOUBLE_T, TIME } type;
-
-    AnyValue(int64 n, bool is_time = false) : num(n), type(is_time ? TIME : NUM) {
-    }
-    AnyValue(std::string s) : str(std::move(s)), type(STRING) {
-    }
-    AnyValue(double d) : dbl(d), type(DOUBLE_T) {
-    }
-
-    AnyValue(Map s) : key_value_array(std::move(s)), type(MAP) {
-    }
-
-    std::string Format(bool is_json) const;
-  };
+                            bool is_json) {
+    Iterate([&](const char* name, AnyValue&& av) {
+      cb(name, Format(av, is_json));
+    });
+  }
 
  protected:
   virtual AnyValue GetData() const = 0;
 
   const char* name_;
 
+  static std::string Format(const AnyValue& av, bool is_json);
  private:
   // Returns the head to varz linked list. Note that the list becomes invalid after at least one
   // linked list node was destroyed.
   static VarzListNode*& global_list();
+  static std::mutex g_varz_mutex;
 
   VarzListNode* next_;
   VarzListNode* prev_;
@@ -185,6 +175,16 @@ class FastVarMapCounter {
     map_count_.IncBy(buf_, val);
   }
 };
+
+template<typename Func> void VarzListNode::Iterate(Func&& f) {
+  std::lock_guard<std::mutex> guard(g_varz_mutex);
+
+  for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
+    if (node->name_ != nullptr) {
+      f(node->name_, node->GetData());
+    }
+  }
+}
 
 }  // namespace http
 
