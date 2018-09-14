@@ -39,9 +39,7 @@ ConnectionHandler::~ConnectionHandler() {
 void ConnectionHandler::Run() {
   CHECK(notifier_);
 
-  auto& cntx = socket_->get_io_context();
-
-  cntx.post([guard = ptr_t(this)] {
+  asio::post(socket_->get_executor(), [guard = ptr_t(this)] {
     // As long as fiber is running, 'this' is protected from deletion.
     fiber(&ConnectionHandler::RunInIOThread, std::move(guard)).detach();
   });
@@ -82,15 +80,13 @@ void ConnectionHandler::RunInIOThread() {
 }
 
 void ConnectionHandler::Close() {
-  auto& cntx = socket_->get_executor().context();
-
   is_open_ = false;
 
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
   // We use intrusive ptr to increment the reference of this in order to allow
   // safe callback execution even if RunInIOThread released the ownership.
-  cntx.post([me = ptr_t(this)] {
+  asio::post(socket_->get_executor(), [me = ptr_t(this)] {
     // The socket might already be closed if RunInIOThread has finished running.
     if (me->socket_->is_open()) {
       system::error_code ec;
