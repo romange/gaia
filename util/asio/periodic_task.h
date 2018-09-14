@@ -3,10 +3,10 @@
 //
 #include <boost/asio/steady_timer.hpp>
 
-#include "util/asio/yield.h"
-
 namespace util {
 
+// Single threaded but fiber friendly PeriodicTask.
+// Cancel blocks the calling fiber until the scheduled callback finished running.
 class PeriodicTask {
   enum {ALARMED = 0x1, SHUTDOWN = 0x2};
 

@@ -2,7 +2,9 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "util/asio/periodic_task.h"
+
 #include "base/logging.h"
+#include "util/asio/yield.h"
 
 namespace util {
 
