@@ -34,11 +34,14 @@ constexpr auto _MakeCommonBuf(T&&... values) ->
 
 }  // namespace detail
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
 template <typename... T>
 constexpr auto make_buffer_seq(T&&... values) ->
         std::array<decltype(detail::_MakeCommonBuf(values...)), sizeof...(T)> {
-    return std::array<decltype(detail::_MakeCommonBuf(values...)), sizeof...(T)>
-        {::boost::asio::buffer(values)...};
+    return {::boost::asio::buffer(values)...};
 }
+#pragma clang diagnostic pop
 
 }  // namespace util

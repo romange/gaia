@@ -26,7 +26,7 @@ AcceptServer::AcceptServer(IoContextPool* pool)
       if (l.acceptor.is_open())
         l.acceptor.close();
     }
-    
+
     bc_.Dec();
   });
 }
@@ -81,7 +81,7 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   auto lock = notifier.Lock();
 
   if (!clist.empty()) {
-    VLOG(1) << "Closing " << clist.size() << " connections";
+    VLOG(1) << "Closing " << clist.size() << " connections on port " << listener->port;
 
     for (auto it = clist.begin(); it != clist.end(); ++it) {
       it->Close();
@@ -94,7 +94,7 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   // Notify that AcceptThread has stopped.
   bc_.Dec();
 
-  LOG(INFO) << "Accept server stopped";
+  LOG(INFO) << "Accept server stopped for port " << listener->port;
 }
 
 auto AcceptServer::AcceptFiber(Listener* listener, ConnectionHandler::Notifier* notifier)

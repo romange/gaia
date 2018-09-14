@@ -30,9 +30,10 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 
 AsyncClient::~AsyncClient() {
   Shutdown();
+
   VLOG(1) << "Before ReadFiberJoin";
+  CHECK(read_fiber_.joinable());
   read_fiber_.join();
-  VLOG(1) << "After ReadFiberJoin";
 }
 
 void AsyncClient::Shutdown() {
@@ -76,21 +77,23 @@ auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
 }
 
 void AsyncClient::ReadFiber() {
-  while (!channel_.is_shut_down()) {
-    error_code ec = channel_.Read([this](tcp::socket& sock) {
-      return ReadEnvelope(&sock);
-    });
-    if (!ec) continue;
+  VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
 
-    // Handle error state.
-    FlushPendingCalls(ec);
-    if (channel_.is_shut_down())
-      break;
-    if (!channel_.is_open()) {
-      VLOG(1) << "WaitRead after " << ec;
-      channel_.socket().async_wait(tcp::socket::wait_read, fibers_ext::yield[ec]);
+  error_code ec;
+  while (!channel_.is_shut_down()) {
+    ec = channel_.WaitForReadAvailable();
+    if (!ec) {
+      ec = channel_.Read([this](tcp::socket& sock) {
+        return ReadEnvelope(&sock);
+      });
+    }
+    if (ec) {
+      // Handle error state.
+      FlushPendingCalls(ec);
     }
   }
+  FlushPendingCalls(ec);
+  VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
 auto AsyncClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {

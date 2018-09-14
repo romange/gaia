@@ -78,8 +78,8 @@ void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
     latency_ms.fetch_add(ms.count(), std::memory_order_relaxed);
     tp = last;
 
-    if ( ec == asio::error::eof) {
-      return; //connection closed cleanly by peer
+    if (ec == asio::error::eof || ec ==asio::error::connection_reset) {
+      break; //connection closed by peer
     } else if (ec) {
       LOG(ERROR) << "Error: " << ec << " " << ec.message();
       break;
@@ -106,7 +106,8 @@ void RunClient(boost::asio::io_context& context,
   for (auto& f : drivers)
     f.join();
 
-  client.reset();
+  client->Shutdown();
+
   done->Notify();
   LOG(INFO) << ": echo-client stopped";
 }

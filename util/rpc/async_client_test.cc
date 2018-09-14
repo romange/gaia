@@ -16,10 +16,9 @@ namespace rpc {
 
 using namespace std;
 using namespace boost;
-using asio::ip::tcp;
 
 
-TEST_F(ServerTest, BadHeader) {
+TEST_F(ServerTest, SendOk) {
   AsyncClient client(std::move(*channel_));
   base::PODArray<uint8_t> header, letter;
   header.resize_fill(14, 1);
@@ -28,6 +27,21 @@ TEST_F(ServerTest, BadHeader) {
   EXPECT_FALSE(fc.get());
 }
 
+TEST_F(ServerTest, ServerStopped) {
+  std::unique_ptr<AsyncClient> client(new AsyncClient(std::move(*channel_)));
+  base::PODArray<uint8_t> header, letter;
+  header.resize_fill(14, 1);
+  letter.resize_fill(42, 2);
+
+  AsyncClient::future_code_t fc = client->SendEnvelope(&header, &letter);
+  EXPECT_FALSE(fc.get());
+
+  server_->Stop();
+  server_->Wait();
+  fc = client->SendEnvelope(&header, &letter);
+  EXPECT_TRUE(fc.get());
+  client.reset();
+}
 
 }  // namespace rpc
 }  // namespace util

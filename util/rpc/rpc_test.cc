@@ -31,7 +31,7 @@ TEST_F(ServerTest, BadHeader) {
   ec_ = channel_->Write(make_buffer_seq(control, message));
   ASSERT_FALSE(ec_);
 
-  asio::read(channel_->socket(), make_buffer_seq(control, message), ec_);
+  ec_ = channel_->Read(make_buffer_seq(control, message));
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
@@ -46,12 +46,14 @@ TEST_F(ServerTest, Basic) {
   ec_ = channel_->Write(make_buffer_seq(asio::buffer(buf, fr_sz), header, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = frame.Read(&channel_->socket());
+  ec_ = channel_->Read([&frame](auto& s) {
+    return frame.Read(&s);
+  });
   ASSERT_FALSE(ec_);
   EXPECT_EQ(frame.header_size, header.size());
   EXPECT_EQ(frame.letter_size, message.size());
 
-  asio::read(channel_->socket(), make_buffer_seq(header, message), ec_);
+  ec_ = channel_->Read(make_buffer_seq(header, message));
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
@@ -80,8 +82,6 @@ TEST_F(ServerTest, Socket) {
   });
   ASSERT_FALSE(ec_) << ec_.message();
 }
-
-
 
 }  // namespace rpc
 }  // namespace util

@@ -22,7 +22,7 @@ class AsyncClient {
 
   ~AsyncClient();
 
-  // Write path is "fiber-synchronous", i.e. done in calling fiber.
+  // Write path is "fiber-synchronous", i.e. done inside calling fiber.
   // Which means we should not run this function from io_context loop. From dedicated fiber is fine.
   future_code_t SendEnvelope(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter);
 

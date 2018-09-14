@@ -85,15 +85,20 @@ void ConnectionHandler::Close() {
 
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
-  // We use intrusive guard to increment the reference of this in order to allow
+  // We use intrusive ptr to increment the reference of this in order to allow
   // safe callback execution even if RunInIOThread released the ownership.
-  cntx.post([guard = ptr_t(this)] {
-    system::error_code ec;
-    if (guard->socket_->is_open()) {
-      VLOG(1) << "Closing socket " << guard->socket_->native_handle();
-      guard->socket_->cancel(ec);
+  cntx.post([me = ptr_t(this)] {
+    // The socket might already be closed if RunInIOThread has finished running.
+    if (me->socket_->is_open()) {
+      system::error_code ec;
+
+      me->socket_->cancel(ec);
+      me->socket_->shutdown(socket_t::shutdown_receive, ec);
+
+      LOG_IF(INFO, ec) << "Error closing socket " << me->socket_->native_handle()
+                       << ": " << ec.message();
     }
-    LOG_IF(INFO, ec) << "Error closing socket " << ec.message();
+
   });
 }
 
