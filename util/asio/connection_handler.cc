@@ -15,6 +15,9 @@ using fibers::fiber;
 
 namespace util {
 
+bool IsExpectedFinish(system::error_code ec) {
+  return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset;
+}
 
 void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
   bool is_empty = false;
@@ -57,7 +60,7 @@ void ConnectionHandler::RunInIOThread() {
     while (is_open_) {
       ec = HandleRequest();
       if (ec) {
-        if (ec != error::eof && ec != error::operation_aborted) {
+        if (!IsExpectedFinish(ec)) {
           LOG(WARNING) << "Error : " << ec.message() << ", "
                        << ec.category().name() << "/" << ec.value();
         }
