@@ -1,8 +1,7 @@
-function JsonToHTML(json_text) {
-	var JSON_data = JSON.parse(json_text);
+function JsonToHTML(json_obj) {
 	var str = '';
-	Object.keys(JSON_data).forEach(function (key) {
-		value = JSON_data[key];
+	Object.keys(json_obj).forEach(function (key) {
+		value = json_obj[key];
 		str += "<div style='margin-top:20px;'>" + span(key, 'title_text');
 		if (!isObject(value)) {
 			str += value_text(value);

@@ -35,24 +35,18 @@ string StatusLine(const string& name, const string& val) {
 
 std::string BuildStatusPage(const char* resource_prefix) {
   string a = "<!DOCTYPE html>\n<html><head>\n";
-  a += "<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />\n"
-       "<link href='http://fonts.googleapis.com/css?family=Roboto:400,300' rel='stylesheet' "
-       "type='text/css'>\n";
-  a += "<link rel='stylesheet' href='{s3_path}/status_page.css'>\n</head><body>\n";
-  a += "<div><img src='{s3_path}/logo.png'/></div>\n";
-  a += "<div class='left_panel'>";
-  VarzListNode::IterateValues(
-      [&a](const string& nm, const string& val) {
-        a += "<div style='margin-top:20px;'><span class='title_text'>";
-        a.append(nm).append("</span>\n");
-        a.append(val).append("</div>\n");
-        a.append("<div class='separator'></div>\n");
-      },
-      false);
+  a += R"(<meta http-equiv='Content-Type' content='text/html; charset=UTF-8'/>
+    <link href='http://fonts.googleapis.com/css?family=Roboto:400,300' rel='stylesheet'
+     type='text/css'>
+    <link rel='stylesheet' href='{s3_path}/status_page.css'>
+    <script type="text/javascript" src="{s3_path}/status_page.js"></script>
+</head>
+<body>
+<div><img src='{s3_path}/logo.png'/></div>)";
 
-  a += "</div>\n";
-  a = absl::StrReplaceAll(a, {{"{s3_path}", resource_prefix}});
+  a = absl::StrReplaceAll(a, { {"{s3_path}", resource_prefix}});
 
+  a += "\n<div class='left_panel'></div>\n";
   a += "<div class='styled_border'>\n";
   a += StatusLine("Status", "OK");
 
@@ -60,7 +54,22 @@ std::string BuildStatusPage(const char* resource_prefix) {
   time_t now = time(NULL);
   a += StatusLine("Started on", base::PrintLocalTime(stats.start_time_seconds));
   a += StatusLine("Uptime", GetTimerString(now - stats.start_time_seconds));
-  a += "</div></body></html>\n";
+
+  string varz;
+  VarzListNode::IterateValues([&varz](const string& nm, const string& val) {
+    absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
+  }, true);
+  if (varz.size() > 1) {
+    varz.resize(varz.size() - 2);
+  }
+  a += R"(</div>
+</body>
+<script>
+var json_text1 = {)";
+  a += varz + R"(};
+document.querySelector('.left_panel').innerHTML = JsonToHTML(json_text1);
+</script>
+</html>)";
 
   return a;
 }
