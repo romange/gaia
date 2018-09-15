@@ -8,7 +8,7 @@ body {
     margin-top: 0px;
     margin-right: 0px;
     margin-bottom: 0px;
-    background-color: #ebebeb;
+    /*background-color: #ebebeb;*/
     background-repeat: repeat-x;
 }
 
@@ -17,14 +17,19 @@ body {
     margin-right: 20px;
 }
 
-.key_text {
+.key_text, .key_text_bold {
     font-style:italic;
     margin-right: 7px;
+}
+
+.key_text_bold {
+    font-weight: bold;
 }
 
 .value_text {
     font-weight: bold;
     color: #d60f96;
+    margin-right: 10px;
 }
 
 .separator {
