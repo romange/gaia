@@ -115,7 +115,7 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
 
 HttpHandler::HttpHandler(const CallbackRegistry* registry) : registry_(registry) {
   favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/favicon-32x32.png";
-  resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/master/util/http";
+  resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/05a9c02/util/http";
 }
 
 system::error_code HttpHandler::HandleRequest() {
