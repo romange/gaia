@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "util/http/varz_stats.h"
+#include "util/stats/varz_stats.h"
 
 #include "base/walltime.h"
 #include "strings/strcat.h"
@@ -13,7 +13,7 @@ using std::string;
 using strings::AsString;
 using util::VarzValue;
 
-namespace http {
+namespace util {
 
 typedef std::lock_guard<std::mutex> mguard;
 
@@ -195,4 +195,4 @@ VarzValue VarzFunction::GetData() const {
   return AnyValue(result);
 }
 
-}  // namespace http
+}  // namespace util

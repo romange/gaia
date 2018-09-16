@@ -1,18 +1,17 @@
 // Copyright 2013, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#ifndef VARZ_STATS_H
-#define VARZ_STATS_H
+#pragma once
 
 #include <atomic>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include "absl/strings/str_cat.h"
 #include "base/RWSpinLock.h"
 #include "base/atomic_wrapper.h"
 #include "base/integral_types.h"
-#include "strings/strcat.h"
 #include "strings/stringpiece.h"
 #include "strings/unique_strings.h"
 #include "util/stats/sliding_counter.h"
@@ -20,7 +19,7 @@
 
 #define DEFINE_VARZ(type, name) http::type name(#name)
 
-namespace http {
+namespace util {
 
 class VarzListNode {
  public:
@@ -30,15 +29,14 @@ class VarzListNode {
   virtual ~VarzListNode();
 
   // New interface. Func is a function accepting 'const char*' and VarzValue&&.
-  template<typename Func> static void Iterate(Func&& f);
+  template <typename Func>
+  static void Iterate(Func&& f);
 
   // Old interface. Appends string representations of each active node in the list to res.
   // Used for outputting the current state.
   static void IterateValues(std::function<void(const std::string&, const std::string&)> cb,
                             bool is_json) {
-    Iterate([&](const char* name, AnyValue&& av) {
-      cb(name, Format(av, is_json));
-    });
+    Iterate([&](const char* name, AnyValue&& av) { cb(name, Format(av, is_json)); });
   }
 
  protected:
@@ -47,6 +45,7 @@ class VarzListNode {
   const char* name_;
 
   static std::string Format(const AnyValue& av, bool is_json);
+
  private:
   // Returns the head to varz linked list. Note that the list becomes invalid after at least one
   // linked list node was destroyed.
@@ -176,7 +175,8 @@ class FastVarMapCounter {
   }
 };
 
-template<typename Func> void VarzListNode::Iterate(Func&& f) {
+template <typename Func>
+void VarzListNode::Iterate(Func&& f) {
   std::lock_guard<std::mutex> guard(g_varz_mutex);
 
   for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
@@ -186,6 +186,4 @@ template<typename Func> void VarzListNode::Iterate(Func&& f) {
   }
 }
 
-}  // namespace http
-
-#endif  // VARZ_STATS_H
+}  // namespace util

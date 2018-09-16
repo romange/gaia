@@ -5,10 +5,8 @@
 
 #include "absl/strings/str_replace.h"
 #include "base/walltime.h"
-#include "util/http/varz_stats.h"
 #include "util/proc_stats.h"
-
-using http::VarzListNode;
+#include "util/stats/varz_stats.h"
 
 namespace util {
 namespace http {
@@ -44,7 +42,7 @@ std::string BuildStatusPage(const char* resource_prefix) {
 <body>
 <div><img src='{s3_path}/logo.png'/></div>)";
 
-  a = absl::StrReplaceAll(a, { {"{s3_path}", resource_prefix}});
+  a = absl::StrReplaceAll(a, {{"{s3_path}", resource_prefix}});
 
   a += "\n<div class='left_panel'></div>\n";
   a += "<div class='styled_border'>\n";
@@ -56,9 +54,11 @@ std::string BuildStatusPage(const char* resource_prefix) {
   a += StatusLine("Uptime", GetTimerString(now - stats.start_time_seconds));
 
   string varz;
-  VarzListNode::IterateValues([&varz](const string& nm, const string& val) {
-    absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
-  }, true);
+  VarzListNode::IterateValues(
+      [&varz](const string& nm, const string& val) {
+        absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
+      },
+      true);
   if (varz.size() > 1) {
     varz.resize(varz.size() - 2);
   }

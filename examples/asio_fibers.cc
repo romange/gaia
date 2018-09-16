@@ -11,9 +11,9 @@
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
 #include "util/http/http_conn_handler.h"
-#include "util/http/varz_stats.h"
-#include "util/rpc/rpc_connection.h"
 #include "util/rpc/async_client.h"
+#include "util/rpc/rpc_connection.h"
+#include "util/stats/varz_stats.h"
 
 using namespace boost;
 using namespace std;
@@ -26,12 +26,11 @@ DEFINE_int32(num_connections, 1, "");
 DEFINE_int32(io_threads, 0, "");
 
 using asio::ip::tcp;
+using rpc::AsyncClient;
 using util::IoContextPool;
 using util::fibers_ext::yield;
-using rpc::AsyncClient;
 
-::http::VarzQps qps("echo-qps");
-
+VarzQps qps("echo-qps");
 
 class PingBridge final : public rpc::ConnectionBridge {
  public:
@@ -48,7 +47,9 @@ class PingBridge final : public rpc::ConnectionBridge {
 
 class PingInterface final : public rpc::ServiceInterface {
  public:
-  rpc::ConnectionBridge* CreateConnectionBridge() override { return new PingBridge{}; }
+  rpc::ConnectionBridge* CreateConnectionBridge() override {
+    return new PingBridge{};
+  }
 };
 
 std::atomic_ulong latency_ms(0);
@@ -78,8 +79,8 @@ void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
     latency_ms.fetch_add(ms.count(), std::memory_order_relaxed);
     tp = last;
 
-    if (ec == asio::error::eof || ec ==asio::error::connection_reset) {
-      break; //connection closed by peer
+    if (ec == asio::error::eof || ec == asio::error::connection_reset) {
+      break;  // connection closed by peer
     } else if (ec) {
       LOG(ERROR) << "Error: " << ec << " " << ec.message();
       break;
@@ -88,10 +89,9 @@ void Driver(AsyncClient* client, size_t index, unsigned msg_count) {
 }
 
 /*****************************************************************************
-*   fiber function per client
-*****************************************************************************/
-void RunClient(boost::asio::io_context& context,
-            unsigned msg_count, util::fibers_ext::Done* done) {
+ *   fiber function per client
+ *****************************************************************************/
+void RunClient(boost::asio::io_context& context, unsigned msg_count, util::fibers_ext::Done* done) {
   LOG(INFO) << ": echo-client started";
 
   ClientChannel channel(context, FLAGS_connect, "9999");
@@ -128,7 +128,7 @@ void client_pool(IoContextPool* pool) {
   cout << "Average latency is " << double(latency_ms.load()) / (latency_count + 1) << endl;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
   unsigned io_threads = FLAGS_io_threads;
   if (io_threads == 0)
@@ -141,8 +141,8 @@ int main(int argc, char **argv) {
   pool.Run();
 
   if (FLAGS_connect.empty()) {
-    uint16_t port = server.AddListener(FLAGS_http_port,
-        [] { return new util::http::HttpHandler(); });
+    uint16_t port =
+        server.AddListener(FLAGS_http_port, [] { return new util::http::HttpHandler(); });
     LOG(INFO) << "Started http server on port " << port;
 
     PingInterface pi;
