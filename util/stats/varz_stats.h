@@ -17,7 +17,7 @@
 #include "util/stats/sliding_counter.h"
 #include "util/stats/varz_value.h"
 
-#define DEFINE_VARZ(type, name) http::type name(#name)
+#define DEFINE_VARZ(type, name) util::type name(#name)
 
 namespace util {
 
