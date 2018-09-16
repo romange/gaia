@@ -197,7 +197,13 @@ IoContextPool::IoContextPool(std::size_t pool_size) {
   }
 }
 
+IoContextPool::~IoContextPool() {
+  Stop();
+}
+
 void IoContextPool::Run() {
+  CHECK_EQ(STOPPED, state_);
+
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].tid = base::StartThread("IoPool",
       [this, i]() {
@@ -207,18 +213,20 @@ void IoContextPool::Run() {
         context_arr_[i]->run();
       });
   }
+  state_ = RUN;
 }
 
 void IoContextPool::Stop() {
+  if (state_ == STOPPED)
+    return;
   for (size_t i = 0; i < context_arr_.size(); ++i) {
     context_arr_[i]->stop();
   }
-}
 
-void IoContextPool::Join() {
   for (const TInfo& tinfo : thread_arr_) {
     pthread_join(tinfo.tid, nullptr);
   }
+  state_ = STOPPED;
 }
 
 asio::io_context& IoContextPool::GetNextContext() {

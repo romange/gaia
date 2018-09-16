@@ -156,7 +156,6 @@ int main(int argc, char** argv) {
   }
 
   pool.Stop();
-  pool.Join();
 
   return 0;
 }

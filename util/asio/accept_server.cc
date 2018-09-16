@@ -76,12 +76,13 @@ void AcceptServer::RunInIOThread(Listener* listener) {
     LOG(WARNING) << ": caught exception : " << ex.what();
   }
 
+  int port = listener->port;
   // We protect clist because we iterate over it and other threads could potentialy change it.
   // connections are dispersed across few threads so clist requires true thread synchronization.
   auto lock = notifier.Lock();
 
   if (!clist.empty()) {
-    VLOG(1) << "Closing " << clist.size() << " connections on port " << listener->port;
+    VLOG(1) << "Closing " << clist.size() << " connections on port " << port;
 
     for (auto it = clist.begin(); it != clist.end(); ++it) {
       it->Close();
@@ -94,7 +95,7 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   // Notify that AcceptThread has stopped.
   bc_.Dec();
 
-  LOG(INFO) << "Accept server stopped for port " << listener->port;
+  LOG(INFO) << "Accept server stopped for port " << port;
 }
 
 auto AcceptServer::AcceptFiber(Listener* listener, ConnectionHandler::Notifier* notifier)

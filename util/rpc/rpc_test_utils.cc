@@ -35,8 +35,6 @@ void ServerTest::TearDown() {
   server_.reset();
   channel_.reset();
   pool_->Stop();
-  pool_->Join();
-  pool_.reset();
 }
 
 }  // namespace rpc

@@ -22,17 +22,16 @@ public:
   // Construct the io_context pool.
   // pool_size = 0 provides pool size as number of cpus.
   explicit IoContextPool(std::size_t pool_size = 0);
+  ~IoContextPool();
 
   /// Runs all io_context objects in the pool and exits.
   void Run();
 
   /// Stop all io_context objects in the pool.
-  void Stop();
-
   // Waits for all the threads to finish.
   // Requires that Run has been called.
-  // Blocks the current thread until Stop is called and all the pool threads exited.
-  void Join();
+  // Blocks the current thread until all the pool threads exited.
+  void Stop();
 
   /// Get an io_context to use. Thread-safe.
   boost::asio::io_context& GetNextContext();
@@ -47,7 +46,6 @@ private:
   std::vector<io_context_ptr> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
-    //bool loop_running = false;
   };
 
   std::vector<TInfo> thread_arr_;
@@ -55,6 +53,7 @@ private:
   /// The next io_context to use for a connection.
   std::atomic_uint_fast32_t next_io_context_{0};
   thread_local static size_t context_indx_;
+  enum State { STOPPED, RUN} state_ = STOPPED;
 };
 
 }  // namespace util
