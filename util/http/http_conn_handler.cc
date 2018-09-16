@@ -153,7 +153,7 @@ void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
 
   if (path == "/") {
     resp->set(h2::field::content_type, kHtmlMime);
-    resp->body() = BuildStatusPage(resource_prefix_);
+    resp->body() = BuildStatusPage(args, resource_prefix_);
     return;
   }
   if (path == "/flagz") {

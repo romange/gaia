@@ -31,7 +31,26 @@ string StatusLine(const string& name, const string& val) {
 }
 }  // namespace
 
-std::string BuildStatusPage(const char* resource_prefix) {
+std::string BuildStatusPage(const QueryArgs& args, const char* resource_prefix) {
+  bool output_json = false;
+
+  string varz;
+  VarzListNode::IterateValues([&varz](const string& nm, const string& val) {
+    absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
+  });
+  if (varz.size() > 1) {
+    varz.resize(varz.size() - 2);
+  }
+
+  for (const auto& k_v : args) {
+    if (k_v.first == "o" && k_v.second == "json")
+      output_json = true;
+  }
+
+  if (output_json) {
+    return "{" + varz + "}\n";
+  }
+
   string a = "<!DOCTYPE html>\n<html><head>\n";
   a += R"(<meta http-equiv='Content-Type' content='text/html; charset=UTF-8'/>
     <link href='http://fonts.googleapis.com/css?family=Roboto:400,300' rel='stylesheet'
@@ -53,15 +72,6 @@ std::string BuildStatusPage(const char* resource_prefix) {
   a += StatusLine("Started on", base::PrintLocalTime(stats.start_time_seconds));
   a += StatusLine("Uptime", GetTimerString(now - stats.start_time_seconds));
 
-  string varz;
-  VarzListNode::IterateValues(
-      [&varz](const string& nm, const string& val) {
-        absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
-      },
-      true);
-  if (varz.size() > 1) {
-    varz.resize(varz.size() - 2);
-  }
   a += R"(</div>
 </body>
 <script>

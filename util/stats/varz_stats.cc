@@ -19,12 +19,6 @@ typedef std::lock_guard<std::mutex> mguard;
 
 std::mutex VarzListNode::g_varz_mutex;
 
-static std::string KeyValueWithStyle(StringPiece key, StringPiece val) {
-  string res("<span class='key_text'>");
-  StrAppend(&res, key, ":</span><span class='value_text'>", val, "</span>\n");
-  return res;
-}
-
 VarzListNode::VarzListNode(const char* name) : name_(name), prev_(nullptr) {
   mguard guard(g_varz_mutex);
   next_ = global_list();
@@ -48,50 +42,28 @@ VarzListNode::~VarzListNode() {
   }
 }
 
-string VarzListNode::Format(const AnyValue& av, bool is_json) {
+string VarzListNode::Format(const AnyValue& av) {
   string result;
 
-  if (is_json) {
-    switch (av.type) {
-      case VarzValue::STRING:
-        StrAppend(&result, "\"", av.str, "\"");
-        break;
-      case VarzValue::NUM:
-      case VarzValue::TIME:
-        StrAppend(&result, av.num);
-        break;
-      case VarzValue::DOUBLE:
-        StrAppend(&result, av.dbl);
-        break;
-      case VarzValue::MAP:
-        result.append("{ ");
-        for (const auto& k_v : av.key_value_array) {
-          StrAppend(&result, "\"", k_v.first, "\": ", Format(k_v.second, is_json), ",");
-        }
-        result.back() = ' ';
-        result.append("}");
-        break;
-    }
-  } else {
-    switch (av.type) {
-      case VarzValue::STRING:
-        StrAppend(&result, "<span class='value_text'> ", av.str, " </span>\n");
-        break;
-      case VarzValue::NUM:
-        StrAppend(&result, "<span class='value_text'> ", av.num, " </span>\n");
-        break;
-      case VarzValue::DOUBLE:
-        StrAppend(&result, "<span class='value_text'> ", av.dbl, " </span>\n");
-        break;
-      case VarzValue::TIME:
-        StrAppend(&result, "<span class='value_text'> ", base::PrintLocalTime(av.num), " </span>\n");
-        break;
-      case VarzValue::MAP:
-        for (const auto& k_v : av.key_value_array) {
-          StrAppend(&result, KeyValueWithStyle(k_v.first, Format(k_v.second, is_json)));
-        }
-        break;
-    }
+  switch (av.type) {
+    case VarzValue::STRING:
+      StrAppend(&result, "\"", av.str, "\"");
+      break;
+    case VarzValue::NUM:
+    case VarzValue::TIME:
+      StrAppend(&result, av.num);
+      break;
+    case VarzValue::DOUBLE:
+      StrAppend(&result, av.dbl);
+      break;
+    case VarzValue::MAP:
+      result.append("{ ");
+      for (const auto& k_v : av.key_value_array) {
+        StrAppend(&result, "\"", k_v.first, "\": ", Format(k_v.second), ",");
+      }
+      result.back() = ' ';
+      result.append("}");
+      break;
   }
   return result;
 }
