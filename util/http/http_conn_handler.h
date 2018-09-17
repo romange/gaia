@@ -18,6 +18,8 @@ namespace http {
 typedef std::vector<std::pair<StringPiece, StringPiece>> QueryArgs;
 
 class CallbackRegistry;
+extern const char kHtmlMime[];
+extern const char kJsonMime[];
 
 class HttpHandler : public ConnectionHandler {
  public:

@@ -11,6 +11,8 @@
 namespace util {
 namespace http {
 using namespace std;
+using namespace boost;
+using beast::http::field;
 
 namespace {
 
@@ -31,7 +33,8 @@ string StatusLine(const string& name, const string& val) {
 }
 }  // namespace
 
-std::string BuildStatusPage(const QueryArgs& args, const char* resource_prefix) {
+void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
+                     HttpHandler::Response* response) {
   bool output_json = false;
 
   string varz;
@@ -48,7 +51,9 @@ std::string BuildStatusPage(const QueryArgs& args, const char* resource_prefix) 
   }
 
   if (output_json) {
-    return "{" + varz + "}\n";
+    response->set(field::content_type, kJsonMime);
+    response->body() = "{" + varz + "}\n";
+    return;
   }
 
   string a = "<!DOCTYPE html>\n<html><head>\n";
@@ -81,7 +86,8 @@ document.querySelector('.left_panel').innerHTML = JsonToHTML(json_text1);
 </script>
 </html>)";
 
-  return a;
+  response->set(field::content_type, kHtmlMime);
+  response->body() = std::move(a);
 }
 
 }  // namespace http

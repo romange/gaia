@@ -22,8 +22,10 @@ namespace h2 = beast::http;
 
 using fibers_ext::yield;
 
+const char kHtmlMime[] = "text/html";
+const char kJsonMime[] = "application/json";
+
 namespace {
-constexpr char kHtmlMime[] = "text/html";
 
 inline absl::string_view as_absl(::boost::string_view s) {
   return absl::string_view(s.data(), s.size());
@@ -152,8 +154,7 @@ void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
   auto args = SplitQuery(query);
 
   if (path == "/") {
-    resp->set(h2::field::content_type, kHtmlMime);
-    resp->body() = BuildStatusPage(args, resource_prefix_);
+    BuildStatusPage(args, resource_prefix_, resp);
     return;
   }
   if (path == "/flagz") {

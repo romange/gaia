@@ -8,7 +8,8 @@
 namespace util {
 namespace http {
 
-std::string BuildStatusPage(const QueryArgs& args, const char* resource_prefix);
+void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
+                     HttpHandler::Response* response);
 
 }  // namespace http
 }  // namespace util
