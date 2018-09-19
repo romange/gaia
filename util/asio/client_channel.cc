@@ -4,7 +4,7 @@
 
 #include <boost/fiber/fiber.hpp>
 
-#include "util/asio/channel.h"
+#include "util/asio/client_channel.h"
 
 #include "base/logging.h"
 

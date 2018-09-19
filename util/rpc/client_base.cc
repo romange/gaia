@@ -3,7 +3,7 @@
 //
 #include <boost/fiber/future.hpp>
 
-#include "util/rpc/async_client.h"
+#include "util/rpc/client_base.h"
 
 #include "base/logging.h"
 #include "util/asio/asio_utils.h"
@@ -28,7 +28,7 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 }  // namespace
 
 
-AsyncClient::~AsyncClient() {
+ClientBase::~ClientBase() {
   Shutdown();
 
   VLOG(1) << "Before ReadFiberJoin";
@@ -36,11 +36,11 @@ AsyncClient::~AsyncClient() {
   read_fiber_.join();
 }
 
-void AsyncClient::Shutdown() {
+void ClientBase::Shutdown() {
   channel_.Shutdown();
 }
 
-auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
+auto ClientBase::SendEnvelope(base::PODArray<uint8_t>* header,
                                base::PODArray<uint8_t>* letter) -> future_code_t {
   // ----
   fibers::promise<error_code> p;
@@ -76,7 +76,7 @@ auto AsyncClient::SendEnvelope(base::PODArray<uint8_t>* header,
   return res;
 }
 
-void AsyncClient::ReadFiber() {
+void ClientBase::ReadFiber() {
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
 
   error_code ec;
@@ -96,7 +96,7 @@ void AsyncClient::ReadFiber() {
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
-auto AsyncClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
+auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   Frame f;
   error_code ec = f.Read(sock);
   if (ec) return ec;
@@ -129,7 +129,7 @@ auto AsyncClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   return error_code{};
 }
 
-void AsyncClient::FlushPendingCalls(error_code ec) {
+void ClientBase::FlushPendingCalls(error_code ec) {
   for (auto& c : calls_) {
     c.promise.set_value(ec);
   }

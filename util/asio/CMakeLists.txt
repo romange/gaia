@@ -1,4 +1,4 @@
-add_library(asio_fiber_lib io_context_pool.cc channel.cc connection_handler.cc yield.cc
+add_library(asio_fiber_lib io_context_pool.cc client_channel.cc connection_handler.cc yield.cc
             accept_server.cc periodic_task.cc)
 cxx_link(asio_fiber_lib base ${Boost_LIBRARIES})
 

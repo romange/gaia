@@ -5,22 +5,22 @@
 
 #include <deque>
 #include "base/pod_array.h"
-#include "util/asio/channel.h"
+#include "util/asio/client_channel.h"
 
-// Single-threaded, fiber safe Asynchronous client for rpc communication.
+// Single-threaded, fiber safe rpc client.
 namespace util {
 namespace rpc {
 
-class AsyncClient {
+class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = ::boost::fibers::future<error_code>;
 
-  AsyncClient(ClientChannel&& channel) : channel_(std::move(channel)) {
-    read_fiber_ = ::boost::fibers::fiber(&AsyncClient::ReadFiber, this);
+  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)) {
+    read_fiber_ = ::boost::fibers::fiber(&ClientBase::ReadFiber, this);
   }
 
-  ~AsyncClient();
+  ~ClientBase();
 
   // Write path is "fiber-synchronous", i.e. done inside calling fiber.
   // Which means we should not run this function from io_context loop.

@@ -4,7 +4,7 @@
 #include "util/rpc/rpc_test_utils.h"
 #include "base/logging.h"
 
-#include "util/asio/channel.h"
+#include "util/asio/client_channel.h"
 
 namespace util {
 namespace rpc {
