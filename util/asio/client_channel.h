@@ -119,6 +119,10 @@ class ClientChannelImpl {
     return status_;
   }
 
+  asio::io_context& get_io_context() {
+    return sock_.get_io_context();
+  }
+
  private:
   using time_point = std::chrono::steady_clock::time_point;
 
@@ -159,6 +163,7 @@ class ClientChannel {
   // since we allow moveable semantics we should support default c'tor as well.
   ClientChannel() {}
 
+  // "service" - port to which to connect.
   ClientChannel(::boost::asio::io_context& cntx, const std::string& hostname,
                 const std::string& service)
       : impl_(new detail::ClientChannelImpl(cntx, hostname, service)) {
@@ -169,6 +174,8 @@ class ClientChannel {
 
   ClientChannel& operator=(ClientChannel&&) noexcept = default;
 
+  // Should be called at most once to trigger the connection process. Should not be called more
+  // than once because ClientChannel handles reconnects by itself.
   error_code Connect(uint32_t ms) {
     return impl_->Connect(ms);
   }
@@ -206,6 +213,9 @@ class ClientChannel {
     return impl_->handle();
   }
 
+  ::boost::asio::io_context& get_io_context() {
+    return impl_->get_io_context();
+  }
  private:
   // Factor out most fields into Impl struct to allow moveable semantics for the channel.
   std::unique_ptr<detail::ClientChannelImpl> impl_;

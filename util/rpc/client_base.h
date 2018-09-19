@@ -20,7 +20,20 @@ class ClientBase {
     read_fiber_ = ::boost::fibers::fiber(&ClientBase::ReadFiber, this);
   }
 
+  ClientBase(::boost::asio::io_context& cntx, const std::string& hostname,
+             const std::string& service) {
+    ClientChannel channel(cntx, hostname, service);
+
+    ClientBase(std::move(channel));
+  }
+
   ~ClientBase();
+
+  // Blocks at least for 'ms' milliseconds to connect to the host.
+  // Should be called once during the initialization phase before sending the requests.
+  error_code Connect(uint32_t ms) {
+    return channel_.Connect(ms);
+  }
 
   // Write path is "fiber-synchronous", i.e. done inside calling fiber.
   // Which means we should not run this function from io_context loop.
@@ -33,6 +46,7 @@ class ClientBase {
     return SendEnvelope(header, letter).get();
   }
 
+  // Blocks the calling fiber until all the background processes finish.
   void Shutdown();
 
  private:

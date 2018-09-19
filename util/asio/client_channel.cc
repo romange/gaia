@@ -21,6 +21,12 @@ ClientChannelImpl::~ClientChannelImpl() {
 }
 
 system::error_code ClientChannelImpl::Connect(uint32_t ms) {
+  CHECK(!shutting_down_ && !reconnect_active_);
+
+  // If we are connected
+  if (!status_)
+    return status_;
+
   VLOG(1) << "Connecting on socket " << sock_.native_handle() << " " << sock_.non_blocking();
 
   CHECK(!hostname_.empty());
