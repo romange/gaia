@@ -26,7 +26,7 @@ DEFINE_int32(num_connections, 1, "");
 DEFINE_int32(io_threads, 0, "");
 
 using asio::ip::tcp;
-using rpc::ClientBase;
+using rpc::EnvelopeClient;
 using util::IoContextPool;
 using util::fibers_ext::yield;
 
@@ -55,7 +55,7 @@ class PingInterface final : public rpc::ServiceInterface {
 std::atomic_ulong latency_ms(0);
 std::atomic_ulong latency_count(0);
 
-void Driver(ClientBase* client, size_t index, unsigned msg_count) {
+void Driver(EnvelopeClient* client, size_t index, unsigned msg_count) {
   rpc::BufferType header, letter;
   letter.resize(64);
 
@@ -69,7 +69,7 @@ void Driver(ClientBase* client, size_t index, unsigned msg_count) {
 
     VLOG(1) << ": Sending: " << msgbuf;
 
-    ClientBase::future_code_t fec = client->SendEnvelope(&header, &letter);
+    EnvelopeClient::future_code_t fec = client->SendEnvelope(&header, &letter);
     system::error_code ec = fec.get();
 
     auto last = chrono::steady_clock::now();
@@ -98,7 +98,7 @@ void RunClient(boost::asio::io_context& context, unsigned msg_count, util::fiber
   system::error_code ec = channel.Connect(1000);
   CHECK(!ec) << ec;
 
-  std::unique_ptr<ClientBase> client(new ClientBase(std::move(channel)));
+  std::unique_ptr<EnvelopeClient> client(new EnvelopeClient(std::move(channel)));
   std::vector<fibers::fiber> drivers(FLAGS_num_connections);
   for (size_t i = 0; i < drivers.size(); ++i) {
     drivers[i] = fibers::fiber(&Driver, client.get(), i, msg_count);

@@ -28,7 +28,7 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 }  // namespace
 
 
-ClientBase::~ClientBase() {
+EnvelopeClient::~EnvelopeClient() {
   Shutdown();
 
   VLOG(1) << "Before ReadFiberJoin";
@@ -36,11 +36,18 @@ ClientBase::~ClientBase() {
   read_fiber_.join();
 }
 
-void ClientBase::Shutdown() {
+void EnvelopeClient::Shutdown() {
   channel_.Shutdown();
 }
 
-auto ClientBase::SendEnvelope(base::PODArray<uint8_t>* header,
+auto EnvelopeClient::Connect(uint32_t ms) -> error_code {
+  CHECK(!read_fiber_.joinable());
+  error_code ec = channel_.Connect(ms);
+  read_fiber_ = ::boost::fibers::fiber(&EnvelopeClient::ReadFiber, this);
+  return ec;
+}
+
+auto EnvelopeClient::SendEnvelope(base::PODArray<uint8_t>* header,
                                base::PODArray<uint8_t>* letter) -> future_code_t {
   // ----
   fibers::promise<error_code> p;
@@ -76,7 +83,7 @@ auto ClientBase::SendEnvelope(base::PODArray<uint8_t>* header,
   return res;
 }
 
-void ClientBase::ReadFiber() {
+void EnvelopeClient::ReadFiber() {
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
 
   error_code ec;
@@ -96,7 +103,7 @@ void ClientBase::ReadFiber() {
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
-auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
+auto EnvelopeClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   Frame f;
   error_code ec = f.Read(sock);
   if (ec) return ec;
@@ -129,7 +136,7 @@ auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   return error_code{};
 }
 
-void ClientBase::FlushPendingCalls(error_code ec) {
+void EnvelopeClient::FlushPendingCalls(error_code ec) {
   for (auto& c : calls_) {
     c.promise.set_value(ec);
   }

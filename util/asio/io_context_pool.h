@@ -8,6 +8,7 @@
 #include <thread>
 
 #include <boost/asio.hpp>
+#include <boost/fiber/fiber.hpp>
 
 namespace util {
 
@@ -39,6 +40,15 @@ public:
   io_context& operator[](size_t i) { return *context_arr_[i];}
   size_t size() const { return context_arr_.size(); }
 
+  // func must accept io_context&. It will run in a dedicated detached fiber.
+  template<typename Func> void AsyncFiberOnAll(Func&& func) {
+    for (unsigned i = 0; i < size(); ++i) {
+      auto& context = *context_arr_[i];
+      context.post([&context, func = std::forward<Func>(func)] () mutable {
+        ::boost::fibers::fiber(std::forward<Func>(func), std::ref(context)).detach();
+      });
+    }
+  }
 private:
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
   typedef std::shared_ptr<boost::asio::io_context> io_context_ptr;

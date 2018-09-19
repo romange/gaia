@@ -7,33 +7,28 @@
 #include "base/pod_array.h"
 #include "util/asio/client_channel.h"
 
-// Single-threaded, fiber safe rpc client.
+// Single-threaded, multi-fiber safe rpc client.
 namespace util {
 namespace rpc {
 
-class ClientBase {
+class EnvelopeClient {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = ::boost::fibers::future<error_code>;
 
-  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)) {
-    read_fiber_ = ::boost::fibers::fiber(&ClientBase::ReadFiber, this);
+  EnvelopeClient(ClientChannel&& channel) : channel_(std::move(channel)) {
   }
 
-  ClientBase(::boost::asio::io_context& cntx, const std::string& hostname,
-             const std::string& service) {
-    ClientChannel channel(cntx, hostname, service);
-
-    ClientBase(std::move(channel));
+  EnvelopeClient(::boost::asio::io_context& cntx, const std::string& hostname,
+             const std::string& service)
+    : EnvelopeClient(ClientChannel(cntx, hostname, service)) {
   }
 
-  ~ClientBase();
+  ~EnvelopeClient();
 
   // Blocks at least for 'ms' milliseconds to connect to the host.
   // Should be called once during the initialization phase before sending the requests.
-  error_code Connect(uint32_t ms) {
-    return channel_.Connect(ms);
-  }
+  error_code Connect(uint32_t ms);
 
   // Write path is "fiber-synchronous", i.e. done inside calling fiber.
   // Which means we should not run this function from io_context loop.
