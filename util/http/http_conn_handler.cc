@@ -24,6 +24,8 @@ using fibers_ext::yield;
 
 const char kHtmlMime[] = "text/html";
 const char kJsonMime[] = "application/json";
+const char kSvgMime[] = "image/svg+xml";
+const char kTextMime[] = "text/plain";
 
 namespace {
 
@@ -113,6 +115,47 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
   }
 }
 
+void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
+  StringPiece file_name;
+  for (const auto& k_v : args) {
+    if (k_v.first == "file") {
+      file_name = k_v.second;
+    }
+  }
+  if (file_name.empty()) {
+    http::StringResponse resp(h2::status::unauthorized, 11);
+    return send->Invoke(std::move(resp));
+  }
+  h2::file_body::value_type body;
+  system::error_code ec;
+  string fname = strings::AsString(file_name);
+  body.open(fname.c_str(), boost::beast::file_mode::scan, ec);
+  if (ec) {
+    StringResponse res{h2::status::not_found, 11};
+    res.set(h2::field::content_type, kTextMime);
+    if (ec == boost::system::errc::no_such_file_or_directory)
+      res.body() = "The resource '" + fname + "' was not found.";
+    else
+      res.body() = "Error '" + ec.message() + "'.";
+    return send->Invoke(std::move(res));
+  }
+
+  size_t sz = body.size();
+  h2::response<h2::file_body> file_resp{std::piecewise_construct,
+        std::make_tuple(std::move(body)),
+        std::make_tuple(h2::status::ok, 11)};
+
+  if (absl::EndsWith(file_name, ".svg")) {
+    file_resp.set(h2::field::content_type, kSvgMime);
+  } else if (absl::EndsWith(file_name, ".html")) {
+    file_resp.set(h2::field::content_type, kHtmlMime);
+  } else {
+    file_resp.set(h2::field::content_type, kTextMime);
+  }
+  file_resp.content_length(sz);
+  return send->Invoke(std::move(file_resp));
+}
+
 }  // namespace
 
 HttpHandler::HttpHandler(const CallbackRegistry* registry) : registry_(registry) {
@@ -122,7 +165,7 @@ HttpHandler::HttpHandler(const CallbackRegistry* registry) : registry_(registry)
 
 system::error_code HttpHandler::HandleRequest() {
   beast::flat_buffer buffer;
-  h2::request<h2::dynamic_body> request;
+  RequestType request;
 
   system::error_code ec;
 
@@ -130,48 +173,56 @@ system::error_code HttpHandler::HandleRequest() {
   if (ec) {
     return to_asio(ec);
   }
-  Response response{h2::status::ok, request.version()};
-  response.set(h2::field::server, "GAIA");
-  response.keep_alive(request.keep_alive());
   VLOG(1) << "Full Url: " << request.target();
 
-  HandleRequestInternal(as_absl(request.target()), &response);
+  SendFunction send(*socket_);
+  HandleRequestInternal(request, &send);
 
-  response.prepare_payload();
-  h2::async_write(*socket_, response, yield[ec]);
-
-  return to_asio(ec);
+  return to_asio(send.ec);
 }
 
-void HttpHandler::HandleRequestInternal(StringPiece target, Response* resp) {
+void HttpHandler::HandleRequestInternal(const RequestType& request, SendFunction* send) {
+  StringPiece target = as_absl(request.target());
   if (target == "/favicon.ico") {
-    resp->set(h2::field::location, favicon_);
-    resp->result(h2::status::moved_permanently);
-    return;
+    h2::response<h2::string_body> resp(h2::status::moved_permanently, request.version());
+    resp.set(h2::field::location, favicon_);
+    resp.set(h2::field::server, "GAIA");
+    resp.keep_alive(request.keep_alive());
+
+    return send->Invoke(std::move(resp));
   }
   StringPiece path, query;
   tie(path, query) = Parse(target);
   auto args = SplitQuery(query);
 
   if (path == "/") {
-    BuildStatusPage(args, resource_prefix_, resp);
-    return;
+    h2::response<h2::string_body> resp(h2::status::ok, request.version());
+    BuildStatusPage(args, resource_prefix_, &resp);
+    return send->Invoke(std::move(resp));
   }
+
   if (path == "/flagz") {
+    h2::response<h2::string_body> resp(h2::status::ok, request.version());
     if (Authorize(args)) {
-      ParseFlagz(args, resp);
+      ParseFlagz(args, &resp);
     } else {
-      resp->result(h2::status::unauthorized);
+      resp.result(h2::status::unauthorized);
     }
+    return send->Invoke(std::move(resp));
+  }
+
+  if (path == "/filez") {
+    FilezHandler(args, send);
     return;
   }
+
   if (registry_) {
     auto it = registry_->cb_map_.find(path);
     if (it == registry_->cb_map_.end() || (it->second.is_protected && !Authorize(args))) {
-      resp->result(h2::status::unauthorized);
-    } else {
-      it->second.cb(args, resp);
+      h2::response<h2::string_body> resp(h2::status::unauthorized, request.version());
+      return send->Invoke(std::move(resp));
     }
+    it->second.cb(args, send);
   }
 }
 

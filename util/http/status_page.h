@@ -9,7 +9,7 @@ namespace util {
 namespace http {
 
 void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
-                     HttpHandler::Response* response);
+                     StringResponse* response);
 
 }  // namespace http
 }  // namespace util

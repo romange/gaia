@@ -3,6 +3,7 @@
 //
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/http/status.hpp>
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
@@ -19,6 +20,7 @@ DEFINE_int32(port, 8080, "Port number.");
 using namespace std;
 using namespace boost;
 using namespace util;
+namespace h2 = beast::http;
 
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
@@ -27,8 +29,10 @@ int main(int argc, char** argv) {
   AcceptServer server(&pool);
   pool.Run();
   http::CallbackRegistry registry;
-  auto cb = [](const http::QueryArgs& args, http::HttpHandler::Response* dest) {
-    dest->body() = "Bar";
+  auto cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
+    http::StringResponse resp(h2::status::ok, 11);
+    resp.body() = "Bar";
+    return send->Invoke(std::move(resp));
   };
 
   registry.RegisterCb("/foo", false, cb);

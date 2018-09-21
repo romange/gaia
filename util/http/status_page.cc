@@ -13,6 +13,8 @@ namespace http {
 using namespace std;
 using namespace boost;
 using beast::http::field;
+namespace h2 = beast::http;
+typedef h2::response<h2::string_body> StringResponse;
 
 namespace {
 
@@ -34,7 +36,7 @@ string StatusLine(const string& name, const string& val) {
 }  // namespace
 
 void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
-                     HttpHandler::Response* response) {
+                     StringResponse* response) {
   bool output_json = false;
 
   string varz;
