@@ -36,6 +36,23 @@ ConnectionHandler::ConnectionHandler() noexcept {
 ConnectionHandler::~ConnectionHandler() {
 }
 
+void ConnectionHandler::Init(socket_t&& sock, Notifier* notifier) {
+  CHECK(!socket_);
+
+  socket_.emplace(std::move(sock));
+  notifier_ = notifier;
+
+  ip::tcp::no_delay nd(true);
+  system::error_code ec;
+  socket_->set_option(nd, ec);
+  if (ec)
+    LOG(ERROR) << "Could not see socket option " << ec.message() << " " << ec;
+  socket_->non_blocking(true, ec);
+
+  if (ec)
+    LOG(ERROR) << "Could not make socket nonblocking " << ec.message() << " " << ec;
+}
+
 void ConnectionHandler::Run() {
   CHECK(notifier_);
 

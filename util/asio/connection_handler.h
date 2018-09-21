@@ -45,6 +45,8 @@ class ConnectionHandler {
 
   virtual ~ConnectionHandler();
 
+  void Init(socket_t&& sock, Notifier* notifier);
+
   // Can be trigerred from any thread. Schedules RunInIOThread to run in io_context loop.
   void Run();
 
@@ -83,11 +85,6 @@ class ConnectionHandler {
       cnd_.wait(lock, [this] { return list_->empty(); });
     }
   };
-
-  void Init(socket_t&& sock, Notifier* notifier) {
-    socket_.emplace(std::move(sock));
-    notifier_ = notifier;
-  }
 
  protected:
   // Should not block the thread. Can fiber-block (fiber friendly).

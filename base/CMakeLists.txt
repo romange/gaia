@@ -1,4 +1,5 @@
-add_library(base arena.cc bits.cc crc32c.cc coder.cc hash.cc init.cc logging.cc simd.cc varint.cc walltime.cc pthread_utils.cc)
+add_library(base arena.cc bits.cc crc32c.cc coder.cc hash.cc histogram.cc
+            init.cc logging.cc simd.cc varint.cc walltime.cc pthread_utils.cc)
 cxx_link(base TRDP::glog TRDP::gflags TRDP::pmr TRDP::xxhash atomic rt)  # rt for timer_create etc.
 add_dependencies(base sparsehash_project)
 

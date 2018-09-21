@@ -209,10 +209,11 @@ void IoContextPool::Run() {
       [this, i]() {
         context_indx_ = i;
         fibers::use_scheduling_algorithm<round_robin>(context_arr_[i]);
-
+        VLOG(1) << "Started io thread " << i;
         context_arr_[i]->run();
       });
   }
+  LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
   state_ = RUN;
 }
 
