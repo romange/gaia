@@ -48,7 +48,9 @@ auto EnvelopeClient::Connect(uint32_t ms) -> error_code {
 }
 
 auto EnvelopeClient::SendEnvelope(base::PODArray<uint8_t>* header,
-                               base::PODArray<uint8_t>* letter) -> future_code_t {
+                                  base::PODArray<uint8_t>* letter) -> future_code_t {
+  CHECK(read_fiber_.joinable());
+
   // ----
   fibers::promise<error_code> p;
   fibers::future<error_code> res = p.get_future();
