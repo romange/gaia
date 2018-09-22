@@ -34,7 +34,12 @@ TEST_F(IoContextTest, Basic) {
 
 static void BM_RunOne(benchmark::State& state) {
   io_context cntx(state.range_x());   // no locking
+  ip::tcp::endpoint endpoint(ip::tcp::v4(), 0);
+  ip::tcp::acceptor acceptor(cntx);
+  acceptor.async_accept([](auto ec, boost::asio::ip::tcp::socket s) {});
+  int i = 0;
   while (state.KeepRunning()) {
+    cntx.post([&i] { ++i; });
     cntx.run_one();
   }
 }
