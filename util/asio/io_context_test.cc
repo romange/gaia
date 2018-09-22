@@ -2,6 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include <boost/asio.hpp>
+#include <chrono>
 
 #include "base/gtest.h"
 #include "base/logging.h"
@@ -10,6 +11,7 @@
 using namespace std::chrono;
 using namespace boost;
 using namespace asio;
+using namespace std::chrono_literals;
 
 namespace util {
 
@@ -32,17 +34,29 @@ TEST_F(IoContextTest, Basic) {
   EXPECT_EQ(0, cntx.run_one());
 }
 
-static void BM_RunOne(benchmark::State& state) {
-  io_context cntx(state.range_x());   // no locking
+static void BM_RunOneNoLock(benchmark::State& state) {
+  io_context cntx(1);   // no locking
+
   ip::tcp::endpoint endpoint(ip::tcp::v4(), 0);
-  ip::tcp::acceptor acceptor(cntx);
-  acceptor.async_accept([](auto ec, boost::asio::ip::tcp::socket s) {});
+  std::vector<std::unique_ptr<ip::tcp::acceptor>> acc_arr(state.range_x());
+  std::vector<std::unique_ptr<steady_timer>> timer_arr(state.range_x());
+  for (auto& a : acc_arr) {
+    a.reset(new ip::tcp::acceptor(cntx, endpoint));
+    a->async_accept([](auto ec, boost::asio::ip::tcp::socket s) {});
+  }
+
+  for (auto& a : timer_arr) {
+    a.reset(new steady_timer(cntx));
+    a->expires_after(2s);
+    a->async_wait([](auto ec) {});
+  }
+
   int i = 0;
   while (state.KeepRunning()) {
     cntx.post([&i] { ++i; });
     cntx.run_one();
   }
 }
-BENCHMARK(BM_RunOne)->Arg(0)->Arg(1);
+BENCHMARK(BM_RunOneNoLock)->Range(1, 64);
 
 }  // namespace util

@@ -14,6 +14,7 @@
 
 #include "util/asio/asio_utils.h"
 #include "util/asio/client_channel.h"
+#include "util/asio/yield.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_test_utils.h"
 
@@ -82,6 +83,48 @@ TEST_F(ServerTest, Socket) {
   });
   ASSERT_FALSE(ec_) << ec_.message();
 }
+
+static void BM_ChannelConnection(benchmark::State& state) {
+  IoContextPool pool(1);
+  pool.Run();
+  AcceptServer server(&pool);
+
+  TestInterface ti;
+  uint16_t port = ti.Listen(0, &server);
+
+  server.Run();
+
+  ClientChannel channel(pool.GetNextContext(), "127.0.0.1",
+                        std::to_string(port));
+  CHECK(!channel.Connect(500));
+  Frame frame;
+  std::string send_msg(100, 'a');
+  uint8_t buf[Frame::kMaxByteSize];
+  BufferType header, letter;
+  frame.letter_size = send_msg.size();
+  letter.resize(frame.letter_size);
+
+  uint64_t fs = frame.Write(buf);
+  auto& socket = channel.socket();
+  BufferType tmp;
+  tmp.resize(10000);
+
+  while (state.KeepRunning()) {
+    error_code ec = channel.Write(make_buffer_seq(asio::buffer(buf, fs), send_msg));
+    CHECK(!ec);
+    // ec = frame.Read(&socket);
+
+    DCHECK(!ec);
+    DCHECK_EQ(0, frame.header_size);
+    DCHECK_EQ(letter.size(), frame.letter_size);
+    while (socket.available() > 1000) {
+      socket.read_some(asio::buffer(tmp));
+    }
+  }
+
+  server.Stop();
+}
+BENCHMARK(BM_ChannelConnection);
 
 }  // namespace rpc
 }  // namespace util

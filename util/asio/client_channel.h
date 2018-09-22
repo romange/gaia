@@ -119,9 +119,18 @@ class ClientChannelImpl {
     return status_;
   }
 
+  template <typename Func> socket_callable_t<Func> ReadUnlocked(Func&& f) {
+    status_ = f(sock_);
+    if (status_)
+      HandleErrorStatus();
+    return status_;
+  }
+
   asio::io_context& get_io_context() {
     return sock_.get_io_context();
   }
+
+  tcp::socket& socket() { return sock_; }
 
  private:
   using time_point = std::chrono::steady_clock::time_point;
@@ -205,6 +214,11 @@ class ClientChannel {
     return impl_->Read(std::forward<Readable>(rd));
   }
 
+  template <typename Readable>
+  error_code ReadUnlocked(Readable&& rd) {
+    return impl_->ReadUnlocked(std::forward<Readable>(rd));
+  }
+
   error_code status() const {
     return impl_->status();
   }
@@ -216,6 +230,8 @@ class ClientChannel {
   ::boost::asio::io_context& get_io_context() {
     return impl_->get_io_context();
   }
+
+  socket_t& socket() { return impl_->socket(); }
  private:
   // Factor out most fields into Impl struct to allow moveable semantics for the channel.
   std::unique_ptr<detail::ClientChannelImpl> impl_;
