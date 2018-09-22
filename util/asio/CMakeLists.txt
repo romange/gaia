@@ -3,3 +3,4 @@ add_library(asio_fiber_lib io_context_pool.cc client_channel.cc connection_handl
 cxx_link(asio_fiber_lib base ${Boost_LIBRARIES})
 
 cxx_test(periodic_task_test asio_fiber_lib LABELS CI)
+cxx_test(io_context_test asio_fiber_lib LABELS CI)
