@@ -46,7 +46,6 @@ class ClientChannelImpl {
   ClientChannelImpl(asio::io_context& cntx, const std::string& hname, const std::string& s)
       : resolver_(cntx), hostname_(hname), service_(s), sock_(cntx, tcp::v4()),
       handle_(sock_.native_handle()) {
-    sock_.non_blocking(true);
   }
 
   ~ClientChannelImpl();

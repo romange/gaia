@@ -3,7 +3,7 @@
 //
 
 #include <boost/fiber/fiber.hpp>
-
+#include <boost/asio/connect.hpp>
 #include "util/asio/client_channel.h"
 
 #include "base/logging.h"
@@ -11,8 +11,8 @@
 using namespace std;
 using chrono::milliseconds;
 using chrono::steady_clock;
-
 using namespace boost;
+using namespace asio::ip;
 
 namespace util {
 
@@ -45,10 +45,18 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
     system::error_code resolve_ec;
     auto results = Resolve(fibers_ext::yield[resolve_ec]);
     if (!resolve_ec) {
-      for (auto& ep : results) {
-        sock_.async_connect(ep, fibers_ext::yield[status_]);
-        if (!status_ || status_ == asio::error::operation_aborted)
-          return;
+      system::error_code ec;
+      VLOG(2) << "Connecting to " << results.size() << " endpoints";
+
+      tcp::endpoint ep = asio::async_connect(sock_, results, fibers_ext::yield[ec]);
+      if (!ec || ec == asio::error::operation_aborted) {
+        if (!ec) {
+          sock_.non_blocking(true);
+          VLOG(1) << "Connected to endpoint " << ep;
+        }
+
+        status_ = ec;
+        return;
       }
     }
     time_point now = steady_clock::now();

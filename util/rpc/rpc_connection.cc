@@ -25,11 +25,15 @@ using namespace system;
 using boost::asio::io_context;
 using fibers_ext::yield;
 using std::string;
+using asio::ip::tcp;
+
+
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
   // bridge is owned by RpcConnectionHandler instance.
   RpcConnectionHandler(ConnectionBridge* bridge);
+  ~RpcConnectionHandler();
 
   system::error_code HandleRequest() final override;
 
@@ -37,17 +41,29 @@ class RpcConnectionHandler : public ConnectionHandler {
   BufferType header_, letter_;
   uint64_t last_rpc_id_ = 0;
   std::unique_ptr<ConnectionBridge> bridge_;
+  BufferedSocketReadAdaptor<tcp::socket> buf_read_sock_;
 };
 
 RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
-    : bridge_(bridge) {
+    : bridge_(bridge), buf_read_sock_(*socket_, 1024) {
 }
 
+RpcConnectionHandler::~RpcConnectionHandler() {
+  LOG(INFO) << "Saved " << buf_read_sock_.saved() << " bytes";
+}
+
+#define BUF_READ 0
+
 system::error_code RpcConnectionHandler::HandleRequest() {
-  VLOG(2) << "RpcConnectionHandler " << socket_->remote_endpoint() << "/" << socket_->is_open();
+  VLOG(2) << "HandleRequest " << socket_->remote_endpoint() << "/" << socket_->is_open();
 
   rpc::Frame frame;
+#if (BUF_READ)
+  system::error_code ec = frame.Read(&buf_read_sock_);
+#else
   system::error_code ec = frame.Read(&socket_.value());
+#endif
+
   if (ec) {
     return ec;
   }
@@ -58,17 +74,18 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   header_.resize(frame.header_size);
   letter_.resize(frame.letter_size);
 
-  size_t sz;
-
   auto rbuf_seq = make_buffer_seq(header_, letter_);
-  sz = asio::async_read(*socket_, rbuf_seq, yield[ec]);
+#if (BUF_READ)
+  ec = buf_read_sock_.Read(rbuf_seq);
+#else
+  asio::async_read(*socket_, rbuf_seq, yield[ec]);
+#endif
+
   if (ec) {
     VLOG(1) << "async_read " << ec << " /" << socket_->native_handle();
     return ec;
   }
   DCHECK_NE(-1, socket_->native_handle());
-
-  CHECK_EQ(sz, frame.header_size + frame.letter_size);
 
   Status status = bridge_->HandleEnvelope(frame.rpc_id, &header_, &letter_);
   if (!status.ok()) {
@@ -82,13 +99,13 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   auto wbuf_seq = make_buffer_seq(asio::buffer(buf, fsz), header_, letter_);
   VLOG(2) << "Writing frame " << frame.rpc_id;
-  sz = asio::async_write(*socket_, wbuf_seq, yield[ec]);
+  size_t sz = asio::async_write(*socket_, wbuf_seq, yield[ec]);
   if (ec) {
     VLOG(1) << "async_write " << ec;
     return ec;
   }
 
-  CHECK_EQ(sz, frame.header_size + frame.letter_size + fsz);
+  CHECK_EQ(sz, frame.total_size() + fsz);
 
   return system::error_code{};
 }

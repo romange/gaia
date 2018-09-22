@@ -87,8 +87,11 @@ void ConnectionHandler::RunInIOThread() {
     LOG(ERROR) << ex.what();
   }
 
-  if (socket_->is_open())
+  if (socket_->is_open()) {
     socket_->close(ec);
+    DCHECK(!ec) << ec.message();
+  }
+
 
   notifier_->Unlink(this);
 
@@ -108,11 +111,16 @@ void ConnectionHandler::Close() {
     if (me->socket_->is_open()) {
       system::error_code ec;
 
-      me->socket_->cancel(ec);
-      me->socket_->shutdown(socket_t::shutdown_receive, ec);
+    //  me->socket_->shutdown(socket_t::shutdown_receive, ec);
+    //  LOG_IF(INFO, ec) << "Error closing socket " << me->socket_->native_handle()
+    //                   << ": " << ec.message();
 
-      LOG_IF(INFO, ec) << "Error closing socket " << me->socket_->native_handle()
+      // In case the socket is blocking a fiber lets break it.
+      me->socket_->cancel(ec);
+      LOG_IF(INFO, ec) << "Error canceling socket " << me->socket_->native_handle()
                        << ": " << ec.message();
+
+
     }
 
   });

@@ -46,10 +46,10 @@ error_code Frame::Read(socket_t* input) {
 
   error_code ec;
   size_t read;
-  size_t available = 0; /*input->available(ec);
+  /*size_t available = input->available(ec);
   if (ec)
     return ec;
-*/
+
   if (available >= kMinByteSize) {
     read = input->read_some(asio::buffer(buf, kMinByteSize), ec);
     available -= kMinByteSize;
@@ -57,8 +57,10 @@ error_code Frame::Read(socket_t* input) {
     read = asio::async_read(*input, asio::buffer(buf, kMinByteSize), yield[ec]);
     if (ec)
       return ec;
-    // available = input->available(ec);
+    available = input->available(ec);
   }
+*/
+  read = asio::async_read(*input, asio::buffer(buf, kMinByteSize), yield[ec]);
   if (ec)
     return ec;
 
@@ -83,11 +85,7 @@ error_code Frame::Read(socket_t* input) {
   // We stored 2 necessary bytes of boths lens, if it was not enough lets fill em up.
   if (sz_len) {
     auto mbuf = asio::buffer(buf + kMinByteSize, to_read);
-    if (available >= to_read) {
-      read = input->read_some(mbuf, ec);
-    } else {
-      read = asio::async_read(*input, mbuf, yield[ec]);
-    }
+    read = asio::async_read(*input, mbuf, yield[ec]);
     if (ec)
       return ec;
   }

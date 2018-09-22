@@ -31,6 +31,7 @@ template<typename Stream> class BufferedSocketReadAdaptor {
 
     size_t total_size = buffer_size(bufs);
     size_t sz = buffer_copy(bufs, mbuf_);
+    saved_ += sz;
     if (sz == total_size) {
       mbuf_ += sz;
       return error_code{};
@@ -41,6 +42,8 @@ template<typename Stream> class BufferedSocketReadAdaptor {
     auto strip_seq = StripSequence(sz, local_bufs);
     return ReadAndLoad(strip_seq, total_size - sz);
   }
+
+  size_t saved() const { return saved_; }
 
  private:
   template <typename MutableBufferSequence>
@@ -75,6 +78,7 @@ template<typename Stream> class BufferedSocketReadAdaptor {
   Stream& sock_;
   std::vector<uint8_t> buf_;
   mutable_buffer mbuf_;
+  size_t saved_ = 0;
 };
 
 /*

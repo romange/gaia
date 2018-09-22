@@ -80,7 +80,7 @@ TEST_F(RpcTest, Socket) {
 
   frame_.header_size = send_msg.size();
   frame_.letter_size = 0;
-  
+
   // Wait for reconnect.
   while (ec_) {
     SleepForMilliseconds(10);
@@ -128,19 +128,21 @@ static void BM_ChannelConnection(benchmark::State& state) {
   BufferType tmp;
   tmp.resize(10000);
 
+  auto buf_seq = make_buffer_seq(asio::buffer(buf, fs), send_msg);
+  size_t total_sz = 0, buf_seq_sz = asio::buffer_size(buf_seq);
+
   while (state.KeepRunning()) {
-    error_code ec = channel.Write(make_buffer_seq(asio::buffer(buf, fs), send_msg));
+    system::error_code ec = channel.Write(buf_seq);
     CHECK(!ec);
     // ec = frame.Read(&socket);
+    total_sz += buf_seq_sz;
 
     DCHECK(!ec);
     DCHECK_EQ(0, frame.header_size);
     DCHECK_EQ(letter.size(), frame.letter_size);
-    while (socket.available() > 1000) {
-      socket.read_some(asio::buffer(tmp));
-    }
+    socket.read_some(asio::buffer(tmp), ec);
   }
-
+  state.SetBytesProcessed(total_sz);
   server.Stop();
 }
 BENCHMARK(BM_ChannelConnection);
