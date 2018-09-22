@@ -25,8 +25,19 @@ using namespace std;
 using namespace boost;
 using asio::ip::tcp;
 
+class RpcTest : public ServerTest {
 
-TEST_F(ServerTest, BadHeader) {
+ protected:
+  asio::mutable_buffer FrameBuffer() {
+    size_t fr_sz = frame_.Write(buf_);
+    return asio::mutable_buffer(buf_, fr_sz);
+  }
+
+  uint8_t buf_[Frame::kMaxByteSize];
+  Frame frame_;
+};
+
+TEST_F(RpcTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
   ec_ = channel_->Write(make_buffer_seq(control, message));
@@ -36,53 +47,61 @@ TEST_F(ServerTest, BadHeader) {
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
-TEST_F(ServerTest, Basic) {
+TEST_F(RpcTest, Basic) {
   // Must be large enough to pass the initial RPC server read.
   string header("Hello "), message("world!!!");
-  uint8_t buf[Frame::kMaxByteSize];
+  frame_.header_size = header.size();
+  frame_.letter_size = message.size();
 
-  Frame frame(1, header.size(), message.size());
-  size_t fr_sz = frame.Write(buf);
-
-  ec_ = channel_->Write(make_buffer_seq(asio::buffer(buf, fr_sz), header, message));
+  ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Read([&frame](auto& s) {
-    return frame.Read(&s);
+  ec_ = channel_->Read([this](auto& s) {
+    return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_);
-  EXPECT_EQ(frame.header_size, header.size());
-  EXPECT_EQ(frame.letter_size, message.size());
+  EXPECT_EQ(frame_.header_size, header.size());
+  EXPECT_EQ(frame_.letter_size, message.size());
 
   ec_ = channel_->Read(make_buffer_seq(header, message));
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
 
-TEST_F(ServerTest, Socket) {
+TEST_F(RpcTest, Socket) {
   std::string send_msg(500, 'a');
   ec_ = channel_->Write(make_buffer_seq(send_msg));
   ASSERT_FALSE(ec_);
 
-  Frame frame;
-
-  ec_ = channel_->Read([&frame] (tcp::socket& s) {
-    return frame.Read(&s);
+  ec_ = channel_->Read([this] (tcp::socket& s) {
+    return frame_.Read(&s);
   });
   ASSERT_TRUE(ec_) << ec_.message();
 
-  uint8_t buf[Frame::kMaxByteSize];
-  frame.header_size = send_msg.size();
-  uint64_t fs = frame.Write(buf);
+  frame_.header_size = send_msg.size();
+  frame_.letter_size = 0;
+  
+  // Wait for reconnect.
   while (ec_) {
     SleepForMilliseconds(10);
-    ec_ = channel_->Write(make_buffer_seq(asio::buffer(buf, fs), send_msg));
+    ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), send_msg));
   }
-  ec_ = channel_->Read([&frame] (tcp::socket& s) {
-    return frame.Read(&s);
+  ec_ = channel_->Read([this] (tcp::socket& s) {
+    return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_) << ec_.message();
 }
+
+TEST_F(RpcTest, SocketRead) {
+  tcp::socket& sock = channel_->socket();
+  ASSERT_TRUE(sock.non_blocking());
+  ec_ = channel_->Write(make_buffer_seq(FrameBuffer()));
+  ASSERT_FALSE(ec_);
+  // std::vector<uint8_t> tmp(10000);
+  //size_t sz = sock.read_some(asio::buffer(tmp));
+  // LOG(INFO) << sz;
+}
+
 
 static void BM_ChannelConnection(benchmark::State& state) {
   IoContextPool pool(1);
