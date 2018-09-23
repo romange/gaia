@@ -87,6 +87,12 @@ class ConnectionHandler {
   };
 
  protected:
+  // called once after connection was initialized.
+  virtual void OnOpenSocket() {};
+
+  // Called before the class destroyed but after the socket was signalled to stop.
+  virtual void OnCloseSocket() {};
+
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 

@@ -12,11 +12,13 @@ using namespace boost;
 using namespace boost::asio;
 using fibers::condition_variable;
 using fibers::fiber;
+using namespace std;
 
 namespace util {
 
 bool IsExpectedFinish(system::error_code ec) {
-  return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset;
+  return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset ||
+         ec == error::not_connected;
 }
 
 void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
@@ -40,17 +42,22 @@ void ConnectionHandler::Init(socket_t&& sock, Notifier* notifier) {
   CHECK(!socket_);
 
   socket_.emplace(std::move(sock));
+  CHECK(socket_->is_open());
+
   notifier_ = notifier;
 
   ip::tcp::no_delay nd(true);
   system::error_code ec;
   socket_->set_option(nd, ec);
   if (ec)
-    LOG(ERROR) << "Could not see socket option " << ec.message() << " " << ec;
-  socket_->non_blocking(true, ec);
+    LOG(ERROR) << "Could not set socket option " << ec.message() << " " << ec;
 
+  socket_->non_blocking(true, ec);
   if (ec)
     LOG(ERROR) << "Could not make socket nonblocking " << ec.message() << " " << ec;
+  is_open_ = true;
+
+  OnOpenSocket();
 }
 
 void ConnectionHandler::Run() {
@@ -68,9 +75,9 @@ void ConnectionHandler::Run() {
 void ConnectionHandler::RunInIOThread() {
   CHECK(socket_);
 
-  VLOG(1) << "ConnectionHandler::RunInIOThread. socket " << socket_->native_handle();
+  VLOG(1) << "ConnectionHandler::RunInIOThread: " << socket_->native_handle();
   system::error_code ec;
-  is_open_ = socket_->is_open();
+
   try {
     while (is_open_) {
       ec = HandleRequest();
@@ -82,16 +89,13 @@ void ConnectionHandler::RunInIOThread() {
         break;
       }
     }
-    VLOG(1) << ": ConnectionHandler closed";
+    VLOG(1) << "ConnectionHandler closed: " << socket_->native_handle();
   } catch ( std::exception const& ex) {
-    LOG(ERROR) << ex.what();
+    string str = ex.what();
+    LOG(ERROR) << str;
   }
 
-  if (socket_->is_open()) {
-    socket_->close(ec);
-    DCHECK(!ec) << ec.message();
-  }
-
+  Close();
 
   notifier_->Unlink(this);
 
@@ -100,8 +104,26 @@ void ConnectionHandler::RunInIOThread() {
 }
 
 void ConnectionHandler::Close() {
+  if (!is_open_)
+    return;
+
   is_open_ = false;
 
+  // socket::close() closes the underlying socket and cancels the pending operations.
+  // The problem is that those operations return with ec = ok() so the flow  is not aware
+  // that the socket is closed. That can lead to nasty bugs. Therefore the only place we close
+  // socket is from the listener loop. Here we only signal that we are ready to close.
+  if (socket_->is_open()) {
+    system::error_code ec;
+    VLOG(1) << "BEfore shutdown " << socket_->native_handle();
+    socket_->cancel(ec);
+    socket_->shutdown(socket_t::shutdown_both, ec);
+    VLOG(1) << "After shutdown" << ec << " " << ec.message();
+  }
+  OnCloseSocket();
+
+  #if 0
+  VLOG(1) << "Is open " << is_open_.load();
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
   // We use intrusive ptr to increment the reference of this in order to allow
@@ -110,7 +132,7 @@ void ConnectionHandler::Close() {
     // The socket might already be closed if RunInIOThread has finished running.
     if (me->socket_->is_open()) {
       system::error_code ec;
-
+      VLOG(1) << "Before cancelling " << me->socket_->native_handle() << " " << me->is_open_.load();
     //  me->socket_->shutdown(socket_t::shutdown_receive, ec);
     //  LOG_IF(INFO, ec) << "Error closing socket " << me->socket_->native_handle()
     //                   << ": " << ec.message();
@@ -124,6 +146,7 @@ void ConnectionHandler::Close() {
     }
 
   });
+  #endif
 }
 
 

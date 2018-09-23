@@ -51,7 +51,7 @@ class AcceptServer {
   typedef std::tuple<ConnectionHandler*, ::boost::system::error_code>
     AcceptResult;
 
-  AcceptResult AcceptFiber(Listener* listener, ConnectionHandler::Notifier* done);
+  AcceptResult AcceptConnection(Listener* listener, ConnectionHandler::Notifier* done);
 
   IoContextPool* pool_;
 

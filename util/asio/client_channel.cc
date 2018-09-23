@@ -77,11 +77,14 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
 void ClientChannelImpl::Shutdown() {
   if (!shutting_down_) {
+    system::error_code ec;
+
     shutting_down_ = true;
-    sock_.cancel();
+    sock_.cancel(ec);
+    LOG_IF(INFO, ec) << "Cancelled with status " << ec << " " << ec.message();
+
     resolver_.cancel();
 
-    system::error_code ec;
     sock_.shutdown(tcp::socket::shutdown_both, ec);
     VLOG(1) << "ClientChannelImpl::Shutdown end " << sock_.native_handle() << " " << ec.message();
   }

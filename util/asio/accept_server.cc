@@ -23,8 +23,11 @@ AcceptServer::AcceptServer(IoContextPool* pool)
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
     for (auto& l : listeners_) {
-      if (l.acceptor.is_open())
-        l.acceptor.close();
+      if (l.acceptor.is_open()) {
+        asio::post(l.acceptor.get_executor(), [acc = &l.acceptor] () mutable {
+          acc->close();
+        });
+      }
     }
 
     bc_.Dec();
@@ -58,12 +61,16 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   util::ConnectionHandler* handler = nullptr;
   try {
     for (;;) {
-       std::tie(handler,ec) = AcceptFiber(listener, &notifier);
+       std::tie(handler,ec) = AcceptConnection(listener, &notifier);
        if (ec) {
          CHECK(!handler);
+         if (ec == asio::error::try_again)
+           continue;
          break; // TODO: To refine it.
       } else {
-        VLOG(1) << "Accepted socket " << handler->socket().remote_endpoint();
+        VLOG(1) << "Accepted socket " << handler->socket().remote_endpoint() << "/"
+                << handler->socket().native_handle();
+
         CHECK_NOTNULL(handler);
         clist.push_back(*handler);
         DCHECK(!clist.empty());
@@ -98,16 +105,20 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   LOG(INFO) << "Accept server stopped for port " << port;
 }
 
-auto AcceptServer::AcceptFiber(Listener* listener, ConnectionHandler::Notifier* notifier)
+auto AcceptServer::AcceptConnection(Listener* listener, ConnectionHandler::Notifier* notifier)
    -> AcceptResult {
   auto& io_cntx = pool_->GetNextContext();
 
   system::error_code ec;
   tcp::socket sock(io_cntx);
-  listener->acceptor.async_accept(sock, fibers_ext::yield[ec]);
 
+  listener->acceptor.async_accept(sock, fibers_ext::yield[ec]);
+  if (!ec && !sock.is_open())
+    ec = asio::error::try_again;
   if (ec)
     return AcceptResult(nullptr, ec);
+  DCHECK(sock.is_open()) << sock.native_handle();
+
   ConnectionHandler* conn = listener->cf();
   conn->Init(std::move(sock), notifier);
 
