@@ -18,38 +18,14 @@ using namespace boost;
 namespace util {
 namespace {
 
-struct rr_service : public asio::io_context::service {
-  // Required by add_service.
-  static asio::execution_context::id id;
-
-  // std::unique_ptr< asio::io_service::work >    work_;
-  asio::executor_work_guard<asio::io_context::executor_type> work_;
-
-  rr_service(asio::io_context& io_svc)
-      : asio::io_context::service(io_svc), work_{asio::make_work_guard(io_svc)} {
-  }
-
-  virtual ~rr_service() {
-  }
-
-  rr_service(rr_service const&) = delete;
-  rr_service& operator=(rr_service const&) = delete;
-
-  void shutdown() final {
-    work_.reset();
-    VLOG(1) << "Work reset";
-  }
-};
-
-
 // TODO: to add priorities.
 // See https://www.boost.org/doc/libs/1_68_0/libs/fiber/doc/html/fiber/custom.html#custom
 // We need it in order to prioritize client rpc read path, loop() fibers - higher
 // and connection acceptor fiber lower
 // than normal operations. For this we need 3 predefined priorities: HIGH,NORMAL, NICED.
-class round_robin final : public fibers::algo::algorithm {
+class AsioScheduler final : public fibers::algo::algorithm {
  private:
-  std::shared_ptr<asio::io_service> io_svc_;
+  std::shared_ptr<asio::io_context> io_svc_;
   asio::steady_timer suspend_timer_;
   //]
   fibers::scheduler::ready_queue_type rqueue_;
@@ -59,10 +35,8 @@ class round_robin final : public fibers::algo::algorithm {
 
  public:
   //[asio_rr_ctor
-  round_robin(const std::shared_ptr<asio::io_context>& io_svc)
+  AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
       : io_svc_(io_svc), suspend_timer_(*io_svc_) {
-    asio::add_service(*io_svc_, new rr_service(*io_svc_));
-    asio::post(*io_svc_, [this]() mutable { this->loop(); });
   }
 
   void awakened(fibers::context* ctx) noexcept override {
@@ -91,6 +65,10 @@ class round_robin final : public fibers::algo::algorithm {
 
   bool has_ready_fibers() const noexcept override {
     return 0 < counter_;
+  }
+
+  size_t active_fiber_count() const {
+    return counter_;
   }
 
   void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
@@ -143,37 +121,39 @@ class round_robin final : public fibers::algo::algorithm {
     suspend_timer_.expires_at(std::chrono::steady_clock::now());
   }
 
-  //]
+  void WaitTillFibersSuspend() {
+    // block this fiber till all pending (ready) fibers are processed
+    // == AsioScheduler::suspend_until() has been called.
+
+    // TODO: We might want to limit the number of processed fibers per iterations
+    // based on their priority and count to allow better responsiveness
+    // for handling io_svc requests. For example, to process all HIGH, and then limit
+    // all other fibers.
+    std::unique_lock<fibers::mutex> lk(mtx_);
+    cnd_.wait(lk);
+  }
 
  private:
-  void loop() {
-    while (!io_svc_->stopped()) {
-      if (has_ready_fibers()) {
-        while (io_svc_->poll())
-          ;
-
-        // block this fiber till all pending (ready) fibers are processed
-        // == round_robin::suspend_until() has been called.
-
-        // TODO: We might want to limit the number of processed fibers per iterations
-        // based on their priority and count to allow better responsiveness
-        // for handling io_svc requests. For example, to process all HIGH, and then limit
-        // all other fibers.
-        std::unique_lock<fibers::mutex> lk(mtx_);
-        cnd_.wait(lk);
-      } else {
-        // run one handler inside io_context
-        // if no handler available, block this thread
-        if (!io_svc_->run_one()) {
-          break;
-        }
-      }
-    }
-    VLOG(1) << "round_robin::loop exited";
-  }
 };
 
-asio::io_context::id rr_service::id;
+
+void MainLoop(asio::io_context* io_cntx, AsioScheduler* scheduler) {
+  while (!io_cntx->stopped()) {
+    if (scheduler->has_ready_fibers()) {
+      while (io_cntx->poll());
+
+      scheduler->WaitTillFibersSuspend();
+    } else {
+      // run one handler inside io_context
+      // if no handler available, block this thread
+      if (!io_cntx->run_one()) {
+        break;
+      }
+    }
+  }
+  VLOG(1) << "MainLoop exited";
+}
+
 }  // namespace
 
 thread_local size_t IoContextPool::context_indx_ = 0;
@@ -193,21 +173,48 @@ IoContextPool::~IoContextPool() {
   Stop();
 }
 
+void IoContextPool::ContextLoop(size_t index) {
+  context_indx_ = index;
+
+  auto& io_ptr = context_arr_[index];
+
+  // I do not use use_scheduling_algorithm because I want to retain access to the scheduler.
+  // fibers::use_scheduling_algorithm<AsioScheduler>(io_ptr);
+  AsioScheduler* scheduler = new AsioScheduler(io_ptr);
+  fibers::context::active()->get_scheduler()->set_algo(scheduler);
+
+  VLOG(1) << "Started io thread " << index << " " << io_ptr.get();
+
+  // We run the main loop inside the callback of io_context, blocking it until the loop exits.
+  // The reason for this is that io_context::running_in_this_thread() is deduced based on the
+  // call-stack. We might right our own utility function based on thread id since
+  // we run single thread per io context.
+  io_ptr->post([scheduler, ptr = io_ptr.get()] {
+    MainLoop(ptr, scheduler);
+  });
+
+  // Bootstrap - launch the callback handler above.
+  // It will block until MainLoop exits.
+  io_ptr->run_one();
+
+  // We stopped io_context. Lets spin it more until all ready handlers are run.
+  // That should make sure that fibers are unblocked.
+  io_ptr->restart();
+
+  while (io_ptr->poll() || scheduler->has_ready_fibers()) {
+    this_fiber::yield();  // while something happens, pass the ownership to other fiber.
+  }
+
+  VLOG(1) << "Finished io thread " << index;
+}
+
 void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
+    thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i]));
     thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() {
-      context_indx_ = i;
-      // thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i]));
-      auto& ptr = context_arr_[i];
-      fibers::use_scheduling_algorithm<round_robin>(ptr);
-      VLOG(1) << "Started io thread " << i;
-      ptr->run();
-      ptr->restart();
-      while (ptr->poll());
-
-      VLOG(1) << "Finished io thread " << i;
+      ContextLoop(i);
     });
   }
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
@@ -222,9 +229,9 @@ void IoContextPool::Stop() {
     context_arr_[i]->stop();
   }
 
-  /*for (TInfo& tinfo : thread_arr_) {
+  for (TInfo& tinfo : thread_arr_) {
     tinfo.work->reset();
-  }*/
+  }
 
   for (TInfo& tinfo : thread_arr_) {
     pthread_join(tinfo.tid, nullptr);

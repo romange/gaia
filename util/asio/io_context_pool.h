@@ -9,7 +9,7 @@
 
 #include <boost/asio.hpp>
 #include <boost/fiber/fiber.hpp>
-// #include <experimental/optional>
+#include <experimental/optional>
 
 namespace util {
 
@@ -36,7 +36,7 @@ public:
   void Stop();
 
   /// Get an io_context to use. Thread-safe.
-  boost::asio::io_context& GetNextContext();
+  io_context& GetNextContext();
 
   io_context& operator[](size_t i) { return *context_arr_[i];}
   size_t size() const { return context_arr_.size(); }
@@ -51,14 +51,17 @@ public:
     }
   }
 private:
+
+  void ContextLoop(size_t index);
+
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
-  typedef std::shared_ptr<boost::asio::io_context> io_context_ptr;
-  typedef ::boost::asio::executor_work_guard<::boost::asio::io_context::executor_type> work_guard_t;
+  typedef std::shared_ptr<io_context> io_context_ptr;
+  typedef ::boost::asio::executor_work_guard<io_context::executor_type> work_guard_t;
 
   std::vector<io_context_ptr> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
-    // std::experimental::optional<work_guard_t> work;
+    std::experimental::optional<work_guard_t> work;
   };
 
   std::vector<TInfo> thread_arr_;
