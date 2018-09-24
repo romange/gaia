@@ -200,9 +200,13 @@ void IoContextPool::Run() {
     thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() {
       context_indx_ = i;
       // thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i]));
-      fibers::use_scheduling_algorithm<round_robin>(context_arr_[i]);
+      auto& ptr = context_arr_[i];
+      fibers::use_scheduling_algorithm<round_robin>(ptr);
       VLOG(1) << "Started io thread " << i;
-      context_arr_[i]->run();
+      ptr->run();
+      ptr->restart();
+      while (ptr->poll());
+
       VLOG(1) << "Finished io thread " << i;
     });
   }

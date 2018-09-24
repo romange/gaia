@@ -34,6 +34,22 @@ TEST_F(IoContextTest, Basic) {
   EXPECT_EQ(0, cntx.run_one());
 }
 
+TEST_F(IoContextTest, Stop) {
+  io_context cntx;
+  int i = 0;
+  auto inc = [&i] {++i;};
+  cntx.post(inc);
+  EXPECT_EQ(1, cntx.poll_one());
+  EXPECT_EQ(1, i);
+  cntx.post(inc);
+  cntx.stop();
+  EXPECT_EQ(0, cntx.poll_one());
+  EXPECT_EQ(1, i);
+  cntx.restart();
+  EXPECT_EQ(1, cntx.poll_one());
+  EXPECT_EQ(2, i);
+}
+
 static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);   // no locking
 

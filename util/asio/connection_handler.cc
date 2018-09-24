@@ -132,9 +132,8 @@ void ConnectionHandler::Close() {
   // I do not launch this task on executors thread because then it would hold guard-pointer to
   // this. If a io_context stops without running this callback, then ConnectionHandler won't
   // delete itself. This is a hack until we fix the shutdown behavior of io_context.
-  // OnCloseSocket();
+  OnCloseSocket();
 
-  asio::dispatch(socket_->get_executor(), [me = ptr_t(this)] { me->OnCloseSocket(); });
 
   #if 0
   VLOG(1) << "Is open " << is_open_.load();

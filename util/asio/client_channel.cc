@@ -80,7 +80,9 @@ void ClientChannelImpl::Shutdown() {
     system::error_code ec;
 
     shutting_down_ = true;
-    resolver_.cancel();
+    // I had crashes when resolver_ was executing in one thread and cancel has been called from here.
+    // Lets hope resolver does not take time to finish.
+    // resolver_.cancel();
 
     VLOG(1) << "Cancelling " << sock_.native_handle();
     sock_.shutdown(tcp::socket::shutdown_both, ec);
