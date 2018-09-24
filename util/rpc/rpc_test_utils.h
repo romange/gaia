@@ -11,7 +11,9 @@ class ClientChannel;
 namespace rpc {
 
 class TestBridge final : public ConnectionBridge {
+  bool clear_;
  public:
+  TestBridge(bool clear) : clear_(clear) {}
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
@@ -20,8 +22,10 @@ class TestBridge final : public ConnectionBridge {
 };
 
 class TestInterface final : public ServiceInterface {
+  bool clear_ = false;
  public:
-  ConnectionBridge* CreateConnectionBridge() override { return new TestBridge{}; }
+  void set_clear(bool c) { clear_ = c; }
+  ConnectionBridge* CreateConnectionBridge() override { return new TestBridge{clear_}; }
 };
 
 class ServerTest : public testing::Test {

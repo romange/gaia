@@ -12,6 +12,10 @@ namespace rpc {
 Status TestBridge::HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
                                   base::PODArray<uint8_t>* letter) {
   VLOG(1) << "Got " << rpc_id << ", hs=" << header->size() << ", ls=" << letter->size();
+  if (clear_) {
+    header->clear();
+    letter->clear();
+  }
   return Status::OK;
 }
 
