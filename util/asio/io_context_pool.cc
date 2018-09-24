@@ -18,6 +18,30 @@ using namespace boost;
 namespace util {
 namespace {
 
+struct rr_service : public asio::io_context::service {
+  // Required by add_service.
+  static asio::execution_context::id id;
+
+  // std::unique_ptr< asio::io_service::work >    work_;
+  asio::executor_work_guard<asio::io_context::executor_type> work_;
+
+  rr_service(asio::io_context& io_svc)
+      : asio::io_context::service(io_svc), work_{asio::make_work_guard(io_svc)} {
+  }
+
+  virtual ~rr_service() {
+  }
+
+  rr_service(rr_service const&) = delete;
+  rr_service& operator=(rr_service const&) = delete;
+
+  void shutdown() final {
+    work_.reset();
+    VLOG(1) << "Work reset";
+  }
+};
+
+
 // TODO: to add priorities.
 // See https://www.boost.org/doc/libs/1_68_0/libs/fiber/doc/html/fiber/custom.html#custom
 // We need it in order to prioritize client rpc read path, loop() fibers - higher
@@ -25,70 +49,41 @@ namespace {
 // than normal operations. For this we need 3 predefined priorities: HIGH,NORMAL, NICED.
 class round_robin final : public fibers::algo::algorithm {
  private:
-  std::shared_ptr< asio::io_service>      io_svc_;
-  asio::steady_timer                      suspend_timer_;
-//]
-  fibers::scheduler::ready_queue_type     rqueue_;
-  fibers::mutex                           mtx_;
-  fibers::condition_variable              cnd_;
-  std::size_t                             counter_{ 0 };
+  std::shared_ptr<asio::io_service> io_svc_;
+  asio::steady_timer suspend_timer_;
+  //]
+  fibers::scheduler::ready_queue_type rqueue_;
+  fibers::mutex mtx_;
+  fibers::condition_variable cnd_;
+  std::size_t counter_{0};
 
  public:
-  // [asio_rr_service_top
-  struct rr_service : public asio::io_context::service {
-
-    // Required by add_service.
-    static asio::execution_context::id  id;
-
-    // std::unique_ptr< asio::io_service::work >    work_;
-    asio::executor_work_guard<asio::io_context::executor_type> work_;
-
-    rr_service(asio::io_context& io_svc) : asio::io_context::service(io_svc),
-      work_{asio::make_work_guard(io_svc)} {
-    }
-
-    virtual ~rr_service() {}
-
-    rr_service(rr_service const&) = delete;
-    rr_service& operator=(rr_service const&) = delete;
-
-    void shutdown_service() final {
-      work_.reset();
-      VLOG(1) << "Work reset";
-    }
-  };
-//]
-
-//[asio_rr_ctor
-  round_robin(const std::shared_ptr< asio::io_context >& io_svc) :
-      io_svc_(io_svc), suspend_timer_( * io_svc_) {
-    // We use add_service() very deliberately. This will throw
-    // service_already_exists if you pass the same io_context instance to
-    // more than one round_robin instance.
+  //[asio_rr_ctor
+  round_robin(const std::shared_ptr<asio::io_context>& io_svc)
+      : io_svc_(io_svc), suspend_timer_(*io_svc_) {
     asio::add_service(*io_svc_, new rr_service(*io_svc_));
-
-    asio::post(*io_svc_, [this] () mutable { this->loop();});
+    asio::post(*io_svc_, [this]() mutable { this->loop(); });
   }
 
-  void awakened(fibers::context * ctx) noexcept override {
-      DCHECK( ! DCHECK_NOTNULL(ctx)->ready_is_linked() );
-      ctx->ready_link( rqueue_); /*< fiber, enqueue on ready queue >*/
-      if ( ! ctx->is_context( fibers::type::dispatcher_context) ) {
-        ++counter_;
-      }
-      // VLOG(1) << "awakened: " << ctx->get_id();
+  void awakened(fibers::context* ctx) noexcept override {
+    DCHECK(!DCHECK_NOTNULL(ctx)->ready_is_linked());
+    ctx->ready_link(rqueue_); /*< fiber, enqueue on ready queue >*/
+    if (!ctx->is_context(fibers::type::dispatcher_context)) {
+      ++counter_;
+    }
+    // VLOG(1) << "awakened: " << ctx->get_id();
   }
 
   fibers::context* pick_next() noexcept override {
-    fibers::context * ctx( nullptr);
-    if (!rqueue_.empty() ) {
-        // pop an item from the ready queue
-        ctx = & rqueue_.front();
-        rqueue_.pop_front();
-        DCHECK(ctx && fibers::context::active() != ctx);
-        if ( !ctx->is_context(fibers::type::dispatcher_context) ) {
-          --counter_;
-        }
+    fibers::context* ctx(nullptr);
+    if (!rqueue_.empty()) {
+      // pop an item from the ready queue
+      ctx = &rqueue_.front();
+      rqueue_.pop_front();
+      DCHECK(ctx && fibers::context::active() != ctx);
+      if (!ctx->is_context(fibers::type::dispatcher_context)) {
+        --counter_;
+      }
     }
     //  VLOG_IF(1, ctx) << ctx->get_id();
     return ctx;
@@ -99,36 +94,34 @@ class round_robin final : public fibers::algo::algorithm {
   }
 
   void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
-    VLOG(1) << "suspend_until " << abs_time.time_since_epoch().count();
+    VLOG(2) << "suspend_until " << abs_time.time_since_epoch().count();
 
-      // Set a timer so at least one handler will eventually fire, causing
-      // run_one() to eventually return.
-    if ( (std::chrono::steady_clock::time_point::max)() != abs_time) {
-    // Each expires_at(time_point) call cancels any previous pending
-    // call. We could inadvertently spin like this:
-    // dispatcher calls suspend_until() with earliest wake time
-    // suspend_until() sets suspend_timer_,
-    // loop() calls run_one()
-    // some other asio handler runs before timer expires
-    // run_one() returns to loop()
-    // loop() yields to dispatcher
-    // dispatcher finds no ready fibers
-    // dispatcher calls suspend_until() with SAME wake time
-    // suspend_until() sets suspend_timer_ to same time, canceling
-    // previous async_wait()
-    // loop() calls run_one()
-    // asio calls suspend_timer_ handler with operation_aborted
-    // run_one() returns to loop()... etc. etc.
-    // So only actually set the timer when we're passed a DIFFERENT
-    // abs_time value.
-        suspend_timer_.expires_at( abs_time);
-        suspend_timer_.async_wait([](system::error_code const&){
-                                    this_fiber::yield();
-                                  });
+    // Set a timer so at least one handler will eventually fire, causing
+    // run_one() to eventually return.
+    if ((std::chrono::steady_clock::time_point::max)() != abs_time) {
+      // Each expires_at(time_point) call cancels any previous pending
+      // call. We could inadvertently spin like this:
+      // dispatcher calls suspend_until() with earliest wake time
+      // suspend_until() sets suspend_timer_,
+      // loop() calls run_one()
+      // some other asio handler runs before timer expires
+      // run_one() returns to loop()
+      // loop() yields to dispatcher
+      // dispatcher finds no ready fibers
+      // dispatcher calls suspend_until() with SAME wake time
+      // suspend_until() sets suspend_timer_ to same time, canceling
+      // previous async_wait()
+      // loop() calls run_one()
+      // asio calls suspend_timer_ handler with operation_aborted
+      // run_one() returns to loop()... etc. etc.
+      // So only actually set the timer when we're passed a DIFFERENT
+      // abs_time value.
+      suspend_timer_.expires_at(abs_time);
+      suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
     }
     cnd_.notify_one();
   }
-//]
+  //]
 
   void notify() noexcept override {
     // Something has happened that should wake one or more fibers BEFORE
@@ -146,43 +139,42 @@ class round_robin final : public fibers::algo::algorithm {
     // a new expiration time. This will cause us to spin the loop twice --
     // once for the operation_aborted handler, once for timer expiration
     // -- but that shouldn't be a big problem.
-    suspend_timer_.async_wait([](system::error_code const&){
-                                this_fiber::yield();
-                              });
-    suspend_timer_.expires_at( std::chrono::steady_clock::now() );
+    suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
+    suspend_timer_.expires_at(std::chrono::steady_clock::now());
   }
 
-//]
+  //]
 
  private:
-    void loop() {
-      while (!io_svc_->stopped()) {
-        if (has_ready_fibers() ) {
-          while (io_svc_->poll());
+  void loop() {
+    while (!io_svc_->stopped()) {
+      if (has_ready_fibers()) {
+        while (io_svc_->poll())
+          ;
 
-          // block this fiber till all pending (ready) fibers are processed
-          // == round_robin::suspend_until() has been called.
+        // block this fiber till all pending (ready) fibers are processed
+        // == round_robin::suspend_until() has been called.
 
-          // TODO: We might want to limit the number of processed fibers per iterations
-          // based on their priority and count to allow better responsiveness
-          // for handling io_svc requests. For example, to process all HIGH, and then limit
-          // all other fibers.
-          std::unique_lock<fibers::mutex > lk(mtx_);
-          cnd_.wait(lk);
-        } else {
-            // run one handler inside io_context
-            // if no handler available, block this thread
-            if (!io_svc_->run_one() ) {
-                break;
-            }
+        // TODO: We might want to limit the number of processed fibers per iterations
+        // based on their priority and count to allow better responsiveness
+        // for handling io_svc requests. For example, to process all HIGH, and then limit
+        // all other fibers.
+        std::unique_lock<fibers::mutex> lk(mtx_);
+        cnd_.wait(lk);
+      } else {
+        // run one handler inside io_context
+        // if no handler available, block this thread
+        if (!io_svc_->run_one()) {
+          break;
         }
       }
     }
+    VLOG(1) << "round_robin::loop exited";
+  }
 };
 
-asio::io_context::id round_robin::rr_service::id;
-
-}
+asio::io_context::id rr_service::id;
+}  // namespace
 
 thread_local size_t IoContextPool::context_indx_ = 0;
 
@@ -198,20 +190,21 @@ IoContextPool::IoContextPool(std::size_t pool_size) {
 }
 
 IoContextPool::~IoContextPool() {
-  Stop(); 
+  Stop();
 }
 
 void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
-    thread_arr_[i].tid = base::StartThread("IoPool",
-      [this, i]() {
-        context_indx_ = i;
-        fibers::use_scheduling_algorithm<round_robin>(context_arr_[i]);
-        VLOG(1) << "Started io thread " << i;
-        context_arr_[i]->run();
-      });
+    thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() {
+      context_indx_ = i;
+      // thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i]));
+      fibers::use_scheduling_algorithm<round_robin>(context_arr_[i]);
+      VLOG(1) << "Started io thread " << i;
+      context_arr_[i]->run();
+      VLOG(1) << "Finished io thread " << i;
+    });
   }
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
   state_ = RUN;
@@ -220,11 +213,16 @@ void IoContextPool::Run() {
 void IoContextPool::Stop() {
   if (state_ == STOPPED)
     return;
+
   for (size_t i = 0; i < context_arr_.size(); ++i) {
     context_arr_[i]->stop();
   }
 
-  for (const TInfo& tinfo : thread_arr_) {
+  /*for (TInfo& tinfo : thread_arr_) {
+    tinfo.work->reset();
+  }*/
+
+  for (TInfo& tinfo : thread_arr_) {
     pthread_join(tinfo.tid, nullptr);
   }
   state_ = STOPPED;

@@ -87,10 +87,11 @@ class ConnectionHandler {
   };
 
  protected:
-  // called once after connection was initialized.
+  // called once after connection was initialized. Will run in io context thread.
   virtual void OnOpenSocket() {};
 
   // Called before the class destroyed but after the socket was signalled to stop.
+  // Should run in io context thread.
   virtual void OnCloseSocket() {};
 
   // Should not block the thread. Can fiber-block (fiber friendly).

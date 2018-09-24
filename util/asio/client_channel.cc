@@ -80,12 +80,14 @@ void ClientChannelImpl::Shutdown() {
     system::error_code ec;
 
     shutting_down_ = true;
-    sock_.cancel(ec);
-    LOG_IF(INFO, ec) << "Cancelled with status " << ec << " " << ec.message();
-
     resolver_.cancel();
 
+    VLOG(1) << "Cancelling " << sock_.native_handle();
     sock_.shutdown(tcp::socket::shutdown_both, ec);
+    if (!ec) {
+      sock_.cancel(ec);
+      LOG_IF(INFO, ec) << "Cancelled with status " << ec << " " << ec.message();
+    }
     VLOG(1) << "ClientChannelImpl::Shutdown end " << sock_.native_handle() << " " << ec.message();
   }
   std::unique_lock<mutex> l(shd_mu_);

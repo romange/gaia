@@ -31,7 +31,7 @@ using std::string;
 
 DEFINE_int32(rpc_server_buffer_size, -1, "");
 
-constexpr size_t kRpcBufSize = 16;
+constexpr size_t kRpcItemSize = 16;
 
 class RpcConnectionHandler : public ConnectionHandler {
  public:
@@ -46,7 +46,6 @@ class RpcConnectionHandler : public ConnectionHandler {
   void FlushFiber();
   void OnOpenSocket() final;
   void OnCloseSocket() final;
-
 
   uint64_t last_rpc_id_ = 0;
   std::unique_ptr<ConnectionBridge> bridge_;
@@ -65,27 +64,31 @@ class RpcConnectionHandler : public ConnectionHandler {
 
   system::error_code ec_;
   std::unique_ptr<RpcItem[]> item_storage_;
-  std::vector<RpcItem*> free_stack_, outgoing_buf_;
+  std::vector<RpcItem*> avail_item_, outgoing_buf_;
+
   fibers::mutex wr_mu_;
   std::vector<asio::const_buffer> write_seq_;
-  
+
   fibers::fiber flush_fiber_;
 };
 
 
 RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
-    : bridge_(bridge), item_storage_(new RpcItem[kRpcBufSize]), free_stack_(kRpcBufSize) {
+    : bridge_(bridge), item_storage_(new RpcItem[kRpcItemSize]), avail_item_(kRpcItemSize) {
   if (FLAGS_rpc_server_buffer_size > 0) {
     buf_read_sock_.reset(
         new BufferedSocketReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size));
   }
-  for (size_t i = 0; i < kRpcBufSize; ++i) {
-    free_stack_[i] = item_storage_.get() + i;
+  for (size_t i = 0; i < kRpcItemSize; ++i) {
+    avail_item_[i] = item_storage_.get() + i;
   }
 }
 
 RpcConnectionHandler::~RpcConnectionHandler() {
   VLOG_IF(1, buf_read_sock_) << "Saved " << buf_read_sock_->saved() << " bytes";
+  if (flush_fiber_.joinable()) {
+    flush_fiber_.join();
+  }
 }
 
 void RpcConnectionHandler::OnOpenSocket() {
@@ -93,7 +96,8 @@ void RpcConnectionHandler::OnOpenSocket() {
 }
 
 void RpcConnectionHandler::OnCloseSocket() {
-  VLOG(1) << "Before  flush_fiber_ join";
+  // CHECK(socket_->get_executor().running_in_this_thread());
+  VLOG(1) << "Before flush fiber join " << socket_->native_handle();
   if (flush_fiber_.joinable()) {
     flush_fiber_.join();
   }
@@ -118,19 +122,19 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
 
   DCHECK_NE(-1, socket_->native_handle());
-  // DCHECK_LT(last_rpc_id_, frame.rpc_id);
+  DCHECK_LT(last_rpc_id_, frame.rpc_id);
   last_rpc_id_ = frame.rpc_id;
 
-  if (free_stack_.empty()) {
+  if (avail_item_.empty()) {
     std::lock_guard<fibers::mutex> l(wr_mu_);
     FlushWritesGuarded();
     if (ec_)
       return ec_;
   }
-  DCHECK(!free_stack_.empty());
-  RpcItem* item = free_stack_.back();
-  free_stack_.pop_back();
-  CHECK(item);
+  DCHECK(!avail_item_.empty());
+  RpcItem* item = avail_item_.back();
+  avail_item_.pop_back();
+  DCHECK(item);
 
   item->header.resize(frame.header_size);
   item->letter.resize(frame.letter_size);
@@ -180,16 +184,17 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   VLOG(2) << "FlushWritesWrote " << write_sz << " bytes";
   for (size_t i = 0; i < count; ++i) {
     RpcItem* item = outgoing_buf_[i];
-    free_stack_.push_back(item);
+    avail_item_.push_back(item);
   }
   outgoing_buf_.erase(outgoing_buf_.begin(), outgoing_buf_.begin() + count);
 }
 
 void RpcConnectionHandler::FlushFiber() {
   using namespace std::chrono_literals;
+  CHECK(socket_->get_executor().running_in_this_thread());
 
   while (true) {
-    this_fiber::sleep_for(200us);
+    this_fiber::sleep_for(100us);
     if (!is_open_ || !socket_->is_open())
       break;
 

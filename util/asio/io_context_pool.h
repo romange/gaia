@@ -9,6 +9,7 @@
 
 #include <boost/asio.hpp>
 #include <boost/fiber/fiber.hpp>
+// #include <experimental/optional>
 
 namespace util {
 
@@ -52,10 +53,12 @@ public:
 private:
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
   typedef std::shared_ptr<boost::asio::io_context> io_context_ptr;
+  typedef ::boost::asio::executor_work_guard<::boost::asio::io_context::executor_type> work_guard_t;
 
   std::vector<io_context_ptr> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
+    // std::experimental::optional<work_guard_t> work;
   };
 
   std::vector<TInfo> thread_arr_;

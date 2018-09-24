@@ -4,15 +4,19 @@
 
 #include "util/asio/connection_handler.h"
 
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/write.hpp>
 
 #include "base/logging.h"
+#include "util/stats/varz_stats.h"
 
 using namespace boost;
 using namespace boost::asio;
 using fibers::condition_variable;
 using fibers::fiber;
 using namespace std;
+
+DEFINE_VARZ(VarzCount, connections);
 
 namespace util {
 
@@ -56,14 +60,14 @@ void ConnectionHandler::Init(socket_t&& sock, Notifier* notifier) {
   if (ec)
     LOG(ERROR) << "Could not make socket nonblocking " << ec.message() << " " << ec;
   is_open_ = true;
-
-  OnOpenSocket();
 }
 
 void ConnectionHandler::Run() {
   CHECK(notifier_);
 
   asio::post(socket_->get_executor(), [guard = ptr_t(this)] {
+    guard->OnOpenSocket();
+
     // As long as fiber is running, 'this' is protected from deletion.
     fiber(&ConnectionHandler::RunInIOThread, std::move(guard)).detach();
   });
@@ -73,6 +77,8 @@ void ConnectionHandler::Run() {
 *   fiber function per server connection
 *****************************************************************************/
 void ConnectionHandler::RunInIOThread() {
+  connections.Inc();
+
   CHECK(socket_);
 
   VLOG(1) << "ConnectionHandler::RunInIOThread: " << socket_->native_handle();
@@ -99,6 +105,8 @@ void ConnectionHandler::RunInIOThread() {
 
   notifier_->Unlink(this);
 
+  connections.IncBy(-1);
+
   // RunInIOThread runs as lambda packaged with ptr_t guard on this. Once the lambda finishes,
   // it releases the ownership over this.
 }
@@ -115,12 +123,18 @@ void ConnectionHandler::Close() {
   // socket is from the listener loop. Here we only signal that we are ready to close.
   if (socket_->is_open()) {
     system::error_code ec;
-    VLOG(1) << "BEfore shutdown " << socket_->native_handle();
+    VLOG(1) << "Before shutdown " << socket_->native_handle();
     socket_->cancel(ec);
     socket_->shutdown(socket_t::shutdown_both, ec);
     VLOG(1) << "After shutdown" << ec << " " << ec.message();
   }
-  OnCloseSocket();
+
+  // I do not launch this task on executors thread because then it would hold guard-pointer to
+  // this. If a io_context stops without running this callback, then ConnectionHandler won't
+  // delete itself. This is a hack until we fix the shutdown behavior of io_context.
+  // OnCloseSocket();
+
+  asio::dispatch(socket_->get_executor(), [me = ptr_t(this)] { me->OnCloseSocket(); });
 
   #if 0
   VLOG(1) << "Is open " << is_open_.load();
