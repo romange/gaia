@@ -29,7 +29,7 @@ using boost::asio::io_context;
 using fibers_ext::yield;
 using std::string;
 
-DEFINE_int32(rpc_server_buffer_size, -1, "");
+DEFINE_int32(rpc_server_buffer_size, 4096, "");
 
 constexpr size_t kRpcItemSize = 16;
 
