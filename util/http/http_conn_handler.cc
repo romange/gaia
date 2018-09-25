@@ -90,7 +90,7 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
     if (!google::GetCommandLineFlagInfo(fname.c_str(), &flag_info)) {
       response->body() = "Flag not found \n";
     } else {
-      response->set(h2::field::content_type, kHtmlMime);
+      SetMime(kHtmlMime, response);
       response->body().append("<p>Current value ").append(flag_info.current_value).append("</p>");
       string new_val = strings::AsString(value);
       string res = google::SetCommandLineOption(fname.c_str(), new_val.c_str());
@@ -123,7 +123,7 @@ void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
     }
   }
   if (file_name.empty()) {
-    http::StringResponse resp(h2::status::unauthorized, 11);
+    http::StringResponse resp = MakeStringResponse(h2::status::unauthorized);
     return send->Invoke(std::move(resp));
   }
   h2::file_body::value_type body;
@@ -131,8 +131,8 @@ void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   string fname = strings::AsString(file_name);
   body.open(fname.c_str(), boost::beast::file_mode::scan, ec);
   if (ec) {
-    StringResponse res{h2::status::not_found, 11};
-    res.set(h2::field::content_type, kTextMime);
+    StringResponse res = MakeStringResponse(h2::status::not_found);
+    SetMime(kTextMime, &res);
     if (ec == boost::system::errc::no_such_file_or_directory)
       res.body() = "The resource '" + fname + "' was not found.";
     else
@@ -145,13 +145,15 @@ void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
         std::make_tuple(std::move(body)),
         std::make_tuple(h2::status::ok, 11)};
 
+  const char* mime = kHtmlMime;
   if (absl::EndsWith(file_name, ".svg")) {
-    file_resp.set(h2::field::content_type, kSvgMime);
+    mime = kSvgMime;
   } else if (absl::EndsWith(file_name, ".html")) {
-    file_resp.set(h2::field::content_type, kHtmlMime);
+    mime = kHtmlMime;
   } else {
-    file_resp.set(h2::field::content_type, kTextMime);
+    mime = kTextMime;
   }
+  SetMime(mime, &file_resp);
   file_resp.content_length(sz);
   return send->Invoke(std::move(file_resp));
 }
@@ -184,7 +186,7 @@ system::error_code HttpHandler::HandleRequest() {
 void HttpHandler::HandleRequestInternal(const RequestType& request, SendFunction* send) {
   StringPiece target = as_absl(request.target());
   if (target == "/favicon.ico") {
-    h2::response<h2::string_body> resp(h2::status::moved_permanently, request.version());
+    h2::response<h2::string_body> resp = MakeStringResponse(h2::status::moved_permanently);
     resp.set(h2::field::location, favicon_);
     resp.set(h2::field::server, "GAIA");
     resp.keep_alive(request.keep_alive());

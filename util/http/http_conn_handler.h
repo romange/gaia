@@ -23,6 +23,15 @@ typedef std::vector<std::pair<StringPiece, StringPiece>> QueryArgs;
 
 typedef ::boost::beast::http::response<::boost::beast::http::string_body> StringResponse;
 
+inline StringResponse MakeStringResponse(
+    ::boost::beast::http::status st = ::boost::beast::http::status::ok) {
+  return StringResponse(st, 11);
+}
+
+inline void SetMime(const char* mime, ::boost::beast::http::fields* dest) {
+  dest->set(::boost::beast::http::field::content_type, mime);
+}
+
 class CallbackRegistry;
 
 extern const char kHtmlMime[];

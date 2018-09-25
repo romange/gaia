@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
   pool.Run();
   http::CallbackRegistry registry;
   auto cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
-    http::StringResponse resp(h2::status::ok, 11);
+    http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
     resp.body() = "Bar";
     return send->Invoke(std::move(resp));
   };
