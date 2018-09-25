@@ -7,8 +7,8 @@
 
 #include <google/protobuf/message.h>
 
-#include "base/pod_array.h"
 #include "util/asio/accept_server.h"
+#include "util/rpc/rpc_envelope.h"
 #include "util/status.h"
 #include "strings/stringpiece.h"
 
@@ -19,8 +19,6 @@ class IoContextPool;
 
 namespace rpc {
 
-typedef base::PODArray<uint8_t> BufferType;
-
 class ConnectionBridge {
  public:
   virtual ~ConnectionBridge() {}
@@ -28,8 +26,7 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, BufferType* header,
-                                        BufferType* letter) = 0;
+  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, Envelope* envelope) = 0;
 };
 
 class ServiceInterface {

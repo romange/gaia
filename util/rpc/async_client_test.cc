@@ -19,30 +19,30 @@ using namespace boost;
 
 
 TEST_F(ServerTest, SendOk) {
-  EnvelopeClient client(std::move(*channel_));
+  ClientBase client(std::move(*channel_));
   client.Connect(10);
 
-  base::PODArray<uint8_t> header, letter;
-  header.resize_fill(14, 1);
-  letter.resize_fill(42, 2);
-  EnvelopeClient::future_code_t fc = client.SendEnvelope(&header, &letter);
+  Envelope envelope;
+  envelope.header.resize_fill(14, 1);
+  envelope.letter.resize_fill(42, 2);
+  ClientBase::future_code_t fc = client.Send(&envelope);
   EXPECT_FALSE(fc.get());
 }
 
 TEST_F(ServerTest, ServerStopped) {
-  std::unique_ptr<EnvelopeClient> client(new EnvelopeClient(std::move(*channel_)));
+  std::unique_ptr<ClientBase> client(new ClientBase(std::move(*channel_)));
   client->Connect(10);
 
-  base::PODArray<uint8_t> header, letter;
-  header.resize_fill(14, 1);
-  letter.resize_fill(42, 2);
+  Envelope envelope;
+  envelope.header.resize_fill(14, 1);
+  envelope.letter.resize_fill(42, 2);
 
-  EnvelopeClient::future_code_t fc = client->SendEnvelope(&header, &letter);
+  ClientBase::future_code_t fc = client->Send(&envelope);
   EXPECT_FALSE(fc.get());
 
   server_->Stop();
   server_->Wait();
-  fc = client->SendEnvelope(&header, &letter);
+  fc = client->Send(&envelope);
   EXPECT_TRUE(fc.get());
   client.reset();
 }

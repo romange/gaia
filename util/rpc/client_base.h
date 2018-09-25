@@ -4,27 +4,27 @@
 #pragma once
 
 #include <deque>
-#include "base/pod_array.h"
 #include "util/asio/client_channel.h"
+#include "util/rpc/rpc_envelope.h"
 
 // Single-threaded, multi-fiber safe rpc client.
 namespace util {
 namespace rpc {
 
-class EnvelopeClient {
+class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = ::boost::fibers::future<error_code>;
 
-  EnvelopeClient(ClientChannel&& channel) : channel_(std::move(channel)) {
+  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)) {
   }
 
-  EnvelopeClient(::boost::asio::io_context& cntx, const std::string& hostname,
+  ClientBase(::boost::asio::io_context& cntx, const std::string& hostname,
              const std::string& service)
-    : EnvelopeClient(ClientChannel(cntx, hostname, service)) {
+    : ClientBase(ClientChannel(cntx, hostname, service)) {
   }
 
-  ~EnvelopeClient();
+  ~ClientBase();
 
   // Blocks at least for 'ms' milliseconds to connect to the host.
   // Should be called once during the initialization phase before sending the requests.
@@ -33,12 +33,12 @@ class EnvelopeClient {
   // Write path is "fiber-synchronous", i.e. done inside calling fiber.
   // Which means we should not run this function from io_context loop.
   // Calling from a separate fiber is fine.
-  future_code_t SendEnvelope(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter);
+  future_code_t Send(Envelope* envelope);
 
   // Fully fiber-blocking call. Sends and waits until the response is back.
   // The response pair is written into the same buffers.
-  error_code SendEnvelopeSync(base::PODArray<uint8_t>* header, base::PODArray<uint8_t>* letter) {
-    return SendEnvelope(header, letter).get();
+  error_code SendSync(Envelope* envelope) {
+    return Send(envelope).get();
   }
 
   // Blocks the calling fiber until all the background processes finish.
@@ -56,11 +56,10 @@ class EnvelopeClient {
   struct PendingCall {
     uint64_t rpc_id;
     ::boost::fibers::promise<error_code> promise;
-    base::PODArray<uint8_t> *header, *letter;
+    Envelope *envelope;
 
-    PendingCall(uint64_t r, ::boost::fibers::promise<error_code> p, base::PODArray<uint8_t> *h,
-                base::PODArray<uint8_t> *l)
-       : rpc_id(r), promise(std::move(p)), header(h), letter(l) {}
+    PendingCall(uint64_t r, ::boost::fibers::promise<error_code> p, Envelope* env)
+       : rpc_id(r), promise(std::move(p)), envelope(env) {}
   };
 
   std::deque<PendingCall> calls_;

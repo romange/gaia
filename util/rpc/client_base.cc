@@ -28,7 +28,7 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 }  // namespace
 
 
-EnvelopeClient::~EnvelopeClient() {
+ClientBase::~ClientBase() {
   Shutdown();
 
   VLOG(1) << "Before ReadFiberJoin";
@@ -36,19 +36,18 @@ EnvelopeClient::~EnvelopeClient() {
   read_fiber_.join();
 }
 
-void EnvelopeClient::Shutdown() {
+void ClientBase::Shutdown() {
   channel_.Shutdown();
 }
 
-auto EnvelopeClient::Connect(uint32_t ms) -> error_code {
+auto ClientBase::Connect(uint32_t ms) -> error_code {
   CHECK(!read_fiber_.joinable());
   error_code ec = channel_.Connect(ms);
-  read_fiber_ = ::boost::fibers::fiber(&EnvelopeClient::ReadFiber, this);
+  read_fiber_ = ::boost::fibers::fiber(&ClientBase::ReadFiber, this);
   return ec;
 }
 
-auto EnvelopeClient::SendEnvelope(base::PODArray<uint8_t>* header,
-                                  base::PODArray<uint8_t>* letter) -> future_code_t {
+auto ClientBase::Send(Envelope* envelope) -> future_code_t {
   CHECK(read_fiber_.joinable());
 
   // ----
@@ -65,16 +64,16 @@ auto EnvelopeClient::SendEnvelope(base::PODArray<uint8_t>* header,
   }
 
   // This section must be atomic so that rpc ids will be sent in increasing order.
-  auto cb = [this, header, letter, p = std::move(p)](tcp::socket& sock) mutable -> error_code {
-    Frame frame(rpc_id_++, header->size(), letter->size());
+  auto cb = [this, envelope, p = std::move(p)] (tcp::socket& sock) mutable -> error_code {
+    Frame frame(rpc_id_++, envelope->header.size(), envelope->letter.size());
     uint8_t buf[Frame::kMaxByteSize];
     size_t bsz = frame.Write(buf);
 
 
-    calls_.emplace_back(frame.rpc_id, std::move(p), header, letter);
+    calls_.emplace_back(frame.rpc_id, std::move(p), envelope);
     error_code ec;
-    asio::async_write(sock, make_buffer_seq(asio::buffer(buf, bsz), *header, *letter),
-                      fibers_ext::yield[ec]);
+    asio::async_write(sock, make_buffer_seq(asio::buffer(buf, bsz), envelope->header,
+                      envelope->letter), fibers_ext::yield[ec]);
     return ec;
   };
 
@@ -85,7 +84,7 @@ auto EnvelopeClient::SendEnvelope(base::PODArray<uint8_t>* header,
   return res;
 }
 
-void EnvelopeClient::ReadFiber() {
+void ClientBase::ReadFiber() {
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
 
   error_code ec;
@@ -105,7 +104,7 @@ void EnvelopeClient::ReadFiber() {
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
-auto EnvelopeClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
+auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   Frame f;
   error_code ec = f.Read(sock);
   if (ec) return ec;
@@ -127,9 +126,9 @@ auto EnvelopeClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   PendingCall call = std::move(calls_.front());
   calls_.pop_front();
   DCHECK_EQ(call.rpc_id, f.rpc_id);
-  call.header->resize(f.header_size);
-  call.letter->resize(f.letter_size);
-  asio::async_read(*sock, make_buffer_seq(*call.header, *call.letter), fibers_ext::yield[ec]);
+  call.envelope->Resize(f.header_size, f.letter_size);
+  asio::async_read(*sock, make_buffer_seq(call.envelope->header, call.envelope->letter),
+                   fibers_ext::yield[ec]);
 
   if (ec) return ec;
 
@@ -138,7 +137,7 @@ auto EnvelopeClient::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   return error_code{};
 }
 
-void EnvelopeClient::FlushPendingCalls(error_code ec) {
+void ClientBase::FlushPendingCalls(error_code ec) {
   for (auto& c : calls_) {
     c.promise.set_value(ec);
   }

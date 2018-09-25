@@ -15,7 +15,6 @@
 #include "util/asio/asio_utils.h"
 #include "util/asio/connection_handler.h"
 #include "util/asio/yield.h"
-// #include "util/fibers_ext.h"
 #include "util/rpc/frame_format.h"
 
 
@@ -52,14 +51,16 @@ class RpcConnectionHandler : public ConnectionHandler {
   std::unique_ptr<BufferedSocketReadAdaptor<tcp::socket>> buf_read_sock_;
 
   struct RpcItem {
-    BufferType header, letter;
+    Envelope envelope;
     uint8_t frame_buf[rpc::Frame::kMaxByteSize];
     size_t frame_sz = 0;
 
     void SyncFrame(uint64_t rpc_id) {
-      Frame frame(rpc_id, header.size(), letter.size());
+      Frame frame(rpc_id, envelope.header.size(), envelope.letter.size());
       frame_sz = frame.Write(frame_buf);
     }
+
+    auto buf_seq() { return make_buffer_seq(envelope.header, envelope.letter); }
   };
 
   system::error_code ec_;
@@ -136,10 +137,9 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   avail_item_.pop_back();
   DCHECK(item);
 
-  item->header.resize(frame.header_size);
-  item->letter.resize(frame.letter_size);
+  item->envelope.Resize(frame.header_size, frame.letter_size);
 
-  auto rbuf_seq = make_buffer_seq(item->header, item->letter);
+  auto rbuf_seq = item->buf_seq();
   if (buf_read_sock_) {
     ec_ = buf_read_sock_->Read(rbuf_seq);
   } else {
@@ -151,7 +151,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
   DCHECK_NE(-1, socket_->native_handle());
 
-  Status status = bridge_->HandleEnvelope(frame.rpc_id, &item->header, &item->letter);
+  Status status = bridge_->HandleEnvelope(frame.rpc_id, &item->envelope);
   if (!status.ok()) {
     return errc::make_error_code(errc::bad_message);
   }
@@ -173,8 +173,8 @@ void RpcConnectionHandler::FlushWritesGuarded() {
     DCHECK_LE(item->frame_sz, sizeof(item->frame_buf));
 
     write_seq_[3 * i] = asio::buffer(item->frame_buf, item->frame_sz);
-    write_seq_[3 * i + 1] = asio::buffer(item->header.data(), item->header.size());
-    write_seq_[3 * i + 2] = asio::buffer(item->letter.data(), item->letter.size());
+    write_seq_[3 * i + 1] = asio::buffer(item->envelope.header.data(), item->envelope.header.size());
+    write_seq_[3 * i + 2] = asio::buffer(item->envelope.letter.data(), item->envelope.letter.size());
   }
 
   size_t write_sz = asio::async_write(*socket_, write_seq_, yield[ec_]);
