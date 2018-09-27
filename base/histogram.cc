@@ -81,10 +81,12 @@ void Histogram::Merge(const Histogram& other) {
   num_ += other.num_;
   sum_ += other.sum_;
   sum_squares_ += other.sum_squares_;
+
   if (other.buckets_.size() > buckets_.size()) {
     buckets_.resize(other.buckets_.size());
   }
-  for (unsigned b = 0; b < buckets_.size(); ++b) {
+
+  for (unsigned b = 0; b < other.buckets_.size(); ++b) {
     buckets_[b] += other.buckets_[b];
   }
 }
