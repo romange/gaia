@@ -10,76 +10,11 @@
 #include "base/integral_types.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/yield.h"
+#include "util/rpc/buffered_read_adaptor.h"
 
 namespace util {
 namespace rpc {
 
-template<typename Stream> class BufferedSocketReadAdaptor {
- public:
-  using error_code = ::boost::system::error_code;
-  using mutable_buffer = ::boost::asio::mutable_buffer;
-
-  BufferedSocketReadAdaptor(Stream& s, size_t buf_size) : sock_(s), buf_(buf_size),
-      mbuf_(buf_.data(), 0) {}
-
-  template <typename MutableBufferSequence>
-    error_code Read(const MutableBufferSequence& bufs) {
-    if (mbuf_.size() == 0) {
-      return ReadAndLoad(bufs);
-    }
-    using namespace boost::asio;
-
-    size_t total_size = buffer_size(bufs);
-    size_t sz = buffer_copy(bufs, mbuf_);
-    saved_ += sz;
-    if (sz == total_size) {
-      mbuf_ += sz;
-      return error_code{};
-    }
-
-    auto local_bufs = bufs;
-    assert(sz == mbuf_.size());
-    auto strip_seq = StripSequence(sz, local_bufs);
-    return ReadAndLoad(strip_seq, total_size - sz);
-  }
-
-  size_t saved() const { return saved_; }
-
- private:
-  template <typename MutableBufferSequence>
-    error_code ReadAndLoad(const MutableBufferSequence& bufs, size_t total_size) {
-    error_code ec;
-    auto new_seq = make_buffer_seq(bufs, mutable_buffer(buf_.data(), buf_.size()));
-    auto strip_seq = StripSequence(0, new_seq);
-
-    size_t read = sock_.read_some(new_seq, ec);
-
-    while (true) {
-      if (read >= total_size) {
-        mbuf_ = mutable_buffer(buf_.data(), read - total_size);
-        return error_code{};
-      }
-
-      strip_seq = StripSequence(read, strip_seq);
-      total_size -= read;
-
-      read = sock_.async_read_some(strip_seq, fibers_ext::yield[ec]);
-      if (ec)
-        return ec;
-    }
-    return ec;
-  }
-
-  template <typename MutableBufferSequence>
-      error_code ReadAndLoad(const MutableBufferSequence& bufs) {
-      return ReadAndLoad(bufs, ::boost::asio::buffer_size(bufs));
-  }
-
-  Stream& sock_;
-  std::vector<uint8_t> buf_;
-  mutable_buffer mbuf_;
-  size_t saved_ = 0;
-};
 
 /*
   Frame structure:
@@ -126,7 +61,7 @@ class Frame {
   unsigned Write(uint8* dest) const;
 
   ::boost::system::error_code Read(socket_t* input);
-  ::boost::system::error_code Read(BufferedSocketReadAdaptor<socket_t>* input);
+  ::boost::system::error_code Read(BufferedReadAdaptor<socket_t>* input);
 };
 
 }  // namespace rpc

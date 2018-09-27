@@ -45,22 +45,7 @@ error_code Frame::Read(socket_t* input) {
   uint8 buf[kMaxByteSize + /* a little extra */ 8];
 
   error_code ec;
-  size_t read;
-  /*size_t available = input->available(ec);
-  if (ec)
-    return ec;
-
-  if (available >= kMinByteSize) {
-    read = input->read_some(asio::buffer(buf, kMinByteSize), ec);
-    available -= kMinByteSize;
-  } else {
-    read = asio::async_read(*input, asio::buffer(buf, kMinByteSize), yield[ec]);
-    if (ec)
-      return ec;
-    available = input->available(ec);
-  }
-*/
-  read = asio::async_read(*input, asio::buffer(buf, kMinByteSize), yield[ec]);
+  size_t read = asio::async_read(*input, asio::buffer(buf, kMinByteSize), yield[ec]);
   if (ec)
     return ec;
 
@@ -120,7 +105,7 @@ unsigned Frame::Write(uint8* dest) const {
   return 4 + 1 /* version */ + 7 /* rpc_id */ + cntrl_bytes_minus1 + msg_bytes_minus1 + 2;
 }
 
-::boost::system::error_code Frame::Read(BufferedSocketReadAdaptor<socket_t>* input) {
+::boost::system::error_code Frame::Read(BufferedReadAdaptor<socket_t>* input) {
   uint8 buf[kMaxByteSize + /* a little extra */ 8];
 
   error_code ec = input->Read(asio::mutable_buffer(buf, kMinByteSize));

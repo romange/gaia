@@ -48,7 +48,7 @@ class RpcConnectionHandler : public ConnectionHandler {
 
   uint64_t last_rpc_id_ = 0;
   std::unique_ptr<ConnectionBridge> bridge_;
-  std::unique_ptr<BufferedSocketReadAdaptor<tcp::socket>> buf_read_sock_;
+  std::unique_ptr<BufferedReadAdaptor<tcp::socket>> buf_read_sock_;
 
   struct RpcItem {
     Envelope envelope;
@@ -78,7 +78,7 @@ RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
     : bridge_(bridge), item_storage_(new RpcItem[kRpcItemSize]), avail_item_(kRpcItemSize) {
   if (FLAGS_rpc_server_buffer_size > 0) {
     buf_read_sock_.reset(
-        new BufferedSocketReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size));
+        new BufferedReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size));
   }
   for (size_t i = 0; i < kRpcItemSize; ++i) {
     avail_item_[i] = item_storage_.get() + i;
