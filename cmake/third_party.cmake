@@ -156,7 +156,8 @@ add_third_party(
 add_third_party(
   benchmark
   GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG v1.4.1
+  GIT_TAG 505be96
+  CMAKE_PASS_FLAGS "-DBENCHMARK_ENABLE_GTEST_TESTS=OFF -DBENCHMARK_ENABLE_TESTING=OFF"
 )
 
 add_third_party(

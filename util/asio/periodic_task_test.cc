@@ -11,6 +11,8 @@
 
 using namespace std;
 using namespace chrono;
+using testing::internal::CaptureStderr;
+using testing::internal::GetCapturedStderr;
 
 namespace util {
 
@@ -86,14 +88,17 @@ TEST_F(PeriodicTest, Cpp) {
   EXPECT_NE(main_id, task_thread_id);
 
   bc.Set(false);
+  task->Cancel();
 
-  // moveable
+  LOG(INFO) << "Moveable";
   std::unique_ptr<int> pi;
   task->Start([pi = std::move(pi), &bc, &task_thread_id] {
     task_thread_id = std::this_thread::get_id();
     bc.Set(true);
+    VLOG(1) << "Cb run";
   });
   bc.Wait();
+  task.reset();
 }
 
 TEST_F(PeriodicTest, Thread) {
@@ -105,15 +110,19 @@ TEST_F(PeriodicTest, Thread) {
 
   std::function<void()> f = [&] { ++count; bc.Wait(); };
 
+  CaptureStderr();
   for (unsigned i = 0; i < 2; ++i) {
     task->Start(f);
     SleepForMilliseconds(5);
+    EXPECT_TRUE(task->IsHanging());
     bc.Set(true);
     task->Cancel();
     bc.Set(false);
     EXPECT_EQ(i+1, count);
+    EXPECT_FALSE(task->IsHanging());
   }
-
+  string err = GetCapturedStderr();
+  EXPECT_FALSE(err.empty());
 }
 
 }  // namespace util
