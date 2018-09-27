@@ -156,13 +156,13 @@ add_third_party(
 add_third_party(
   benchmark
   GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG f662e8be5bc9d40640e10b72092780b401612bf2
+  GIT_TAG v1.4.1
 )
 
 add_third_party(
   gperf
   GIT_REPOSITORY https://github.com/gperftools/gperftools.git
-  GIT_TAG gperftools-2.6.3
+  GIT_TAG gperftools-2.7
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
                     --enable-libunwind

@@ -37,14 +37,14 @@ class PeriodicTask {
 
  private:
    template<typename Func> void RunInternal(Func&& f) {
-    timer_.async_wait([this, f = std::move(f)] (const error_code& ec) mutable {
+    timer_.async_wait([this, f = std::forward<Func>(f)] (const error_code& ec) mutable {
       if (ec == boost::asio::error::operation_aborted || (state_ & SHUTDOWN)) {
         Disalarm();
         return;
       }
 
       f();
-      Start(std::move(f));
+      Start(std::forward<Func>(f));
     });
   }
 

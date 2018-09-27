@@ -2,12 +2,15 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "util/asio/periodic_task.h"
+
+#include <thread>
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "base/walltime.h"
 #include "util/asio/io_context_pool.h"
 
-using namespace std::chrono;
+using namespace std;
+using namespace chrono;
 
 namespace util {
 
@@ -54,6 +57,43 @@ class BlockCheck {
     }
   }
 };
+
+class NonMoveable {
+public:
+ NonMoveable() {}
+ NonMoveable(const NonMoveable&) noexcept = default;
+ NonMoveable(NonMoveable&& ) = delete;
+};
+
+TEST_F(PeriodicTest, Cpp) {
+  auto& cntx = pool_.GetNextContext();
+  thread::id main_id = this_thread::get_id();
+  std::unique_ptr<PeriodicTask> task(new PeriodicTask(cntx, milliseconds(1)));
+
+  BlockCheck bc;
+  NonMoveable nm;
+  thread::id task_thread_id;
+
+  // non-moveable
+  task->Start([nm, &bc, &task_thread_id] {
+    task_thread_id = std::this_thread::get_id();
+    bc.Set(true);
+  });
+  bc.Wait();
+
+  EXPECT_NE(thread::id{}, task_thread_id);
+  EXPECT_NE(main_id, task_thread_id);
+
+  bc.Set(false);
+
+  // moveable
+  std::unique_ptr<int> pi;
+  task->Start([pi = std::move(pi), &bc, &task_thread_id] {
+    task_thread_id = std::this_thread::get_id();
+    bc.Set(true);
+  });
+  bc.Wait();
+}
 
 TEST_F(PeriodicTest, Thread) {
   auto& cntx = pool_.GetNextContext();
