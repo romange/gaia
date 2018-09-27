@@ -19,7 +19,7 @@ class ClientBase {
   ClientBase(ClientChannel&& channel) : channel_(std::move(channel)) {
   }
 
-  ClientBase(::boost::asio::io_context& cntx, const std::string& hostname,
+  ClientBase(IoContext& cntx, const std::string& hostname,
              const std::string& service)
     : ClientBase(ClientChannel(cntx, hostname, service)) {
   }

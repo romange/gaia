@@ -8,6 +8,7 @@
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
 
+#include "util/asio/io_context.h"
 #include "util/asio/yield.h"
 
 namespace util {
@@ -43,9 +44,9 @@ class ClientChannelImpl {
   template <typename Func>
   using socket_callable_t = check_ec_t<func_return_t<Func>>;
 
-  ClientChannelImpl(asio::io_context& cntx, const std::string& hname, const std::string& s)
-      : resolver_(cntx), hostname_(hname), service_(s), sock_(cntx, tcp::v4()),
-      handle_(sock_.native_handle()) {
+  ClientChannelImpl(IoContext& cntx, const std::string& hname, const std::string& s)
+      : resolver_(cntx.get_context()), hostname_(hname), service_(s),
+        sock_(cntx.get_context(), tcp::v4()), handle_(sock_.native_handle()) {
   }
 
   ~ClientChannelImpl();
@@ -172,7 +173,7 @@ class ClientChannel {
   ClientChannel() {}
 
   // "service" - port to which to connect.
-  ClientChannel(::boost::asio::io_context& cntx, const std::string& hostname,
+  ClientChannel(IoContext& cntx, const std::string& hostname,
                 const std::string& service)
       : impl_(new detail::ClientChannelImpl(cntx, hostname, service)) {
   }

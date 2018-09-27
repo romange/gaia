@@ -6,6 +6,7 @@
 
 #include <condition_variable>
 
+#include <boost/asio/steady_timer.hpp>
 #include <boost/fiber/condition_variable.hpp>
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/scheduler.hpp>
@@ -136,11 +137,11 @@ class AsioScheduler final : public fibers::algo::algorithm {
  private:
 };
 
-
 void MainLoop(asio::io_context* io_cntx, AsioScheduler* scheduler) {
   while (!io_cntx->stopped()) {
     if (scheduler->has_ready_fibers()) {
-      while (io_cntx->poll());
+      while (io_cntx->poll())
+        ;
 
       scheduler->WaitTillFibersSuspend();
     } else {
@@ -163,10 +164,6 @@ IoContextPool::IoContextPool(std::size_t pool_size) {
     pool_size = std::thread::hardware_concurrency();
   context_arr_.resize(pool_size);
   thread_arr_.resize(pool_size);
-
-  for (size_t i = 0; i < pool_size; ++i) {
-    context_arr_[i] = std::make_shared<asio::io_context>();
-  }
 }
 
 IoContextPool::~IoContextPool() {
@@ -176,32 +173,30 @@ IoContextPool::~IoContextPool() {
 void IoContextPool::ContextLoop(size_t index) {
   context_indx_ = index;
 
-  auto& io_ptr = context_arr_[index];
-
+  auto& context = context_arr_[index];
+  auto ptr = context.ptr();
   // I do not use use_scheduling_algorithm because I want to retain access to the scheduler.
   // fibers::use_scheduling_algorithm<AsioScheduler>(io_ptr);
-  AsioScheduler* scheduler = new AsioScheduler(io_ptr);
+  AsioScheduler* scheduler = new AsioScheduler(ptr);
   fibers::context::active()->get_scheduler()->set_algo(scheduler);
 
-  VLOG(1) << "Started io thread " << index << " " << io_ptr.get();
+  VLOG(1) << "Started io thread " << index << " " << ptr.get();
 
   // We run the main loop inside the callback of io_context, blocking it until the loop exits.
   // The reason for this is that io_context::running_in_this_thread() is deduced based on the
   // call-stack. We might right our own utility function based on thread id since
   // we run single thread per io context.
-  io_ptr->post([scheduler, ptr = io_ptr.get()] {
-    MainLoop(ptr, scheduler);
-  });
+  ptr->post([scheduler, ptr = ptr.get()] { MainLoop(ptr, scheduler); });
 
   // Bootstrap - launch the callback handler above.
   // It will block until MainLoop exits.
-  io_ptr->run_one();
+  ptr->run_one();
 
   // We stopped io_context. Lets spin it more until all ready handlers are run.
   // That should make sure that fibers are unblocked.
-  io_ptr->restart();
+  ptr->restart();
 
-  while (io_ptr->poll() || scheduler->has_ready_fibers()) {
+  while (ptr->poll() || scheduler->has_ready_fibers()) {
     this_fiber::yield();  // while something happens, pass the ownership to other fiber.
   }
 
@@ -212,10 +207,8 @@ void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
-    thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i]));
-    thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() {
-      ContextLoop(i);
-    });
+    thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].ptr()));
+    thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() { ContextLoop(i); });
   }
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
   state_ = RUN;
@@ -226,7 +219,7 @@ void IoContextPool::Stop() {
     return;
 
   for (size_t i = 0; i < context_arr_.size(); ++i) {
-    context_arr_[i]->stop();
+    context_arr_[i].Stop();
   }
 
   for (TInfo& tinfo : thread_arr_) {
@@ -239,11 +232,11 @@ void IoContextPool::Stop() {
   state_ = STOPPED;
 }
 
-asio::io_context& IoContextPool::GetNextContext() {
+IoContext& IoContextPool::GetNextContext() {
   // Use a round-robin scheme to choose the next io_context to use.
   DCHECK_LT(next_io_context_, context_arr_.size());
   uint32_t index = next_io_context_.load();
-  boost::asio::io_context& io_context = *context_arr_[index++];
+  IoContext& io_context = context_arr_[index++];
 
   // Not-perfect round-robind since this function is non-transactional but it's valid.
   if (index == context_arr_.size())

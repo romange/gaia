@@ -7,11 +7,14 @@
 #include <vector>
 #include <thread>
 
-#include <boost/asio.hpp>
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/fiber/fiber.hpp>
 #include <experimental/optional>
 
+#include "util/asio/io_context.h"
 namespace util {
+
+
 
 /// A pool of io_context objects.
 class IoContextPool {
@@ -36,16 +39,16 @@ public:
   void Stop();
 
   /// Get an io_context to use. Thread-safe.
-  io_context& GetNextContext();
+  IoContext& GetNextContext();
 
-  io_context& operator[](size_t i) { return *context_arr_[i];}
+  IoContext& operator[](size_t i) { return context_arr_[i];}
   size_t size() const { return context_arr_.size(); }
 
-  // func must accept io_context&. It will run in a dedicated detached fiber.
+  // func must accept IoContext&. It will run in a dedicated detached fiber.
   template<typename Func> void AsyncFiberOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
-      auto& context = *context_arr_[i];
-      context.post([&context, func = std::forward<Func>(func)] () mutable {
+      IoContext& context = context_arr_[i];
+      context.Post([&context, func = std::forward<Func>(func)] () mutable {
         ::boost::fibers::fiber(std::forward<Func>(func), std::ref(context)).detach();
       });
     }
@@ -54,11 +57,9 @@ private:
 
   void ContextLoop(size_t index);
 
-  // We use shared_ptr because of the shared ownership with the fibers scheduler.
-  typedef std::shared_ptr<io_context> io_context_ptr;
-  typedef ::boost::asio::executor_work_guard<io_context::executor_type> work_guard_t;
+  typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
 
-  std::vector<io_context_ptr> context_arr_;
+  std::vector<IoContext> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
     std::experimental::optional<work_guard_t> work;

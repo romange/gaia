@@ -30,7 +30,7 @@ class PeriodicTest : public testing::Test {
 };
 
 TEST_F(PeriodicTest, BasicTimer) {
-  auto& cntx = pool_.GetNextContext();
+  IoContext& cntx = pool_.GetNextContext();
   unsigned int count = 0;
   {
     std::unique_ptr<PeriodicTask> task(new PeriodicTask(cntx, milliseconds(1)));

@@ -6,6 +6,7 @@
 #include <thread>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/fiber/condition_variable.hpp>
+#include "util/asio/io_context.h"
 
 namespace util {
 
@@ -21,7 +22,7 @@ class PeriodicTask {
   using duration_t = timer_t::duration;
   using error_code = boost::system::error_code;
 
-  PeriodicTask(::boost::asio::io_context& cntx, duration_t d) : timer_(cntx), d_(d), state_(0) {}
+  PeriodicTask(IoContext& cntx, duration_t d) : timer_(cntx.get_context()), d_(d), state_(0) {}
   PeriodicTask(PeriodicTask&&) = default;
 
   ~PeriodicTask() { Cancel(); }
@@ -77,7 +78,7 @@ class PeriodicWorkerTask {
     Options() : skip_run_margin(0) {}
   };
 
-  PeriodicWorkerTask(::boost::asio::io_context& cntx, PeriodicTask::duration_t d,
+  PeriodicWorkerTask(IoContext& cntx, PeriodicTask::duration_t d,
       const Options& opts = Options{}) : pt_(cntx, d), opts_(opts) {}
 
   ~PeriodicWorkerTask() { Cancel(); }

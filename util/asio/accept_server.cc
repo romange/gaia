@@ -15,7 +15,7 @@ using namespace boost;
 using asio::ip::tcp;
 
 AcceptServer::AcceptServer(IoContextPool* pool)
-     :pool_(pool), signals_(pool->GetNextContext(), SIGINT, SIGTERM), bc_(1) {
+     :pool_(pool), signals_(pool->GetNextContext().get_context(), SIGINT, SIGTERM), bc_(1) {
 
   signals_.async_wait(
   [this](system::error_code /*ec*/, int /*signo*/) {
@@ -43,7 +43,8 @@ unsigned short AcceptServer::AddListener(unsigned short port, ConnectionFactory 
   CHECK(!was_run_);
 
   tcp::endpoint endpoint(tcp::v4(), port);
-  listeners_.emplace_back(&pool_->GetNextContext(), endpoint, std::move(cf));
+  IoContext& io_context = pool_->GetNextContext();
+  listeners_.emplace_back(&io_context.get_context(), endpoint, std::move(cf));
   auto& listener = listeners_.back();
 
   LOG(INFO) << "AcceptServer - listening on port " << listener.port;
@@ -107,10 +108,10 @@ void AcceptServer::RunInIOThread(Listener* listener) {
 
 auto AcceptServer::AcceptConnection(Listener* listener, ConnectionHandler::Notifier* notifier)
    -> AcceptResult {
-  auto& io_cntx = pool_->GetNextContext();
+  IoContext& io_cntx = pool_->GetNextContext();
 
   system::error_code ec;
-  tcp::socket sock(io_cntx);
+  tcp::socket sock(io_cntx.get_context());
 
   listener->acceptor.async_accept(sock, fibers_ext::yield[ec]);
   if (!ec && !sock.is_open())
