@@ -2,12 +2,15 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #pragma once
+
+#include <thread>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/fiber/condition_variable.hpp>
 
 namespace util {
 
-// Single threaded but fiber friendly PeriodicTask. Should run very short tasks which should
+// Single threaded but fiber friendly PeriodicTask. Runs directly from IO fiber therefore
+// should run only cpu, non-blocking tasks which should
 // not block the calling fiber.
 // 'Cancel' blocks the calling fiber until the scheduled callback finished running.
 class PeriodicTask {
@@ -48,34 +51,45 @@ class PeriodicTask {
     });
   }
 
-  void Disalarm();
+  void Disalarm() {
+    state_ &= ~uint8_t(ALARMED);
+  }
 
   timer_t timer_;
   duration_t d_;
   uint8_t state_ ;
 };
 
-class PeriodicThreadTask {
- public:
-  PeriodicThreadTask(::boost::asio::io_context& cntx, PeriodicTask::duration_t d) : pt_(cntx, d) {}
 
-  void Start(std::function<void()> f) {
-    pt_.Start([this, f = std::move(f)] () {
-      StartThreaded(f);  // I do not move f, to allow calling this lambda many times.
+// Each tasks runs in a new thread, thus not blocking the IO fiber. The next invocation of the
+// task will skip the run if the previous has finished.
+class PeriodicWorkerTask {
+ public:
+  PeriodicWorkerTask(::boost::asio::io_context& cntx, PeriodicTask::duration_t d) : pt_(cntx, d) {}
+
+  template<typename Func> void Start(Func&& f) {
+    pt_.Start([this, f = PackagedTask(std::forward<Func>(f))] () {
+      if (AllowRunning()) {
+        std::thread(f).detach();
+      };
     });
   }
 
   void Cancel();
  private:
-  std::function<void()> WrappedFunc(std::function<void()> f);
-
-  void StartThreaded(std::function<void()> f) {
-    bool val = false;
-    if (is_running_.compare_exchange_strong(val, true)) {
-      std::thread t(WrappedFunc(std::move(f)));
-      t.detach();
+  template<typename Func> auto PackagedTask(Func&& f) {
+    return [this, f = std::forward<Func>(f)]() {
+      f();
+      Epilog();
     };
   }
+
+  bool AllowRunning() {
+    bool val = false;
+    return is_running_.compare_exchange_strong(val, true);
+  }
+
+  void Epilog();
 
   std::atomic_bool is_running_{false};
 

@@ -63,6 +63,7 @@ public:
  NonMoveable() {}
  NonMoveable(const NonMoveable&) noexcept = default;
  NonMoveable(NonMoveable&& ) = delete;
+ void operator=(NonMoveable&& ) = delete;
 };
 
 TEST_F(PeriodicTest, Cpp) {
@@ -97,7 +98,7 @@ TEST_F(PeriodicTest, Cpp) {
 
 TEST_F(PeriodicTest, Thread) {
   auto& cntx = pool_.GetNextContext();
-  std::unique_ptr<PeriodicThreadTask> task(new PeriodicThreadTask(cntx, milliseconds(1)));
+  std::unique_ptr<PeriodicWorkerTask> task(new PeriodicWorkerTask(cntx, milliseconds(1)));
 
   unsigned count = 0;
   BlockCheck bc;
