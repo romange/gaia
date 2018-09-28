@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "base/logging.h"
+#include "base/walltime.h"
 
 #include "util/asio/asio_utils.h"
 #include "util/rpc/client_base.h"
@@ -16,6 +17,8 @@ namespace rpc {
 
 using namespace std;
 using namespace boost;
+using testing::internal::CaptureStderr;
+using testing::internal::GetCapturedStderr;
 
 
 TEST_F(ServerTest, SendOk) {
@@ -39,12 +42,14 @@ TEST_F(ServerTest, ServerStopped) {
 
   ClientBase::future_code_t fc = client->Send(&envelope);
   EXPECT_FALSE(fc.get());
-
+  CaptureStderr();
   server_->Stop();
   server_->Wait();
+
   fc = client->Send(&envelope);
   EXPECT_TRUE(fc.get());
   client.reset();
+  GetCapturedStderr();
 }
 
 }  // namespace rpc

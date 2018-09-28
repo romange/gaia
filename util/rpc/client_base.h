@@ -5,6 +5,7 @@
 
 #include <deque>
 #include "util/asio/client_channel.h"
+#include "util/rpc/buffered_read_adaptor.h"
 #include "util/rpc/rpc_envelope.h"
 
 // Single-threaded, multi-fiber safe rpc client.
@@ -16,12 +17,11 @@ class ClientBase {
   using error_code = ClientChannel::error_code;
   using future_code_t = ::boost::fibers::future<error_code>;
 
-  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)) {
+  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
 
-  ClientBase(IoContext& cntx, const std::string& hostname,
-             const std::string& service)
-    : ClientBase(ClientChannel(cntx, hostname, service)) {
+  ClientBase(IoContext& cntx, const std::string& hostname, const std::string& service)
+      : ClientBase(ClientChannel(cntx, hostname, service)) {
   }
 
   ~ClientBase();
@@ -48,18 +48,20 @@ class ClientBase {
   void ReadFiber();
 
   void FlushPendingCalls(error_code ec);
-  error_code ReadEnvelope(ClientChannel::socket_t* sock);
+  error_code ReadEnvelope();
 
   uint64_t rpc_id_ = 1;
   ClientChannel channel_;
+  BufferedReadAdaptor<ClientChannel::socket_t> br_;
 
   struct PendingCall {
     uint64_t rpc_id;
     ::boost::fibers::promise<error_code> promise;
-    Envelope *envelope;
+    Envelope* envelope;
 
     PendingCall(uint64_t r, ::boost::fibers::promise<error_code> p, Envelope* env)
-       : rpc_id(r), promise(std::move(p)), envelope(env) {}
+        : rpc_id(r), promise(std::move(p)), envelope(env) {
+    }
   };
 
   std::deque<PendingCall> calls_;

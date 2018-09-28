@@ -60,7 +60,7 @@ class RpcConnectionHandler : public ConnectionHandler {
       frame_sz = frame.Write(frame_buf);
     }
 
-    auto buf_seq() { return make_buffer_seq(envelope.header, envelope.letter); }
+    auto buf_seq() { return envelope.buf_seq(); }
   };
 
   system::error_code ec_;

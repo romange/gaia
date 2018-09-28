@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "util/asio/asio_utils.h"
 #include "util/rpc/frame_format.h"
+#include "util/rpc/rpc_envelope.h"
 
 namespace util {
 namespace rpc {
@@ -17,7 +18,8 @@ using asio::ip::tcp;
 
 namespace {
 
-template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
+template <typename R>
+fibers::future<std::decay_t<R>> make_ready(R&& r) {
   fibers::promise<std::decay_t<R>> p;
   fibers::future<std::decay_t<R>> res = p.get_future();
   p.set_value(std::forward<R>(r));
@@ -26,7 +28,6 @@ template<typename R> fibers::future<std::decay_t<R>> make_ready(R&& r) {
 }
 
 }  // namespace
-
 
 ClientBase::~ClientBase() {
   Shutdown();
@@ -64,16 +65,16 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
   }
 
   // This section must be atomic so that rpc ids will be sent in increasing order.
-  auto cb = [this, envelope, p = std::move(p)] (tcp::socket& sock) mutable -> error_code {
+  auto cb = [this, envelope, p = std::move(p)](tcp::socket& sock) mutable -> error_code {
     Frame frame(rpc_id_++, envelope->header.size(), envelope->letter.size());
     uint8_t buf[Frame::kMaxByteSize];
     size_t bsz = frame.Write(buf);
 
-
     calls_.emplace_back(frame.rpc_id, std::move(p), envelope);
     error_code ec;
-    asio::async_write(sock, make_buffer_seq(asio::buffer(buf, bsz), envelope->header,
-                      envelope->letter), fibers_ext::yield[ec]);
+    asio::async_write(sock,
+                      make_buffer_seq(asio::buffer(buf, bsz), envelope->header, envelope->letter),
+                      fibers_ext::yield[ec]);
     return ec;
   };
 
@@ -87,39 +88,49 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
 void ClientBase::ReadFiber() {
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
 
-  error_code ec;
+  error_code ec = channel_.WaitForReadAvailable();
   while (!channel_.is_shut_down()) {
-    ec = channel_.WaitForReadAvailable();
-    if (!ec) {
-      ec = channel_.Read([this](tcp::socket& sock) {
-        return ReadEnvelope(&sock);
-      });
-    }
     if (ec) {
-      // Handle error state.
+      LOG(WARNING) << "Error reading envelope " << ec << " " << ec.message();
+
       FlushPendingCalls(ec);
+      ec.clear();
+      continue;
     }
+
+    if (auto ch_st = channel_.status()) {
+      ec = channel_.WaitForReadAvailable();
+      VLOG(1) << "Channel status " << ch_st << " Read available st: " << ec;
+      continue;
+    }
+
+    ec = channel_.ReadUnlocked([this](auto&) {
+      return ReadEnvelope();
+    });
   }
   FlushPendingCalls(ec);
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
-auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
+auto ClientBase::ReadEnvelope() -> error_code {
   Frame f;
-  error_code ec = f.Read(sock);
-  if (ec) return ec;
+  error_code ec = f.Read(&br_);
+  if (ec)
+    return ec;
 
-  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << sock->native_handle();
+  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << channel_.handle();
+
+  // TODO: it's a bad state machine that potentially can cause rpc call not being
+  // released by the higher level since we just loose a received envelope.
+  // To fix it fully we should change calls_ to hash table.
   if (calls_.empty() || calls_.front().rpc_id != f.rpc_id) {
+
     LOG(WARNING) << "Unexpected id " << f.rpc_id;
     LOG_IF(WARNING, !calls_.empty()) << "Expecting " << calls_.front().rpc_id;
 
-    base::PODArray<uint8_t> buf;
-    buf.resize(f.header_size);
-    asio::async_read(*sock, asio::buffer(buf), fibers_ext::yield[ec]);
-    if (ec) return ec;
-    buf.resize(f.letter_size);
-    asio::async_read(*sock, asio::buffer(buf), fibers_ext::yield[ec]);
+    Envelope envelope(f.header_size, f.letter_size);
+    auto rbuf_seq = envelope.buf_seq();
+    ec = br_.Read(rbuf_seq);
     return ec;
   }
 
@@ -127,14 +138,10 @@ auto ClientBase::ReadEnvelope(ClientChannel::socket_t* sock) -> error_code {
   calls_.pop_front();
   DCHECK_EQ(call.rpc_id, f.rpc_id);
   call.envelope->Resize(f.header_size, f.letter_size);
-  asio::async_read(*sock, make_buffer_seq(call.envelope->header, call.envelope->letter),
-                   fibers_ext::yield[ec]);
+  ec = br_.Read(call.envelope->buf_seq());
+  call.promise.set_value(ec);
 
-  if (ec) return ec;
-
-  call.promise.set_value(error_code{});
-
-  return error_code{};
+  return ec;
 }
 
 void ClientBase::FlushPendingCalls(error_code ec) {

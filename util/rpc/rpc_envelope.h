@@ -4,6 +4,7 @@
 #pragma once
 
 #include "base/pod_array.h"
+#include "util/asio/asio_utils.h"
 
 namespace util {
 namespace rpc {
@@ -14,6 +15,12 @@ class Envelope {
  public:
   BufferType header, letter;
 
+  Envelope() = default;
+
+  Envelope(size_t hsz, size_t lsz) {
+    Resize(hsz, lsz);
+  }
+
   void Clear() {
     header.clear();
     letter.clear();
@@ -23,6 +30,8 @@ class Envelope {
     header.resize(hsz);
     letter.resize(lsz);
   }
+
+  auto buf_seq() { return make_buffer_seq(header, letter); }
 };
 
 }  // namespace rpc
