@@ -88,6 +88,11 @@ class ClientChannelImpl {
   template <typename BufferSequence>
   system::error_code Write(const BufferSequence& seq, is_cbuf_t<BufferSequence>* = 0) {
     std::lock_guard<mutex> guard(wmu_);
+    return Write(do_not_lock, seq);
+  }
+
+  template <typename BufferSequence>
+  system::error_code Write(do_not_lock_t, const BufferSequence& seq, is_cbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
 
@@ -223,6 +228,11 @@ class ClientChannel {
   template <typename Writeable>
   error_code Write(Writeable&& wr) {
     return impl_->Write(std::forward<Writeable>(wr));
+  }
+
+  template <typename Writeable>
+  error_code Write(do_not_lock_t, Writeable&& wr) {
+    return impl_->Write(do_not_lock, std::forward<Writeable>(wr));
   }
 
 

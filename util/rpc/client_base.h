@@ -3,10 +3,11 @@
 //
 #pragma once
 
-#include <deque>
 #include "util/asio/client_channel.h"
 #include "util/rpc/buffered_read_adaptor.h"
+#include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_envelope.h"
+#include "absl/container/flat_hash_map.h"
 
 // Single-threaded, multi-fiber safe rpc client.
 namespace util {
@@ -15,7 +16,7 @@ namespace rpc {
 class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
-  using future_code_t = ::boost::fibers::future<error_code>;
+  using future_code_t = boost::fibers::future<error_code>;
 
   ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
@@ -46,26 +47,44 @@ class ClientBase {
 
  private:
   void ReadFiber();
+  void FlushFiber();
 
-  void FlushPendingCalls(error_code ec);
+  void CancelPendingCalls(error_code ec);
   error_code ReadEnvelope();
+  error_code PresendChecks();
+  error_code FlushSends();
+  error_code FlushSendsGuarded();
 
-  uint64_t rpc_id_ = 1;
+  error_code CancelSentBufferGuarded(error_code ec);
+
+  RpcId rpc_id_ = 1;
   ClientChannel channel_;
   BufferedReadAdaptor<ClientChannel::socket_t> br_;
 
   struct PendingCall {
-    uint64_t rpc_id;
-    ::boost::fibers::promise<error_code> promise;
+    boost::fibers::promise<error_code> promise;
     Envelope* envelope;
 
-    PendingCall(uint64_t r, ::boost::fibers::promise<error_code> p, Envelope* env)
-        : rpc_id(r), promise(std::move(p)), envelope(env) {
+    PendingCall(boost::fibers::promise<error_code> p, Envelope* env)
+        : promise(std::move(p)), envelope(env) {
     }
   };
 
-  std::deque<PendingCall> calls_;
-  ::boost::fibers::fiber read_fiber_;
+  struct SendItem {
+    RpcId rpc_id;
+    Envelope* envelope;
+    uint8_t frame_buf[rpc::Frame::kMaxByteSize];
+
+    SendItem(RpcId i, Envelope* e) : rpc_id(i), envelope(e) {}
+  };
+
+  typedef absl::flat_hash_map<RpcId, PendingCall> PendingMap;
+  PendingMap pending_calls_;
+  std::vector<SendItem> outgoing_buf_;
+
+  boost::fibers::fiber read_fiber_, flush_fiber_;
+  boost::fibers::mutex send_mu_;
+  std::vector<boost::asio::const_buffer> write_seq_;
 };
 
 }  // namespace rpc

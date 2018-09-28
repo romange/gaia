@@ -1,5 +1,5 @@
 add_library(rpc frame_format.cc rpc_connection.cc client_base.cc)
-cxx_link(rpc base asio_fiber_lib status strings ${Boost_LIBRARIES})
+cxx_link(rpc base asio_fiber_lib status strings absl_hash ${Boost_LIBRARIES})
 
 add_library(rpc_test_lib rpc_test_utils.cc)
 cxx_link(rpc_test_lib rpc gtest_main)

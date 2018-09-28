@@ -28,19 +28,21 @@ namespace rpc {
       PB - message request of size message_size
 */
 
+typedef uint64_t RpcId;
+
 class Frame {
   static const uint32 kHeaderVal;
 
  public:
   typedef ::boost::asio::ip::tcp::socket socket_t;
 
-  uint64 rpc_id;
-  uint32 header_size;
-  uint32 letter_size;
+  RpcId rpc_id;
+  uint32_t header_size;
+  uint32_t letter_size;
 
   Frame() : rpc_id(1), header_size(0), letter_size(0) {
   }
-  Frame(uint64 r, uint32 cs, uint32 ms) : rpc_id(r), header_size(cs), letter_size(ms) {
+  Frame(RpcId r, uint32_t cs, uint32_t ms) : rpc_id(r), header_size(cs), letter_size(ms) {
   }
 
   enum { kMinByteSize = 4 + 1 + 7 + 2, kMaxByteSize = 4 + 1 + 7 + 4 * 2 };
