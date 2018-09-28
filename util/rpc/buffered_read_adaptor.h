@@ -34,7 +34,7 @@ template<typename Stream> class BufferedReadAdaptor {
 
     auto local_bufs = bufs;
     assert(sz == mbuf_.size());
-    auto strip_seq = StripSequence(sz, local_bufs);
+    auto strip_seq = StripSequence(sz, &local_bufs);
     return ReadAndLoad(strip_seq, total_size - sz);
   }
 
@@ -45,7 +45,7 @@ template<typename Stream> class BufferedReadAdaptor {
     error_code ReadAndLoad(const BufferSequence& bufs, size_t total_size) {
     error_code ec;
     auto new_seq = make_buffer_seq(bufs, mutable_buffer(buf_.data(), buf_.size()));
-    auto strip_seq = StripSequence(0, new_seq);
+    auto strip_seq = StripSequence(0, &new_seq);
 
     size_t read = sock_.read_some(new_seq, ec);
 
@@ -55,7 +55,7 @@ template<typename Stream> class BufferedReadAdaptor {
         return error_code{};
       }
 
-      strip_seq = StripSequence(read, strip_seq);
+      strip_seq = StripSequence(read, &strip_seq);
       total_size -= read;
 
       read = sock_.async_read_some(strip_seq, fibers_ext::yield[ec]);
