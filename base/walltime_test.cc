@@ -367,7 +367,7 @@ static void BM_LoopMillionInts(benchmark::State& state) {
   constexpr int sz = 10000000;
 
   std::unique_ptr<uint32[]> data(new uint32[sz]);
-  int divisor = state.range_x();
+  int divisor = state.range(0);
   int iter_num = sz / divisor;
   std::unique_ptr<uint32[]> cold_cache(new uint32[sz]);
   while (state.KeepRunning()) {

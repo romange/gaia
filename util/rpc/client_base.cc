@@ -103,10 +103,7 @@ void ClientBase::ReadFiber() {
       VLOG(1) << "Channel status " << ch_st << " Read available st: " << ec;
       continue;
     }
-
-    ec = channel_.ReadUnlocked([this](auto&) {
-      return ReadEnvelope();
-    });
+    ec = channel_.Apply(do_not_lock, [this] { return this->ReadEnvelope();});
   }
   FlushPendingCalls(ec);
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();

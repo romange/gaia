@@ -8,10 +8,15 @@
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
 
+#include "base/type_traits.h"
 #include "util/asio/io_context.h"
 #include "util/asio/yield.h"
 
 namespace util {
+
+struct do_not_lock_t { explicit do_not_lock_t() = default; };
+
+constexpr do_not_lock_t do_not_lock{};
 
 namespace detail {
 using namespace boost;
@@ -28,13 +33,6 @@ class ClientChannelImpl {
   template <typename T>
   using is_mbuf_t = typename std::enable_if<is_mutable_buffer_sequence<T>::value>::type;
 
-  template <typename Func>
-  using func_return_t = decltype(std::declval<Func>()(std::declval<tcp::socket&>()));
-
-  template <typename T>
-  using check_ec_t =
-      typename std::enable_if<std::is_same<system::error_code, T>::value, system::error_code>::type;
-
   using mutex = boost::fibers::mutex;
 
  public:
@@ -42,11 +40,21 @@ class ClientChannelImpl {
       decltype(resolver_.async_resolve(tcp::v4(), {}, {}, fibers_ext::yield_t{}));
 
   template <typename Func>
-  using socket_callable_t = check_ec_t<func_return_t<Func>>;
+  using socket_callable_t =
+      std::enable_if_t<base::is_invocable_r<system::error_code, Func, tcp::socket&>::value,
+                       system::error_code>;
+
+  template <typename Func>
+  using ec_returnable_t =
+      std::enable_if_t<base::is_invocable_r<system::error_code, Func>::value, system::error_code>;
+
 
   ClientChannelImpl(IoContext& cntx, const std::string& hname, const std::string& s)
-      : resolver_(cntx.get_context()), hostname_(hname), service_(s),
-        sock_(cntx.get_context(), tcp::v4()), handle_(sock_.native_handle()) {
+      : resolver_(cntx.get_context()),
+        hostname_(hname),
+        service_(s),
+        sock_(cntx.get_context(), tcp::v4()),
+        handle_(sock_.native_handle()) {
   }
 
   ~ClientChannelImpl();
@@ -90,7 +98,8 @@ class ClientChannelImpl {
   }
 
   // 'f' must be callable on 'socket&'. Returns error_code, the function is guaranteed to call 'f'.
-  template <typename Func> socket_callable_t<Func> Write(Func&& f) {
+  template <typename Func>
+  socket_callable_t<Func> Write(Func&& f) {
     std::lock_guard<mutex> guard(wmu_);
     status_ = f(sock_);
     if (status_)
@@ -101,6 +110,12 @@ class ClientChannelImpl {
   template <typename BufferSequence>
   system::error_code Read(const BufferSequence& seq, is_mbuf_t<BufferSequence>* = 0) {
     std::lock_guard<mutex> guard(rmu_);
+    return Read(do_not_lock, seq);
+  }
+
+  template <typename BufferSequence>
+  system::error_code Read(do_not_lock_t, const BufferSequence& seq,
+                          is_mbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
 
@@ -110,17 +125,15 @@ class ClientChannelImpl {
     return status_;
   }
 
-  // The function is guaranteed to call 'f'.
-  template <typename Func> socket_callable_t<Func> Read(Func&& f) {
-    std::lock_guard<mutex> guard(rmu_);
+  template <typename Func> socket_callable_t<Func> Apply(Func&& f) {
     status_ = f(sock_);
     if (status_)
       HandleErrorStatus();
     return status_;
   }
 
-  template <typename Func> socket_callable_t<Func> ReadUnlocked(Func&& f) {
-    status_ = f(sock_);
+  template <typename Func> ec_returnable_t<Func> Apply(Func&& f) {
+    status_ = f();
     if (status_)
       HandleErrorStatus();
     return status_;
@@ -130,7 +143,9 @@ class ClientChannelImpl {
     return sock_.get_io_context();
   }
 
-  tcp::socket& socket() { return sock_; }
+  tcp::socket& socket() {
+    return sock_;
+  }
 
  private:
   using time_point = std::chrono::steady_clock::time_point;
@@ -170,11 +185,11 @@ class ClientChannel {
   using socket_t = detail::tcp::socket;
 
   // since we allow moveable semantics we should support default c'tor as well.
-  ClientChannel() {}
+  ClientChannel() {
+  }
 
   // "service" - port to which to connect.
-  ClientChannel(IoContext& cntx, const std::string& hostname,
-                const std::string& service)
+  ClientChannel(IoContext& cntx, const std::string& hostname, const std::string& service)
       : impl_(new detail::ClientChannelImpl(cntx, hostname, service)) {
   }
 
@@ -192,7 +207,8 @@ class ClientChannel {
   // impl_ might be null due to object move.
   // Blocks the calling fiber until impl_ is shut down.
   void Shutdown() {
-    if (impl_) impl_->Shutdown();
+    if (impl_)
+      impl_->Shutdown();
   }
 
   error_code WaitForReadAvailable() {
@@ -209,14 +225,15 @@ class ClientChannel {
     return impl_->Write(std::forward<Writeable>(wr));
   }
 
-  template <typename Readable>
-  error_code Read(Readable&& rd) {
-    return impl_->Read(std::forward<Readable>(rd));
+
+  template <typename BufferSequence>
+  error_code Read(do_not_lock_t, const BufferSequence& bs) {
+    return impl_->Read(do_not_lock, bs);
   }
 
-  template <typename Readable>
-  error_code ReadUnlocked(Readable&& rd) {
-    return impl_->ReadUnlocked(std::forward<Readable>(rd));
+  template <typename Func>
+  error_code Apply(do_not_lock_t, Func&& f) {
+    return impl_->Apply(std::forward<Func>(f));
   }
 
   error_code status() const {
@@ -231,7 +248,10 @@ class ClientChannel {
     return impl_->get_io_context();
   }
 
-  socket_t& socket() { return impl_->socket(); }
+  socket_t& socket() {
+    return impl_->socket();
+  }
+
  private:
   // Factor out most fields into Impl struct to allow moveable semantics for the channel.
   std::unique_ptr<detail::ClientChannelImpl> impl_;

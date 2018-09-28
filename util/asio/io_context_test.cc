@@ -54,8 +54,8 @@ static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);   // no locking
 
   ip::tcp::endpoint endpoint(ip::tcp::v4(), 0);
-  std::vector<std::unique_ptr<ip::tcp::acceptor>> acc_arr(state.range_x());
-  std::vector<std::unique_ptr<steady_timer>> timer_arr(state.range_x());
+  std::vector<std::unique_ptr<ip::tcp::acceptor>> acc_arr(state.range(0));
+  std::vector<std::unique_ptr<steady_timer>> timer_arr(state.range(0));
   for (auto& a : acc_arr) {
     a.reset(new ip::tcp::acceptor(cntx, endpoint));
     a->async_accept([](auto ec, boost::asio::ip::tcp::socket s) {});

@@ -77,8 +77,8 @@ TEST_F(CxxTest, SequenceOrder) {
 }
 
 static void BM_LoopSwitch(benchmark::State& state) {
-  int val = state.range_x();
-  int cnt = state.range_y();
+  int val = state.range(0);
+  int cnt = state.range(1);
   unsigned sum = 0;
   while (state.KeepRunning()) {
     sum += LoopSwitch(val, cnt);
@@ -88,8 +88,8 @@ static void BM_LoopSwitch(benchmark::State& state) {
 BENCHMARK(BM_LoopSwitch)->ArgPair(1, 10000);
 
 static void BM_SwitchLoop(benchmark::State& state) {
-  int val = state.range_x();
-  int cnt = state.range_y();
+  int val = state.range(0);
+  int cnt = state.range(1);
   unsigned sum = 0;
   while (state.KeepRunning()) {
     sum += SwitchLoop(val, cnt);

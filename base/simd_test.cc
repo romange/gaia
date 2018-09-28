@@ -76,17 +76,17 @@ TEST(SimdTest, OverFlow) {
 using benchmark::DoNotOptimize;
 
 static void BM_Simd(benchmark::State& state) {
-  std::unique_ptr<uint8[]> buf(new uint8[state.range_x() + 20]);
+  std::unique_ptr<uint8[]> buf(new uint8[state.range(0) + 20]);
   while (state.KeepRunning()) {
-    CountVal8(buf.get() + 13, state.range_x(), 1);
+    CountVal8(buf.get() + 13, state.range(0), 1);
   }
 }
 BENCHMARK(BM_Simd)->Range(8, 1 << 16);
 
 static void BM_Plain(benchmark::State& state) {
-  std::unique_ptr<uint8[]> buf(new uint8[state.range_x() + 20]);
+  std::unique_ptr<uint8[]> buf(new uint8[state.range(0) + 20]);
   while (state.KeepRunning()) {
-    DoNotOptimize(std::count(buf.get() + 13, buf.get() + 13 + state.range_x(), 1));
+    DoNotOptimize(std::count(buf.get() + 13, buf.get() + 13 + state.range(0), 1));
   }
 }
 BENCHMARK(BM_Plain)->Range(8, 1 << 16);

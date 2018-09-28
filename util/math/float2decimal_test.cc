@@ -403,7 +403,7 @@ struct RandomDoubles {
 static void BM_LoopDouble(benchmark::State& state) {
   RandomDoubles rng;
 
-  uint64_t iters = state.range_x();
+  uint64_t iters = state.range(0);
   char str[32];
   std::unique_ptr<double[]> vals(new double[iters]);
   for (uint64_t i = 0; i < iters; ++i) {
