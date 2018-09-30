@@ -3,8 +3,8 @@
 //
 #include <dirent.h>
 
-#include "base/init.h"
 #include "base/gtest.h"
+#include "base/init.h"
 #include "base/logging.h"
 
 DEFINE_bool(bench, false, "Run benchmarks");
@@ -16,7 +16,7 @@ namespace base {
 static char test_path[1024] = {0};
 
 static constexpr char kProcSelf[] = "/proc/self/exe";
-static constexpr char kDeletedSuffix[] =  " (deleted)";
+static constexpr char kDeletedSuffix[] = " (deleted)";
 constexpr size_t kDeletedSuffixLen = sizeof(kDeletedSuffix) - 1;
 
 std::string GetTestTempDir() {
@@ -24,7 +24,7 @@ std::string GetTestTempDir() {
     strcpy(test_path, "/tmp/XXXXXX");
     CHECK(mkdtemp(test_path)) << test_path;
     LOG(INFO) << "Creating test directory " << test_path;
-}
+  }
   return test_path;
 }
 
@@ -41,7 +41,8 @@ void DeleteRecursively(const char* name) {
   // Use opendir()!  Yay!
   // lstat = Don't follow symbolic links.
   struct stat stats;
-  if (lstat(name, &stats) != 0) return;
+  if (lstat(name, &stats) != 0)
+    return;
 
   if (S_ISREG(stats.st_mode)) {
     remove(name);
@@ -54,7 +55,8 @@ void DeleteRecursively(const char* name) {
   string tmp(name);
   while (true) {
     struct dirent* entry = readdir(dir);
-    if (entry == NULL) break;
+    if (entry == NULL)
+      break;
     string entry_name = entry->d_name;
     if (entry_name != "." && entry_name != "..") {
       string item = tmp + "/" + entry_name;
@@ -73,7 +75,7 @@ std::string RandStr(const unsigned len) {
 
   string s(len, '\0');
   for (unsigned i = 0; i < len; ++i) {
-      s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+    s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
   }
 
   s[len] = 0;
@@ -91,8 +93,7 @@ string ProgramRunfile(const string& relative_path) {
 
 }  // namespace base
 
-
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--bench") == 0) {
@@ -102,7 +103,9 @@ int main(int argc, char **argv) {
   }
 
   MainInitGuard guard(&argc, &argv);
+
   LOG(INFO) << "Starting tests in " << argv[0];
+
   int res = RUN_ALL_TESTS();
 
   if (FLAGS_bench) {

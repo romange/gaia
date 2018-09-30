@@ -1,6 +1,7 @@
 add_library(base arena.cc bits.cc crc32c.cc coder.cc hash.cc histogram.cc
             init.cc logging.cc simd.cc varint.cc walltime.cc pthread_utils.cc)
-cxx_link(base TRDP::glog TRDP::gflags TRDP::pmr TRDP::xxhash atomic rt)  # rt for timer_create etc.
+cxx_link(base TRDP::glog TRDP::gflags TRDP::pmr TRDP::xxhash atomic rt
+         absl_symbolize absl_failure_signal_handler)  # rt for timer_create etc.
 add_dependencies(base sparsehash_project)
 
 cxx_test(array_test base LABELS CI)
