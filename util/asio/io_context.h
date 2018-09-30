@@ -33,7 +33,7 @@ class IoContext {
   // Runs 'f' in Io Context thread and waits for it to finish,
   // therefore might block the current fiber.
   // If we run in context thread - runs 'f' directly.
-  // f should not block on IO because it might block the IO fiber directly. 
+  // f should not block on IO because it might block the IO fiber directly.
   template<typename Func> void PostSynchronous(Func&& f) {
     if (InContextThread()) {
       return f();
@@ -47,11 +47,10 @@ class IoContext {
     done.Wait();
   }
 
+  auto get_executor() { return context_ptr_->get_executor(); }
+
  private:
-
   void StartLoop();
-
-  ptr_t ptr() { return context_ptr_;}
 
   ptr_t context_ptr_;
   std::thread::id thread_id_;

@@ -46,7 +46,7 @@ void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
-    thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].ptr()));
+    thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
     thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() { ContextLoop(i); });
   }
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";

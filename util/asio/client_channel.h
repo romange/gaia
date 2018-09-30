@@ -14,7 +14,9 @@
 
 namespace util {
 
-struct do_not_lock_t { explicit do_not_lock_t() = default; };
+struct do_not_lock_t {
+  explicit do_not_lock_t() = default;
+};
 
 constexpr do_not_lock_t do_not_lock{};
 
@@ -49,9 +51,9 @@ class ClientChannelImpl {
   using ec_returnable_t =
       std::enable_if_t<base::is_invocable_r<system::error_code, Func>::value, system::error_code>;
 
-
   ClientChannelImpl(IoContext& cntx, const std::string& hname, const std::string& s)
-      : io_context_(cntx), resolver_(cntx.get_context()),
+      : io_context_(cntx),
+        resolver_(cntx.get_context()),
         hostname_(hname),
         service_(s),
         sock_(cntx.get_context(), tcp::v4()),
@@ -88,12 +90,6 @@ class ClientChannelImpl {
 
   template <typename BufferSequence>
   system::error_code Write(const BufferSequence& seq, is_cbuf_t<BufferSequence>* = 0) {
-    std::lock_guard<mutex> guard(wmu_);
-    return Write(do_not_lock, seq);
-  }
-
-  template <typename BufferSequence>
-  system::error_code Write(do_not_lock_t, const BufferSequence& seq, is_cbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
 
@@ -103,25 +99,8 @@ class ClientChannelImpl {
     return status_;
   }
 
-  // 'f' must be callable on 'socket&'. Returns error_code, the function is guaranteed to call 'f'.
-  template <typename Func>
-  socket_callable_t<Func> Write(Func&& f) {
-    std::lock_guard<mutex> guard(wmu_);
-    status_ = f(sock_);
-    if (status_)
-      HandleErrorStatus();
-    return status_;
-  }
-
   template <typename BufferSequence>
   system::error_code Read(const BufferSequence& seq, is_mbuf_t<BufferSequence>* = 0) {
-    std::lock_guard<mutex> guard(rmu_);
-    return Read(do_not_lock, seq);
-  }
-
-  template <typename BufferSequence>
-  system::error_code Read(do_not_lock_t, const BufferSequence& seq,
-                          is_mbuf_t<BufferSequence>* = 0) {
     if (status_)
       return status_;
 
@@ -131,14 +110,16 @@ class ClientChannelImpl {
     return status_;
   }
 
-  template <typename Func> socket_callable_t<Func> Apply(Func&& f) {
+  template <typename Func>
+  socket_callable_t<Func> Apply(Func&& f) {
     status_ = f(sock_);
     if (status_)
       HandleErrorStatus();
     return status_;
   }
 
-  template <typename Func> ec_returnable_t<Func> Apply(Func&& f) {
+  template <typename Func>
+  ec_returnable_t<Func> Apply(Func&& f) {
     status_ = f();
     if (status_)
       HandleErrorStatus();
@@ -175,7 +156,6 @@ class ClientChannelImpl {
   tcp::socket sock_;
   system::error_code status_ = asio::error::not_connected;
 
-  mutex wmu_, rmu_;
   mutex shd_mu_;
   bool shutting_down_{false}, reconnect_active_{false};
 
@@ -231,19 +211,13 @@ class ClientChannel {
     return impl_->Write(std::forward<Writeable>(wr));
   }
 
-  template <typename Writeable>
-  error_code Write(do_not_lock_t, Writeable&& wr) {
-    return impl_->Write(do_not_lock, std::forward<Writeable>(wr));
-  }
-
-
   template <typename BufferSequence>
-  error_code Read(do_not_lock_t, const BufferSequence& bs) {
-    return impl_->Read(do_not_lock, bs);
+  error_code Read(const BufferSequence& bs) {
+    return impl_->Read(bs);
   }
 
   template <typename Func>
-  error_code Apply(do_not_lock_t, Func&& f) {
+  error_code Apply(Func&& f) {
     return impl_->Apply(std::forward<Func>(f));
   }
 

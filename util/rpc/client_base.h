@@ -10,10 +10,13 @@
 #include "util/rpc/rpc_envelope.h"
 #include "absl/container/flat_hash_map.h"
 
-// Single-threaded, multi-fiber safe rpc client.
 namespace util {
 namespace rpc {
 
+// Fiber-safe rpc client.
+// Send(..) is also thread-safe and may be used from multiple threads differrent than
+// of IoContext containing the channel, however it might incur performance penalty.
+// Therefore to achieve maximal performance - it's advised to ClientBase only from IoContext thread.
 class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
@@ -32,10 +35,14 @@ class ClientBase {
   // Should be called once during the initialization phase before sending the requests.
   error_code Connect(uint32_t ms);
 
+  // Thread-safe function.
+  // Sends the envelope and returns the future to the response status code.
+  // Future is realized when response is received and serialized into the same envelope.
+  // Send() might block therefore it should not be called directly from IoContext loop (post).
   future_code_t Send(Envelope* envelope);
 
-  // Fully fiber-blocking call. Sends and waits until the response is back.
-  // The response pair is written into the same buffers.
+  // Fiber-blocking call. Sends and waits until the response is back.
+  // Similarly to Send, the response is written into the same envelope.
   error_code SendSync(Envelope* envelope) {
     return Send(envelope).get();
   }
@@ -69,22 +76,15 @@ class ClientBase {
     }
   };
 
-  struct SendItem {
-    RpcId rpc_id;
-    Envelope* envelope;
-    EcPromise promise;
+  typedef std::pair<RpcId, PendingCall> SendItem;
 
-
-    SendItem(RpcId i, Envelope* e, EcPromise pr) : rpc_id(i), envelope(e),
-      promise(std::move(pr)) {}
-  };
-
-  folly::RWSpinLock buf_lock_;
   typedef absl::flat_hash_map<RpcId, PendingCall> PendingMap;
   PendingMap pending_calls_;
   std::atomic_ulong pending_calls_size_{0};
 
-  std::vector<SendItem> outgoing_buf_;
+  folly::RWSpinLock buf_lock_;
+  std::vector<SendItem> outgoing_buf_;  // protected by buf_lock_.
+  std::atomic_ulong outgoing_buf_size_{0};
 
   boost::fibers::fiber read_fiber_, flush_fiber_;
   boost::fibers::mutex send_mu_;

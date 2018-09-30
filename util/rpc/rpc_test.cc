@@ -43,7 +43,7 @@ TEST_F(RpcTest, BadHeader) {
   ec_ = channel_->Write(make_buffer_seq(control, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Read(do_not_lock, make_buffer_seq(control, message));
+  ec_ = channel_->Read(make_buffer_seq(control, message));
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
@@ -56,14 +56,14 @@ TEST_F(RpcTest, Basic) {
   ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Apply(do_not_lock, [this](auto& s) {
+  ec_ = channel_->Apply([this](auto& s) {
     return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_);
   EXPECT_EQ(frame_.header_size, header.size());
   EXPECT_EQ(frame_.letter_size, message.size());
 
-  ec_ = channel_->Read(do_not_lock, make_buffer_seq(header, message));
+  ec_ = channel_->Read(make_buffer_seq(header, message));
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
@@ -73,7 +73,7 @@ TEST_F(RpcTest, Socket) {
   ec_ = channel_->Write(make_buffer_seq(send_msg));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Apply(do_not_lock, [this] (tcp::socket& s) {
+  ec_ = channel_->Apply([this] (tcp::socket& s) {
     return frame_.Read(&s);
   });
   ASSERT_TRUE(ec_) << ec_.message();
@@ -86,7 +86,7 @@ TEST_F(RpcTest, Socket) {
     SleepForMilliseconds(10);
     ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), send_msg));
   }
-  ec_ = channel_->Apply(do_not_lock, [this] (tcp::socket& s) {
+  ec_ = channel_->Apply([this] (tcp::socket& s) {
     return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_) << ec_.message();
