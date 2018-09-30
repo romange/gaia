@@ -22,6 +22,7 @@ DEFINE_uint32(rpc_client_queue_size, 16,
 
 using namespace boost;
 using asio::ip::tcp;
+using folly::RWSpinLock;
 
 namespace {
 
@@ -52,8 +53,12 @@ auto ClientBase::Connect(uint32_t ms) -> error_code {
   CHECK(!read_fiber_.joinable());
   error_code ec = channel_.Connect(ms);
 
-  read_fiber_ = fibers::fiber(&ClientBase::ReadFiber, this);
-  flush_fiber_ = fibers::fiber(&ClientBase::FlushFiber, this);
+  IoContext& context = channel_.context();
+  context.PostSynchronous([this] {
+    read_fiber_ = fibers::fiber(&ClientBase::ReadFiber, this);
+    flush_fiber_ = fibers::fiber(&ClientBase::FlushFiber, this);
+  });
+
   return ec;
 }
 
@@ -66,13 +71,13 @@ auto ClientBase::PresendChecks() -> error_code {
     return channel_.status();
   }
 
-  if (pending_calls_.size() >= FLAGS_rpc_client_pending_limit) {
+  if (pending_calls_size_.load(std::memory_order_relaxed) >= FLAGS_rpc_client_pending_limit) {
     return asio::error::no_buffer_space;
   }
 
   error_code ec;
 
-  if (outgoing_buf_.size() > FLAGS_rpc_client_queue_size) {
+  if (outgoing_buf_.size() >= FLAGS_rpc_client_queue_size) {
     ec = FlushSends();
   }
   return ec;
@@ -91,11 +96,25 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
     return res;
   }
 
-  RpcId id = rpc_id_++;
-  auto emplace_res = pending_calls_.emplace(id, PendingCall{std::move(p), envelope});
-  CHECK(emplace_res.second);
+  // We protect for Send thread vs IoContext thread access.
+  // Fibers inside IoContext thread do not have to protect against each other since
+  // they do not cause data races. So we use lock_shared as "no-op" lock that only becomes
+  // relevant if someone else locked exclusively.
+  bool lock_exclusive = !channel_.context().InContextThread();
 
-  outgoing_buf_.emplace_back(id, envelope);
+  if (lock_exclusive)
+    buf_lock_.lock();
+  else
+    buf_lock_.lock_shared();
+
+  RpcId id = rpc_id_++;
+
+  outgoing_buf_.emplace_back(id, envelope, std::move(p));
+
+  if (lock_exclusive)
+    buf_lock_.unlock();
+  else
+    buf_lock_.unlock_shared();
 
   return res;
 }
@@ -147,7 +166,10 @@ auto ClientBase::FlushSends() -> error_code {
   std::lock_guard<fibers::mutex> guard(send_mu_);
 
   error_code ec;
-  while (outgoing_buf_.size() > FLAGS_rpc_client_queue_size) {
+
+  // We use `while` because multiple fibers might fill outgoing_buf_
+  // and when the current fiber resumes, the buffer might be full again.
+  while (outgoing_buf_.size() >= FLAGS_rpc_client_queue_size) {
     ec = FlushSendsGuarded();
   }
   return ec;  // Return the last known status code.
@@ -155,24 +177,44 @@ auto ClientBase::FlushSends() -> error_code {
 
 auto ClientBase::FlushSendsGuarded() -> error_code {
   error_code ec;
+  // This function runs only in IOContext thread. Therefore only
   if (outgoing_buf_.empty())
     return ec;
 
-  if ((ec = channel_.status())) {
-    return CancelSentBufferGuarded(ec);
+  ec = channel_.status();
+  if (ec) {
+    CancelSentBufferGuarded(ec);
+    return ec;
   }
 
-  size_t count = outgoing_buf_.size();
-  write_seq_.resize(count * 3);
+  // The following section is CPU-only - No IO blocks.
+  {
+    RWSpinLock::ReadHolder holder(buf_lock_);  // protect outgoing_buf_ against Send path
 
-  for (size_t i = 0; i < count; ++i) {
-    auto& item = outgoing_buf_[i];
-    Frame f(item.rpc_id, item.envelope->header.size(), item.envelope->letter.size());
-    size_t sz = f.Write(item.frame_buf);
+    size_t count = outgoing_buf_.size();
+    write_seq_.resize(count * 3);
+    frame_buf_.resize(count);
+    for (size_t i = 0; i < count; ++i) {
+      auto& item = outgoing_buf_[i];
+      Frame f(item.rpc_id, item.envelope->header.size(), item.envelope->letter.size());
+      size_t sz = f.Write(frame_buf_[i].data());
 
-    write_seq_[3 * i] = asio::buffer(item.frame_buf, sz);
-    write_seq_[3 * i + 1] = asio::buffer(item.envelope->header);
-    write_seq_[3 * i + 2] = asio::buffer(item.envelope->letter);
+      write_seq_[3 * i] = asio::buffer(frame_buf_[i].data(), sz);
+      write_seq_[3 * i + 1] = asio::buffer(item.envelope->header);
+      write_seq_[3 * i + 2] = asio::buffer(item.envelope->letter);
+    }
+
+    // Fill the pending call before the socket.Write() because otherwise in case it blocks
+    // *after* it sends, the current fiber might resume after Read fiber receives results
+    // and it would not find them inside pending_calls_.
+    pending_calls_size_.fetch_add(count, std::memory_order_relaxed);
+    for (size_t i = 0; i < count; ++i) {
+      auto& item = outgoing_buf_[i];
+      auto emplace_res =
+          pending_calls_.emplace(item.rpc_id, PendingCall{std::move(item.promise), item.envelope});
+      CHECK(emplace_res.second);
+    }
+    outgoing_buf_.clear();
   }
 
   // Interrupt point during which outgoing_buf_ could grow.
@@ -180,25 +222,25 @@ auto ClientBase::FlushSendsGuarded() -> error_code {
   // guarded by send_mu_.
   ec = channel_.Write(do_not_lock, write_seq_);
   if (ec) {
-    return CancelSentBufferGuarded(ec);
+    // I do not know if we need to flush everything but I do for simplicity reasons.
+    CancelPendingCalls(ec);
+    return ec;
   }
 
-  outgoing_buf_.erase(outgoing_buf_.begin(), outgoing_buf_.begin() + count);
   return ec;
 }
 
-auto ClientBase::CancelSentBufferGuarded(error_code ec) -> error_code {
+void ClientBase::CancelSentBufferGuarded(error_code ec) {
   std::vector<SendItem> tmp;
-  tmp.swap(outgoing_buf_);
 
-  for (const auto& item : tmp) {
-    auto it = pending_calls_.find(item.rpc_id);
-    CHECK(it != pending_calls_.end());
-    auto promise = std::move(it->second.promise);
-    pending_calls_.erase(it);
+  buf_lock_.lock_shared();
+  tmp.swap(outgoing_buf_);
+  buf_lock_.unlock_shared();
+
+  for (auto& item : tmp) {
+    auto promise = std::move(item.promise);
     promise.set_value(ec);
   }
-  return ec;
 }
 
 auto ClientBase::ReadEnvelope() -> error_code {
@@ -211,21 +253,28 @@ auto ClientBase::ReadEnvelope() -> error_code {
 
   auto it = pending_calls_.find(f.rpc_id);
   if (it == pending_calls_.end()) {
-    LOG(WARNING) << "Unknown id " << f.rpc_id;
+    // It might happens if for some reason we flushed pending_calls_ but the envelope somehow
+    // reached us. We just consume it.
+
+    VLOG(1) << "Unknown id " << f.rpc_id;
     Envelope envelope(f.header_size, f.letter_size);
     auto rbuf_seq = envelope.buf_seq();
     ec = channel_.Apply(do_not_lock, [this, &rbuf_seq] { return br_.Read(rbuf_seq); });
     return ec;
   }
 
+  // -- NO interrupt section begin
   PendingCall& call = it->second;
   Envelope* env = call.envelope;
   env->Resize(f.header_size, f.letter_size);
   auto promise = std::move(call.promise);
 
   // We erase before reading from the socket/setting promise because pending_calls_ might change
-  // during IO and 'it' will be invalidated.
+  // when we resume after IO and 'it' will be invalidated.
   pending_calls_.erase(it);
+  pending_calls_size_.fetch_sub(1, std::memory_order_relaxed);
+  // -- NO interrupt section end
+
   ec = channel_.Apply(do_not_lock, [this, &call] { return br_.Read(call.envelope->buf_seq()); });
   promise.set_value(ec);
 
@@ -235,6 +284,7 @@ auto ClientBase::ReadEnvelope() -> error_code {
 void ClientBase::CancelPendingCalls(error_code ec) {
   PendingMap tmp;
   tmp.swap(pending_calls_);
+  pending_calls_size_.store(0, std::memory_order_relaxed);
 
   // promise might interrupt so we want to swap into local variable to allow stable iteration
   // over the map. In case pending_calls_ did not change we swap back to preserve already allocated
