@@ -73,10 +73,11 @@ void AcceptServer::RunInIOThread(Listener* listener) {
                 << handler->socket().native_handle();
 
         CHECK_NOTNULL(handler);
-        clist.push_back(*handler);
-        DCHECK(!clist.empty());
+        notifier.Add(*handler);
 
+        DCHECK(!clist.empty());
         DCHECK(handler->hook_.is_linked());
+
         handler->Run();
       }
     }
@@ -85,6 +86,7 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   }
 
   int port = listener->port;
+
   // We protect clist because we iterate over it and other threads could potentialy change it.
   // connections are dispersed across few threads so clist requires true thread synchronization.
   auto lock = notifier.Lock();

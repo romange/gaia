@@ -72,17 +72,24 @@ class ConnectionHandler {
     boost::fibers::condition_variable cnd_;
     boost::fibers::mutex mu_;
     ListType* list_;
+
+
    public:
     explicit Notifier(ListType* list) : list_(list) {}
 
     void Unlink(ConnectionHandler* me) noexcept;
 
-    std::unique_lock<boost::fibers::mutex> Lock() noexcept {
-      return std::unique_lock<boost::fibers::mutex>(mu_);
+    void Add(ConnectionHandler& item) {
+      auto guard = Lock();
+      list_->push_back(item);
     }
 
     void WaitTillEmpty(std::unique_lock<boost::fibers::mutex>& lock) noexcept {
       cnd_.wait(lock, [this] { return list_->empty(); });
+    }
+
+    std::unique_lock<boost::fibers::mutex> Lock() noexcept {
+      return std::unique_lock<boost::fibers::mutex>(mu_);
     }
   };
 

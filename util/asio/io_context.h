@@ -33,12 +33,17 @@ class IoContext {
   // Runs 'f' in Io Context thread and waits for it to finish,
   // therefore might block the current fiber.
   // If we run in context thread - runs 'f' directly.
+  // f should not block on IO because it might block the IO fiber directly. 
   template<typename Func> void PostSynchronous(Func&& f) {
     if (InContextThread()) {
       return f();
     }
     fibers_ext::Done done;
-    Post([f = std::forward<Func>(f), &done] { f(); done.Notify();});
+    Post([f = std::forward<Func>(f), &done] {
+      f();
+      done.Notify();
+    });
+
     done.Wait();
   }
 

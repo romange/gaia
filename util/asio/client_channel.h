@@ -25,6 +25,7 @@ using asio::is_mutable_buffer_sequence;
 using asio::ip::tcp;
 
 class ClientChannelImpl {
+  IoContext& io_context_;
   tcp::resolver resolver_;
 
   template <typename T>
@@ -50,7 +51,7 @@ class ClientChannelImpl {
 
 
   ClientChannelImpl(IoContext& cntx, const std::string& hname, const std::string& s)
-      : resolver_(cntx.get_context()),
+      : io_context_(cntx), resolver_(cntx.get_context()),
         hostname_(hname),
         service_(s),
         sock_(cntx.get_context(), tcp::v4()),
@@ -144,8 +145,8 @@ class ClientChannelImpl {
     return status_;
   }
 
-  asio::io_context& get_io_context() {
-    return sock_.get_io_context();
+  IoContext& context() {
+    return io_context_;
   }
 
   tcp::socket& socket() {
@@ -254,8 +255,8 @@ class ClientChannel {
     return impl_->handle();
   }
 
-  ::boost::asio::io_context& get_io_context() {
-    return impl_->get_io_context();
+  IoContext& context() {
+    return impl_->context();
   }
 
   socket_t& socket() {
