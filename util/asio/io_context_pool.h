@@ -15,7 +15,6 @@
 namespace util {
 
 
-
 /// A pool of io_context objects.
 class IoContextPool {
 public:

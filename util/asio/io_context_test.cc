@@ -7,6 +7,7 @@
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "base/walltime.h"
+#include "util/asio/io_context_pool.h"
 
 using namespace std::chrono;
 using namespace boost;
@@ -47,6 +48,27 @@ TEST_F(IoContextTest, Stop) {
   EXPECT_EQ(1, i);
   cntx.restart();
   EXPECT_EQ(1, cntx.poll_one());
+  EXPECT_EQ(2, i);
+}
+
+TEST_F(IoContextTest, FiberJoin) {
+  IoContextPool pool(1);
+  pool.Run();
+  IoContext& cntx = pool.GetNextContext();
+
+  int i = 0;
+  auto cb = [&] {
+    ++i;
+    EXPECT_TRUE(cntx.InContextThread());
+  };
+  cntx.PostSynchronous(cb);
+  EXPECT_EQ(1, i);
+
+  fibers::fiber fb;
+  EXPECT_FALSE(fb.joinable());
+  cntx.PostSynchronous([cb, &fb] { fb = fibers::fiber(cb); });
+  EXPECT_TRUE(fb.joinable());
+  fb.join();
   EXPECT_EQ(2, i);
 }
 
