@@ -16,6 +16,7 @@ class Envelope {
   BufferType header, letter;
 
   Envelope() = default;
+  Envelope(Envelope&&) = default;
 
   Envelope(size_t hsz, size_t lsz) {
     Resize(hsz, lsz);
@@ -32,6 +33,13 @@ class Envelope {
   }
 
   auto buf_seq() { return make_buffer_seq(header, letter); }
+
+  void Swap(Envelope* other) {
+    if (other != this) {
+      other->header.swap(header);
+      other->letter.swap(letter);
+    }
+  }
 };
 
 }  // namespace rpc

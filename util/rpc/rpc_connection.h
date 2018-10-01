@@ -14,19 +14,26 @@
 
 namespace util {
 
+// RPC-Server side part.
+
 class AcceptServer;
-class IoContextPool;
 
 namespace rpc {
 
+// ConnectionBridge is responsible to abstract higher level server-app logic and to provide
+// an interface that allows to map Envelope to ServiceInterface methods.
 class ConnectionBridge {
  public:
+  // Ownership over Envelope stays with the caller.
+  typedef std::function<void(Envelope*)> EnvelopeWriter;
+
   virtual ~ConnectionBridge() {}
 
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, Envelope* envelope) = 0;
+  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, Envelope* input,
+                                        EnvelopeWriter writer) = 0;
 };
 
 class ServiceInterface {
