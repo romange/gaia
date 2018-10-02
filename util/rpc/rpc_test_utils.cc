@@ -9,12 +9,14 @@
 namespace util {
 namespace rpc {
 
-Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope) {
+Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) {
   VLOG(1) << "Got " << rpc_id << ", hs=" << envelope->header.size() << ", ls="
           << envelope->letter.size();
   if (clear_) {
     envelope->Clear();
   }
+  writer(envelope);
+
   return Status::OK;
 }
 
