@@ -15,7 +15,7 @@ Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeW
   if (clear_) {
     envelope->Clear();
   }
-  writer(envelope);
+  writer(std::move(*envelope));
 
   return Status::OK;
 }

@@ -187,11 +187,11 @@ public:
     dealloc();
   }
 
-  PODArray(PODArray && other) : ParentClass(nullptr) {
+  PODArray(PODArray && other) noexcept : ParentClass(nullptr) {
     this->swap(other);
   }
 
-  PODArray & operator=(PODArray && other) {
+  PODArray & operator=(PODArray && other) noexcept {
     this->swap(other);
     return *this;
   }
