@@ -21,6 +21,7 @@ class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = boost::fibers::future<error_code>;
+  using MessageCallback = std::function<bool(Envelope&)>;
 
   ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
@@ -46,6 +47,13 @@ class ClientBase {
   error_code SendSync(Envelope* envelope) {
     return Send(envelope).get();
   }
+
+  // Sends a msg and wait to receive a stream of envelopes.
+  // For each envelope MessageCallback is called.
+  // MessageCallback returns is expected to tell if more items are expected in the stream,
+  // i.e. Envelope should encode stream-related information to allow MessageCallback to
+  // decide whether more envelopes should come.
+  error_code SendAndReadStream(Envelope* msg, MessageCallback cb);
 
   // Blocks the calling fiber until all the background processes finish.
   void Shutdown();
@@ -76,6 +84,11 @@ class ClientBase {
     }
   };
 
+  // The flow is as follows:
+  // Send fiber enques requests into outgoing_buf_. It's thread-safe, protected by spinlock.
+  // FlushSendsGuarded flushes outgoing queue into the socket. ReadFiber receives envelopes and
+  // triggers the receive flow: Stream Handler and finally realizes future signalling the end of
+  // rpc call.
   typedef std::pair<RpcId, PendingCall> SendItem;
 
   typedef absl::flat_hash_map<RpcId, PendingCall> PendingMap;
