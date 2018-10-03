@@ -16,7 +16,10 @@ class Envelope {
   BufferType header, letter;
 
   Envelope() = default;
-  Envelope(Envelope&&) = default;
+
+  Envelope(Envelope&& other) noexcept {
+    Swap(&other);
+  }
 
   Envelope(size_t hsz, size_t lsz) {
     Resize(hsz, lsz);
@@ -39,6 +42,11 @@ class Envelope {
       other->header.swap(header);
       other->letter.swap(letter);
     }
+  }
+
+  Envelope& operator=(Envelope&& other) noexcept {
+    Swap(&other);
+    return *this;
   }
 };
 

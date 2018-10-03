@@ -151,9 +151,9 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   DCHECK_NE(-1, socket_->native_handle());
 
   bool first_time = true;
-  auto writer = [&](Envelope* env) {
+  auto writer = [&](Envelope&& env) {
     if (first_time) {
-      item->envelope.Swap(env);
+      item->envelope = std::move(env);
       item->id = frame.rpc_id;
       outgoing_buf_.push_back(*item);
     } else {
@@ -198,6 +198,7 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   for (auto& item : tmp) {
     rpc_items_.Release(&item);
   }
+
   VLOG(1) << "Wrote " << count << " requests with " << write_sz << " bytes";
 }
 

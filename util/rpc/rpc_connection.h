@@ -25,7 +25,7 @@ namespace rpc {
 class ConnectionBridge {
  public:
   // Ownership over Envelope stays with the caller.
-  typedef std::function<void(Envelope*)> EnvelopeWriter;
+  typedef std::function<void(Envelope&&)> EnvelopeWriter;
 
   virtual ~ConnectionBridge() {}
 
