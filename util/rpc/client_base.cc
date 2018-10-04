@@ -102,24 +102,45 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
   // they do not cause data races. So we use lock_shared as "no-op" lock that only becomes
   // relevant if someone outside IoContext thread locks exclusively.
   // Also this lock allows multi-threaded access for Send operation.
-  bool lock_exclusive = !channel_.context().InContextThread();
-
-  if (lock_exclusive)
-    buf_lock_.lock();
-  else
-    buf_lock_.lock_shared();
-
+  bool lock_exclusive = OutgoingBufLock();
   RpcId id = rpc_id_++;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
   outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
 
-  if (lock_exclusive)
-    buf_lock_.unlock();
-  else
-    buf_lock_.unlock_shared();
+  OutgoingBufUnlock(lock_exclusive);
 
   return res;
+}
+
+auto ClientBase::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_code {
+  DCHECK(read_fiber_.joinable());
+
+  // ----
+  error_code ec = PresendChecks();
+  if (ec) {
+    return ec;
+  }
+
+  fibers::promise<error_code> p;
+  fibers::future<error_code> future = p.get_future();
+
+  // We protect against Send thread vs IoContext thread data races.
+  // Fibers inside IoContext thread do not have to protect against each other.
+  // Therefore use lock_shared as "no-op" lock that only becomes
+  // relevant if someone outside IoContext thread locks exclusively.
+  // Also this lock allows multi-threaded access for Send operation.
+  bool exclusive = OutgoingBufLock();
+
+  RpcId id = rpc_id_++;
+
+  outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), msg, std::move(cb)}));
+  outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
+
+  OutgoingBufUnlock(exclusive);
+  ec = future.get();
+
+  return ec;
 }
 
 void ClientBase::ReadFiber() {
@@ -230,7 +251,7 @@ auto ClientBase::FlushSendsGuarded() -> error_code {
   // guarded by send_mu_.
   ec = channel_.Write(write_seq_);
   if (ec) {
-    // I do not know if we need to flush everything but I do for simplicity reasons.
+    // I do not know if we need to flush everything but I prefer doing it to make it simpler.
     CancelPendingCalls(ec);
     return ec;
   }
@@ -266,8 +287,9 @@ auto ClientBase::ReadEnvelope() -> error_code {
 
     VLOG(1) << "Unknown id " << f.rpc_id;
     Envelope envelope(f.header_size, f.letter_size);
-    auto rbuf_seq = envelope.buf_seq();
-    ec = channel_.Apply([this, &rbuf_seq] { return br_.Read(rbuf_seq); });
+
+    // ReadEnvelope is called via Channel::Apply, so no need to call it here.
+    ec = br_.Read(envelope.buf_seq());
     return ec;
   }
 
@@ -275,18 +297,47 @@ auto ClientBase::ReadEnvelope() -> error_code {
   PendingCall& call = it->second;
   Envelope* env = call.envelope;
   env->Resize(f.header_size, f.letter_size);
-  auto promise = std::move(call.promise);
+  bool is_stream = static_cast<bool>(call.cb);
 
+  if (is_stream) {
+    VLOG(1) << "Processing stream";
+    ec = br_.Read(env->buf_seq());
+    if (!ec) {
+      HandleStreamResponse(f.rpc_id);
+    }
+
+    return ec;
+  }
+
+  fibers::promise<error_code> promise = std::move(call.promise);
   // We erase before reading from the socket/setting promise because pending_calls_ might change
   // when we resume after IO and 'it' will be invalidated.
   pending_calls_.erase(it);
   pending_calls_size_.fetch_sub(1, std::memory_order_relaxed);
   // -- NO interrupt section end
 
-  ec = channel_.Apply([this, &call] { return br_.Read(call.envelope->buf_seq()); });
+  ec = br_.Read(env->buf_seq());
   promise.set_value(ec);
 
   return ec;
+}
+
+void ClientBase::HandleStreamResponse(RpcId rpc_id) {
+  auto it = pending_calls_.find(rpc_id_);
+  if (it == pending_calls_.end()) {
+    return;  // Might happen if pending_calls_ was cancelled when we read the envelope.
+  }
+  PendingCall& call = it->second;
+  bool to_continue = call.cb(*call.envelope);
+  if (to_continue)
+    return;
+
+  // We finished processing the stream.
+  // Keep the promise on the stack and erase from pending_calls_ first because
+  // set_value might context switch and invalidate 'it'.
+  auto promise = std::move(call.promise);
+  pending_calls_.erase(it);
+  promise.set_value(error_code{});
 }
 
 void ClientBase::CancelPendingCalls(error_code ec) {

@@ -134,7 +134,6 @@ static void BM_ChannelConnection(benchmark::State& state) {
   while (state.KeepRunning()) {
     system::error_code ec = channel.Write(buf_seq);
     CHECK(!ec);
-    // ec = frame.Read(&socket);
     total_sz += buf_seq_sz;
 
     DCHECK(!ec);
