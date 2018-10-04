@@ -3,12 +3,12 @@
 //
 #pragma once
 
+#include "absl/container/flat_hash_map.h"
 #include "base/RWSpinLock.h"  //
 #include "util/asio/client_channel.h"
 #include "util/rpc/buffered_read_adaptor.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_envelope.h"
-#include "absl/container/flat_hash_map.h"
 
 namespace util {
 namespace rpc {
@@ -50,8 +50,8 @@ class ClientBase {
 
   // Sends a msg and wait to receive a stream of envelopes.
   // For each envelope MessageCallback is called.
-  // MessageCallback returns is expected to tell if more items are expected in the stream,
-  // i.e. Envelope should encode stream-related information to allow MessageCallback to
+  // MessageCallback should return True if more items are expected in the stream.
+  // i.e. Envelope should contain stream-related information to allow MessageCallback to
   // decide whether more envelopes should come.
   error_code SendAndReadStream(Envelope* msg, MessageCallback cb);
 
@@ -70,6 +70,27 @@ class ClientBase {
 
   void CancelSentBufferGuarded(error_code ec);
 
+  bool OutgoingBufLock() {
+    bool lock_exclusive = !channel_.context().InContextThread();
+
+    if (lock_exclusive)
+      buf_lock_.lock();
+    else
+      buf_lock_.lock_shared();
+
+    return lock_exclusive;
+  }
+
+  void OutgoingBufUnlock(bool exclusive) {
+    if (exclusive)
+      buf_lock_.unlock();
+    else
+      buf_lock_.unlock_shared();
+  }
+
+  void HandleStreamResponse(RpcId rpc_id);
+
+
   RpcId rpc_id_ = 1;
   ClientChannel channel_;
   BufferedReadAdaptor<ClientChannel::socket_t> br_;
@@ -78,9 +99,10 @@ class ClientBase {
   struct PendingCall {
     EcPromise promise;
     Envelope* envelope;
+    MessageCallback cb;
 
-    PendingCall(EcPromise p, Envelope* env)
-        : promise(std::move(p)), envelope(env) {
+    PendingCall(EcPromise p, Envelope* env, MessageCallback mcb = MessageCallback{})
+      : promise(std::move(p)), envelope(env), cb(std::move(mcb)) {
     }
   };
 
