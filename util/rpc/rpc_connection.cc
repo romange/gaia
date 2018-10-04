@@ -152,13 +152,12 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   bool first_time = true;
   auto writer = [&](Envelope&& env) {
-    if (first_time) {
-      item->envelope = std::move(env);
-      item->id = frame.rpc_id;
-      outgoing_buf_.push_back(*item);
-    } else {
-      LOG(FATAL) << "Not implemented";
-    }
+    RpcItem* next = first_time ? item : rpc_items_.Get();
+
+    next->envelope = std::move(env);
+    next->id = frame.rpc_id;
+    outgoing_buf_.push_back(*next);
+    first_time = false;
   };
 
   Status status = bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
