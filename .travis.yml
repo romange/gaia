@@ -6,7 +6,7 @@ os: linux
 cache:
   directories:
   - /opt/boost
-  - third_party
+  - build-dbg/third_party
 
 matrix:
   include:
