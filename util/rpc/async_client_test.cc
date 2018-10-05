@@ -4,6 +4,8 @@
 #include <chrono>
 #include <memory>
 
+#include "absl/strings/numbers.h"
+#include "absl/strings/strip.h"
 #include "base/logging.h"
 #include "base/walltime.h"
 
@@ -50,6 +52,33 @@ TEST_F(ServerTest, ServerStopped) {
   EXPECT_TRUE(fc.get());
   client.reset();
   GetCapturedStderr();
+}
+
+TEST_F(ServerTest, Stream) {
+  std::unique_ptr<ClientBase> client(new ClientBase(std::move(*channel_)));
+  client->Connect(20);
+
+  string header("repeat3");
+
+  Envelope envelope;
+  Copy(header, &envelope.header);
+
+  envelope.letter.resize_fill(42, 2);
+
+  int times = 0;
+  auto cb = [&](Envelope& env) {
+    ++times;
+    absl::string_view header(strings::charptr(env.header.data()), env.header.size());
+    LOG(INFO) << "Stream resp: " << header;
+    if (absl::ConsumePrefix(&header, "cont:")) {
+      uint32_t cont = 0;
+      CHECK(absl::SimpleAtoi(header, &cont));
+      return cont > 0;
+    }
+    return false;
+  };
+  ClientBase::error_code ec = client->SendAndReadStream(&envelope, cb);
+  EXPECT_FALSE(ec);
 }
 
 }  // namespace rpc

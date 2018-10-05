@@ -4,6 +4,7 @@
 #include <chrono>
 #include <memory>
 
+#include "absl/strings/str_cat.h"
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "base/walltime.h"
@@ -114,19 +115,21 @@ TEST_F(RpcTest, Repeat) {
   ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
   ASSERT_FALSE(ec_);
 
+
   for (unsigned i = 0; i < 3; ++i) {
     ec_ = channel_->Apply([&] (tcp::socket& s) {
-      auto ec = frame_.Read(&s);
-      if (ec) return ec;
-      EXPECT_EQ(0, frame_.header_size);
-      EXPECT_EQ(frame_.letter_size, message.size());
-
-      ec = channel_->Read(make_buffer_seq(message));
-      if (ec) return ec;
-      EXPECT_EQ(kPayload, message);
-      return ec;
+      return frame_.Read(&s);
     });
     EXPECT_FALSE(ec_);
+
+    header.resize(frame_.header_size);
+    ASSERT_EQ(frame_.letter_size, message.size());
+
+    ec_ = channel_->Read(make_buffer_seq(header, message));
+    ASSERT_FALSE(ec_);
+    string expected = absl::StrCat("cont:", i + 1 < 3);
+    EXPECT_EQ(expected, header);
+    EXPECT_EQ(kPayload, message);
   }
 }
 

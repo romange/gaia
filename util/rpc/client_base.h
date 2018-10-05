@@ -21,6 +21,8 @@ class ClientBase {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = boost::fibers::future<error_code>;
+
+  // Returns true if the Stream has not been finished.
   using MessageCallback = std::function<bool(Envelope&)>;
 
   ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
@@ -91,7 +93,7 @@ class ClientBase {
   void HandleStreamResponse(RpcId rpc_id);
 
 
-  RpcId rpc_id_ = 1;
+  RpcId next_send_rpc_id_ = 1;
   ClientChannel channel_;
   BufferedReadAdaptor<ClientChannel::socket_t> br_;
   typedef boost::fibers::promise<error_code> EcPromise;

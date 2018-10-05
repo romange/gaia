@@ -10,6 +10,11 @@ class ClientChannel;
 
 namespace rpc {
 
+template <typename Src, typename Dest> void Copy(const Src& src, Dest* dest) {
+  dest->resize(src.size());
+  std::copy(src.begin(), src.end(), dest->begin());
+}
+
 class TestBridge final : public ConnectionBridge {
   bool clear_;
  public:
