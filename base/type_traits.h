@@ -1,6 +1,7 @@
 #ifndef BEERI_BASE_TYPE_TRAITS_H_
 #define BEERI_BASE_TYPE_TRAITS_H_
 
+#include <functional>
 #include <type_traits>
 
 namespace base {
