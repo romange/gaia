@@ -3,6 +3,8 @@
 //
 #include "util/rpc/rpc_test_utils.h"
 #include "base/logging.h"
+#include "absl/strings/strip.h"
+#include "absl/strings/numbers.h"
 
 #include "util/asio/client_channel.h"
 
@@ -15,8 +17,21 @@ Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeW
   if (clear_) {
     envelope->Clear();
   }
-  writer(std::move(*envelope));
+  absl::string_view header(strings::charptr(envelope->header.data()), envelope->header.size());
 
+  if (absl::ConsumePrefix(&header, "repeat")) {
+    uint32_t repeat = 0;
+    CHECK(absl::SimpleAtoi(header, &repeat));
+    for (uint32_t i = 0; i < repeat; ++i) {
+      Envelope tmp;
+      tmp.letter.resize(envelope->letter.size());
+      std::copy(envelope->letter.begin(), envelope->letter.end(), tmp.letter.begin());
+
+      writer(std::move(tmp));
+    }
+  } else {
+    writer(std::move(*envelope));
+  }
   return Status::OK;
 }
 

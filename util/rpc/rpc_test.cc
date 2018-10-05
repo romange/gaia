@@ -102,6 +102,34 @@ TEST_F(RpcTest, SocketRead) {
   // LOG(INFO) << sz;
 }
 
+TEST_F(RpcTest, Repeat) {
+  tcp::socket& sock = channel_->socket();
+  ASSERT_TRUE(sock.non_blocking());
+
+  const char kPayload[] = "World!!!";
+  string header("repeat3"), message(kPayload);
+  frame_.header_size = header.size();
+  frame_.letter_size = message.size();
+
+  ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
+  ASSERT_FALSE(ec_);
+
+  for (unsigned i = 0; i < 3; ++i) {
+    ec_ = channel_->Apply([&] (tcp::socket& s) {
+      auto ec = frame_.Read(&s);
+      if (ec) return ec;
+      EXPECT_EQ(0, frame_.header_size);
+      EXPECT_EQ(frame_.letter_size, message.size());
+
+      ec = channel_->Read(make_buffer_seq(message));
+      if (ec) return ec;
+      EXPECT_EQ(kPayload, message);
+      return ec;
+    });
+    EXPECT_FALSE(ec_);
+  }
+}
+
 
 static void BM_ChannelConnection(benchmark::State& state) {
   IoContextPool pool(1);
