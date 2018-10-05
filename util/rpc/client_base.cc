@@ -23,16 +23,13 @@ DEFINE_uint32(rpc_client_queue_size, 128,
 using namespace boost;
 using asio::ip::tcp;
 using folly::RWSpinLock;
+namespace error = asio::error;
 
 namespace {
 
-template <typename R>
-fibers::future<std::decay_t<R>> make_ready(R&& r) {
-  fibers::promise<std::decay_t<R>> p;
-  fibers::future<std::decay_t<R>> res = p.get_future();
-  p.set_value(std::forward<R>(r));
-
-  return res;
+bool IsExpectedFinish(system::error_code ec) {
+  return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset ||
+         ec == error::not_connected;
 }
 
 }  // namespace
@@ -103,7 +100,7 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
   // relevant if someone outside IoContext thread locks exclusively.
   // Also this lock allows multi-threaded access for Send operation.
   bool lock_exclusive = OutgoingBufLock();
-  RpcId id = rpc_id_++;
+  RpcId id = next_send_rpc_id_++;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
   outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
@@ -132,7 +129,7 @@ auto ClientBase::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_c
   // Also this lock allows multi-threaded access for Send operation.
   bool exclusive = OutgoingBufLock();
 
-  RpcId id = rpc_id_++;
+  RpcId id = next_send_rpc_id_++;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), msg, std::move(cb)}));
   outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
@@ -151,7 +148,8 @@ void ClientBase::ReadFiber() {
   error_code ec = channel_.WaitForReadAvailable();
   while (!channel_.is_shut_down()) {
     if (ec) {
-      LOG(WARNING) << "Error reading envelope " << ec << " " << ec.message();
+      LOG_IF(WARNING, !IsExpectedFinish(ec))
+          << "Error reading envelope " << ec << " " << ec.message();
 
       CancelPendingCalls(ec);
       ec.clear();
@@ -323,7 +321,7 @@ auto ClientBase::ReadEnvelope() -> error_code {
 }
 
 void ClientBase::HandleStreamResponse(RpcId rpc_id) {
-  auto it = pending_calls_.find(rpc_id_);
+  auto it = pending_calls_.find(rpc_id);
   if (it == pending_calls_.end()) {
     return;  // Might happen if pending_calls_ was cancelled when we read the envelope.
   }
