@@ -135,18 +135,20 @@ class TimerEventInterface {
   void set_scheduled_at(Tick ts) {
     scheduled_at_ = ts;
   }
+
   // Move the event to another slot. (It's safe for either the current
   // or new slot to be NULL).
   inline void relink(TimerWheelSlot* slot);
 
   Tick scheduled_at_;
   // The slot this event is currently in (NULL if not currently scheduled).
-  TimerWheelSlot* slot_ = NULL;
+  TimerWheelSlot* slot_ = nullptr;
+
   // The events are linked together in the slot using an internal
   // doubly-linked list; this iterator does double duty as the
   // linked list node for this event.
-  TimerEventInterface* next_ = NULL;
-  TimerEventInterface* prev_ = NULL;
+  TimerEventInterface* next_ = nullptr;
+  TimerEventInterface* prev_ = nullptr;
 };
 
 // An event that takes the callback (of type CBType) to execute as
@@ -195,6 +197,7 @@ class TimerWheelSlot {
   const TimerEventInterface* events() const {
     return events_;
   }
+
   // Deque the first event from the slot, and return it.
   TimerEventInterface* pop_event() {
     auto event = events_;
@@ -246,7 +249,7 @@ class TimerWheel {
   // call to advance() returned false.
   //
   // advance() should not be called from an event callback.
-  inline bool advance(Tick delta, size_t max_execute = size_t(-1), int level = 0);
+  inline bool advance(Tick delta, size_t max_execute = size_t(-1));
 
   // Schedule the event to be executed delta ticks from the current time.
   // The delta must be non-0.
@@ -283,6 +286,7 @@ class TimerWheel {
   // This handles the actual work of executing event callbacks and
   // recursing to the outer wheels.
   inline bool process_current_slot(Tick now, size_t max_execute, unsigned level);
+  inline bool cascade(Tick scaled_now, size_t max_execute, unsigned level);
 
   // Total number of ticks reachable from the wheel:
   // (2^(WIDTH_BITS)) ^ NUM_LEVELS. For (7,5) its 2^35 ticks. If a tick is 1ms than it would take
@@ -351,32 +355,28 @@ void TimerEventInterface::cancel() {
   relink(NULL);
 }
 
-bool TimerWheel::advance(Tick delta, size_t max_events, int level) {
+bool TimerWheel::advance(Tick delta, size_t max_events) {
   if (ticks_pending_) {
-    if (level == 0) {
-      // Continue collecting a backlog of ticks to process if
-      // we're called with non-zero deltas.
-      ticks_pending_ += delta;
-    }
+    // Continue collecting a backlog of ticks to process if
+    // we're called with non-zero deltas.
+    ticks_pending_ += delta;
+
     // We only partially processed the last tick. Process the
     // current slot, rather incrementing like advance() normally
     // does.
-    Tick now = now_[level];
-    if (!process_current_slot(now, max_events, level)) {
+    Tick now = now_[0];
+    if (!process_current_slot(now, max_events, 0)) {
       // Outer layers are still not done, propagate that information
       // back up.
       return false;
     }
-    if (level == 0) {
-      // The core wheel has been fully processed. We can now close
-      // down the partial tick and pretend that we've just been
-      // called with a delta containing both the new and original
-      // amounts.
-      delta = (ticks_pending_ - 1);
-      ticks_pending_ = 0;
-    } else {
-      return true;
-    }
+    // The core wheel has been fully processed. We can now close
+    // down the partial tick and pretend that we've just been
+    // called with a delta containing both the new and original
+    // amounts.
+    delta = (ticks_pending_ - 1);
+    ticks_pending_ = 0;
+
   } else {
     // Zero deltas are only ok when in the middle of a partially
     // processed tick.
@@ -384,8 +384,8 @@ bool TimerWheel::advance(Tick delta, size_t max_events, int level) {
   }
 
   while (delta--) {
-    Tick now = ++now_[level];
-    if (!process_current_slot(now, max_events, level)) {
+    Tick now = ++now_[0];
+    if (!process_current_slot(now, max_events, 0)) {
       ticks_pending_ = (delta + 1);
       return false;
     }
@@ -393,17 +393,40 @@ bool TimerWheel::advance(Tick delta, size_t max_events, int level) {
   return true;
 }
 
+bool TimerWheel::cascade(Tick base, size_t max_events, unsigned level) {
+  assert(level > 0);
+  if (ticks_pending_) {
+    // Tick now = now_[level];
+    // assert(now == base);
+
+    // We only partially processed the last tick. Process the
+    // current slot, rather incrementing like advance() normally
+    // does.
+    return process_current_slot(base, max_events, level);
+  }
+
+  ++now_[level];
+  assert(now_[level] == base);
+
+  if (!process_current_slot(base, max_events, level)) {
+    ticks_pending_ = 1;
+    return false;
+  }
+
+  return true;
+}
+
 bool TimerWheel::process_current_slot(Tick now, size_t max_events, unsigned level) {
   size_t slot_index = now % NUM_SLOTS;
   auto slot = &slots_[level][slot_index];
   if (slot_index == 0 && level < MAX_LEVEL) {
-    if (!advance(1, max_events, level + 1)) {
+    if (!cascade(now >> WIDTH_BITS, max_events, level + 1)) {
       return false;
     }
   }
 
   while (slot->events()) {
-    auto event = slot->pop_event();
+    TimerEventInterface* event = slot->pop_event();
     if (level > 0) {
       assert((now_[0] % NUM_SLOTS) == 0);
       if (now_[0] >= event->scheduled_at()) {
@@ -419,7 +442,17 @@ bool TimerWheel::process_current_slot(Tick now, size_t max_events, unsigned leve
         // magnitude more expensive to execute a typical
         // callback, and promotions will naturally clump while
         // events triggering won't.
-        schedule(event, event->scheduled_at() - now_[0]);
+        assert(0 == now_[0] % (1 << (WIDTH_BITS * level)));
+
+        Tick delta = event->scheduled_at() - now_[0];
+        unsigned lvl = 0;
+        while (delta >= NUM_SLOTS) {
+          ++lvl;
+          delta >>= WIDTH_BITS;
+        }
+
+        TimerWheelSlot& slot = slots_[lvl][delta];
+        event->relink(&slot);
       }
     } else {
       event->execute();

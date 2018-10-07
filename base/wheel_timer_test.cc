@@ -247,7 +247,7 @@ TEST_F(TimerWheelTest, RescheduleFromTimer) {
 
     timers.schedule(&rescheduler, 1);
     timers.advance(257);
-    EXPECT_EQ(count, 0);
+    ASSERT_EQ(count, 0);
   }
   // But once we stop rescheduling the timer, it'll trigger as intended.
   timers.advance(2);
@@ -260,14 +260,14 @@ TEST_F(TimerWheelTest, Random) {
   int count = 0;
   TimerEvent<Callback> timer([&count]() { ++count; });
 
-  for (int i = 0; i < 1000; ++i) {
-    int len = rand() % 15;
+  for (int i = 0; i < 3000; ++i) {
+    int len = rand() % 19;
     int r = 1 + rand() % (1 << len);
 
     timers.schedule(&timer, r);
     if (r > 1)
       timers.advance(r - 1);
-    EXPECT_EQ(count, i);
+    ASSERT_EQ(count, i);
     timers.advance(1);
     EXPECT_EQ(count, i + 1);
   }
@@ -423,12 +423,12 @@ static void BM_WheelScheduleCancel(benchmark::State& state) {
 
   while (state.KeepRunning()) {
     for (int i = 0; i < iters; ++i) {
-      timers.schedule(cb_vec[i].get(), 256 + i);
+      timers.schedule(cb_vec[i].get(), iters + i);
     }
     for (int i = 0; i < iters; ++i) {
       cb_vec[i]->cancel();
     }
-    timers.advance(iters + 260);
+    timers.advance(2 * iters);
   }
 }
 BENCHMARK(BM_WheelScheduleCancel)->Range(64, 1024);
