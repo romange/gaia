@@ -191,10 +191,10 @@ TEST_F(TimerWheelTest, ScheduleInRange) {
   TimerEvent<Callback> timer([]() {});
 
   // No useful rounding possible.
-  timers.schedule_in_range(&timer, 281, 290);
-  EXPECT_EQ(timers.ticks_to_next_event(), 290);
+  timers.schedule_in_range(&timer, 221, 230);
+  EXPECT_EQ(timers.ticks_to_next_event(), 230);
 
-  constexpr unsigned kNumSlots = 256;
+  constexpr unsigned kNumSlots = 64;
 
   // Pick a time aligned at slot boundary if possible.
   timers.schedule_in_range(&timer, kNumSlots * 4 - 1, kNumSlots * 5 - 1);
@@ -284,15 +284,16 @@ TEST_F(TimerWheelTest, MaxExec) {
 
   // Schedule 3 timers to happen at the same time (on 2 different
   // wheels).
-  timers.schedule(&timer1a, 256);
-  timers.schedule(&timer1b, 256);
+  constexpr unsigned kNumSlots = 128;
+  timers.schedule(&timer1a, kNumSlots);
+  timers.schedule(&timer1b, kNumSlots);
   timers.advance(1);
-  timers.schedule(&timer0, 255);
-  timers.advance(254);
+  timers.schedule(&timer0, kNumSlots - 1);
+  timers.advance(kNumSlots - 2);
   EXPECT_EQ(count0, 0);
   EXPECT_EQ(count1, 0);
   EXPECT_EQ(timers.ticks_to_next_event(), 1);
-  EXPECT_EQ(timers.now(), 255);
+  EXPECT_EQ(timers.now(), kNumSlots - 1);
 
   // Then run them one by one.
   EXPECT_TRUE(!timers.advance(1, 1));
@@ -301,7 +302,7 @@ TEST_F(TimerWheelTest, MaxExec) {
   EXPECT_EQ(timers.ticks_to_next_event(), 0);
 
   // Note that time has already advanced.
-  EXPECT_EQ(timers.now(), 256);
+  EXPECT_EQ(timers.now(), kNumSlots);
   EXPECT_TRUE(!timers.advance(0, 1));
   EXPECT_EQ(count0, 0);
   EXPECT_EQ(count1, 2);
@@ -317,25 +318,28 @@ TEST_F(TimerWheelTest, MaxExec) {
   EXPECT_EQ(timers.ticks_to_next_event(100), 100);
 
   // Test scheduling while wheel is in the middle of partial tick handling.
-  timers.schedule(&timer1a, 256);
+  timers.schedule(&timer1a, kNumSlots);
   timers.advance(1);
-  timers.schedule(&timer0, 255);
-  timers.advance(254);
+  timers.schedule(&timer0, kNumSlots - 1);
+  timers.advance(kNumSlots - 2);
   EXPECT_TRUE(!timers.advance(1, 1));
+
   // Now in the middle of the tick.
-  std::vector<bool> done(false, 512);
-  std::vector<TimerEvent<Callback>*> events;
+  std::vector<bool> done(false, kNumSlots * 2);
+  typedef TimerEvent<Callback> Event;
+  std::vector<std::unique_ptr<Event>> events;
+
   // Schedule 512 timers, each setting the matching bit in "done".
   for (int i = 0; i < done.size(); ++i) {
-    auto event = new TimerEvent<Callback>([&done, i]() { done[i] = true; });
-    events.push_back(event);
+    auto event = new Event([&done, i]() { done[i] = true; });
+    events.emplace_back(event);
     timers.schedule(event, i + 1);
   }
 
   // Close the tick.
   EXPECT_TRUE(timers.advance(0, 100));
 
-  // Now check that all 512 timers were scheduled in the right location.
+  // Now check that all timers were scheduled in the right location.
   for (int i = 0; i < done.size(); ++i) {
     EXPECT_EQ(std::count(done.begin(), done.end(), true), i);
     EXPECT_TRUE(!done[i]);

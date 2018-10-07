@@ -88,8 +88,6 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <limits>
 #include <memory>
 
 
@@ -248,8 +246,7 @@ class TimerWheel {
   // call to advance() returned false.
   //
   // advance() should not be called from an event callback.
-  inline bool advance(Tick delta, size_t max_execute = std::numeric_limits<size_t>::max(),
-                      int level = 0);
+  inline bool advance(Tick delta, size_t max_execute = size_t(-1), int level = 0);
 
   // Schedule the event to be executed delta ticks from the current time.
   // The delta must be non-0.
@@ -277,7 +274,7 @@ class TimerWheel {
   //
   // Will return 0 if the wheel still has unprocessed events from the
   // previous call to advance().
-  inline Tick ticks_to_next_event(Tick max = std::numeric_limits<Tick>::max(), int level = 0) const;
+  inline Tick ticks_to_next_event(Tick max = Tick(-1), unsigned level = 0) const;
 
  private:
   TimerWheel(const TimerWheel& other) = delete;
@@ -285,10 +282,13 @@ class TimerWheel {
 
   // This handles the actual work of executing event callbacks and
   // recursing to the outer wheels.
-  inline bool process_current_slot(Tick now, size_t max_execute, int level);
+  inline bool process_current_slot(Tick now, size_t max_execute, unsigned level);
 
-  static constexpr unsigned WIDTH_BITS = 8;
-  static constexpr unsigned NUM_LEVELS = 6;
+  // Total number of ticks reachable from the wheel:
+  // (2^(WIDTH_BITS)) ^ NUM_LEVELS. For (7,5) its 2^35 ticks. If a tick is 1ms than it would take
+  // 159 hours to reach the last one.
+  static constexpr unsigned WIDTH_BITS = 7;
+  static constexpr unsigned NUM_LEVELS = 5;
   static constexpr unsigned MAX_LEVEL = NUM_LEVELS - 1;
   static constexpr unsigned NUM_SLOTS = 1 << WIDTH_BITS;
 
@@ -393,7 +393,7 @@ bool TimerWheel::advance(Tick delta, size_t max_events, int level) {
   return true;
 }
 
-bool TimerWheel::process_current_slot(Tick now, size_t max_events, int level) {
+bool TimerWheel::process_current_slot(Tick now, size_t max_events, unsigned level) {
   size_t slot_index = now % NUM_SLOTS;
   auto slot = &slots_[level][slot_index];
   if (slot_index == 0 && level < MAX_LEVEL) {
@@ -435,7 +435,7 @@ void TimerWheel::schedule(TimerEventInterface* event, Tick delta) {
   assert(delta > 0);
   event->set_scheduled_at(now_[0] + delta);
 
-  int level = 0;
+  unsigned level = 0;
   while (delta >= NUM_SLOTS) {
     delta = (delta + (now_[level] % NUM_SLOTS)) >> WIDTH_BITS;
     ++level;
@@ -472,7 +472,7 @@ void TimerWheel::schedule_in_range(TimerEventInterface* event, Tick start, Tick 
   schedule(event, delta);
 }
 
-Tick TimerWheel::ticks_to_next_event(Tick max, int level) const {
+Tick TimerWheel::ticks_to_next_event(Tick max, unsigned level) const {
   if (ticks_pending_) {
     return 0;
   }
@@ -481,7 +481,7 @@ Tick TimerWheel::ticks_to_next_event(Tick max, int level) const {
 
   // Smallest tick (relative to now) we've found.
   Tick min = max;
-  for (int i = 0; i < NUM_SLOTS; ++i) {
+  for (unsigned i = 0; i < NUM_SLOTS; ++i) {
     // Note: Unlike the uses of "now", slot index calculations really
     // need to use now_.
     auto slot_index = (now_[level] + 1 + i) % NUM_SLOTS;
