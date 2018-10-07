@@ -140,7 +140,7 @@ class TimerEventInterface {
   // or new slot to be NULL).
   inline void relink(TimerWheelSlot* slot);
 
-  Tick scheduled_at_;
+  Tick scheduled_at_ = 0;
   // The slot this event is currently in (NULL if not currently scheduled).
   TimerWheelSlot* slot_ = nullptr;
 
@@ -156,10 +156,10 @@ class TimerEventInterface {
 template <typename CBType>
 class TimerEvent : public TimerEventInterface {
  public:
-  explicit TimerEvent<CBType>(const CBType& callback) : callback_(callback) {
+  explicit TimerEvent(CBType&& callback) : callback_(std::forward<CBType>(callback)) {
   }
 
-  void execute() final {
+  void execute() override {
     callback_();
   }
 

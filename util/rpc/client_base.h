@@ -4,8 +4,13 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
+
 #include "base/RWSpinLock.h"  //
+#include "base/wheel_timer.h"
+
 #include "util/asio/client_channel.h"
+#include "util/asio/periodic_task.h"
+
 #include "util/rpc/buffered_read_adaptor.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_envelope.h"
@@ -42,12 +47,12 @@ class ClientBase {
   // Sends the envelope and returns the future to the response status code.
   // Future is realized when response is received and serialized into the same envelope.
   // Send() might block therefore it should not be called directly from IoContext loop (post).
-  future_code_t Send(Envelope* envelope);
+  future_code_t Send(uint32_t deadline_msec, Envelope* envelope);
 
   // Fiber-blocking call. Sends and waits until the response is back.
   // Similarly to Send, the response is written into the same envelope.
-  error_code SendSync(Envelope* envelope) {
-    return Send(envelope).get();
+  error_code SendSync(uint32_t deadline_msec, Envelope* envelope) {
+    return Send(deadline_msec, envelope).get();
   }
 
   // Sends a msg and wait to receive a stream of envelopes.
@@ -101,11 +106,14 @@ class ClientBase {
   struct PendingCall {
     EcPromise promise;
     Envelope* envelope;
-    MessageCallback cb;
+
+    MessageCallback cb;  // for Stream response.
 
     PendingCall(EcPromise p, Envelope* env, MessageCallback mcb = MessageCallback{})
       : promise(std::move(p)), envelope(env), cb(std::move(mcb)) {
     }
+
+    std::unique_ptr<base::TimerEventInterface> expiry;
   };
 
   // The flow is as follows:
@@ -127,6 +135,8 @@ class ClientBase {
   boost::fibers::mutex send_mu_;
   std::vector<boost::asio::const_buffer> write_seq_;
   base::PODArray<std::array<uint8_t, rpc::Frame::kMaxByteSize>> frame_buf_;
+  base::TimerWheel expire_timer_;
+  std::unique_ptr<PeriodicTask> expiry_task_;
 };
 
 }  // namespace rpc

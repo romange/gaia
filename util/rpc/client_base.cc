@@ -2,6 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include <boost/fiber/future.hpp>
+#include <chrono>
 
 #include "util/rpc/client_base.h"
 
@@ -21,6 +22,7 @@ DEFINE_uint32(rpc_client_queue_size, 128,
               "The size of the outgoing batch queue that contains envelopes waiting to send.");
 
 using namespace boost;
+using namespace std;
 using asio::ip::tcp;
 using folly::RWSpinLock;
 namespace error = asio::error;
@@ -30,6 +32,28 @@ namespace {
 bool IsExpectedFinish(system::error_code ec) {
   return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset ||
          ec == error::not_connected;
+}
+
+constexpr uint32_t kTickPrecision = 3;  // 3ms per timer tick.
+
+template<typename Func> class RpcEvent : public base::TimerEventInterface {
+ public:
+  explicit RpcEvent(Func&& callback) : callback_(std::forward<Func>(callback)) {
+ }
+
+ void execute() override {
+  callback_(id_);
+ }
+
+ void set_id(RpcId i) { id_ = i; }
+
+ private:
+  Func callback_;
+  RpcId id_;
+};
+
+template<typename Func> RpcEvent<Func>* CreateEvent(Func&& f) {
+  return new RpcEvent<Func>(std::forward<Func>(f));
 }
 
 }  // namespace
@@ -56,6 +80,9 @@ auto ClientBase::Connect(uint32_t ms) -> error_code {
     read_fiber_ = fibers::fiber(&ClientBase::ReadFiber, this);
     flush_fiber_ = fibers::fiber(&ClientBase::FlushFiber, this);
   });
+  expiry_task_.reset(new PeriodicTask(context, chrono::milliseconds(kTickPrecision)));
+
+  expiry_task_->Start([this] { this->expire_timer_.advance(1); });
 
   return ec;
 }
@@ -81,8 +108,9 @@ auto ClientBase::PresendChecks() -> error_code {
   return ec;
 }
 
-auto ClientBase::Send(Envelope* envelope) -> future_code_t {
+auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t {
   DCHECK(read_fiber_.joinable());
+  DCHECK_GT(deadline_msec, 0);
 
   // ----
   fibers::promise<error_code> p;
@@ -94,6 +122,18 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
     return res;
   }
 
+  auto cb = [this](RpcId id) mutable {
+    auto it = this->pending_calls_.find(id);
+    if (it == this->pending_calls_.end())
+      return;
+    EcPromise pr = std::move(it->second.promise);
+    this->pending_calls_.erase(it);
+    pr.set_value(asio::error::timed_out);
+  };
+
+  uint32_t ticks = (deadline_msec + kTickPrecision - 1) / kTickPrecision;
+  auto* event = CreateEvent(std::move(cb));
+
   // We protect against Send thread vs IoContext thread data races.
   // Fibers inside IoContext thread do not have to protect against each other since
   // they do not cause data races. So we use lock_shared as "no-op" lock that only becomes
@@ -102,7 +142,11 @@ auto ClientBase::Send(Envelope* envelope) -> future_code_t {
   bool lock_exclusive = OutgoingBufLock();
   RpcId id = next_send_rpc_id_++;
 
+  event->set_id(id);
+  expire_timer_.schedule(event, ticks);
+
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
+  outgoing_buf_.back().second.expiry.reset(event);
   outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
 
   OutgoingBufUnlock(lock_exclusive);

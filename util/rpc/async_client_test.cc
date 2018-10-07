@@ -30,7 +30,7 @@ TEST_F(ServerTest, SendOk) {
   Envelope envelope;
   envelope.header.resize_fill(14, 1);
   envelope.letter.resize_fill(42, 2);
-  ClientBase::future_code_t fc = client.Send(&envelope);
+  ClientBase::future_code_t fc = client.Send(20, &envelope);
   EXPECT_FALSE(fc.get());
 }
 
@@ -42,13 +42,13 @@ TEST_F(ServerTest, ServerStopped) {
   envelope.header.resize_fill(14, 1);
   envelope.letter.resize_fill(42, 2);
 
-  ClientBase::future_code_t fc = client->Send(&envelope);
+  ClientBase::future_code_t fc = client->Send(20, &envelope);
   EXPECT_FALSE(fc.get());
   CaptureStderr();
   server_->Stop();
   server_->Wait();
 
-  fc = client->Send(&envelope);
+  fc = client->Send(20, &envelope);
   EXPECT_TRUE(fc.get());
   client.reset();
   GetCapturedStderr();
