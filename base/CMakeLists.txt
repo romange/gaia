@@ -18,6 +18,7 @@ cxx_test(hash_test base file DATA testdata/ids.txt.gz LABELS CI)
 cxx_test(RWSpinLock_test base LABELS CI)
 cxx_test(event_count_test base LABELS CI)
 cxx_test(coder_test base LABELS CI)
+cxx_test(wheel_timer_test base LABELS CI)
 
 # Define default gtest_main for tests.
 add_library(gtest_main gtest_main.cc)
