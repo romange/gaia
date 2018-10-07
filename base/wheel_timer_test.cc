@@ -154,9 +154,9 @@ TEST_F(TimerWheelTest, TicksNextEvent) {
     // Test having a timer on the next wheel (still remaining from
     // the previous test), and another (earlier) timer on this
     // wheel.
-    for (int i = 1; i < 256; ++i) {
-      timers.schedule(&timer2, i);
-      EXPECT_EQ(timers.ticks_to_next_event(1000), i);
+    for (int j = 1; j < 256; ++j) {
+      timers.schedule(&timer2, j);
+      ASSERT_EQ(timers.ticks_to_next_event(1000), j);
     }
 
     timer.cancel();
@@ -229,7 +229,7 @@ TEST_F(TimerWheelTest, ScheduleInRange) {
     int r2 = r1 + (1 + rand() % (1 << len2));
     timers.schedule_in_range(&timer, r1, r2);
     EXPECT_TRUE(timers.ticks_to_next_event() >= r1);
-    EXPECT_TRUE(timers.ticks_to_next_event() <= r2);
+    ASSERT_LE(timers.ticks_to_next_event(), r2);
   }
 }
 
@@ -325,7 +325,7 @@ TEST_F(TimerWheelTest, MaxExec) {
   EXPECT_TRUE(!timers.advance(1, 1));
 
   // Now in the middle of the tick.
-  std::vector<bool> done(false, kNumSlots * 2);
+  std::vector<bool> done(kNumSlots * 2, false);
   typedef TimerEvent<Callback> Event;
   std::vector<std::unique_ptr<Event>> events;
 
