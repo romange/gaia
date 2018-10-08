@@ -56,7 +56,9 @@ TEST_F(ServerTest, ServerStopped) {
 
 TEST_F(ServerTest, Stream) {
   std::unique_ptr<ClientBase> client(new ClientBase(std::move(*channel_)));
-  client->Connect(20);
+  system::error_code ec = client->Connect(20);
+
+  ASSERT_FALSE(ec);
 
   string header("repeat3");
 
@@ -77,8 +79,27 @@ TEST_F(ServerTest, Stream) {
     }
     return false;
   };
-  ClientBase::error_code ec = client->SendAndReadStream(&envelope, cb);
+  ec = client->SendAndReadStream(&envelope, cb);
   EXPECT_FALSE(ec);
+}
+
+TEST_F(ServerTest, Sleep) {
+  std::unique_ptr<ClientBase> client(new ClientBase(std::move(*channel_)));
+  system::error_code ec = client->Connect(20);
+  ASSERT_FALSE(ec);
+
+  string header("sleep20");
+
+  Envelope envelope;
+  Copy(header, &envelope.header);
+  envelope.letter.resize_fill(42, 2);
+
+  ec = client->SendSync(1, &envelope);
+  ASSERT_EQ(asio::error::timed_out, ec) << ec.message();   // expect timeout.
+
+  envelope.header.clear();
+  ec = client->SendSync(20, &envelope);
+  ASSERT_FALSE(ec) << ec.message();   // expect normal execution.
 }
 
 }  // namespace rpc

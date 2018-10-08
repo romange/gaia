@@ -3,6 +3,8 @@
 //
 #include "util/rpc/rpc_test_utils.h"
 
+#include <boost/fiber/operations.hpp>
+
 #include "absl/strings/numbers.h"
 #include "absl/strings/strip.h"
 #include "base/logging.h"
@@ -10,6 +12,8 @@
 #include "util/asio/client_channel.h"
 
 using namespace std;
+using namespace boost;
+using namespace chrono;
 
 namespace util {
 namespace rpc {
@@ -30,11 +34,18 @@ Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeW
       Copy(envelope->letter, &tmp.letter);
       string h = string("cont:") + to_string(i + 1 < repeat);
       Copy(h, &tmp.header);
-      writer(move(tmp));
+      writer(std::move(tmp));
     }
-  } else {
-    writer(std::move(*envelope));
+    return Status::OK;
   }
+
+  if (absl::ConsumePrefix(&header, "sleep")) {
+    uint32_t msec = 0;
+    CHECK(absl::SimpleAtoi(header, &msec));
+    this_fiber::sleep_for(milliseconds(msec));
+  }
+
+  writer(std::move(*envelope));
   return Status::OK;
 }
 

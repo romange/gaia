@@ -82,7 +82,10 @@ auto ClientBase::Connect(uint32_t ms) -> error_code {
   });
   expiry_task_.reset(new PeriodicTask(context, chrono::milliseconds(kTickPrecision)));
 
-  expiry_task_->Start([this] { this->expire_timer_.advance(1); });
+  expiry_task_->Start([this] {
+    this->expire_timer_.advance(1);
+    DVLOG(2) << "Advancing expiry to " << this->expire_timer_.now();
+  });
 
   return ec;
 }
@@ -122,17 +125,21 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
     return res;
   }
 
-  auto cb = [this](RpcId id) mutable {
+  auto expire_cb = [this](RpcId id) mutable {
+    DVLOG(1) << "Expire " << id;
+
     auto it = this->pending_calls_.find(id);
     if (it == this->pending_calls_.end())
       return;
+
+    // The order is important to eliminate interrupts.
     EcPromise pr = std::move(it->second.promise);
     this->pending_calls_.erase(it);
     pr.set_value(asio::error::timed_out);
   };
 
   uint32_t ticks = (deadline_msec + kTickPrecision - 1) / kTickPrecision;
-  auto* event = CreateEvent(std::move(cb));
+  auto* event = CreateEvent(std::move(expire_cb));
 
   // We protect against Send thread vs IoContext thread data races.
   // Fibers inside IoContext thread do not have to protect against each other since
@@ -143,7 +150,8 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
   RpcId id = next_send_rpc_id_++;
 
   event->set_id(id);
-  expire_timer_.schedule(event, ticks);
+  base::Tick at = expire_timer_.schedule(event, ticks);
+  DVLOG(2) << "Scheduled expiry at " << at;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
   outgoing_buf_.back().second.expiry.reset(event);
@@ -324,10 +332,10 @@ auto ClientBase::ReadEnvelope() -> error_code {
 
   auto it = pending_calls_.find(f.rpc_id);
   if (it == pending_calls_.end()) {
-    // It might happens if for some reason we flushed pending_calls_ but the envelope somehow
-    // reached us. We just consume it.
-
+    // It might happens if for some reason we flushed pending_calls_ or the rpc has expired and
+    //  the envelope reached us afterwards. We just consume it.
     VLOG(1) << "Unknown id " << f.rpc_id;
+
     Envelope envelope(f.header_size, f.letter_size);
 
     // ReadEnvelope is called via Channel::Apply, so no need to call it here.

@@ -250,7 +250,7 @@ class TimerWheel {
 
   // Schedule the event to be executed delta ticks from the current time.
   // The delta must be non-0.
-  inline void schedule(TimerEventInterface* event, Tick delta);
+  inline Tick schedule(TimerEventInterface* event, Tick delta);
 
   // Schedule the event to happen at some time between start and end
   // ticks from the current time. The actual time will be determined
@@ -450,9 +450,10 @@ bool TimerWheel::process_current_slot(Tick now, size_t max_events, unsigned leve
   return true;
 }
 
-void TimerWheel::schedule(TimerEventInterface* event, Tick delta) {
+Tick TimerWheel::schedule(TimerEventInterface* event, Tick delta) {
   assert(delta > 0);
-  event->set_scheduled_at(now_ + delta);
+  Tick at = now_ + delta;
+  event->set_scheduled_at(at);
 
   unsigned level = 0;
   Tick base = now_;
@@ -465,6 +466,8 @@ void TimerWheel::schedule(TimerEventInterface* event, Tick delta) {
   size_t slot_index = (base + delta) % NUM_SLOTS;
   auto slot = &slots_[level][slot_index];
   event->relink(slot);
+
+  return at;
 }
 
 void TimerWheel::schedule_in_range(TimerEventInterface* event, Tick start, Tick end) {
