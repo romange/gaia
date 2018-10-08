@@ -61,10 +61,10 @@ template<typename Func> RpcEvent<Func>* CreateEvent(Func&& f) {
 ClientBase::~ClientBase() {
   Shutdown();
 
-  VLOG(1) << "Before ReadFiberJoin";
   CHECK(read_fiber_.joinable());
   read_fiber_.join();
   flush_fiber_.join();
+  VLOG(1) << "After ReadFiberJoin";
 }
 
 void ClientBase::Shutdown() {
@@ -112,7 +112,7 @@ auto ClientBase::PresendChecks() -> error_code {
 }
 
 auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t {
-  DCHECK(read_fiber_.joinable());
+  DCHECK(read_fiber_.joinable()) << "Call ClientBase::Connect(), stupid.";
   DCHECK_GT(deadline_msec, 0);
 
   // ----

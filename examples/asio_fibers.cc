@@ -24,9 +24,10 @@ DEFINE_string(connect, "", "");
 DEFINE_int32(count, 10, "");
 DEFINE_int32(num_connections, 1, "");
 DEFINE_int32(io_threads, 0, "");
+DEFINE_uint32(deadline_msec, 10, "");
 
 using asio::ip::tcp;
-using rpc::EnvelopeClient;
+using rpc::ClientBase;
 using util::IoContextPool;
 using util::fibers_ext::yield;
 
@@ -37,10 +38,12 @@ class PingBridge final : public rpc::ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  Status HandleEnvelope(uint64_t rpc_id, base::PODArray<uint8_t>* header,
-                        base::PODArray<uint8_t>* letter) override {
+  Status HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input,
+                                        EnvelopeWriter writer) override {
     qps.Inc();
     VLOG(1) << "RpcId: " << rpc_id;
+    writer(std::move(*input));
+
     return Status::OK;
   }
 };
@@ -54,23 +57,27 @@ class PingInterface final : public rpc::ServiceInterface {
 
 std::atomic_ulong latency_ms(0);
 std::atomic_ulong latency_count(0);
+std::atomic_ulong timeouts(0);
 
-void Driver(EnvelopeClient* client, size_t index, unsigned msg_count) {
-  rpc::BufferType header, letter;
-  letter.resize(64);
+void Driver(ClientBase* client, size_t index, unsigned msg_count) {
+  rpc::Envelope envelope;
+  envelope.letter.resize(64);
 
   char msgbuf[64];
 
-  char* start = reinterpret_cast<char*>(letter.data());
+  char* start = reinterpret_cast<char*>(envelope.letter.data());
   auto tp = chrono::steady_clock::now();
   for (unsigned msg = 0; msg < msg_count; ++msg) {
-    char* next = StrAppend(start, letter.size(), index, ".", msg);
-    letter.resize(next - start);
+    char* next = StrAppend(start, envelope.letter.size(), index, ".", msg);
+    envelope.letter.resize(next - start);
 
     VLOG(1) << ": Sending: " << msgbuf;
 
-    EnvelopeClient::future_code_t fec = client->SendEnvelope(&header, &letter);
-    system::error_code ec = fec.get();
+    system::error_code ec = client->SendSync(FLAGS_deadline_msec, &envelope);
+    if (ec == asio::error::timed_out) {
+      timeouts.fetch_add(1, std::memory_order_relaxed);
+      continue;
+    }
 
     auto last = chrono::steady_clock::now();
     chrono::milliseconds ms = chrono::duration_cast<chrono::milliseconds>(last - tp);
@@ -91,41 +98,42 @@ void Driver(EnvelopeClient* client, size_t index, unsigned msg_count) {
 /*****************************************************************************
  *   fiber function per client
  *****************************************************************************/
-void RunClient(boost::asio::io_context& context, unsigned msg_count, util::fibers_ext::Done* done) {
+void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::Done* done) {
   LOG(INFO) << ": echo-client started";
+  {
+    std::unique_ptr<ClientBase> client(new ClientBase(context, FLAGS_connect, "9999"));
+    system::error_code ec = client->Connect(100);
+    CHECK(!ec) << ec.message();
 
-  ClientChannel channel(context, FLAGS_connect, "9999");
-  system::error_code ec = channel.Connect(1000);
-  CHECK(!ec) << ec;
+    std::vector<fibers::fiber> drivers(FLAGS_num_connections);
+    for (size_t i = 0; i < drivers.size(); ++i) {
+      drivers[i] = fibers::fiber(&Driver, client.get(), i, msg_count);
+    }
+    for (auto& f : drivers)
+      f.join();
 
-  std::unique_ptr<EnvelopeClient> client(new EnvelopeClient(std::move(channel)));
-  std::vector<fibers::fiber> drivers(FLAGS_num_connections);
-  for (size_t i = 0; i < drivers.size(); ++i) {
-    drivers[i] = fibers::fiber(&Driver, client.get(), i, msg_count);
+    client->Shutdown();
   }
-  for (auto& f : drivers)
-    f.join();
-
-  client->Shutdown();
-
   done->Notify();
   LOG(INFO) << ": echo-client stopped";
 }
+
 
 void client_pool(IoContextPool* pool) {
   vector<util::fibers_ext::Done> done_arr(pool->size());
   {
     for (unsigned i = 0; i < pool->size(); ++i) {
-      asio::io_context& cntx = pool->operator[](i);
-      cntx.post([&cntx, done = &done_arr[i]] {
+      util::IoContext& cntx = pool->at(i);
+      cntx.Post([&cntx, done = &done_arr[i]] {
         fibers::fiber(RunClient, std::ref(cntx), FLAGS_count, done).detach();
       });
     }
     for (auto& f : done_arr)
       f.Wait();
   }
-  LOG(INFO) << "Pool ended";
+  LOG(INFO) << "client_pool ended";
   cout << "Average latency is " << double(latency_ms.load()) / (latency_count + 1) << endl;
+  cout << "Timeouts " << timeouts.load() << endl;
 }
 
 int main(int argc, char** argv) {
@@ -136,23 +144,24 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Running with " << io_threads << " threads";
 
   IoContextPool pool(io_threads);
-  util::AcceptServer server(&pool);
-
   pool.Run();
 
   if (FLAGS_connect.empty()) {
+    std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
+
     uint16_t port =
-        server.AddListener(FLAGS_http_port, [] { return new util::http::HttpHandler(); });
+        server->AddListener(FLAGS_http_port, [] { return new http::HttpHandler(); });
     LOG(INFO) << "Started http server on port " << port;
 
     PingInterface pi;
 
-    pi.Listen(9999, &server);
+    pi.Listen(9999, server.get());
 
-    server.Run();
-    server.Wait();
+    server->Run();
+    server->Wait();
   } else {
     client_pool(&pool);
+    // server.reset();
   }
 
   pool.Stop();
