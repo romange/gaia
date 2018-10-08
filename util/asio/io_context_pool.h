@@ -41,6 +41,8 @@ public:
   IoContext& GetNextContext();
 
   IoContext& operator[](size_t i) { return context_arr_[i];}
+  IoContext& at(size_t i) { return context_arr_[i];}
+
   size_t size() const { return context_arr_.size(); }
 
   // func must accept IoContext&. It will run in a dedicated detached fiber.

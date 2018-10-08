@@ -72,6 +72,12 @@ TEST_F(IoContextTest, FiberJoin) {
   EXPECT_EQ(2, i);
 }
 
+TEST_F(IoContextTest, RunAndStop) {
+  IoContextPool pool(1);
+  pool.Run();
+  pool.Stop();
+}
+
 static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);   // no locking
 

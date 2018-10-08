@@ -49,6 +49,12 @@ void IoContextPool::Run() {
     thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
     thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() { ContextLoop(i); });
   }
+
+  // Wait for all the IO loops to start runnning.
+  for (auto& cntx : context_arr_) {
+    cntx.PostSynchronous([]{});
+  }
+
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
   state_ = RUN;
 }
