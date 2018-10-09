@@ -76,7 +76,8 @@ class ClientBase {
   error_code FlushSendsGuarded();
 
   void CancelSentBufferGuarded(error_code ec);
-
+  void ExpirePending(RpcId id);
+  
   bool OutgoingBufLock() {
     bool lock_exclusive = !channel_.context().InContextThread();
 

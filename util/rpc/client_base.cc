@@ -41,11 +41,11 @@ template<typename Func> class RpcEvent : public base::TimerEventInterface {
   explicit RpcEvent(Func&& callback) : callback_(std::forward<Func>(callback)) {
  }
 
- void execute() override {
-  callback_(id_);
- }
+  void execute() override {
+    callback_(id_);
+  }
 
- void set_id(RpcId i) { id_ = i; }
+  void set_id(RpcId i) { id_ = i; }
 
  private:
   Func callback_;
@@ -53,7 +53,8 @@ template<typename Func> class RpcEvent : public base::TimerEventInterface {
 };
 
 template<typename Func> RpcEvent<Func>* CreateEvent(Func&& f) {
-  return new RpcEvent<Func>(std::forward<Func>(f));
+  auto* res = new RpcEvent<Func>(std::forward<Func>(f));
+  return res;
 }
 
 }  // namespace
@@ -125,21 +126,8 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
     return res;
   }
 
-  auto expire_cb = [this](RpcId id) mutable {
-    DVLOG(1) << "Expire " << id;
-
-    auto it = this->pending_calls_.find(id);
-    if (it == this->pending_calls_.end())
-      return;
-
-    // The order is important to eliminate interrupts.
-    EcPromise pr = std::move(it->second.promise);
-    this->pending_calls_.erase(it);
-    pr.set_value(asio::error::timed_out);
-  };
-
   uint32_t ticks = (deadline_msec + kTickPrecision - 1) / kTickPrecision;
-  auto* event = CreateEvent(std::move(expire_cb));
+  auto* event = CreateEvent([this] (RpcId id) { ExpirePending(id); });
 
   // We protect against Send thread vs IoContext thread data races.
   // Fibers inside IoContext thread do not have to protect against each other since
@@ -307,6 +295,19 @@ auto ClientBase::FlushSendsGuarded() -> error_code {
   }
 
   return ec;
+}
+
+void ClientBase::ExpirePending(RpcId id) {
+  DVLOG(1) << "Expire " << id;
+
+  auto it = this->pending_calls_.find(id);
+  if (it == this->pending_calls_.end())
+    return;
+
+  // The order is important to eliminate interrupts.
+  EcPromise pr = std::move(it->second.promise);
+  this->pending_calls_.erase(it);
+  pr.set_value(asio::error::timed_out);
 }
 
 void ClientBase::CancelSentBufferGuarded(error_code ec) {
