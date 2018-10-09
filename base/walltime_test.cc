@@ -4,15 +4,15 @@
 #include "base/walltime.h"
 
 #include <sys/timerfd.h>
+#include <time.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
-#include <mutex>
 #include <csignal>
-#include <time.h>
 #include <functional>
+#include <mutex>
 #include <thread>
-#include <benchmark/benchmark.h>
 
 #include "base/flags.h"
 #include "base/gtest.h"
@@ -20,10 +20,11 @@
 
 DEFINE_int32(test_sleep_delay_sec, 1, "");
 
+using namespace std::chrono;
+
 namespace base {
 
-class WalltimeTest : public testing::Test {
-};
+class WalltimeTest : public testing::Test {};
 
 TEST_F(WalltimeTest, BasicTimer) {
   LOG(INFO) << "Resolution in ms: " << Timer::ResolutionUsec() / 1000;
@@ -36,22 +37,21 @@ TEST_F(WalltimeTest, BasicTimer) {
 
 class Dummy {
   char buf[1000];
-public:
-  void __attribute__ ((noinline)) f() noexcept {
+
+ public:
+  void __attribute__((noinline)) f() noexcept {
   }
 
-  static void  __attribute__ ((noinline)) CallMethod(void* cntx) {
+  static void __attribute__((noinline)) CallMethod(void* cntx) {
     Dummy* me = (Dummy*)cntx;
     me->f();
   }
 };
 
-
-void __attribute__ ((noinline)) MyFunction(void* foo, void* bar) {
+void __attribute__((noinline)) MyFunction(void* foo, void* bar) {
   (void)foo;
   (void)bar;
 }
-
 
 TEST_F(WalltimeTest, ClockRes) {
   timespec ts;
@@ -86,17 +86,17 @@ TEST_F(WalltimeTest, TimerMonotonic) {
   MicrosecondsInt64 start = GetMonotonicMicros();
   if (FLAGS_test_sleep_delay_sec >= 0) {
     // cpu free.
-    SleepForMilliseconds(FLAGS_test_sleep_delay_sec*kNumMillisPerSecond);
+    SleepForMilliseconds(FLAGS_test_sleep_delay_sec * kNumMillisPerSecond);
   } else {
     // cpu intensive.
-    while (GetMonotonicMicros() < start - FLAGS_test_sleep_delay_sec*kNumMicrosPerSecond);
+    while (GetMonotonicMicros() < start - FLAGS_test_sleep_delay_sec * kNumMicrosPerSecond)
+      ;
   }
 
   unsigned millis = GetMonotonicJiffies();
   MicrosecondsInt64 delta = (GetMonotonicMicros() - start) / 100;
-  ASSERT_LE(millis/10, delta + 1);
+  ASSERT_LE(millis / 10, delta + 1);
   ASSERT_LE(delta - millis, 1) << " " << millis;
-
 }
 
 TEST_F(WalltimeTest, TimerMonotonicNoInterrupt) {
@@ -120,10 +120,10 @@ TEST_F(WalltimeTest, ThreadTime) {
     MicrosecondsInt64 wall_start = GetMonotonicMicros();
     SleepForMilliseconds(100);
 
-    EXPECT_GT(GetMonotonicMicros(), wall_start + 99*kNumMicrosPerMilli);
+    EXPECT_GT(GetMonotonicMicros(), wall_start + 99 * kNumMicrosPerMilli);
 
     // EXPECT_LT(GetClockMicros<CLOCK_PROCESS_CPUTIME_ID>() - proc_start,10*kNumMicrosPerMilli);
-    EXPECT_LT(GetClockMicros<CLOCK_THREAD_CPUTIME_ID>() - thread_start, 1*kNumMicrosPerMilli);
+    EXPECT_LT(GetClockMicros<CLOCK_THREAD_CPUTIME_ID>() - thread_start, 1 * kNumMicrosPerMilli);
   });
 
   t1.join();
@@ -149,8 +149,9 @@ static void BM_GetTimeOfDay(benchmark::State& state) {
 }
 BENCHMARK(BM_GetTimeOfDay);
 
-template<clockid_t cid> void BM_ClockType(benchmark::State& state) {
-  timespec ts; \
+template <clockid_t cid>
+void BM_ClockType(benchmark::State& state) {
+  timespec ts;
   while (state.KeepRunning()) {
     DoNotOptimize(clock_gettime(cid, &ts));
   }
@@ -163,6 +164,13 @@ BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_PROCESS_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_THREAD_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME_ALARM);
+
+static void BM_ChronoSteady(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    DoNotOptimize(steady_clock::now());
+  }
+}
+BENCHMARK(BM_ChronoSteady);
 
 static void BM_TimerGetTime(benchmark::State& state) {
   struct sigevent sev;
@@ -194,7 +202,6 @@ static void BM_MonotonicMicrosFast(benchmark::State& state) {
 }
 BENCHMARK(BM_MonotonicMicrosFast)->ThreadRange(1, 8);
 
-
 static void BM_ReadLock(benchmark::State& state) {
   pthread_rwlock_t lock;
   CHECK_EQ(0, pthread_rwlock_init(&lock, nullptr));
@@ -225,7 +232,7 @@ static void BM_StlMutexGuardLock(benchmark::State& state) {
     std::lock_guard<std::mutex> g(m1);
   }
 }
-BENCHMARK(BM_StlMutexGuardLock)->ThreadRange(1,16);
+BENCHMARK(BM_StlMutexGuardLock)->ThreadRange(1, 16);
 
 static std::mutex m2;
 static void BM_StlMutexUniqueLock(benchmark::State& state) {
@@ -233,14 +240,13 @@ static void BM_StlMutexUniqueLock(benchmark::State& state) {
     std::unique_lock<std::mutex> g(m2);
   }
 }
-BENCHMARK(BM_StlMutexUniqueLock)->ThreadRange(1,16);
-
+BENCHMARK(BM_StlMutexUniqueLock)->ThreadRange(1, 16);
 
 static void BM_CallFuncPtr(benchmark::State& state) {
-  void (*func_ptr)(void*, void* ) = &MyFunction;
+  void (*func_ptr)(void*, void*) = &MyFunction;
 
   while (state.KeepRunning()) {
-     func_ptr(nullptr, nullptr);
+    func_ptr(nullptr, nullptr);
   }
 }
 BENCHMARK(BM_CallFuncPtr);
@@ -272,7 +278,6 @@ static void BM_CallFuncMembFunc(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_CallFuncMembFunc);
-
 
 static std::mutex m9;
 static std::condition_variable cv9;
@@ -320,7 +325,7 @@ static void BM_ReadTimerFd(benchmark::State& state) {
   int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
   uint64 missed;
   while (state.KeepRunning()) {
-    read(timer_fd, &missed, sizeof (missed));
+    read(timer_fd, &missed, sizeof(missed));
   }
   close(timer_fd);
 }
@@ -376,11 +381,10 @@ static void BM_LoopMillionInts(benchmark::State& state) {
     state.ResumeTiming();
 
     for (int i = 0; i < iter_num; ++i) {
-      data[i*divisor] = i;
+      data[i * divisor] = i;
     }
   }
 }
 BENCHMARK(BM_LoopMillionInts)->Arg(1)->Arg(2);
-
 
 }  // namespace base
