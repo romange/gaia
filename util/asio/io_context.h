@@ -10,6 +10,42 @@
 
 namespace util {
 
+class IoFiberProperties : public boost::fibers::fiber_properties {
+ public:
+  enum { MAX_NICE_LEVEL = 5};
+  constexpr static unsigned NUM_NICE_LEVELS = MAX_NICE_LEVEL + 1;
+
+  IoFiberProperties(::boost::fibers::context* ctx) : fiber_properties(ctx), nice_(3) {
+  }
+
+  unsigned nice_level() const {
+    return nice_;
+  }
+
+  // Call this method to alter nice, because we must notify
+  // nice_scheduler of any change.
+  // Currently supported levels are 0-MAX_NICE_LEVEL.
+  // 0 - has the highest responsiveness and MAX_NICE_LEVEL has the least.
+  void set_nice_level(unsigned p) {
+    // Of course, it's only worth reshuffling the queue and all if we're
+    // actually changing the nice.
+    if (p != nice_) {
+      nice_ = p;
+      notify();
+    }
+  }
+
+  void set_name(std::string nm) {
+    name_ = std::move(nm);
+  }
+
+  const std::string& name() const { return name_;}
+
+ private:
+  std::string name_;
+  unsigned nice_;
+};
+
 class IoContext {
   friend class IoContextPool;
  public:

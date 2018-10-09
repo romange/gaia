@@ -18,17 +18,12 @@ namespace util {
 
 namespace {
 
-// TODO: to add priorities.
-// See https://www.boost.org/doc/libs/1_68_0/libs/fiber/doc/html/fiber/custom.html#custom
-// We need it in order to prioritize client rpc read path, loop() fibers - higher
-// and connection acceptor fiber lower
-// than normal operations. For this we need 3 predefined priorities: HIGH,NORMAL, NICED.
-class AsioScheduler final : public fibers::algo::algorithm {
+class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
   std::shared_ptr<asio::io_context> io_svc_;
   asio::steady_timer suspend_timer_;
   //]
-  fibers::scheduler::ready_queue_type rqueue_;
+  fibers::scheduler::ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
   fibers::mutex mtx_;
   fibers::condition_variable cnd_;
   std::size_t counter_{0};
@@ -39,9 +34,14 @@ class AsioScheduler final : public fibers::algo::algorithm {
       : io_svc_(io_svc), suspend_timer_(*io_svc_) {
   }
 
-  void awakened(fibers::context* ctx) noexcept override {
-    DCHECK(!DCHECK_NOTNULL(ctx)->ready_is_linked());
-    ctx->ready_link(rqueue_); /*< fiber, enqueue on ready queue >*/
+  void awakened(fibers::context* ctx, IoFiberProperties& props) noexcept override {
+    DCHECK(!ctx->ready_is_linked());
+
+    unsigned nice = props.nice_level();
+    DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
+    auto& q = rqueue_arr_[nice];
+
+    ctx->ready_link(q); /*< fiber, enqueue on ready queue >*/
     if (!ctx->is_context(fibers::type::dispatcher_context)) {
       ++counter_;
     }
@@ -50,17 +50,44 @@ class AsioScheduler final : public fibers::algo::algorithm {
 
   fibers::context* pick_next() noexcept override {
     fibers::context* ctx(nullptr);
-    if (!rqueue_.empty()) {
+    for (auto& q : rqueue_arr_) {
+      if (q.empty())
+        continue;
+
       // pop an item from the ready queue
-      ctx = &rqueue_.front();
-      rqueue_.pop_front();
+      ctx = &q.front();
+      q.pop_front();
       DCHECK(ctx && fibers::context::active() != ctx);
       if (!ctx->is_context(fibers::type::dispatcher_context)) {
         --counter_;
       }
+      break;
     }
+
     //  VLOG_IF(1, ctx) << ctx->get_id();
     return ctx;
+  }
+
+  void property_change(boost::fibers::context* ctx, IoFiberProperties& props) noexcept final {
+    // Although our priority_props class defines multiple properties, only
+    // one of them (priority) actually calls notify() when changed. The
+    // point of a property_change() override is to reshuffle the ready
+    // queue according to the updated priority value.
+
+    // 'ctx' might not be in our queue at all, if caller is changing the
+    // priority of (say) the running fiber. If it's not there, no need to
+    // move it: we'll handle it next time it hits awakened().
+    if (!ctx->ready_is_linked()) {
+      return;
+    }
+
+    // Found ctx: unlink it
+    ctx->ready_unlink();
+
+    // Here we know that ctx was in our ready queue, but we've unlinked
+    // it. We happen to have a method that will (re-)add a context* to the
+    // right place in the ready queue.
+    awakened(ctx, props);
   }
 
   bool has_ready_fibers() const noexcept override {
@@ -162,6 +189,9 @@ void IoContext::StartLoop() {
   // fibers::use_scheduling_algorithm<AsioScheduler>(io_ptr);
   AsioScheduler* scheduler = new AsioScheduler(context_ptr_);
   fibers::context::active()->get_scheduler()->set_algo(scheduler);
+  this_fiber::properties<IoFiberProperties>().set_name("io_loop");
+  this_fiber::properties<IoFiberProperties>().set_nice_level(2);
+  CHECK(fibers::context::active()->is_context(fibers::type::main_context));
 
   thread_id_ = this_thread::get_id();
 
