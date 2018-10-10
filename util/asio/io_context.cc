@@ -72,11 +72,13 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
       if (ctx->is_context(fibers::type::main_context)) {
         switch_cnt_ = 0;
+        DVLOG(1) << "BackToMain";
       } else {
         ++switch_cnt_;
-        if (switch_cnt_ > 5 && i > MAIN_NICE_LEVEL) {
+        /*if (switch_cnt_ > 5 && i > MAIN_NICE_LEVEL) {
+          VLOG(1) << "WakeMain";
           cnd_.notify_one();
-        }
+        }*/
       }
 
       break;
@@ -175,6 +177,8 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     // for handling io_svc requests. For example, to process all HIGH, and then limit
     // all other fibers.
     std::unique_lock<fibers::mutex> lk(mtx_);
+    DVLOG(1) << "WaitTillFibersSuspend";
+
     cnd_.wait(lk);
   }
 
