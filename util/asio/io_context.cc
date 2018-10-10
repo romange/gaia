@@ -17,17 +17,19 @@ using namespace std;
 namespace util {
 
 namespace {
+constexpr unsigned MAIN_NICE_LEVEL = 2;
 
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
+  using ready_queue_type = fibers::scheduler::ready_queue_type;
   std::shared_ptr<asio::io_context> io_svc_;
   asio::steady_timer suspend_timer_;
   //]
-  fibers::scheduler::ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
+  ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
   fibers::mutex mtx_;
   fibers::condition_variable cnd_;
-  std::size_t counter_{0};
-
+  std::size_t active_cnt_{0};
+  std::size_t switch_cnt_{0};
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
@@ -37,30 +39,46 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   void awakened(fibers::context* ctx, IoFiberProperties& props) noexcept override {
     DCHECK(!ctx->ready_is_linked());
 
-    unsigned nice = props.nice_level();
-    DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
-    auto& q = rqueue_arr_[nice];
+    ready_queue_type* rq;
 
-    ctx->ready_link(q); /*< fiber, enqueue on ready queue >*/
-    if (!ctx->is_context(fibers::type::dispatcher_context)) {
-      ++counter_;
+    // Starting new fiber has lowest priority. Is it ok?
+    if (ctx->is_context(fibers::type::dispatcher_context)) {
+      rq = rqueue_arr_ + IoFiberProperties::MAX_NICE_LEVEL;
+    } else {
+      unsigned nice = props.nice_level();
+      DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
+      rq = rqueue_arr_ + nice;
+      ++active_cnt_;
     }
-    // VLOG(1) << "awakened: " << ctx->get_id();
+    ctx->ready_link(*rq); /*< fiber, enqueue on ready queue >*/
   }
 
   fibers::context* pick_next() noexcept override {
     fibers::context* ctx(nullptr);
-    for (auto& q : rqueue_arr_) {
+    for (unsigned i = 0; i < IoFiberProperties::NUM_NICE_LEVELS; ++i) {
+      auto& q = rqueue_arr_[i];
       if (q.empty())
         continue;
 
       // pop an item from the ready queue
       ctx = &q.front();
       q.pop_front();
+
       DCHECK(ctx && fibers::context::active() != ctx);
+
       if (!ctx->is_context(fibers::type::dispatcher_context)) {
-        --counter_;
+        --active_cnt_;
       }
+
+      if (ctx->is_context(fibers::type::main_context)) {
+        switch_cnt_ = 0;
+      } else {
+        ++switch_cnt_;
+        if (switch_cnt_ > 5 && i > MAIN_NICE_LEVEL) {
+          cnd_.notify_one();
+        }
+      }
+
       break;
     }
 
@@ -91,11 +109,11 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   }
 
   bool has_ready_fibers() const noexcept override {
-    return 0 < counter_;
+    return 0 < active_cnt_;
   }
 
   size_t active_fiber_count() const {
-    return counter_;
+    return active_cnt_;
   }
 
   void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
@@ -184,13 +202,26 @@ void MainLoop(asio::io_context* io_cntx, AsioScheduler* scheduler) {
 
 }  // namespace
 
+constexpr unsigned IoFiberProperties::MAX_NICE_LEVEL;
+constexpr unsigned IoFiberProperties::NUM_NICE_LEVELS;
+
+void IoFiberProperties::SetNiceLevel(unsigned p) {
+  // Of course, it's only worth reshuffling the queue and all if we're
+  // actually changing the nice.
+  p = std::min(p, MAX_NICE_LEVEL);
+  if (p != nice_) {
+    nice_ = p;
+    notify();
+  }
+}
+
 void IoContext::StartLoop() {
   // I do not use use_scheduling_algorithm because I want to retain access to the scheduler.
   // fibers::use_scheduling_algorithm<AsioScheduler>(io_ptr);
   AsioScheduler* scheduler = new AsioScheduler(context_ptr_);
   fibers::context::active()->get_scheduler()->set_algo(scheduler);
   this_fiber::properties<IoFiberProperties>().set_name("io_loop");
-  this_fiber::properties<IoFiberProperties>().set_nice_level(2);
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(MAIN_NICE_LEVEL);
   CHECK(fibers::context::active()->is_context(fibers::type::main_context));
 
   thread_id_ = this_thread::get_id();
