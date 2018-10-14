@@ -204,6 +204,7 @@ void RpcConnectionHandler::FlushWritesGuarded() {
 void RpcConnectionHandler::FlushFiber() {
   using namespace std::chrono_literals;
   CHECK(socket_->get_executor().running_in_this_thread());
+  VLOG(1) << "RpcConnectionHandler::FlushFiber";
 
   while (true) {
     this_fiber::sleep_for(100us);
@@ -216,6 +217,7 @@ void RpcConnectionHandler::FlushFiber() {
     FlushWritesGuarded();
     wr_mu_.unlock();
   }
+  VLOG(1) << "RpcConnectionHandler::FlushFiberExit";
 }
 
 inline bool RpcConnectionHandler::ShouldFlush() {

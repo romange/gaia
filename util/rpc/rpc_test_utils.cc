@@ -69,6 +69,7 @@ void ServerTest::TearDown() {
   server_.reset();
   channel_.reset();
   pool_->Stop();
+  VLOG(1) << "ServerTest::TearDown";
 }
 
 }  // namespace rpc

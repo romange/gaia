@@ -17,7 +17,8 @@ using namespace std;
 namespace util {
 
 namespace {
-constexpr unsigned MAIN_NICE_LEVEL = 2;
+constexpr unsigned MAIN_NICE_LEVEL = 0;
+constexpr bool LIMIT_SWITCH = false;
 
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
@@ -30,7 +31,10 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   fibers::condition_variable cnd_;
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
+  bool main_suspended_ = false;
  public:
+  unsigned switch_limit = 3;
+
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
       : io_svc_(io_svc), suspend_timer_(*io_svc_) {
@@ -68,20 +72,14 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
       if (!ctx->is_context(fibers::type::dispatcher_context)) {
         --active_cnt_;
-      }
 
-      if (ctx->is_context(fibers::type::main_context)) {
-        switch_cnt_ = 0;
-        DVLOG(1) << "BackToMain";
-      } else {
-        ++switch_cnt_;
-        /*if (switch_cnt_ > 5 && i > MAIN_NICE_LEVEL) {
-          VLOG(1) << "WakeMain";
+        if (LIMIT_SWITCH && main_suspended_ && i && ++switch_cnt_ > switch_limit) {
+          DVLOG(1) << "NotifyOne on " << i << " " << switch_cnt_;
           cnd_.notify_one();
-        }*/
+        }
       }
 
-      break;
+      return ctx;
     }
 
     //  VLOG_IF(1, ctx) << ctx->get_id();
@@ -178,8 +176,10 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     // all other fibers.
     std::unique_lock<fibers::mutex> lk(mtx_);
     DVLOG(1) << "WaitTillFibersSuspend";
-
+    main_suspended_ = true;
     cnd_.wait(lk);
+    switch_cnt_ = 0;
+    main_suspended_ = false;
   }
 
  private:
@@ -241,6 +241,8 @@ void IoContext::StartLoop() {
   // Bootstrap - launch the callback handler above.
   // It will block until MainLoop exits.
   io_cntx.run_one();
+
+  // scheduler->switch_limit = 10000;
 
   // We stopped io_context. Lets spin it more until all ready handlers are run.
   // That should make sure that fibers are unblocked.
