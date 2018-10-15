@@ -23,7 +23,7 @@ constexpr bool LIMIT_SWITCH = false;
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
   using ready_queue_type = fibers::scheduler::ready_queue_type;
-  std::shared_ptr<asio::io_context> io_svc_;
+  std::shared_ptr<asio::io_context> io_context_;
   asio::steady_timer suspend_timer_;
   //]
   ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
@@ -37,54 +37,12 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
-      : io_svc_(io_svc), suspend_timer_(*io_svc_) {
+      : io_context_(io_svc), suspend_timer_(*io_svc) {
   }
 
-  void awakened(fibers::context* ctx, IoFiberProperties& props) noexcept override {
-    DCHECK(!ctx->ready_is_linked());
+  void awakened(fibers::context* ctx, IoFiberProperties& props) noexcept override;
 
-    ready_queue_type* rq;
-
-    // Starting new fiber has lowest priority. Is it ok?
-    if (ctx->is_context(fibers::type::dispatcher_context)) {
-      rq = rqueue_arr_ + IoFiberProperties::MAX_NICE_LEVEL;
-    } else {
-      unsigned nice = props.nice_level();
-      DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
-      rq = rqueue_arr_ + nice;
-      ++active_cnt_;
-    }
-    ctx->ready_link(*rq); /*< fiber, enqueue on ready queue >*/
-  }
-
-  fibers::context* pick_next() noexcept override {
-    fibers::context* ctx(nullptr);
-    for (unsigned i = 0; i < IoFiberProperties::NUM_NICE_LEVELS; ++i) {
-      auto& q = rqueue_arr_[i];
-      if (q.empty())
-        continue;
-
-      // pop an item from the ready queue
-      ctx = &q.front();
-      q.pop_front();
-
-      DCHECK(ctx && fibers::context::active() != ctx);
-
-      if (!ctx->is_context(fibers::type::dispatcher_context)) {
-        --active_cnt_;
-
-        if (LIMIT_SWITCH && main_suspended_ && i && ++switch_cnt_ > switch_limit) {
-          DVLOG(1) << "NotifyOne on " << i << " " << switch_cnt_;
-          cnd_.notify_one();
-        }
-      }
-
-      return ctx;
-    }
-
-    //  VLOG_IF(1, ctx) << ctx->get_id();
-    return ctx;
-  }
+  fibers::context* pick_next() noexcept override;
 
   void property_change(boost::fibers::context* ctx, IoFiberProperties& props) noexcept final {
     // Although our priority_props class defines multiple properties, only
@@ -116,8 +74,12 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     return active_cnt_;
   }
 
+  // suspend_until halts the thread in case there are no active fibers to run on it.
+  // This is done by dispatcher fiber.
   void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
-    VLOG(2) << "suspend_until " << abs_time.time_since_epoch().count();
+    DVLOG(2) << "suspend_until " << abs_time.time_since_epoch().count();
+    // Only dispatcher context stops the thread.
+    DCHECK(fibers::context::active()->is_context(fibers::type::dispatcher_context));
 
     // Set a timer so at least one handler will eventually fire, causing
     // run_one() to eventually return.
@@ -166,33 +128,22 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     suspend_timer_.expires_at(std::chrono::steady_clock::now());
   }
 
-  void WaitTillFibersSuspend() {
-    // block this fiber till all pending (ready) fibers are processed
-    // == AsioScheduler::suspend_until() has been called.
-
-    // TODO: We might want to limit the number of processed fibers per iterations
-    // based on their priority and count to allow better responsiveness
-    // for handling io_svc requests. For example, to process all HIGH, and then limit
-    // all other fibers.
-    std::unique_lock<fibers::mutex> lk(mtx_);
-    DVLOG(1) << "WaitTillFibersSuspend";
-    main_suspended_ = true;
-    cnd_.wait(lk);
-    switch_cnt_ = 0;
-    main_suspended_ = false;
-  }
+  void MainLoop();
 
  private:
+  void WaitTillFibersSuspend();
 };
 
-void MainLoop(asio::io_context* io_cntx, AsioScheduler* scheduler) {
+void AsioScheduler::MainLoop() {
+  asio::io_context* io_cntx = io_context_.get();
+
   while (!io_cntx->stopped()) {
-    if (scheduler->has_ready_fibers()) {
+    if (has_ready_fibers()) {
       while (io_cntx->poll())
         ;
 
       // Gives up control to allow other fibers to run in the thread.
-      scheduler->WaitTillFibersSuspend();
+      WaitTillFibersSuspend();
     } else {
       // run one handler inside io_context
       // if no handler available, blocks this thread
@@ -202,6 +153,68 @@ void MainLoop(asio::io_context* io_cntx, AsioScheduler* scheduler) {
     }
   }
   VLOG(1) << "MainLoop exited";
+}
+
+void AsioScheduler::WaitTillFibersSuspend() {
+  // block this fiber till all pending (ready) fibers are processed
+  // == AsioScheduler::suspend_until() has been called.
+
+  // TODO: We might want to limit the number of processed fibers per iterations
+  // based on their priority and count to allow better responsiveness
+  // for handling io_svc requests. For example, to process all HIGH, and then limit
+  // all other fibers.
+  std::unique_lock<fibers::mutex> lk(mtx_);
+  DVLOG(1) << "WaitTillFibersSuspend";
+  main_suspended_ = true;
+  cnd_.wait(lk);
+  switch_cnt_ = 0;
+  main_suspended_ = false;
+}
+
+void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noexcept {
+  DCHECK(!ctx->ready_is_linked());
+
+  ready_queue_type* rq;
+
+  // Dispatcher fiber has lowest priority. Is it ok?
+  if (ctx->is_context(fibers::type::dispatcher_context)) {
+    rq = rqueue_arr_ + IoFiberProperties::MAX_NICE_LEVEL;
+  } else {
+    unsigned nice = props.nice_level();
+    DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
+    rq = rqueue_arr_ + nice;
+    ++active_cnt_;
+  }
+  ctx->ready_link(*rq); /*< fiber, enqueue on ready queue >*/
+}
+
+fibers::context* AsioScheduler::pick_next() noexcept {
+  fibers::context* ctx(nullptr);
+  for (unsigned i = 0; i < IoFiberProperties::NUM_NICE_LEVELS; ++i) {
+    auto& q = rqueue_arr_[i];
+    if (q.empty())
+      continue;
+
+    // pop an item from the ready queue
+    ctx = &q.front();
+    q.pop_front();
+
+    DCHECK(ctx && fibers::context::active() != ctx);
+
+    if (!ctx->is_context(fibers::type::dispatcher_context)) {
+      --active_cnt_;
+
+      if (LIMIT_SWITCH && main_suspended_ && i && ++switch_cnt_ > switch_limit) {
+        DVLOG(1) << "NotifyOne on " << i << " " << switch_cnt_;
+        cnd_.notify_one();
+      }
+    }
+
+    return ctx;
+  }
+
+  //  VLOG_IF(1, ctx) << ctx->get_id();
+  return ctx;
 }
 
 }  // namespace
@@ -236,7 +249,7 @@ void IoContext::StartLoop() {
   // The reason for this is that io_context::running_in_this_thread() is deduced based on the
   // call-stack. We might right our own utility function based on thread id since
   // we run single thread per io context.
-  Post([scheduler, &io_cntx] { MainLoop(&io_cntx, scheduler); });
+  Post([scheduler] { scheduler->MainLoop(); });
 
   // Bootstrap - launch the callback handler above.
   // It will block until MainLoop exits.
