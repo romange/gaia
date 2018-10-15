@@ -34,7 +34,7 @@ TEST_F(PeriodicTest, BasicTimer) {
   unsigned int count = 0;
   {
     std::unique_ptr<PeriodicTask> task(new PeriodicTask(cntx, milliseconds(1)));
-    task->Start([&count] { ++count; });
+    task->Start([&count](int) { ++count; });
     SleepForMilliseconds(20);
     EXPECT_GT(count, 10);
   }
@@ -78,7 +78,7 @@ TEST_F(PeriodicTest, Cpp) {
   thread::id task_thread_id;
 
   // non-moveable
-  task->Start([nm, &bc, &task_thread_id] {
+  task->Start([nm, &bc, &task_thread_id] (int) {
     task_thread_id = std::this_thread::get_id();
     bc.Set(true);
   });
@@ -92,7 +92,7 @@ TEST_F(PeriodicTest, Cpp) {
 
   LOG(INFO) << "Moveable";
   std::unique_ptr<int> pi;
-  task->Start([pi = std::move(pi), &bc, &task_thread_id] {
+  task->Start([pi = std::move(pi), &bc, &task_thread_id] (int) {
     task_thread_id = std::this_thread::get_id();
     bc.Set(true);
     VLOG(1) << "Cb run";

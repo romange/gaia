@@ -83,8 +83,9 @@ auto ClientBase::Connect(uint32_t ms) -> error_code {
   });
   expiry_task_.reset(new PeriodicTask(context, chrono::milliseconds(kTickPrecision)));
 
-  expiry_task_->Start([this] {
-    this->expire_timer_.advance(1);
+  expiry_task_->Start([this](int ticks) {
+    DCHECK_GT(ticks, 0);
+    this->expire_timer_.advance(ticks);
     DVLOG(2) << "Advancing expiry to " << this->expire_timer_.now();
   });
 
@@ -139,7 +140,7 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
 
   event->set_id(id);
   base::Tick at = expire_timer_.schedule(event, ticks);
-  DVLOG(2) << "Scheduled expiry at " << at;
+  DVLOG(2) << "Scheduled expiry at " << at << " for rpcid " << id;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
   outgoing_buf_.back().second.expiry.reset(event);
@@ -300,7 +301,7 @@ auto ClientBase::FlushSendsGuarded() -> error_code {
 }
 
 void ClientBase::ExpirePending(RpcId id) {
-  DVLOG(1) << "Expire " << id;
+  DVLOG(1) << "Expire rpc id " << id;
 
   auto it = this->pending_calls_.find(id);
   if (it == this->pending_calls_.end())

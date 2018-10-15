@@ -28,7 +28,8 @@ void PeriodicTask::Cancel() {
 
 void PeriodicTask::Alarm() {
   CHECK_EQ(0, state_ & ALARMED) << "Can not Start on already alarmed timer, run Cancel first";
-  timer_.expires_after(d_);
+  last_ = timer_t::clock_type::now();
+  timer_.expires_at(last_ + d_);
   state_ |= ALARMED;
 }
 

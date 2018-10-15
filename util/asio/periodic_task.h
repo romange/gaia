@@ -28,6 +28,11 @@ class PeriodicTask {
   ~PeriodicTask() { Cancel(); }
 
   // f must be non-blocking function because it runs directly in IO fiber.
+  // f should accept 'ticks' argument that says by how many duration cycles we are late.
+  // Usually ticks=1.
+  // For example if we started at time 0, with duration=1s and on n-th invocation we measured
+  // "n+1" seconds, then f(2) will be called. The system is self-balancing so for next invocation
+  // at (n+2) seconds, we will pass f(1) again.
   template<typename Func> void Start(Func&& f) {
     Alarm();
     RunInternal(std::forward<Func>(f));
@@ -46,9 +51,15 @@ class PeriodicTask {
         Disalarm();
         return;
       }
+      duration_t real_d = timer_t::clock_type::now() - last_;
 
-      f();
-      timer_.expires_after(d_);
+      // for each function invocation we pass at least 1 tick.
+      int ticks = std::max<int>(1, real_d / d_);
+      f(ticks);
+      last_ += d_ * ticks;
+
+      // due to max() rounding, last_ will self balance itself to be close to clock_type::now().
+      timer_.expires_at(last_ + d_);
       RunInternal(std::forward<Func>(f));
     });
   }
@@ -59,6 +70,7 @@ class PeriodicTask {
 
   timer_t timer_;
   duration_t d_;
+  timer_t::time_point last_;
   uint8_t state_ ;
 };
 
@@ -84,7 +96,7 @@ class PeriodicWorkerTask {
   ~PeriodicWorkerTask() { Cancel(); }
 
   template<typename Func> void Start(Func&& f) {
-    pt_.Start([this, f = PackagedTask(std::forward<Func>(f))] () {
+    pt_.Start([this, f = PackagedTask(std::forward<Func>(f))] (int ticks) {
       if (AllowRunning()) {
         std::thread(f).detach();
       } else {
