@@ -49,6 +49,8 @@ bool safe_strtof(StringPiece str, float* value);
 bool safe_strtod(StringPiece str, double* value);
 
 
+char* FastHex64ToBuffer(uint64 i, char* buffer);
+
 #if 0
 // ----------------------------------------------------------------------
 // FastIntToBuffer()
@@ -241,6 +243,7 @@ inline bool ParseLeadingBoolValue(const std::string& str, bool deflt) {
   return ParseLeadingBoolValue(str.c_str(), deflt);
 }
 
+#if 0
 // ----------------------------------------------------------------------
 // AutoDigitStrCmp
 // AutoDigitLessThan
@@ -303,6 +306,7 @@ struct strict_autodigit_greater
 };
 
 
+#endif
 
 // ----------------------------------------------------------------------
 // SimpleDtoa()
