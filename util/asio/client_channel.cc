@@ -42,6 +42,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
   VLOG(1) << "ClientChannel::ResolveAndConnect " << sock_.native_handle();
 
   asio::steady_timer timer(sock_.get_executor().context());
+  fibers_ext::Done done;
 
   auto connect_cb = [&](const system::error_code& ec, const tcp::endpoint& ep) {
     VLOG(1) << "Async connect with status " << ec << " " << ec.message();
@@ -51,17 +52,20 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
       sock_.non_blocking(true);
       VLOG(1) << "Connected to endpoint " << ep;
     }
-
     status_ = ec;
+    done.Notify();
   };
 
   while (!shutting_down_ && status_ && steady_clock::now() < until) {
+    DCHECK(status_);
+
     system::error_code resolve_ec;
     auto results = Resolve(fibers_ext::yield[resolve_ec]);
     if (!resolve_ec) {
       system::error_code ec;
       VLOG(2) << "Connecting to " << results.size() << " endpoints";
 
+      done.Reset();
       asio::async_connect(sock_, results, connect_cb);
 
       timer.expires_at(until);
@@ -72,6 +76,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
       } else if (!status_) {
         return;  // connected.
       }
+      done.Wait();  // wait for connect_cb to run.
     }
 
     time_point now = steady_clock::now();

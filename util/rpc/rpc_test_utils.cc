@@ -15,6 +15,8 @@ using namespace std;
 using namespace boost;
 using namespace chrono;
 
+DEFINE_uint32(rpc_test_io_pool, 0, "Number of IO loops");
+
 namespace util {
 namespace rpc {
 
@@ -53,7 +55,7 @@ ServerTest::ServerTest() {
 }
 
 void ServerTest::SetUp() {
-  pool_.reset(new IoContextPool);
+  pool_.reset(new IoContextPool(FLAGS_rpc_test_io_pool));
   pool_->Run();
   service_.reset(new TestInterface);
   server_.reset(new AcceptServer(pool_.get()));

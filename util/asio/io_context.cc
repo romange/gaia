@@ -18,7 +18,9 @@ namespace util {
 
 namespace {
 constexpr unsigned MAIN_NICE_LEVEL = 0;
-constexpr bool LIMIT_SWITCH = false;
+
+// Amount of fiber switches we make before bringing back the main IO loop.
+constexpr unsigned MAIN_SWITCH_LIMIT = 7;
 
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
@@ -31,10 +33,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   fibers::condition_variable cnd_;
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
-  bool main_suspended_ = false;
  public:
-  unsigned switch_limit = 3;
-
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
       : io_context_(io_svc), suspend_timer_(*io_svc) {
@@ -59,6 +58,10 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
     // Found ctx: unlink it
     ctx->ready_unlink();
+    if (!ctx->is_context(fibers::type::dispatcher_context)) {
+      DCHECK_GT(active_cnt_, 0);
+      --active_cnt_;
+    }
 
     // Here we know that ctx was in our ready queue, but we've unlinked
     // it. We happen to have a method that will (re-)add a context* to the
@@ -147,6 +150,7 @@ void AsioScheduler::MainLoop() {
     } else {
       // run one handler inside io_context
       // if no handler available, blocks this thread
+      DVLOG(2) << "MainLoop::RunOne";
       if (!io_cntx->run_one()) {
         break;
       }
@@ -164,11 +168,10 @@ void AsioScheduler::WaitTillFibersSuspend() {
   // for handling io_svc requests. For example, to process all HIGH, and then limit
   // all other fibers.
   std::unique_lock<fibers::mutex> lk(mtx_);
-  DVLOG(1) << "WaitTillFibersSuspend";
-  main_suspended_ = true;
+  DVLOG(2) << "WaitTillFibersSuspend:Start";
   cnd_.wait(lk);
   switch_cnt_ = 0;
-  main_suspended_ = false;
+  DVLOG(2) << "WaitTillFibersSuspend:End";
 }
 
 void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noexcept {
@@ -190,6 +193,8 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
 
 fibers::context* AsioScheduler::pick_next() noexcept {
   fibers::context* ctx(nullptr);
+  DVLOG(3) << "pick_next: ActiveCnt " << active_cnt_;
+
   for (unsigned i = 0; i < IoFiberProperties::NUM_NICE_LEVELS; ++i) {
     auto& q = rqueue_arr_[i];
     if (q.empty())
@@ -202,19 +207,32 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     DCHECK(ctx && fibers::context::active() != ctx);
 
     if (!ctx->is_context(fibers::type::dispatcher_context)) {
+      DCHECK_GT(active_cnt_, 0);
       --active_cnt_;
 
-      if (LIMIT_SWITCH && main_suspended_ && i && ++switch_cnt_ > switch_limit) {
-        DVLOG(1) << "NotifyOne on " << i << " " << switch_cnt_;
-        cnd_.notify_one();
+      /* We check for active_cnt_ > K for 2 reasons:
+         1. To allow dispatcher_context to run. Otherwise if active_cnt_ == 0 and
+         dispatcher_context is active and we switch to the main loop it will never switch back
+         to dispatcher_context because has_ready_fibers() will return false.
+         2. To switch to main loop only if the active_cnt is large enough, i.e. it might take
+            a lot of time to switch back to main so resuming main fiber is worth it.
+
+         In addition we switch only priorities higher than MAIN_NICE_LEVEL, which also implies
+         that MAIN is suspended (otherwise pick_next would choose it with i == MAIN_NICE_LEVEL).
+      */
+      if (i > MAIN_NICE_LEVEL && active_cnt_ > 1) {
+        if (++switch_cnt_ > MAIN_SWITCH_LIMIT) {
+          DVLOG(1) << "SwitchToMain on " << i << " " << switch_cnt_ << " " << active_cnt_;
+          cnd_.notify_one();
+        }
       }
     }
 
     return ctx;
   }
 
-  //  VLOG_IF(1, ctx) << ctx->get_id();
-  return ctx;
+  DCHECK_EQ(0, active_cnt_);
+  return nullptr;
 }
 
 }  // namespace
