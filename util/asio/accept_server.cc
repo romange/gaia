@@ -55,6 +55,8 @@ unsigned short AcceptServer::AddListener(unsigned short port, ConnectionFactory 
 void AcceptServer::RunInIOThread(Listener* listener) {
   util::ConnectionHandler::ListType clist;
 
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
+
   // wrap it to allow thread-safe and consistent access to the list.
   ConnectionHandler::Notifier notifier(&clist);
 

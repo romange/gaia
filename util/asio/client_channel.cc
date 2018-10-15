@@ -114,6 +114,8 @@ void ClientChannelImpl::Shutdown() {
 }
 
 void ClientChannelImpl::ReconnectFiber() {
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
+
   ResolveAndConnect(steady_clock::now() + 30s);
   DCHECK(reconnect_active_);
 

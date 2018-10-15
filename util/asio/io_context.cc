@@ -22,6 +22,8 @@ constexpr unsigned MAIN_NICE_LEVEL = 0;
 // Amount of fiber switches we make before bringing back the main IO loop.
 constexpr unsigned MAIN_SWITCH_LIMIT = 7;
 
+thread_local unsigned main_resumes = 0;
+
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
   using ready_queue_type = fibers::scheduler::ready_queue_type;
@@ -223,6 +225,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
       if (i > MAIN_NICE_LEVEL && active_cnt_ > 1) {
         if (++switch_cnt_ > MAIN_SWITCH_LIMIT) {
           DVLOG(1) << "SwitchToMain on " << i << " " << switch_cnt_ << " " << active_cnt_;
+          ++main_resumes;
           cnd_.notify_one();
         }
       }
@@ -282,6 +285,7 @@ void IoContext::StartLoop() {
   while (io_cntx.poll() || scheduler->has_ready_fibers()) {
     this_fiber::yield();  // while something happens, pass the ownership to other fiber.
   }
+  VLOG(1) << "MainSwitch Resumes :" << main_resumes;
 }
 
 }  // namespace util

@@ -184,6 +184,7 @@ void ClientBase::ReadFiber() {
   CHECK(channel_.context().get_executor().running_in_this_thread());
 
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
 
   error_code ec = channel_.WaitForReadAvailable();
   while (!channel_.is_shut_down()) {
@@ -210,6 +211,7 @@ void ClientBase::ReadFiber() {
 void ClientBase::FlushFiber() {
   using namespace std::chrono_literals;
   CHECK(channel_.context().get_executor().running_in_this_thread());
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
   while (true) {
     this_fiber::sleep_for(100us);
