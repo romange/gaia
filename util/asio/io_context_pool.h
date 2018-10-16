@@ -4,20 +4,21 @@
 
 #pragma once
 
-#include <vector>
 #include <thread>
+#include <vector>
 
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/fiber/fiber.hpp>
 #include <experimental/optional>
 
 #include "util/asio/io_context.h"
-namespace util {
+#include "util/fibers_ext.h"
 
+namespace util {
 
 /// A pool of io_context objects.
 class IoContextPool {
-public:
+ public:
   using io_context = ::boost::asio::io_context;
 
   IoContextPool(const IoContextPool&) = delete;
@@ -40,22 +41,42 @@ public:
   /// Get an io_context to use. Thread-safe.
   IoContext& GetNextContext();
 
-  IoContext& operator[](size_t i) { return context_arr_[i];}
-  IoContext& at(size_t i) { return context_arr_[i];}
+  IoContext& operator[](size_t i) {
+    return context_arr_[i];
+  }
+  IoContext& at(size_t i) {
+    return context_arr_[i];
+  }
 
-  size_t size() const { return context_arr_.size(); }
+  size_t size() const {
+    return context_arr_.size();
+  }
 
   // func must accept IoContext&. It will run in a dedicated detached fiber.
-  template<typename Func> void AsyncFiberOnAll(Func&& func) {
+  template <typename Func>
+  void AsyncFiberOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
-      context.Post([&context, func = std::forward<Func>(func)] () mutable {
+      context.Post([&context, func = std::forward<Func>(func)]() mutable {
         ::boost::fibers::fiber(std::forward<Func>(func), std::ref(context)).detach();
       });
     }
   }
-private:
 
+  // Runs func in all IO threads in parallel, but waits for it to finish. The function runs
+  // inside a temporary fiber to allow the execution of IO loop.
+  template <typename Func>
+  void SyncFiberOnAll(Func&& func) {
+    fibers_ext::BlockingCounter bc(size());
+    auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
+      func(context);
+      bc.Dec();
+    };
+    AsyncFiberOnAll(cb);
+    bc.Wait();
+  }
+
+ private:
   void ContextLoop(size_t index);
 
   typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
@@ -71,7 +92,7 @@ private:
   /// The next io_context to use for a connection.
   std::atomic_uint_fast32_t next_io_context_{0};
   thread_local static size_t context_indx_;
-  enum State { STOPPED, RUN} state_ = STOPPED;
+  enum State { STOPPED, RUN } state_ = STOPPED;
 };
 
 }  // namespace util
