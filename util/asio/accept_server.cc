@@ -51,7 +51,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   return listener.port;
 }
 
-void AcceptServer::RunInIOThread(ListenerWrapper* listener) {
+void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
   util::ConnectionHandler::ListType clist;
 
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
@@ -63,7 +63,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* listener) {
   util::ConnectionHandler* handler = nullptr;
   try {
     for (;;) {
-      std::tie(handler, ec) = AcceptConnection(listener, &notifier);
+      std::tie(handler, ec) = AcceptConnection(wrapper, &notifier);
       if (ec) {
         CHECK(!handler);
         if (ec == asio::error::try_again)
@@ -86,7 +86,9 @@ void AcceptServer::RunInIOThread(ListenerWrapper* listener) {
     LOG(WARNING) << ": caught exception : " << ex.what();
   }
 
-  int port = listener->port;
+  wrapper->listener->PreShutdown();
+
+  int port = wrapper->port;
 
   // We protect clist because we iterate over it and other threads could potentialy change it.
   // connections are dispersed across few threads so clist requires true thread synchronization.
@@ -102,6 +104,8 @@ void AcceptServer::RunInIOThread(ListenerWrapper* listener) {
     VLOG(1) << "Waiting for connections to close";
     notifier.WaitTillEmpty(lock);
   }
+
+  wrapper->listener->PostShutdown();
 
   // Notify that AcceptThread has stopped.
   bc_.Dec();
