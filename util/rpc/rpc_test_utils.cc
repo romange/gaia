@@ -59,7 +59,7 @@ void ServerTest::SetUp() {
   pool_->Run();
   service_.reset(new TestInterface);
   server_.reset(new AcceptServer(pool_.get()));
-  uint16_t port = service_->Listen(0, server_.get());
+  uint16_t port = server_->AddListener(0, service_.get());
 
   server_->Run();
   channel_.reset(new ClientChannel(pool_->GetNextContext(), "127.0.0.1", std::to_string(port)));

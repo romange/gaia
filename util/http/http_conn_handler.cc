@@ -160,7 +160,7 @@ void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
 
 }  // namespace
 
-HttpHandler::HttpHandler(const CallbackRegistry* registry) : registry_(registry) {
+HttpHandler::HttpHandler(const ListenerBase* lb) : registry_(lb) {
   favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/favicon-32x32.png";
   resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/05a9c02/util/http";
 }
@@ -236,7 +236,7 @@ bool HttpHandler::Authorize(const QueryArgs& args) const {
   return false;
 }
 
-bool CallbackRegistry::RegisterCb(StringPiece path, bool protect, HttpHandler::RequestCb cb) {
+bool ListenerBase::RegisterCb(StringPiece path, bool protect, RequestCb cb) {
   CbInfo info{protect, cb};
   auto res = cb_map_.emplace(path, info);
   return res.second;

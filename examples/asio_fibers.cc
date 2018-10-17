@@ -148,14 +148,13 @@ int main(int argc, char** argv) {
 
   if (FLAGS_connect.empty()) {
     std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
-
-    uint16_t port =
-        server->AddListener(FLAGS_http_port, [] { return new http::HttpHandler(); });
+    util::http::Listener<> http_listener;
+    uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
     LOG(INFO) << "Started http server on port " << port;
 
-    PingInterface pi;
 
-    pi.Listen(9999, server.get());
+    PingInterface pi;
+    server->AddListener(9999, &pi);
 
     server->Run();
     server->Wait();

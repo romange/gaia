@@ -224,12 +224,9 @@ inline bool RpcConnectionHandler::ShouldFlush() {
   return rpc_items_.empty();
 }
 
-uint16_t ServiceInterface::Listen(uint16_t port, AcceptServer* acc_server) {
-  AcceptServer::ConnectionFactory cf = [this]() -> ConnectionHandler* {
-    ConnectionBridge* bridge = CreateConnectionBridge();
-    return new RpcConnectionHandler(bridge);
-  };
-  return acc_server->AddListener(port, std::move(cf));
+ConnectionHandler* ServiceInterface::NewConnection() {
+  ConnectionBridge* bridge = CreateConnectionBridge();
+  return new RpcConnectionHandler(bridge);
 }
 
 }  // namespace rpc

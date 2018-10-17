@@ -21,8 +21,6 @@ class AcceptServer {
   typedef ::boost::asio::io_context io_context;
   typedef ::boost::fibers::condition_variable condition_variable;
 
-  using ConnectionFactory = std::function<ConnectionHandler*()> ;
-
   explicit AcceptServer(IoContextPool* pool);
   ~AcceptServer();
 
@@ -37,31 +35,31 @@ class AcceptServer {
   void Wait();
 
   // Returns the port number to which the listener was bound.
-  unsigned short AddListener(unsigned short port, ConnectionFactory cf);
+  unsigned short AddListener(unsigned short port, ListenerInterface* cf);
 
  private:
   using acceptor = ::boost::asio::ip::tcp::acceptor;
   using endpoint = ::boost::asio::ip::tcp::endpoint;
-  struct Listener;
+  struct ListenerWrapper;
 
-  void RunInIOThread(Listener* listener);
+  void RunInIOThread(ListenerWrapper* listener);
 
   // Should really be std::expected or std::experimental::fundamental_v3::expected
   // when upgrade the compiler.
   typedef std::tuple<ConnectionHandler*, ::boost::system::error_code>
     AcceptResult;
 
-  AcceptResult AcceptConnection(Listener* listener, ConnectionHandler::Notifier* done);
+  AcceptResult AcceptConnection(ListenerWrapper* listener, ConnectionHandler::Notifier* done);
 
   IoContextPool* pool_;
 
-  struct Listener {
+  struct ListenerWrapper {
     ::boost::asio::ip::tcp::acceptor acceptor;
-    ConnectionFactory cf;
+    ListenerInterface* listener;
     unsigned short port;
 
-    Listener(io_context* cntx, const endpoint& ep,
-             ConnectionFactory cf2) : acceptor(*cntx, ep), cf(std::move(cf2)) {
+    ListenerWrapper(io_context* cntx, const endpoint& ep,
+             ListenerInterface* si) : acceptor(*cntx, ep), listener(si) {
       port = acceptor.local_endpoint().port();
     }
   };
@@ -71,7 +69,7 @@ class AcceptServer {
 
   bool was_run_ = false;
 
-  std::vector<Listener> listeners_;
+  std::vector<ListenerWrapper> listeners_;
 };
 
 }  // namespace util

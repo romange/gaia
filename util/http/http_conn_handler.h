@@ -32,8 +32,6 @@ inline void SetMime(const char* mime, ::boost::beast::http::fields* dest) {
   dest->set(::boost::beast::http::field::content_type, mime);
 }
 
-class CallbackRegistry;
-
 extern const char kHtmlMime[];
 extern const char kJsonMime[];
 extern const char kSvgMime[];
@@ -70,15 +68,34 @@ struct SendLambda {
   }
 };
 
-class HttpHandler : public ConnectionHandler {
+// Should be one per process. Represents http server interface. 
+// Currently does not support on the fly updates - requires
+// multi-threading support.
+class ListenerBase : public ListenerInterface {
+  friend class HttpHandler;
+
  public:
-  typedef ::boost::beast::http::request<::boost::beast::http::string_body> RequestType;
-  typedef SendLambda<socket_t> SendFunction;
-  // typedef ::boost::beast::http::string_body BodyType;
-  // typedef ::boost::beast::http::response<BodyType> Response;
+  typedef SendLambda<::boost::asio::ip::tcp::socket> SendFunction;
   typedef std::function<void(const QueryArgs&, SendFunction*)> RequestCb;
 
-  HttpHandler(const CallbackRegistry* registry = nullptr);
+  // Returns true if a callback was registered.
+  bool RegisterCb(StringPiece path, bool protect, RequestCb cb);
+
+ private:
+  struct CbInfo {
+    bool is_protected;
+    RequestCb cb;
+  };
+  StringPieceMap<CbInfo> cb_map_;
+};
+
+class HttpHandler : public ConnectionHandler {
+ public:
+  using RequestType = ::boost::beast::http::request<::boost::beast::http::string_body>;
+  using SendFunction = ListenerBase::SendFunction;
+
+
+  HttpHandler(const ListenerBase* registry);
 
   boost::system::error_code HandleRequest() final override;
 
@@ -93,25 +110,19 @@ class HttpHandler : public ConnectionHandler {
   bool Authorize(const QueryArgs& args) const;
   void HandleRequestInternal(const RequestType& req, SendFunction* send);
 
-  const CallbackRegistry* registry_;
+  const ListenerBase* registry_;
 };
 
-// Should be one per process. HandlerFactory should pass it to HttpHandler's c-tor once
-// the registry is finalized. Currently does not support on the fly updates - requires
-// multi-threading support.
-class CallbackRegistry {
-  friend class HttpHandler;
-
+// http Listener + handler factory. By default creates HttpHandler.
+template <typename Handler = HttpHandler>
+class Listener : public ListenerBase {
  public:
-  // Returns true if a callback was registered.
-  bool RegisterCb(StringPiece path, bool protect, HttpHandler::RequestCb cb);
+  static_assert(std::is_base_of<HttpHandler, Handler>::value,
+                "Handler must be derived from HttpHandler");
 
- private:
-  struct CbInfo {
-    bool is_protected;
-    HttpHandler::RequestCb cb;
-  };
-  StringPieceMap<CbInfo> cb_map_;
+  ConnectionHandler* NewConnection() final {
+    return new Handler(this);
+  }
 };
 
 }  // namespace http

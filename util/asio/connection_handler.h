@@ -114,4 +114,18 @@ class ConnectionHandler {
   std::atomic<std::uint32_t>  use_count_{0};
 };
 
+// Abstracts away connections implementation and their life-cycle.
+class ListenerInterface {
+ public:
+  virtual ~ListenerInterface() {}
+
+  virtual ConnectionHandler* NewConnection() = 0;
+
+  // Called by AcceptServer when shutting down start and before all connections are closed.
+  virtual void PreShutdown() {}
+
+  // Called by AcceptServer when shutting down finalized and after all connections are closed.
+  virtual void PostShutdown() {}
+};
+
 }  // namespace util

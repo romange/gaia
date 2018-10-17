@@ -35,15 +35,16 @@ class ConnectionBridge {
                                         EnvelopeWriter writer) = 0;
 };
 
-class ServiceInterface {
+class ServiceInterface : public ListenerInterface {
  public:
   virtual ~ServiceInterface() {}
 
+ protected:
   // A factory method creating a handler that should handles requests for a single connection.
   // The ownership over handler is passed to the caller.
   virtual ConnectionBridge* CreateConnectionBridge() = 0;
 
-  uint16_t Listen(uint16_t port, AcceptServer* acc_server);
+  ConnectionHandler* NewConnection() final;
 };
 
 }  // namespace rpc

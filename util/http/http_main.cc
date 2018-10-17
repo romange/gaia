@@ -28,17 +28,15 @@ int main(int argc, char** argv) {
   IoContextPool pool;
   AcceptServer server(&pool);
   pool.Run();
-  http::CallbackRegistry registry;
+  http::Listener<> listener;
   auto cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
     http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
     resp.body() = "Bar";
     return send->Invoke(std::move(resp));
   };
 
-  registry.RegisterCb("/foo", false, cb);
-  uint16_t port = server.AddListener(FLAGS_port, [&registry] {
-    return new http::HttpHandler(&registry);
-  });
+  listener.RegisterCb("/foo", false, cb);
+  uint16_t port = server.AddListener(FLAGS_port, &listener);
   LOG(INFO) << "Listening on port " << port;
 
   server.Run();

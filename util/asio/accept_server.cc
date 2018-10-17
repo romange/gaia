@@ -15,18 +15,14 @@ using namespace boost;
 using asio::ip::tcp;
 
 AcceptServer::AcceptServer(IoContextPool* pool)
-     :pool_(pool), signals_(pool->GetNextContext().get_context(), SIGINT, SIGTERM), bc_(1) {
-
-  signals_.async_wait(
-  [this](system::error_code /*ec*/, int /*signo*/) {
+    : pool_(pool), signals_(pool->GetNextContext().get_context(), SIGINT, SIGTERM), bc_(1) {
+  signals_.async_wait([this](system::error_code /*ec*/, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
     for (auto& l : listeners_) {
       if (l.acceptor.is_open()) {
-        asio::post(l.acceptor.get_executor(), [acc = &l.acceptor] () mutable {
-          acc->close();
-        });
+        asio::post(l.acceptor.get_executor(), [acc = &l.acceptor]() mutable { acc->close(); });
       }
     }
 
@@ -39,12 +35,15 @@ AcceptServer::~AcceptServer() {
   Wait();
 }
 
-unsigned short AcceptServer::AddListener(unsigned short port, ConnectionFactory cf) {
+unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface* si) {
+  CHECK(si);
+
+  // We can not allow dynamic listener additions because listeners_ might reallocate.
   CHECK(!was_run_);
 
   tcp::endpoint endpoint(tcp::v4(), port);
   IoContext& io_context = pool_->GetNextContext();
-  listeners_.emplace_back(&io_context.get_context(), endpoint, std::move(cf));
+  listeners_.emplace_back(&io_context.get_context(), endpoint, si);
   auto& listener = listeners_.back();
 
   LOG(INFO) << "AcceptServer - listening on port " << listener.port;
@@ -52,7 +51,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ConnectionFactory 
   return listener.port;
 }
 
-void AcceptServer::RunInIOThread(Listener* listener) {
+void AcceptServer::RunInIOThread(ListenerWrapper* listener) {
   util::ConnectionHandler::ListType clist;
 
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
@@ -64,12 +63,12 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   util::ConnectionHandler* handler = nullptr;
   try {
     for (;;) {
-       std::tie(handler,ec) = AcceptConnection(listener, &notifier);
-       if (ec) {
-         CHECK(!handler);
-         if (ec == asio::error::try_again)
-           continue;
-         break; // TODO: To refine it.
+      std::tie(handler, ec) = AcceptConnection(listener, &notifier);
+      if (ec) {
+        CHECK(!handler);
+        if (ec == asio::error::try_again)
+          continue;
+        break;  // TODO: To refine it.
       } else {
         VLOG(1) << "Accepted socket " << handler->socket().remote_endpoint() << "/"
                 << handler->socket().native_handle();
@@ -110,26 +109,25 @@ void AcceptServer::RunInIOThread(Listener* listener) {
   LOG(INFO) << "Accept server stopped for port " << port;
 }
 
-auto AcceptServer::AcceptConnection(Listener* listener, ConnectionHandler::Notifier* notifier)
-   -> AcceptResult {
+auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper,
+                                    ConnectionHandler::Notifier* notifier) -> AcceptResult {
   IoContext& io_cntx = pool_->GetNextContext();
 
   system::error_code ec;
   tcp::socket sock(io_cntx.get_context());
 
-  listener->acceptor.async_accept(sock, fibers_ext::yield[ec]);
+  wrapper->acceptor.async_accept(sock, fibers_ext::yield[ec]);
   if (!ec && !sock.is_open())
     ec = asio::error::try_again;
   if (ec)
     return AcceptResult(nullptr, ec);
   DCHECK(sock.is_open()) << sock.native_handle();
 
-  ConnectionHandler* conn = listener->cf();
+  ConnectionHandler* conn = wrapper->listener->NewConnection();
   conn->Init(std::move(sock), notifier);
 
   return AcceptResult(conn, ec);
 }
-
 
 void AcceptServer::Run() {
   CHECK(!listeners_.empty());
@@ -137,9 +135,9 @@ void AcceptServer::Run() {
   bc_.Add(listeners_.size());
 
   for (auto& listener : listeners_) {
-    Listener* ptr = &listener;
-
+    ListenerWrapper* ptr = &listener;
     io_context& io_cntx = ptr->acceptor.get_executor().context();
+
     asio::post(io_cntx, [this, ptr] {
       fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this, ptr);
       srv_fb.detach();
