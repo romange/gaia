@@ -140,7 +140,7 @@ static void BM_ChannelConnection(benchmark::State& state) {
   AcceptServer server(&pool);
 
   TestInterface ti;
-  uint16_t port = ti.Listen(0, &server);
+  uint16_t port = server.AddListener(0, &ti);
 
   server.Run();
 
