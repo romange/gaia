@@ -150,6 +150,8 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
   DCHECK_NE(-1, socket_->native_handle());
 
+  // To support streaming we have this writer that can write multiple envelopes per
+  // single rpc request.
   bool first_time = true;
   auto writer = [&](Envelope&& env) {
     RpcItem* next = first_time ? item : rpc_items_.Get();
