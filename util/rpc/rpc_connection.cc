@@ -10,79 +10,24 @@
 
 #include "base/flags.h"
 #include "base/logging.h"
-#include "base/pod_array.h"
-#include "base/object_pool.h"
 
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
-#include "util/asio/connection_handler.h"
 #include "util/asio/yield.h"
-#include "util/rpc/frame_format.h"
+#include "util/rpc/impl/rpc_conn_handler.h"
 
 DEFINE_int32(rpc_server_buffer_size, 4096, "");
 
 namespace util {
 namespace rpc {
 
-using namespace boost;
 using namespace system;
 using asio::ip::tcp;
 using boost::asio::io_context;
 using fibers_ext::yield;
 using std::string;
-using namespace intrusive;
 
-namespace {
 constexpr size_t kRpcPoolSize = 32;
-
-
-struct RpcItem : public slist_base_hook<> {
-  RpcId id;
-  Envelope envelope;
-
-  RpcItem() = default;
-  RpcItem(RpcId i, Envelope env) : id(i), envelope(std::move(env)) {
-  }
-
-  auto buf_seq() {
-    return envelope.buf_seq();
-  }
-};
-
-typedef slist<RpcItem, cache_last<true>> ItemList;
-}  // namespace
-
-// Generally it's an object called from a single fiber.
-// However FlushFiber runs from a background fiber and makes sure that all outgoing writes
-// are flushed to socket.
-class RpcConnectionHandler : public ConnectionHandler {
- public:
-  // bridge is owned by RpcConnectionHandler instance.
-  RpcConnectionHandler(ConnectionBridge* bridge);
-  ~RpcConnectionHandler();
-
-  system::error_code HandleRequest() final override;
-
- private:
-  void FlushWritesGuarded();  // protected by wr_mu_
-  void FlushFiber();
-  void OnOpenSocket() final;
-  void OnCloseSocket() final;
-  bool ShouldFlush();
-
-  std::unique_ptr<ConnectionBridge> bridge_;
-  std::unique_ptr<BufferedReadAdaptor<tcp::socket>> buf_read_sock_;
-
-  system::error_code ec_;
-  base::ObjectPool<RpcItem> rpc_items_;
-  ItemList outgoing_buf_;
-
-  fibers::mutex wr_mu_;
-  std::vector<asio::const_buffer> write_seq_;
-  base::PODArray<std::array<uint8_t, rpc::Frame::kMaxByteSize>> frame_buf_;
-
-  fibers::fiber flush_fiber_;
-};
 
 RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
     : bridge_(bridge), rpc_items_(kRpcPoolSize) {
@@ -134,6 +79,11 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
 
   DCHECK_NE(-1, socket_->native_handle());
+
+  if (ShouldFlush()) {
+    std::lock_guard<fibers::mutex> l(wr_mu_);
+    FlushWritesGuarded();
+  }
 
   RpcItem* item = rpc_items_.Get();
 
@@ -220,7 +170,7 @@ void RpcConnectionHandler::FlushFiber() {
 }
 
 inline bool RpcConnectionHandler::ShouldFlush() {
-  return rpc_items_.empty();
+  return rpc_items_.empty() && !outgoing_buf_.empty();
 }
 
 ConnectionHandler* ServiceInterface::NewConnection() {
