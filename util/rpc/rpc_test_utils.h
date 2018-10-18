@@ -22,7 +22,7 @@ class TestBridge final : public ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  Status HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) final;
+  void HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) final;
 };
 
 class TestInterface final : public ServiceInterface {

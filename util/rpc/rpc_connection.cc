@@ -160,10 +160,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
     first_time = false;
   };
 
-  Status status = bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
-  if (!status.ok()) {
-    return errc::make_error_code(errc::bad_message);
-  }
+  bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
 
   if (ShouldFlush()) {
     std::lock_guard<fibers::mutex> l(wr_mu_);

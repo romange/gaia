@@ -5,11 +5,8 @@
 
 #include <memory>
 
-#include <google/protobuf/message.h>
-
 #include "util/asio/accept_server.h"
 #include "util/rpc/rpc_envelope.h"
-#include "util/status.h"
 #include "strings/stringpiece.h"
 
 namespace util {
@@ -31,8 +28,8 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual ::util::Status HandleEnvelope(uint64_t rpc_id, Envelope* input,
-                                        EnvelopeWriter writer) = 0;
+  virtual void HandleEnvelope(uint64_t rpc_id, Envelope* input,
+                              EnvelopeWriter writer) = 0;
 };
 
 class ServiceInterface : public ListenerInterface {

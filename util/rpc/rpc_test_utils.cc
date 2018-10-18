@@ -20,7 +20,7 @@ DEFINE_uint32(rpc_test_io_pool, 0, "Number of IO loops");
 namespace util {
 namespace rpc {
 
-Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) {
+void TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) {
   VLOG(1) << "Got " << rpc_id << ", hs=" << envelope->header.size()
           << ", ls=" << envelope->letter.size();
   if (clear_) {
@@ -38,7 +38,7 @@ Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeW
       Copy(h, &tmp.header);
       writer(std::move(tmp));
     }
-    return Status::OK;
+    return;
   }
 
   if (absl::ConsumePrefix(&header, "sleep")) {
@@ -48,7 +48,6 @@ Status TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeW
   }
 
   writer(std::move(*envelope));
-  return Status::OK;
 }
 
 ServerTest::ServerTest() {

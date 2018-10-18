@@ -38,13 +38,11 @@ class PingBridge final : public rpc::ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  Status HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input,
-                                        EnvelopeWriter writer) override {
+  void HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input,
+                      EnvelopeWriter writer) override {
     qps.Inc();
     VLOG(1) << "RpcId: " << rpc_id;
     writer(std::move(*input));
-
-    return Status::OK;
   }
 };
 
