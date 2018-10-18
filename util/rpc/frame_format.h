@@ -28,6 +28,7 @@ namespace rpc {
       PB - message request of size message_size
 */
 
+// Also defined in rpc_connection.h. Seems to work.
 typedef uint64_t RpcId;
 
 class Frame {

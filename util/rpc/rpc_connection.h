@@ -17,8 +17,13 @@ class AcceptServer;
 
 namespace rpc {
 
+// Also defined in frame_format.h. Seems to work.
+typedef uint64_t RpcId;
+
 // ConnectionBridge is responsible to abstract higher level server-app logic and to provide
 // an interface that allows to map Envelope to ServiceInterface methods.
+// ConnectionBridge is a single-fiber creature, so currently only one caller fiber can
+// use it simultaneusly.
 class ConnectionBridge {
  public:
   typedef std::function<void(Envelope&&)> EnvelopeWriter;
@@ -28,7 +33,7 @@ class ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  virtual void HandleEnvelope(uint64_t rpc_id, Envelope* input,
+  virtual void HandleEnvelope(RpcId rpc_id, Envelope* input,
                               EnvelopeWriter writer) = 0;
 };
 
