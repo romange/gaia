@@ -100,24 +100,28 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
   DCHECK_NE(-1, socket_->native_handle());
 
-  // To support streaming we have this writer that can write multiple envelopes per
-  // single rpc request.
-  bool first_time = true;
-  auto writer = [&](Envelope&& env) {
-    RpcItem* next = first_time ? item : rpc_items_.Get();
-
-    next->envelope = std::move(env);
-    next->id = frame.rpc_id;
-    outgoing_buf_.push_back(*next);
-    first_time = false;
+  struct WriterData {
+    RpcId rpc_id;
+    RpcItem* item;
   };
 
+  // To support streaming we have this writer that can write multiple envelopes per
+  // single rpc request. We pass additional data by value to allow asynchronous invocation
+  // of ConnectionBridge::HandleEnvelope. We move writer into it, this it will be responsible to
+  // own it until the handler finishes.
+  auto writer = [data = WriterData{frame.rpc_id, item}, this] (Envelope&& env) mutable {
+    RpcItem* next = data.item ? data.item : rpc_items_.Get();
+
+    next->envelope = std::move(env);
+    next->id = data.rpc_id;
+    outgoing_buf_.push_back(*next);
+    data.item = nullptr;
+  };
+
+  // TODO: to wait until bridge finishes all its requests before RpcConnectionHandler can
+  // destroy itself due to depenency of writer on 'this'.
   bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
 
-  if (ShouldFlush()) {
-    std::lock_guard<fibers::mutex> l(wr_mu_);
-    FlushWritesGuarded();
-  }
   return ec_;
 }
 
