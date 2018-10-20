@@ -43,9 +43,7 @@ RpcConnectionHandler::~RpcConnectionHandler() {
     flush_fiber_.join();
   }
 
-  for (auto& item : outgoing_buf_) {
-    rpc_items_.Release(&item);
-  }
+  outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
 }
 
 void RpcConnectionHandler::OnOpenSocket() {
@@ -147,9 +145,9 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   }
   tmp.swap(outgoing_buf_);
   size_t write_sz = asio::async_write(*socket_, write_seq_, yield[ec_]);
-  for (auto& item : tmp) {
-    rpc_items_.Release(&item);
-  }
+
+  // We should use clear_and_dispose to delete items safely while unlinking them from tmp.
+  tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
 
   VLOG(1) << "Wrote " << count << " requests with " << write_sz << " bytes";
 }

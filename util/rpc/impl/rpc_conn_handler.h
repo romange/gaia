@@ -38,7 +38,7 @@ class RpcConnectionHandler : public ConnectionHandler {
   std::unique_ptr<ConnectionBridge> bridge_;
   std::unique_ptr<BufferedReadAdaptor<socket_t>> buf_read_sock_;
 
-  struct RpcItem : public intrusive::slist_base_hook<> {
+  struct RpcItem : public intrusive::slist_base_hook<intrusive::link_mode<intrusive::normal_link>> {
     RpcId id;
     Envelope envelope;
 

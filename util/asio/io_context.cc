@@ -83,6 +83,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   // This is done by dispatcher fiber.
   void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept override {
     DVLOG(2) << "suspend_until " << abs_time.time_since_epoch().count();
+
     // Only dispatcher context stops the thread.
     DCHECK(fibers::context::active()->is_context(fibers::type::dispatcher_context));
 
