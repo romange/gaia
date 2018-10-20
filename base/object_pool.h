@@ -72,4 +72,44 @@ class ObjectPool {
   size_t avail_index_ = 0, available_ = 0;
 };
 
+template <typename T> class ScopeGuard {
+ public:
+  ScopeGuard(ObjectPool<T>* pool) : pool_(pool), obj_(pool->Get()) {
+  }
+  ScopeGuard(const ScopeGuard&) = delete;
+
+  ScopeGuard(ScopeGuard&& o) noexcept : pool_(o.pool_), obj_(o.obj_) {
+    o.obj_ = nullptr;
+    o.pool_ = nullptr;
+  }
+
+  ~ScopeGuard() {
+    if (obj_)
+      pool_->Release(obj_);
+  }
+
+  void operator=(const ScopeGuard&) = delete;
+  ScopeGuard& operator=(ScopeGuard&& o) noexcept {
+    if (obj_)
+      pool_->Release(obj_);
+    obj_ = o.obj_;
+    pool_ = o.pool_;
+    o.obj_ = nullptr;
+    o.pool_ = nullptr;
+    return *this;
+  }
+
+  T* operator->() { return obj_;}
+  T* Get() { return obj_; }
+
+  T* Release() {
+    T* res = obj_;
+    obj_ = nullptr;
+    return res;
+  }
+ private:
+  ObjectPool<T>* pool_;
+  T* obj_;
+};
+
 }  // namespace base
