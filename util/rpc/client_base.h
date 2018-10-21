@@ -27,8 +27,9 @@ class ClientBase {
   using error_code = ClientChannel::error_code;
   using future_code_t = boost::fibers::future<error_code>;
 
-  // Returns true if the Stream has not been finished.
-  using MessageCallback = std::function<bool(Envelope&)>;
+  // Returns boost::asio::error::eof if the Stream has been finished,
+  // if bool(error_code) returns true, aborts receiving the stream and returns the error.
+  using MessageCallback = std::function<error_code(Envelope&)>;
 
   ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
@@ -77,7 +78,7 @@ class ClientBase {
 
   void CancelSentBufferGuarded(error_code ec);
   void ExpirePending(RpcId id);
-  
+
   bool OutgoingBufLock() {
     bool lock_exclusive = !channel_.context().InContextThread();
 

@@ -382,16 +382,21 @@ void ClientBase::HandleStreamResponse(RpcId rpc_id) {
     return;  // Might happen if pending_calls_ was cancelled when we read the envelope.
   }
   PendingCall& call = it->second;
-  bool to_continue = call.cb(*call.envelope);
-  if (to_continue)
+  error_code ec = call.cb(*call.envelope);
+  if (!ec)
     return;
+
+  // eof - means successful finish of stream receival.
+  if (ec == error::eof) {
+    ec = system::error_code{};
+  }
 
   // We finished processing the stream.
   // Keep the promise on the stack and erase from pending_calls_ first because
   // set_value might context switch and invalidate 'it'.
   auto promise = std::move(call.promise);
   pending_calls_.erase(it);
-  promise.set_value(error_code{});
+  promise.set_value(ec);
 }
 
 void ClientBase::CancelPendingCalls(error_code ec) {

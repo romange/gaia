@@ -68,19 +68,20 @@ TEST_F(ServerTest, Stream) {
   envelope.letter.resize_fill(42, 2);
 
   int times = 0;
-  auto cb = [&](Envelope& env) {
+  auto cb = [&](Envelope& env) -> system::error_code {
     ++times;
     absl::string_view header(strings::charptr(env.header.data()), env.header.size());
     LOG(INFO) << "Stream resp: " << header;
     if (absl::ConsumePrefix(&header, "cont:")) {
       uint32_t cont = 0;
       CHECK(absl::SimpleAtoi(header, &cont));
-      return cont > 0;
+      return cont ? system::error_code{} : asio::error::eof;
     }
-    return false;
+    return system::errc::make_error_code(system::errc::invalid_argument);
   };
   ec = client->SendAndReadStream(&envelope, cb);
   EXPECT_FALSE(ec);
+  EXPECT_EQ(3, times);
 }
 
 TEST_F(ServerTest, Sleep) {
