@@ -157,8 +157,13 @@ void RpcConnectionHandler::FlushFiber() {
   CHECK(socket_->get_executor().running_in_this_thread());
   VLOG(1) << "RpcConnectionHandler::FlushFiber";
 
+  // TODO: To save redunant spins
+  // we could reimplement this with periodict task and condition_variable.
+  // For each rpc connection we setup a Flush fiber which polls. That means that
+  // if we have 1000 connections we poll 1000 times * this loop frequency.
+  // It makes more sense to have a single poller per thread that awaken flush fibers if needed.
   while (true) {
-    this_fiber::sleep_for(100us);
+    this_fiber::sleep_for(300us);
     if (!is_open_ || !socket_->is_open())
       break;
 

@@ -215,7 +215,7 @@ void ClientBase::FlushFiber() {
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
   while (true) {
-    this_fiber::sleep_for(100us);
+    this_fiber::sleep_for(300us);
     if (channel_.is_shut_down())
       break;
 
