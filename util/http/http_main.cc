@@ -1,14 +1,9 @@
 // Copyright 2013, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/beast/http/status.hpp>
-
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 
-#include "util/asio/yield.h"
 #include "util/http/http_conn_handler.h"
 
 #include "absl/strings/str_join.h"
