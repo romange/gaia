@@ -49,6 +49,7 @@ RpcConnectionHandler::~RpcConnectionHandler() {
 
 void RpcConnectionHandler::OnOpenSocket() {
   flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
+  bridge_->InitInThread();
 }
 
 void RpcConnectionHandler::OnCloseSocket() {
@@ -117,8 +118,6 @@ system::error_code RpcConnectionHandler::HandleRequest() {
     data.item = nullptr;
   };
 
-  // TODO: to wait until bridge finishes all its requests before RpcConnectionHandler can
-  // destroy itself due to depenency of writer on 'this'.
   bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
 
   return ec_;

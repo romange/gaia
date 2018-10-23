@@ -30,6 +30,10 @@ class ConnectionBridge {
 
   virtual ~ConnectionBridge() {}
 
+  // Is called once from the connection thread before HandleEnvelope is being called.
+  // Is intended to finalize the setup for the bridge inside its intended thread.
+  virtual void InitInThread() {}
+
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.

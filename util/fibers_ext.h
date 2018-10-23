@@ -53,7 +53,7 @@ class Done {
 
   void Reset() {
     mutex_.lock();
-    ready_ = true;
+    ready_ = false;
     mutex_.unlock();
   }
 

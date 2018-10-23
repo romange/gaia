@@ -21,6 +21,7 @@ using namespace boost;
 class RpcConnectionHandler : public ConnectionHandler {
  public:
   // bridge is owned by RpcConnectionHandler instance.
+  // RpcConnectionHandler is created in acceptor thread and not in the socket thread.
   explicit RpcConnectionHandler(ConnectionBridge* bridge);
   ~RpcConnectionHandler();
 
@@ -29,6 +30,8 @@ class RpcConnectionHandler : public ConnectionHandler {
  private:
   void FlushWritesGuarded();  // protected by wr_mu_
   void FlushFiber();
+
+  // The following methods are run in the socket thread (thread that calls HandleRequest.)
   void OnOpenSocket() final;
   void OnCloseSocket() final;
   bool ShouldFlush();
