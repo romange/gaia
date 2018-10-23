@@ -57,6 +57,8 @@ class Done {
     mutex_.unlock();
   }
 
+  bool IsReady() const { return ready_; }
+
  private:
   ::boost::fibers::condition_variable cond_;
   ::boost::fibers::mutex mutex_;

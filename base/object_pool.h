@@ -74,6 +74,8 @@ class ObjectPool {
 
 template <typename T> class ScopeGuard {
  public:
+  ScopeGuard() : pool_(nullptr), obj_(nullptr) {}
+
   ScopeGuard(ObjectPool<T>* pool) : pool_(pool), obj_(pool->Get()) {
   }
   ScopeGuard(const ScopeGuard&) = delete;
@@ -106,6 +108,11 @@ template <typename T> class ScopeGuard {
     T* res = obj_;
     obj_ = nullptr;
     return res;
+  }
+
+  void Swap(ScopeGuard* o) {
+    std::swap(pool_, o->pool_);
+    std::swap(obj_, o->obj_);
   }
  private:
   ObjectPool<T>* pool_;
