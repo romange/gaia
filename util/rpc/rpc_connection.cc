@@ -42,6 +42,7 @@ RpcConnectionHandler::~RpcConnectionHandler() {
   if (flush_fiber_.joinable()) {
     flush_fiber_.join();
   }
+  bridge_->Join();
 
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
 }
@@ -149,7 +150,7 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   // We should use clear_and_dispose to delete items safely while unlinking them from tmp.
   tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
 
-  VLOG(1) << "Wrote " << count << " requests with " << write_sz << " bytes";
+  VLOG(2) << "Wrote " << count << " requests with " << write_sz << " bytes";
 }
 
 void RpcConnectionHandler::FlushFiber() {
@@ -169,7 +170,7 @@ void RpcConnectionHandler::FlushFiber() {
 
     if (outgoing_buf_.empty() || !wr_mu_.try_lock())
       continue;
-    VLOG(1) << "FlushFiber::IFlushWritesGuarded";
+    VLOG(2) << "FlushFiber::IFlushWritesGuarded";
     FlushWritesGuarded();
     wr_mu_.unlock();
   }

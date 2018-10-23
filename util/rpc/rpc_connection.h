@@ -35,6 +35,10 @@ class ConnectionBridge {
   // back another header, letter pair.
   virtual void HandleEnvelope(RpcId rpc_id, Envelope* input,
                               EnvelopeWriter writer) = 0;
+
+  // In case HandleEnvelope is asynchronous, waits for all the issued calls to finish.
+  // HandleEnvelope should not be called after calling Join().
+  virtual void Join() {};
 };
 
 class ServiceInterface : public ListenerInterface {
