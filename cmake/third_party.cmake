@@ -172,15 +172,16 @@ add_third_party(
   LIB libtcmalloc_and_profiler.so
 )
 
-set(CCTZ_DIR ${THIRD_PARTY_LIB_DIR}/cctz)
-add_third_party(cctz
-  GIT_REPOSITORY https://github.com/google/cctz.git
-  GIT_TAG v2.1
-  CONFIGURE_COMMAND true # 'true' is bash's NOP
-  BUILD_COMMAND make -j4 classic
-  INSTALL_COMMAND make install -e PREFIX=${CCTZ_DIR}
-  BUILD_IN_SOURCE 1
-)
+# abseil has cctz support built-in
+# set(CCTZ_DIR ${THIRD_PARTY_LIB_DIR}/cctz)
+# add_third_party(cctz
+#   GIT_REPOSITORY https://github.com/google/cctz.git
+#   GIT_TAG v2.1
+#   CONFIGURE_COMMAND true # 'true' is bash's NOP
+#   BUILD_COMMAND make -j4 classic
+#   INSTALL_COMMAND make install -e PREFIX=${CCTZ_DIR}
+#   BUILD_IN_SOURCE 1
+# )
 
 #Protobuf project
 set(PROTOBUF_DIR ${THIRD_PARTY_LIB_DIR}/protobuf)

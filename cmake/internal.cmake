@@ -233,6 +233,8 @@ endfunction()
 
 SET_PROPERTY(GLOBAL PROPERTY "test_list_property" "")
 
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
+
 function(cxx_test name)
   add_executable(${name} ${name}.cc)
   add_dependencies(${name} benchmark_project gtest_project)
@@ -254,7 +256,7 @@ function(cxx_test name)
     LIST(APPEND cur_list "${_label}:${name}")
   endforeach(_label)
   SET_PROPERTY(GLOBAL PROPERTY "test_list_property" "${cur_list}")
-
+  add_dependencies(check ${name})
 
   # add_custom_command(TARGET ${name} POST_BUILD
   #                    COMMAND ${name} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
