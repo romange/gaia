@@ -53,7 +53,7 @@ class PingInterface final : public rpc::ServiceInterface {
   }
 };
 
-std::atomic_ulong latency_ms(0);
+std::atomic_ulong latency_usec(0);
 std::atomic_ulong latency_count(0);
 std::atomic_ulong timeouts(0);
 
@@ -78,10 +78,10 @@ void Driver(ClientBase* client, size_t index, unsigned msg_count) {
     }
 
     auto last = chrono::steady_clock::now();
-    chrono::milliseconds ms = chrono::duration_cast<chrono::milliseconds>(last - tp);
+    chrono::microseconds usec = chrono::duration_cast<chrono::microseconds>(last - tp);
 
     latency_count.fetch_add(1, std::memory_order_relaxed);
-    latency_ms.fetch_add(ms.count(), std::memory_order_relaxed);
+    latency_usec.fetch_add(usec.count(), std::memory_order_relaxed);
     tp = last;
 
     if (ec == asio::error::eof || ec == asio::error::connection_reset) {
@@ -130,7 +130,7 @@ void client_pool(IoContextPool* pool) {
       f.Wait();
   }
   LOG(INFO) << "client_pool ended";
-  cout << "Average latency is " << double(latency_ms.load()) / (latency_count + 1) << endl;
+  cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000 << endl;
   cout << "Timeouts " << timeouts.load() << endl;
 }
 
