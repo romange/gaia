@@ -28,7 +28,7 @@ function(add_third_party name)
   CMAKE_PARSE_ARGUMENTS(parsed "${options}" "${oneValueArgs}" "${multiValArgs}" ${ARGN})
 
   if (parsed_CMAKE_PASS_FLAGS)
-    string(REPLACE " " ";" list_CMAKE_ARGS ${parsed_CMAKE_PASS_FLAGS})
+    string(REPLACE " " ";" piped_CMAKE_ARGS ${parsed_CMAKE_PASS_FLAGS})
   endif()
 
   if (NOT parsed_INSTALL_COMMAND)
@@ -87,6 +87,7 @@ function(add_third_party name)
 
     CMAKE_GENERATOR "Unix Makefiles"
     BUILD_BYPRODUCTS ${LIB_FILES}
+    LIST_SEPARATOR | # Use the alternate list separator
 
     # we need those CMAKE_ARGS for cmake based 3rd party projects.
     CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${INSTALL_ROOT}
@@ -95,7 +96,7 @@ function(add_third_party name)
         -DBUILD_TESTING=OFF
         -DCMAKE_C_FLAGS:STRING=-O3 -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
         -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_ROOT}
-        ${list_CMAKE_ARGS}
+        ${piped_CMAKE_ARGS}
     ${parsed_UNPARSED_ARGUMENTS}
   )
 
@@ -103,7 +104,6 @@ function(add_third_party name)
   file(MAKE_DIRECTORY ${INSTALL_ROOT}/include)
 
   set("${uname}_INCLUDE_DIR" "${INSTALL_ROOT}/include" PARENT_SCOPE)
-
   if (LIB_TYPE)
     set("${uname}_LIB_DIR" "${INSTALL_ROOT}/lib" PARENT_SCOPE)
     list(LENGTH LIB_FILES LIB_LEN)
@@ -132,7 +132,7 @@ add_third_party(
   gflags
   GIT_REPOSITORY https://github.com/gflags/gflags.git
   GIT_TAG v2.2.1
-  CMAKE_PASS_FLAGS "-DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=ON \
+  CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=ON \
                     -DBUILD_STATIC_LIBS=OFF -DBUILD_gflags_nothreads_LIB=OFF"
   SHARED
 )
@@ -143,7 +143,6 @@ add_third_party(
   DEPENDS gflags_project
   GIT_REPOSITORY https://github.com/romange/glog.git
   GIT_TAG Prod
-  CMAKE_PASS_FLAGS "-DBUILD_TESTING=OFF"
 )
 
 
@@ -267,14 +266,6 @@ add_third_party(
   LIB libdouble-conversion.a
 )
 
-add_third_party(evhtp
-  GIT_REPOSITORY https://github.com/romange/libevhtp-1
-# checking out the version that contains config support.
-  GIT_TAG 1.3.12-Fix
-  # BUILD_IN_SOURCE 1
-  CMAKE_PASS_FLAGS "-DEVHTP_DISABLE_SSL:STRING=ON  -DEVHTP_DISABLE_REGEX:STRING=ON"
-)
-
 set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
 
@@ -308,48 +299,6 @@ ExternalProject_Add_Step(folly_project config
 
   # Disable sanitization code in library includes.
   COMMAND sed -i "s/__SANITIZE_ADDRESS__/__SANITIZE_ADDRESS_DISABLED/" CPortability.h
-  LOG 1
-)
-
-add_third_party(wangle
-  DEPENDS folly_project
-  GIT_REPOSITORY https://github.com/facebook/wangle.git
-  GIT_TAG v2017.12.11.00
-  CONFIGURE_COMMAND cmake wangle -DFOLLY_LIBRARYDIR:PATH=${FOLLY_LIB_DIR}
-                    -DFOLLY_INCLUDEDIR:PATH=${FOLLY_INCLUDE_DIR}
-                    -DDOUBLE_CONVERSION_INCLUDE_DIR=${DCONV_INCLUDE_DIR}
-                    -DDOUBLE_CONVERSION_LIBRARYDIR=${DCONV_LIB_DIR}
-                    -DGFLAGS_INCLUDE_DIR=${GFLAGS_INCLUDE_DIR}
-                    -DGFLAGS_LIBRARYDIR=${GFLAGS_LIB_DIR}
-                    -DGLOG_INCLUDE_DIR=${GLOG_INCLUDE_DIR}
-                    -DGLOG_LIBRARYDIR=${GLOG_LIB_DIR}
-                    -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
-                    -DBUILD_TESTS=OFF
-                    -DCMAKE_BUILD_TYPE=Release
-                    -DCMAKE_INSTALL_PREFIX=${THIRD_PARTY_LIB_DIR}/wangle
-  BUILD_IN_SOURCE 1
-)
-
-set(LDPROXYGEN "${LDFOLLY} -L${FOLLY_LIB_DIR} -L${WANGLE_LIB_DIR} -L${GPERF_LIB_DIR}")
-set(CXXPROXYGEN "${CXXFOLLY} -I${FOLLY_INCLUDE_DIR} -I${WANGLE_INCLUDE_DIR} ")
-add_third_party(proxygen
-  DEPENDS folly_project wangle_project
-  GIT_REPOSITORY https://github.com/facebook/proxygen.git
-  GIT_TAG v2017.12.11.00
-  PATCH_COMMAND autoreconf <SOURCE_DIR>/proxygen -ivf
-  CONFIGURE_COMMAND echo foo
-  BUILD_COMMAND make -C proxygen -j4 install
-  INSTALL_COMMAND echo coo
-  BUILD_IN_SOURCE 1
-)
-
-ExternalProject_Add_Step(proxygen_project config
-  DEPENDEES configure
-  DEPENDERS build
-  WORKING_DIRECTORY ${THIRD_PARTY_DIR}/proxygen/proxygen
-  COMMAND ./configure --enable-shared=no
-                      --prefix=${THIRD_PARTY_LIB_DIR}/proxygen LDFLAGS=${LDPROXYGEN}
-                      CXXFLAGS=${CXXPROXYGEN} "LIBS=-lpthread"
   LOG 1
 )
 
@@ -392,32 +341,10 @@ add_third_party(dynasm
   INSTALL_COMMAND sh -c "test -L ${DYNASM_INCLUDE_DIR}/dynasm || ln -s ${THIRD_PARTY_DIR}/dynasm/dynasm -t ${DYNASM_INCLUDE_DIR}/"
 )
 
-set(SEASTAR_DIR ${THIRD_PARTY_LIB_DIR}/seastar)
-set(SEASTAR_INCLUDE_DIR ${SEASTAR_DIR}/include)
-
-set(SEASTAR_LIB_DIR "${SEASTAR_DIR}/lib")
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-set(SEASTAR_MODE debug)
-else()
-set(SEASTAR_MODE release)
-endif()
-
-# to make seastar INTERFACE_INCLUDE_DIRECTORIES happy.
-file(MAKE_DIRECTORY ${SEASTAR_INCLUDE_DIR}/fmt)
-add_third_party(seastar
-  DEPENDS protobuf_project lz4_project
-  GIT_REPOSITORY https://github.com/romange/seastar.git
-  PATCH_COMMAND sh -c "rm -rf ${SEASTAR_INCLUDE_DIR}"
-  COMMAND ln -sf ${THIRD_PARTY_DIR}/seastar ${SEASTAR_INCLUDE_DIR}
-  COMMAND mkdir -p ${SEASTAR_DIR}/lib
-  CONFIGURE_COMMAND <SOURCE_DIR>/configure.py --compiler=g++-5
-                    "--cflags=-I${PROTOBUF_INCLUDE_DIR} -I${LZ4_INCLUDE_DIR} -I${Boost_INCLUDE_DIR}"
-                    --protoc-compiler=${PROTOC} "--ldflags=-L${Boost_LIBRARY_DIR}" --mode=all
-  LIB ${SEASTAR_MODE}/libseastar.a
-  BUILD_COMMAND ninja -j4 build/${SEASTAR_MODE}/libseastar.a
-  INSTALL_COMMAND sh -c "rm -rf ${SEASTAR_LIB_DIR}/${SEASTAR_MODE} && ln -sf <SOURCE_DIR>/build/${SEASTAR_MODE} -t ${SEASTAR_LIB_DIR}"
-  BUILD_IN_SOURCE 1
+add_third_party(s2geometry
+  GIT_REPOSITORY https://github.com/romange/s2geometry.git
+  DEPENDS glog_project
+  CMAKE_PASS_FLAGS "-DWITH_GFLAGS=ON  -DWITH_GLOG=ON -DCMAKE_PREFIX_PATH=${GLOG_LIB_DIR}/cmake/glog/|${GFLAGS_LIB_DIR}/cmake/gflags"
 )
 
 
@@ -444,27 +371,3 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
 include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
-
-set_property(TARGET TRDP::seastar APPEND PROPERTY
-             INTERFACE_INCLUDE_DIRECTORIES ${SEASTAR_INCLUDE_DIR}/fmt)
-
-foreach(var IN ITEMS system program_options thread filesystem)
-  LIST(APPEND SEASTAR_LINK_LIBS "${BOOST_ROOT}/lib/libboost_${var}.so")
-endforeach()
-
-set_target_properties(TRDP::seastar PROPERTIES
-                      INTERFACE_COMPILE_DEFINITIONS FMT_HEADER_ONLY)
-
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set_property(TARGET TRDP::seastar APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS DEBUG_SHARED_PTR)
-endif()
-
-
-set_property(TARGET TRDP::seastar APPEND PROPERTY
-             IMPORTED_LINK_INTERFACE_LIBRARIES aio ${SEASTAR_LINK_LIBS}
-             ${CMAKE_THREAD_LIBS_INIT} hwloc numa dl rt gcc_s unwind)
-
-file(MAKE_DIRECTORY ${EVHTP_INCLUDE_DIR}/evhtp)
-set_property(TARGET TRDP::evhtp APPEND PROPERTY
-             INTERFACE_INCLUDE_DIRECTORIES ${EVHTP_INCLUDE_DIR}/evhtp
-             )
