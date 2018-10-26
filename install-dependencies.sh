@@ -11,8 +11,10 @@ BOOST_VER=boost_1_68_0
 
 install_boost() {
     BOOST=$BOOST_VER
-    wget -nv http://dl.bintray.com/boostorg/release/1.68.0/source/$BOOST.tar.bz2 \
+    if ! [ -d $BOOST_VER ]; then
+      wget -nv http://dl.bintray.com/boostorg/release/1.68.0/source/$BOOST.tar.bz2 \
         && tar -xjf $BOOST.tar.bz2
+    fi
 
     cd $BOOST && ./bootstrap.sh --prefix=/opt/boost --without-libraries=graph_parallel,graph,wave,test,mpi,python
     ./b2 --link=shared cxxflags="-std=c++14 -Wno-deprecated-declarations"  --variant=release --threading=multi \
@@ -20,7 +22,7 @@ install_boost() {
     ./b2 install -d0
 }
 
-if ! [ -d /opt/$BOOST_VER/lib ]; then
+if ! [ -d /opt/boost/lib ]; then
   install_boost
 else
   echo "Skipping installing boost"
