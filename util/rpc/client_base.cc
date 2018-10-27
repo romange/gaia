@@ -36,27 +36,6 @@ bool IsExpectedFinish(system::error_code ec) {
 
 constexpr uint32_t kTickPrecision = 3;  // 3ms per timer tick.
 
-template<typename Func> class RpcEvent : public base::TimerEventInterface {
- public:
-  explicit RpcEvent(Func&& callback) : callback_(std::forward<Func>(callback)) {
- }
-
-  void execute() override {
-    callback_(id_);
-  }
-
-  void set_id(RpcId i) { id_ = i; }
-
- private:
-  Func callback_;
-  RpcId id_;
-};
-
-template<typename Func> RpcEvent<Func>* CreateEvent(Func&& f) {
-  auto* res = new RpcEvent<Func>(std::forward<Func>(f));
-  return res;
-}
-
 }  // namespace
 
 ClientBase::~ClientBase() {
@@ -128,7 +107,7 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
   }
 
   uint32_t ticks = (deadline_msec + kTickPrecision - 1) / kTickPrecision;
-  auto* event = CreateEvent([this] (RpcId id) { ExpirePending(id); });
+  std::unique_ptr<ExpiryEvent> ev(new ExpiryEvent(this));
 
   // We protect against Send thread vs IoContext thread data races.
   // Fibers inside IoContext thread do not have to protect against each other since
@@ -138,12 +117,12 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
   bool lock_exclusive = OutgoingBufLock();
   RpcId id = next_send_rpc_id_++;
 
-  event->set_id(id);
-  base::Tick at = expire_timer_.schedule(event, ticks);
+  ev->set_id(id);
+  base::Tick at = expire_timer_.schedule(ev.get(), ticks);
   DVLOG(2) << "Scheduled expiry at " << at << " for rpcid " << id;
 
   outgoing_buf_.emplace_back(SendItem(id, PendingCall{std::move(p), envelope}));
-  outgoing_buf_.back().second.expiry.reset(event);
+  outgoing_buf_.back().second.expiry_event = std::move(ev);
   outgoing_buf_size_.store(outgoing_buf_.size(), std::memory_order_relaxed);
 
   OutgoingBufUnlock(lock_exclusive);
@@ -304,9 +283,10 @@ void ClientBase::ExpirePending(RpcId id) {
   DVLOG(1) << "Expire rpc id " << id;
 
   auto it = this->pending_calls_.find(id);
-  if (it == this->pending_calls_.end())
+  if (it == this->pending_calls_.end()) {
+    // TODO: there could be that the call is in outgoing_buf_ and we did not expiry it.
     return;
-
+  }
   // The order is important to eliminate interrupts.
   EcPromise pr = std::move(it->second.promise);
   this->pending_calls_.erase(it);

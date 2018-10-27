@@ -99,6 +99,20 @@ class ClientBase {
 
   void HandleStreamResponse(RpcId rpc_id);
 
+  class ExpiryEvent : public base::TimerEventInterface {
+   public:
+    explicit ExpiryEvent(ClientBase* me) : me_(me) {
+   }
+
+   // ExpiryEvent can not be moved because its address is registered inside TimerWheel.
+   void execute() final {  me_->ExpirePending(id_); }
+
+   void set_id(RpcId i) { id_ = i; }
+
+  private:
+    ClientBase* me_;
+    RpcId id_ = 0;
+  };
 
   RpcId next_send_rpc_id_ = 1;
   ClientChannel channel_;
@@ -115,28 +129,32 @@ class ClientBase {
       : promise(std::move(p)), envelope(env), cb(std::move(mcb)) {
     }
 
-    std::unique_ptr<base::TimerEventInterface> expiry;
+    std::unique_ptr<ExpiryEvent> expiry_event;
   };
 
   // The flow is as follows:
   // Send fiber enques requests into outgoing_buf_. It's thread-safe, protected by spinlock.
-  // FlushSendsGuarded flushes outgoing queue into the socket. ReadFiber receives envelopes and
-  // triggers the receive flow: Stream Handler and finally realizes future signalling the end of
-  // rpc call.
+  // FlushSendsGuarded flushes outgoing_buf_ into the socket. ReadFiber receives envelopes and
+  // triggers the receive flow: it might call Stream Handler and at the end it realizes
+  // future signalling the end of rpc call.
   typedef std::pair<RpcId, PendingCall> SendItem;
-
-  typedef absl::flat_hash_map<RpcId, PendingCall> PendingMap;
-  PendingMap pending_calls_;
-  std::atomic_ulong pending_calls_size_{0};
 
   folly::RWSpinLock buf_lock_;
   std::vector<SendItem> outgoing_buf_;  // protected by buf_lock_.
   std::atomic_ulong outgoing_buf_size_{0};
 
   boost::fibers::fiber read_fiber_, flush_fiber_;
-  boost::fibers::mutex send_mu_;
+  boost::fibers::mutex send_mu_;  // protects FlushSendsGuarded.
+
+  // Used in FlushSendsGuarded to flush buffers efficiently.
   std::vector<boost::asio::const_buffer> write_seq_;
   base::PODArray<std::array<uint8_t, rpc::Frame::kMaxByteSize>> frame_buf_;
+
+  typedef absl::flat_hash_map<RpcId, PendingCall> PendingMap;
+  PendingMap pending_calls_;
+  std::atomic_ulong pending_calls_size_{0};
+
+  // Handles expiration flow.
   base::TimerWheel expire_timer_;
   std::unique_ptr<PeriodicTask> expiry_task_;
 };

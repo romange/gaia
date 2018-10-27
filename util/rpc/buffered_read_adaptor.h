@@ -4,6 +4,7 @@
 #pragma once
 
 #include "util/asio/asio_utils.h"
+#include "util/asio/yield.h"
 
 namespace util {
 namespace rpc {
