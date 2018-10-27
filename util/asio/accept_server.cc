@@ -41,6 +41,8 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   // We can not allow dynamic listener additions because listeners_ might reallocate.
   CHECK(!was_run_);
 
+  si->RegisterPool(pool_);
+
   tcp::endpoint endpoint(tcp::v4(), port);
   IoContext& io_context = pool_->GetNextContext();
   listeners_.emplace_back(&io_context.get_context(), endpoint, si);

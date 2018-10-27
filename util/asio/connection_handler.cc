@@ -163,4 +163,9 @@ void ConnectionHandler::Close() {
 }
 
 
+void ListenerInterface::RegisterPool(IoContextPool* pool) {
+  CHECK(pool_ == nullptr);
+  pool_ = pool;
+}
+
 }  // namespace util

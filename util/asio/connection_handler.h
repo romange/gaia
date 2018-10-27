@@ -10,7 +10,7 @@
 
 namespace util {
 
-class ConnectionHandler;
+class IoContextPool;
 
 namespace detail {
 using namespace ::boost::intrusive;
@@ -119,6 +119,8 @@ class ListenerInterface {
  public:
   virtual ~ListenerInterface() {}
 
+  void RegisterPool(IoContextPool* pool);
+
   virtual ConnectionHandler* NewConnection() = 0;
 
   // Called by AcceptServer when shutting down start and before all connections are closed.
@@ -126,6 +128,12 @@ class ListenerInterface {
 
   // Called by AcceptServer when shutting down finalized and after all connections are closed.
   virtual void PostShutdown() {}
+
+ protected:
+  IoContextPool* pool() { return pool_;}
+
+ private:
+  IoContextPool* pool_ = nullptr;
 };
 
 }  // namespace util
