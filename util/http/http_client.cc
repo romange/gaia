@@ -8,9 +8,10 @@
 #include <curl/curl.h>
 
 #include "base/logging.h"
+#include "base/integral_types.h"
 #include "strings/strcat.h"
 #include "strings/stringpiece.h"
-#include "strings/urlencode.h"
+#include "absl/strings/escaping.h"
 #include "util/status.h"
 #include "util/http/http_status_code.h"
 
@@ -18,8 +19,9 @@ DEFINE_bool(enable_curl_verbosity, false, "");
 
 namespace http {
 
+using namespace std;
 using util::Status;
-using base::StatusCode;
+using util::StatusCode;
 
 
 namespace {
@@ -53,9 +55,13 @@ HttpClient::~HttpClient() {
 
 std::string HttpClient::EncodeUrl(const Args& args, bool url_encode) {
   std::string res;
+  std::string tmp;
+
   for (const auto& a : args) {
-    res.append(a.first).append("=").append(
-      url_encode ? UrlEncodeStringWithoutEncodingSpaceAsPlus(a.second) : a.second).append("&");
+    if (url_encode) {
+      absl::WebSafeBase64Escape(a.second, &tmp);
+    }
+    res.append(a.first).append("=").append(url_encode ? tmp : a.second).append("&");
   }
   if (!res.empty()) {
     res.pop_back();
@@ -87,7 +93,7 @@ util::Status HttpClient::Fetch(StringPiece url, CallbackFun fun) {
   long reply = 0;
   curl_easy_getinfo(rep_->curl, CURLINFO_RESPONSE_CODE , &reply);
   if (reply == HTTP_BAD_REQUEST || reply == HTTP_NOT_FOUND) {
-    return Status(StatusCode::IO_ERROR, StrCat(reply, ", ",
+    return Status(StatusCode::IO_ERROR, absl::StrCat(reply, ", ",
       StatusStringFromCode(HttpStatusCode(reply))));
   }
   return Status::OK;
@@ -103,7 +109,7 @@ util::Status HttpClient::ReadToString(StringPiece url, string* dest) {
 }
 
 void HttpClient::AddHeader(StringPiece header) {
-  rep_->headers.push_back(header.as_string());
+  rep_->headers.push_back(strings::AsString(header));
 }
 
 void HttpClient::ClearHeaders() {

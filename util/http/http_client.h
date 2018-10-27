@@ -25,7 +25,7 @@ public:
   // as well.
   static std::string EncodeUrl(const Args& args, bool url_encode = true);
 
-  void set_timeout(uint32 msec);
+  void set_timeout(uint32_t msec);
 
   util::Status Fetch(StringPiece url, CallbackFun fun);
   util::Status ReadToString(StringPiece url, std::string* dest);
