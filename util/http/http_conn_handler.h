@@ -68,7 +68,7 @@ struct SendLambda {
   }
 };
 
-// Should be one per process. Represents http server interface. 
+// Should be one per process. Represents http server interface.
 // Currently does not support on the fly updates - requires
 // multi-threading support.
 class ListenerBase : public ListenerInterface {
@@ -100,14 +100,12 @@ class HttpHandler : public ConnectionHandler {
   boost::system::error_code HandleRequest() final override;
 
  protected:
-  virtual bool Authorize(StringPiece key, StringPiece value) const {
-    return true;
-  }
   const char* favicon_;
   const char* resource_prefix_;
+  virtual bool Authorize(const QueryArgs& args) const { return true; }
 
  private:
-  bool Authorize(const QueryArgs& args) const;
+
   void HandleRequestInternal(const RequestType& req, SendFunction* send);
 
   const ListenerBase* registry_;

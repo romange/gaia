@@ -15,6 +15,7 @@
 #include "strings/strcat.h"
 #include "util/spawn.h"
 #include "util/http/http_conn_handler.h"
+#include "util/fibers_ext.h"
 
 namespace util {
 namespace http {
@@ -27,8 +28,6 @@ using namespace boost;
 using beast::http::field;
 namespace h2 = beast::http;
 typedef h2::response<h2::string_body> StringResponse;
-
-namespace internal {
 
 static void HandleCpuProfile(bool enable, StringResponse* response) {
   string profile_name = "/tmp/" + base::ProgramBaseName();
@@ -91,6 +90,29 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
   response->result(h2::status::moved_permanently);
 }
 
+
+void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
+  bool enable = false;
+  for (const auto& k_v : args) {
+    if (k_v.first == "profile" && k_v.second == "on")
+      enable = true;
+  }
+
+  fibers_ext::Done done;
+  std::thread([=, &done] {
+    StringResponse response;
+
+    HandleCpuProfile(enable, &response);
+    send->Invoke(std::move(response));
+    done.Notify();
+  }).detach();
+
+  // Instead of joining the thread which is not fiber-friendly,
+  // I use done to block the fiber but free the thread to handle other fibers.
+  // Still this fiber connection is blocked.
+  done.Wait();
+}
+
 #if 0
 static void HandleHeapProfile(bool enable, Response* response) {
   string profile_name = "/tmp/" + base::ProgramBaseName();
@@ -122,7 +144,6 @@ static string HumanReadableBytes(StringPiece key, int64 val) {
 
 #endif
 
-}  // namespace internal
 }  // namespace http
 }  // namespace util
 

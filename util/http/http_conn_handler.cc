@@ -218,6 +218,11 @@ void HttpHandler::HandleRequestInternal(const RequestType& request, SendFunction
     return;
   }
 
+  if (path == "/profilez") {
+    ProfilezHandler(args, send);
+    return;
+  }
+
   if (registry_) {
     auto it = registry_->cb_map_.find(path);
     if (it == registry_->cb_map_.end() || (it->second.is_protected && !Authorize(args))) {
@@ -226,14 +231,6 @@ void HttpHandler::HandleRequestInternal(const RequestType& request, SendFunction
     }
     it->second.cb(args, send);
   }
-}
-
-bool HttpHandler::Authorize(const QueryArgs& args) const {
-  for (const auto& k_v : args) {
-    if (Authorize(k_v.first, k_v.second))
-      return true;
-  }
-  return false;
 }
 
 bool ListenerBase::RegisterCb(StringPiece path, bool protect, RequestCb cb) {
