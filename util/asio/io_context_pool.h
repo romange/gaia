@@ -52,27 +52,35 @@ class IoContextPool {
     return context_arr_.size();
   }
 
-  // func must accept IoContext&. It will run in a dedicated detached fiber.
-  template <typename Func>
-  void AsyncFiberOnAll(Func&& func) {
+  // Runs func in all IO threads asynchronously. The task must be CPU-only non IO-blocking code
+  // because it runs directly in IO-fiber. MapTask runs asynchronously and will exit before
+  // the task finishes. The 'func' must accept context as its argument.
+  template <typename Func> void MapTask(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
       context.Post([&context, func = std::forward<Func>(func)]() mutable {
-        ::boost::fibers::fiber(std::forward<Func>(func), std::ref(context)).detach();
+        func(context);
       });
     }
+  }
+
+  // func must accept IoContext&. It will run in a dedicated detached fiber.
+  template <typename Func> void MapFiber(Func&& func) {
+    MapTask([func = std::forward<Func>(func)] (IoContext& context) {
+      ::boost::fibers::fiber(func, std::ref(context)).detach();
+    });
   }
 
   // Runs func in all IO threads in parallel, but waits for it to finish. The function runs
   // inside a temporary fiber to allow the execution of IO loop.
   template <typename Func>
-  void SyncFiberOnAll(Func&& func) {
+  void MapFiberSync(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
       func(context);
       bc.Dec();
     };
-    AsyncFiberOnAll(cb);
+    MapFiber(cb);
     bc.Wait();
   }
 
