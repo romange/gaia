@@ -40,5 +40,5 @@ script:
 
 after_failure:
   - pwd
-  - find ../third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
+  - find third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
   - find ../testresults | xargs -n 3 -t cat
