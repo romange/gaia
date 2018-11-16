@@ -12,10 +12,9 @@ add_dependencies(pb2json rapidjson_project)
 cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
 
 
-add_library(threads executor.cc sp_task_pool.cc)
-cxx_link(threads proc_stats event event_pthreads)
+add_library(threads sp_task_pool.cc)
+cxx_link(threads base)
 
-cxx_test(executor_test threads LABELS CI)
 cxx_test(sp_task_pool_test base threads util LABELS CI)
 
 add_library(fibers sq_threadpool.cc)

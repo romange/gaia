@@ -144,7 +144,6 @@ TEST_F(SPTaskPoolTest, NoShared) {
   pool.Launch(1000);
 
   EXPECT_EQ(0, pool.QueueSize());
-  EXPECT_EQ(0, pool.AverageDelayUsec());
 
   for (int i = 0; i < 16; ++i)
     pool.RunTask(5, "bar");
@@ -161,6 +160,29 @@ TEST_F(SPTaskPoolTest, JoinThreads) {
   }
 }
 
+struct TaskFinalize {
+  TaskFinalize(int* cnt) : cnt_(cnt) {}
+
+  void operator()(int work) {
+  }
+
+  void Finalize() {
+    (*cnt_)++;
+  }
+
+  int* cnt_;
+};
+
+TEST_F(SPTaskPoolTest, Finalize) {
+  SingleProducerTaskPool<TaskFinalize, int> pool("finalize", 2);
+  int count = 0;
+
+  pool.Launch(&count);
+  pool.WaitForTasksToComplete();
+  pool.Finalize();
+  EXPECT_GT(count, 0);
+}
+
 struct NoOpTask {
   void operator()(int ) {
   }
@@ -169,15 +191,15 @@ struct NoOpTask {
 typedef SingleProducerTaskPool<NoOpTask, int> NoOpPool;
 
 static void BM_PoolRun(benchmark::State& state) {
-  NoOpPool pool("test", 40, state.range_x());
+  NoOpPool pool("test", 40, state.range(0));
   pool.Launch();
   volatile int val = 10;
 
   while (state.KeepRunning()) {
     pool.RunTask(val);
   }
-  LOG(INFO) << "AvDelay (usec): " << pool.AverageDelayUsec();
-  //pool->WaitForTasksToComplete();*/
+
+  pool.WaitForTasksToComplete();
 }
 BENCHMARK(BM_PoolRun)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16);
 
@@ -191,8 +213,6 @@ static void BM_PoolTryRun(benchmark::State& state) {
       pool.WaitForTasksToComplete();
     }
   }
-  LOG(INFO) << "AvDelay (usec): " << pool.AverageDelayUsec();
-  //pool->WaitForTasksToComplete();*/
 }
 BENCHMARK(BM_PoolTryRun);
 

@@ -13,7 +13,8 @@
 namespace util {
 
 
-namespace internal {
+namespace detail {
+
 
 void SingleProducerTaskPoolBase::ThreadInfo::Join() {
   if (d.thread_id) {
@@ -50,26 +51,25 @@ SingleProducerTaskPoolBase::SingleProducerTaskPoolBase(
 
 SingleProducerTaskPoolBase::~SingleProducerTaskPoolBase() {
   JoinThreads();
-
-  for (auto t : thread_interfaces_) delete t;
 }
 
 void SingleProducerTaskPoolBase::LaunchThreads() {
-  CHECK(threads_.empty());
+  CHECK(!thread_info_);
 
-  threads_.resize(thread_count_);
+  thread_info_.reset(new ThreadInfo[thread_count_]);
 
   char buf[16];
-  for (unsigned i = 0; i < threads_.size(); ++i) {
+  for (unsigned i = 0; i < thread_count_; ++i) {
     snprintf(buf, sizeof(buf), "%s%d", base_name_.c_str(), i);
 
-    threads_[i].d.thread_id = base::StartThread(buf, ThreadRoutine, new RoutineConfig{this, i});
+    thread_info_[i].d.thread_id = base::StartThread(buf, ThreadRoutine, new RoutineConfig{this, i});
   }
 }
 
 void SingleProducerTaskPoolBase::JoinThreads() {
   start_cancel_ = true;
-  for (auto& t : threads_) {
+  for (unsigned i = 0; i < thread_count_; ++i) {
+    auto& t = thread_info_[i];
     t.Wake();
     t.Join();
   }
@@ -81,9 +81,9 @@ unsigned SingleProducerTaskPoolBase::FindMostFreeThread() const {
   // Rerun thread index with lowest score.
   uint32 min_score = kuint32max;
   unsigned index = 0;
-  for (unsigned i = 0; i < threads_.size(); ++i) {
+  for (unsigned i = 0; i < thread_count_; ++i) {
     uint32 score = thread_interfaces_[i]->QueueSize();
-    if (threads_[i].d.has_tasks) {
+    if (thread_info_[i].d.has_tasks) {
       ++score;
     }
     if (score == 0) {
@@ -100,9 +100,9 @@ unsigned SingleProducerTaskPoolBase::FindMostFreeThread() const {
 
 void SingleProducerTaskPoolBase::WaitForTasksToComplete() {
   // We assuming that producer thread stopped enqueing tasks.
-  for (unsigned i = 0; i < threads_.size(); ++i) {
-    const ThreadLocalInterface* tli = thread_interfaces_[i];
-    ThreadInfo::Data& d = threads_[i].d;
+  for (unsigned i = 0; i < thread_count_; ++i) {
+    const ThreadLocalInterface* tli = thread_interfaces_[i].get();
+    ThreadInfo::Data& d = thread_info_[i].d;
 
     d.ev_task_finished.await([tli, &d] { return tli->IsQueueEmpty() && !d.has_tasks; });
   }
@@ -111,30 +111,32 @@ void SingleProducerTaskPoolBase::WaitForTasksToComplete() {
 
 unsigned SingleProducerTaskPoolBase::QueueSize() const {
   unsigned res = 0;
-  for (unsigned i = 0; i < threads_.size(); ++i) {
+  for (unsigned i = 0; i < thread_count_; ++i) {
     res = std::max(res, thread_interfaces_[i]->QueueSize());
   }
   return res;
 }
 
+#ifdef DEBUG_ROMAN
 uint64 SingleProducerTaskPoolBase::AverageDelayUsec() const {
   uint64 jiffies = 0;
   uint64 count = 0;
-  for (unsigned i = 0; i < threads_.size(); ++i) {
-    const ThreadLocalInterface* tli = thread_interfaces_[i];
+  for (unsigned i = 0; i < thread_count_; ++i) {
+    const ThreadLocalInterface* tli = thread_interfaces_[i].get();
     jiffies += tli->queue_delay_jiffies;
     count += tli->queue_delay_count;
   }
 
   return count ? jiffies * 100 / count : 0;
 }
+#endif
 
 void* SingleProducerTaskPoolBase::ThreadRoutine(void* arg) {
   RoutineConfig* config = (RoutineConfig*)arg;
   SingleProducerTaskPoolBase* me = config->me;
-  ThreadInfo::Data& ti = me->threads_[config->thread_index].d;
+  ThreadInfo::Data& ti = me->thread_info_[config->thread_index].d;
 
-  ThreadLocalInterface* thread_interface = me->thread_interfaces_[config->thread_index];
+  ThreadLocalInterface* thread_interface = me->thread_interfaces_[config->thread_index].get();
 
   delete config;
   config = nullptr;
@@ -168,6 +170,6 @@ void* SingleProducerTaskPoolBase::ThreadRoutine(void* arg) {
   return NULL;
 }
 
-}  // namespace internal
+}  // namespace detail
 
 }  // namespace util
