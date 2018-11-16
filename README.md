@@ -53,20 +53,17 @@ as its core libraries for asynchronous processing.
 is used for managing thread-per-core asynchronous engine based on ASIO.
 For periodic tasks, look at `asio/period_task.h`.
 2. The listening server (AcceptServer) is protocol agnostic and serves both http and RPC.
-3. new RPC service methods run inside a fiber. This fiber belongs to a thread that probably serves
-many other connections in the server. Using regular locking mechanisms
-(`std::mutex`, `pthread_mutex`) or calling 3rd party libraries (libmysqlcpp) will block the whole thread. We need to be mindful about this, and as a policy prohibit thread blocking in fiber-based server code.
-4. RPC service methods might need to issue RPC calls by themselves or block for some other reason.
-To do it correctly, we must use fiber-friendly fiber-friendly synchronization routines. But even
-in this case we still block the calling fiber (not thread). By default, there is one dedicated fiber per RPC connection that reads rpc requests and delegates them to the RPC application code. Please note,
-that if an application code blocks during its request processing, it effectively limits total QPS per that socket connection. For spinlock use-cases (i.e. RAM access locking with rw-spinlocks) having single fiber per rpc-connection is usually enough. For more complicated cases, it's advised to implement fiber-pool (currently not implemented in GAIA).
+3. RPC-service methods run inside a fiber. That fiber belongs to a thread that probably serves
+many other fiber-based connections in the server. Using regular locking mechanisms
+(`std::mutex`, `pthread_mutex`) or calling 3rd party libraries (libmysqlcpp) will block the whole thread and all its connections will be stalled. We need to be mindful about this, and as a policy prohibit thread blocking in fiber-based server code.
+4. Nevetheless, RPC service methods might need to issue RPC calls by themselves or block for some other reason.
+To do it correctly, we must use fiber-friendly synchronization routines. But even in this case we will still block the calling fiber (not thread). All other connections will continue processing but this one will stall. By default, there is one dedicated fiber per RPC connection that reads rpc requests and delegates them to the RPC application code. We need to remember that if higher level server-code stalls its fiber during its request processing, it effectively limits total QPS per that socket connection. For spinlock use-cases (i.e. RAM access locking with rw-spinlocks with low contention) having single fiber per rpc-connection is usually good enough to sustain high throughput. For more complicated cases, it's advised to implement fiber-pool (currently not exposed in GAIA).
 
-5. Server-side streaming is needed for responses that can be very large and can easily be represented by
-many smaller responses with identical interface. Think of SQL response for example.
-It may consist of many rows returned by `SELECT`. Instead, of returning them as one blob, server-side streaming can send back multiple responses in the context of a single request on a wire.
-Each small response is propagated to RPC client via callback based interface. As a result, both systems (client and server) are not required to hold the whole response in RAM at the same time.
+5. Server-side streaming is needed for responses that can be very large in size. Such responses can easily be represented by
+a stream of smaller responses with identical schema. Think of SQL response for example.
+It may consist of many rows returned by `SELECT`. Instead, of returning all of them as one blob, server-side streaming can send back multiple responses in the context of a single request on a wire. Each small response is propagated to RPC client via callback based interface. As a result, both systems (client and server) are not required to hold the whole response in RAM at the same time.
 
-While GAIA provides very efficient RPC core, it does not provide higher level RPC bindings.
+While GAIA provides very efficient RPC core library, it does not provide higher level RPC bindings.
 It's possible though to build a layer that uses protobuf-based declaration language this RPC library.
 For raw RPC demo see asio_fibers above.
 
@@ -78,7 +75,7 @@ Please see [http_main.cc](https://github.com/romange/gaia/blob/master/util/http/
 
 ### Self-profiling
 Every http-powered backend has integrated CPU profiling capabilities using [gperf-tools](https://github.com/gperftools/gperftools) and [pprof](https://github.com/google/pprof)
-Profiling can be trigerred in prod using magical url commands and they usually have very minimal impact
+Profiling can be trigerred in prod using magic-url commands. Enabled profiling usually has very minimal impact
 on cpu performance of the running backend.
 
 ### Logging
