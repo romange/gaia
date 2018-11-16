@@ -55,7 +55,7 @@ struct CheckCtorRules {
   }
 };
 
-struct Task {
+struct CheckCtorTask {
   typedef std::vector<Op>* SharedData;
   SharedData shared = nullptr;
 
@@ -115,7 +115,7 @@ TEST_F(SPTaskPoolTest, Queue) {
 }
 
 TEST_F(SPTaskPoolTest, Basic) {
-  SingleProducerTaskPool<Task, CheckCtorRules> pool("test", 2, 1);
+  SingleProducerTaskPool<CheckCtorTask> pool("test", 2, 1);
   vector<Op> result;
   pool.SetSharedData(&result);
   pool.Launch();
@@ -130,14 +130,13 @@ TEST_F(SPTaskPoolTest, Basic) {
 struct TaskNoShared {
   unsigned sleep;
 
-
-  void operator()(std::pair<int, string> p) {
+  void operator()(int arg1, string arg2) {
     if (sleep) base::SleepMicros(sleep);
   }
   TaskNoShared(unsigned s = 0) : sleep(s) {}
 };
 
-typedef SingleProducerTaskPool<TaskNoShared, std::pair<int, string>> TaskNoSharedPool;
+typedef SingleProducerTaskPool<TaskNoShared> TaskNoSharedPool;
 
 TEST_F(SPTaskPoolTest, NoShared) {
   TaskNoSharedPool pool("test", 2);
@@ -174,7 +173,7 @@ struct TaskFinalize {
 };
 
 TEST_F(SPTaskPoolTest, Finalize) {
-  SingleProducerTaskPool<TaskFinalize, int> pool("finalize", 2);
+  SingleProducerTaskPool<TaskFinalize> pool("finalize", 2);
   int count = 0;
 
   pool.Launch(&count);
@@ -188,7 +187,7 @@ struct NoOpTask {
   }
 };
 
-typedef SingleProducerTaskPool<NoOpTask, int> NoOpPool;
+typedef SingleProducerTaskPool<NoOpTask> NoOpPool;
 
 static void BM_PoolRun(benchmark::State& state) {
   NoOpPool pool("test", 40, state.range(0));

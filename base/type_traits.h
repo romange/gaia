@@ -28,6 +28,23 @@ struct is_invocable_r : std::is_constructible<std::function<R(Args...)>,
                                               std::reference_wrapper<std::remove_reference_t<F>>> {
 };
 
+// based on https://functionalcpp.wordpress.com/2013/08/05/function-traits/
+template <typename F> struct DecayedTupleFromParams;
+
+/*template <typename C, typename R, typename Arg> struct DecayedTupleFromParams<R(C::*)(Arg)> {
+  typedef typename std::decay<Arg>::type type;
+};*/
+
+template <typename C, typename R, typename... Args> struct DecayedTupleFromParams<R(C::*)(Args...)> {
+  typedef std::tuple<typename std::decay<Args>::type...> type;
+};
+template <typename C, typename R, typename... Args> struct DecayedTupleFromParams<R(C::*)(Args...) const> {
+  typedef std::tuple<typename std::decay<Args>::type...> type;
+};
+
+template <typename C>
+struct DecayedTupleFromParams : public DecayedTupleFromParams<decltype(&C::operator())> {};
+
 }  // namespace base
 
 // Right now these macros are no-ops, and mostly just document the fact

@@ -18,6 +18,7 @@
 
 #include "base/event_count.h"
 #include "base/type_traits.h"
+#include "absl/utility/utility.h"   // for absl::apply
 // #include "base/walltime.h"  // for GetMonotonicJiffies
 
 /*
@@ -161,35 +162,37 @@ using SharedDataOrEmptyTuple_t = typename SharedDataOrEmptyTuple<T>::type;
 
 }  // namespace detail
 
-template <typename Task, typename TaskArgs,
-          typename SharedTuple = detail::SharedDataOrEmptyTuple_t<Task>>
+template <typename Task>
 class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
   template <class T>
   using PCQ = folly::ProducerConsumerQueue<T>;
-  using EmptyTupleTag = typename std::is_same<SharedTuple, std::tuple<>>::type;
+  using SharedTuple = detail::SharedDataOrEmptyTuple_t<Task>;
 
   // When tasks do not have shared data.
-  static void InitShared(std::true_type, Task&, SharedTuple&) {
-  }
+  static void InitShared(Task& task, const std::tuple<>& t) {}
 
   // When tasks do have shared data.
-  static void InitShared(std::false_type, Task& task, SharedTuple& s) {
+  template<typename S> static void InitShared(Task& task, S& s,
+      typename std::enable_if<!std::is_same<S, std::tuple<>>::value>::type* = 0) {
     task.InitShared(s);
   }
 
-  struct QueueItem {
+  using TaskArgs = typename base::DecayedTupleFromParams<Task>::type;
+
+  struct CallItem {
     TaskArgs args;
     // int64 ts;
 
-    template <typename... Args> QueueItem(Args&&... a) : args(std::forward<Args>(a)...) {
+    template <typename... Args> CallItem(Args&&... a) : args(std::forward<Args>(a)...) {
       // ts = base::GetMonotonicJiffies();
     }
-    QueueItem() {
+
+    CallItem() {
     }
   };
 
   class QueueTaskImpl : public ThreadLocalInterface {
-    PCQ<QueueItem> queue_;
+    PCQ<CallItem> queue_;
     SharedTuple& shared_data_;
     Task task_;
 
@@ -197,20 +200,23 @@ class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
 
    public:
     template <typename... Args>
-    QueueTaskImpl(unsigned size, SharedTuple& shared, Args&&... args)
-        : queue_(size), shared_data_(shared), task_(std::forward<Args>(args)...) {
-      InitShared(EmptyTupleTag(), task_, shared);
+    QueueTaskImpl(unsigned size, SharedTuple& shared, Args&&... task_args)
+        : queue_(size), shared_data_(shared), task_(std::forward<Args>(task_args)...) {
+      InitShared(task_, shared);
     }
 
     virtual bool RunTask() override {
-      QueueItem item;
+      CallItem item;
       if (!queue_.read(item))
         return false;
 
       // queue_delay_jiffies += (base::GetMonotonicJiffies() - item.ts);
       // ++queue_delay_count;
 
-      task_(std::move(item.args));
+      // In C++17 can be std::apply.
+      // Should it be forward or move? Depends if args are moveable or not.
+      // Ideally we want to move instead of copy.
+      absl::apply(task_, std::move(item.args));
       return true;
     }
 
@@ -257,12 +263,12 @@ class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
     if (TryRunTask(std::forward<Args>(args)...))
       return;
     // We use TaskArgs to allow element by element initialization of the arguments.
-    RunInline(TaskArgs(std::forward<Args>(args)...));
+    RunInline(std::forward<Args>(args)...);
   }
 
   template <typename... Args>
   void RunInline(Args&&... args) {
-    (*calling_thread_task_)(TaskArgs(std::forward<Args>(args)...));
+    (*calling_thread_task_)(std::forward<Args>(args)...);
   }
 
   template <typename... Args>
@@ -275,7 +281,7 @@ class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
     if (calling_thread_task_)
       return;
     calling_thread_task_.reset(new Task(std::forward<Args>(args)...));
-    InitShared(EmptyTupleTag{}, *calling_thread_task_, shared_data_);
+    InitShared(*calling_thread_task_, shared_data_);
 
     thread_interfaces_.resize(thread_count());
     for (auto& ti : thread_interfaces_) {
@@ -284,6 +290,7 @@ class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
     LaunchThreads();
   }
 
+  // Runs sequentially, thread-safe.
   void Finalize() {
     if (!calling_thread_task_)
       return;
