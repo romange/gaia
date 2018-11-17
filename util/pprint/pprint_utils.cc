@@ -21,10 +21,14 @@ DEFINE_string(csv, "", "comma delimited list of tag numbers. For repeated fields
                        "to add :[delimiting char] after a tag number.");
 DEFINE_bool(use_csv_null, true, "When printing csv format use \\N for outputing undefined "
                                 "optional fields.");
+DEFINE_bool(aggregate_repeated, false, "When printing csv format, aggregate repeated leaves in one "
+                                       "line: \"xx,yy,..\"");
+
 DEFINE_bool(omit_blobs, true, "");
 DEFINE_bool(omit_custom_formatting, false, "");
 DEFINE_bool(skip_value_escaping, false, "");
 DEFINE_string(root_node, "", "");
+DEFINE_bool(omit_double_quotes, false, "Omits double quotes when printing string values");
 
 using std::cout;
 using std::string;
@@ -96,9 +100,12 @@ void FdPath::ExtractValueRecur(const gpb::Message& msg, uint32 index, ValueCb cb
 
       } else {
         // Repeated leaves.
-        string val;
-        for (int i = 0; i < sz; ++i) {
-          cb(msg, fd, i);
+        if (FLAGS_aggregate_repeated) {
+          cb(msg, fd, -1, sz);
+        } else {
+          for (int i = 0; i < sz; ++i) {
+            cb(msg, fd, i, -1);
+          }
         }
       }
     }
@@ -116,7 +123,7 @@ void FdPath::ExtractValueRecur(const gpb::Message& msg, uint32 index, ValueCb cb
   }
   string res;
   printer_.PrintFieldValueToString(msg, fd, -1, &res);*/
-  cb(msg, fd, -1);
+  cb(msg, fd, -1, -1);
 }
 
 static gpb::SimpleDescriptorDatabase proto_db;
@@ -181,6 +188,9 @@ public:
       }
     }
     const string& val2 = FLAGS_skip_value_escaping ? val : absl::Utf8SafeCEscape(val);
+    if (FLAGS_omit_double_quotes) {
+      return val2;
+    }
     return absl::StrCat("\"", val2, "\"");
   }
 };
@@ -267,13 +277,31 @@ void Printer::PrintValueRecur(size_t path_index, const string& prefix,
                               bool has_value, const gpb::Message& msg) const {
   CHECK_LT(path_index, fds_.size());
   auto cb_fun = [path_index, this, has_value, &prefix, &msg](
-    const gpb::Message& parent, const gpb::FieldDescriptor* fd, int item_index) {
+    // num_items - #items in leaf repeated field. if given (!-1): aggregate all values: "xx,yy,.."
+    // item_index - item index in leaf repeated field. if given (!-1): print line with this item.
+    const gpb::Message& parent, const gpb::FieldDescriptor* fd, int item_index, int num_items) {
     string val;
-    printer_.PrintFieldValueToString(parent, fd, item_index, &val);
-    if (item_index == -1) {
-      const gpb::Reflection* reflection = parent.GetReflection();
-      if (FLAGS_use_csv_null && !reflection->HasField(parent, fd)) {
-        val = "\\N";
+    CHECK_NE(num_items, 0);
+
+    if (num_items != -1) {
+      if (!FLAGS_omit_double_quotes)
+        val = "\"";
+      for (int i=0; i < num_items; i++) {
+        string repeated_val;
+        printer_.PrintFieldValueToString(parent, fd, i, &repeated_val);
+        absl::StrAppend(&val, repeated_val, ",");
+      }
+      if (FLAGS_omit_double_quotes)
+        val.pop_back();
+      else
+        val.back() = '"';
+    } else {
+      printer_.PrintFieldValueToString(parent, fd, item_index, &val);
+      if (item_index == -1) {
+        const gpb::Reflection* reflection = parent.GetReflection();
+        if (FLAGS_use_csv_null && !reflection->HasField(parent, fd)) {
+          val = "\\N";
+        }
       }
     }
 

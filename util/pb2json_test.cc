@@ -5,6 +5,7 @@
 
 #include "util/plang/addressbook.pb.h"
 #include "base/gtest.h"
+#include "absl/strings/str_cat.h"
 
 namespace util {
 
@@ -61,6 +62,21 @@ TEST_F(Pb2JsonTest, EnumAndRepeated) {
   string res = Pb2Json(p);
 
   EXPECT_EQ(kExpected, res);
+}
+
+TEST_F(Pb2JsonTest, Double) {
+  static_assert(26.100000381f == 26.1f, "");
+  absl::AlphaNum al(26.1f);
+  EXPECT_EQ(4, al.size());
+
+  Person p;
+  p.set_fval(26.1f);
+  string res = Pb2Json(p);
+
+  // Json has only double representation so it may change floats.
+  // If we want to fix it, we must use different formatter for floats.
+  // For some reason RawNumber adds quotes, need to fix it or fork rapidjson.
+  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":26.100000381})", res);
 }
 
 }  // namespace util

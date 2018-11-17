@@ -65,8 +65,11 @@ void PrintValue(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
     case FD::CPPTYPE_UINT64:
       res->Uint64(refl->GetUInt64(msg, fd));
     break;
-    case FD::CPPTYPE_FLOAT:
+    case FD::CPPTYPE_FLOAT: {
+      // absl::AlphaNum al(refl->GetFloat(msg, fd));
+      // res->RawNumber(al.data(), al.size());
       res->Double(refl->GetFloat(msg, fd));
+    }
     break;
     case FD::CPPTYPE_DOUBLE:
       res->Double(refl->GetDouble(msg, fd));

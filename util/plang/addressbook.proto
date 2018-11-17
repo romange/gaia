@@ -39,6 +39,7 @@ message Person {
   optional BankAccount account = 6;
   repeated string tag = 7;
   required double dval = 8;
+  optional float fval = 9;
 }
 
 // Our address book file is just one of these.

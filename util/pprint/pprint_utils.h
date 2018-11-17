@@ -22,7 +22,8 @@ namespace gpb = ::google::protobuf;
 class FdPath {
 public:
   // msg, fd, index in repeated array.
-  typedef std::function<void(const gpb::Message& msg, const gpb::FieldDescriptor*, int)> ValueCb;
+  typedef std::function<void(const gpb::Message& msg, const gpb::FieldDescriptor*, int, int)> 
+          ValueCb;
   FdPath() {}
   FdPath(const gpb::Descriptor* root, StringPiece path);
   FdPath(const FdPath&) = default;

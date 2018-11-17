@@ -33,6 +33,7 @@ DEFINE_string(where, "", "boolean constraint in plang language");
 DECLARE_string(csv);
 DEFINE_bool(json, false, "");
 DEFINE_bool(raw, false, "");
+DEFINE_bool(count, false, "");
 DEFINE_string(schema, "", "Prints the schema of the underlying proto."
                           "Can be either 'json' or 'proto'.");
 DEFINE_bool(sizes, false, "Prints a rough estimation of the size of every field");
@@ -103,7 +104,7 @@ bool ShouldSkip(const gpb::Message& msg, const FdPath& fd_path) {
     return false;
   const string* val = nullptr;
   string buf;
-  auto cb = [&val, &buf](const gpb::Message& msg, const gpb::FieldDescriptor* fd, int) {
+  auto cb = [&val, &buf](const gpb::Message& msg, const gpb::FieldDescriptor* fd, int, int) {
     const gpb::Reflection* refl = msg.GetReflection();
     val = &refl->GetStringReference(msg, fd, &buf);
   };
@@ -183,6 +184,8 @@ int main(int argc, char **argv) {
     CHECK_EQ(0, parser.parse()) << "Could not parse " << FLAGS_where;
   }
 
+  size_t count = 0;
+
   // const Reflection* reflection = msg->GetReflection();
   for (int i = 1; i < argc; ++i) {
     StringPiece path(argv[i]);
@@ -202,7 +205,7 @@ int main(int argc, char **argv) {
       std::unique_ptr<Printer> printer;
       std::unique_ptr<SizeSummarizer> size_summarizer;
 
-      if (!FLAGS_raw) {
+      if (!FLAGS_raw && !FLAGS_count) {
         std::map<std::string, std::string> meta;
         if (!reader.GetMetaData(&meta)) {
           LOG(ERROR) << "Error reading " << argv[i];
@@ -231,7 +234,7 @@ int main(int argc, char **argv) {
         printer.reset(new Printer(tmp_msg->GetDescriptor()));
       }
 
-      using TaskPool = util::SingleProducerTaskPool<PrintTask, string>;
+      using TaskPool = util::SingleProducerTaskPool<PrintTask>;
       std::unique_ptr<TaskPool> pool;
       pool.reset(new TaskPool("pool", 10));
 
@@ -248,10 +251,14 @@ int main(int argc, char **argv) {
       }
 
       while (reader.ReadRecord(&record, &record_buf)) {
-        if (FLAGS_parallel) {
-          pool->RunTask(AsString(record));
+        if (FLAGS_count) {
+          ++count;
         } else {
-          pool->RunInline(AsString(record));
+          if (FLAGS_parallel) {
+            pool->RunTask(AsString(record));
+          } else {
+            pool->RunInline(AsString(record));
+          }
         }
       }
       if (pool)
@@ -262,6 +269,8 @@ int main(int argc, char **argv) {
                 << reader.read_header_bytes();
     }
   }
+  if (FLAGS_count)
+    std::cout << "Count: " << count;
 
   return 0;
 }
