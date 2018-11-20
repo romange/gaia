@@ -1,5 +1,9 @@
-// See README.txt for information and build instructions.
+// Copyright 2018, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
 syntax = "proto2";
+
+import "google/protobuf/descriptor.proto";
 
 package tutorial;
 
@@ -7,6 +11,11 @@ option cc_generic_services = true;
 option java_package = "com.example.tutorial";
 option java_outer_classname = "AddressBookProtos";
 option cc_enable_arenas = true;
+
+extend google.protobuf.FieldOptions {
+  optional string fd_type = 10101;
+  optional string fd_name = 10102;
+}
 
 message Address {
   optional string street = 1;
@@ -48,6 +57,7 @@ message AddressBook {
   repeated int64 ts = 2;
   repeated uint64 tmp = 3;
   map<int32, string> ids = 4;
+  optional int64 fd1 = 5  [ (fd_name) = "another_name"];
 }
 
 message JsonParse {

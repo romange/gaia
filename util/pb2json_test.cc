@@ -11,6 +11,7 @@ namespace util {
 
 using namespace tutorial;
 using namespace std;
+using namespace google::protobuf;
 
 class Pb2JsonTest : public testing::Test {
 protected:
@@ -77,6 +78,23 @@ TEST_F(Pb2JsonTest, Double) {
   // If we want to fix it, we must use different formatter for floats.
   // For some reason RawNumber adds quotes, need to fix it or fork rapidjson.
   EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":26.100000381})", res);
+}
+
+TEST_F(Pb2JsonTest, Options) {
+  AddressBook book;
+  book.set_fd1(1);
+  Pb2JsonOptions options;
+  options.field_name_cb = [](const FieldOptions& fo, const FieldDescriptor& fd) {
+    return fo.HasExtension(fd_name) ? fo.GetExtension(fd_name) : fd.name();
+  };
+  string res = Pb2Json(book, options);
+  EXPECT_EQ(R"({"another_name":1})", res);
+
+  options.enum_as_ints = true;
+  Person::PhoneNumber pnum;
+  pnum.set_type(Person::WORK);
+  res = Pb2Json(pnum, options);
+  EXPECT_EQ(R"({"number":"","type":2})", res);
 }
 
 }  // namespace util

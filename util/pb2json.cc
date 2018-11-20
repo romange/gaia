@@ -21,12 +21,13 @@ typedef gpb::FieldDescriptor FD;
 using RapidWriter = rj::Writer<rj::StringBuffer, rj::UTF8<>, rj::UTF8<>,
                                rj::CrtAllocator, rj::kWriteNanAndInfFlag>;
 
-void PrintValue(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
-                const gpb::Reflection* refl, RapidWriter* res);
-void PrintRepeated(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
-                   const gpb::Reflection* refl, RapidWriter* res);
+void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
+                const gpb::FieldDescriptor* fd, const gpb::Reflection* refl, RapidWriter* res);
+void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
+                   const gpb::FieldDescriptor* fd, const gpb::Reflection* refl, RapidWriter* res);
 
-void Pb2JsonInternal(const ::google::protobuf::Message& msg, RapidWriter* res) {
+void Pb2JsonInternal(const ::google::protobuf::Message& msg, const Pb2JsonOptions& options,
+                     RapidWriter* res) {
   const gpb::Descriptor* descr = msg.GetDescriptor();
   const gpb::Reflection* refl = msg.GetReflection();
   res->StartObject();
@@ -37,21 +38,22 @@ void Pb2JsonInternal(const ::google::protobuf::Message& msg, RapidWriter* res) {
     if (!is_set)
       continue;
 
-    const string& fname = fd->name();
+    const gpb::FieldOptions& fo = fd->options();
+    const string& fname = options.field_name_cb ? options.field_name_cb(fo, *fd) : fd->name();
     if (fname.empty())
       continue;
     res->Key(fname.c_str(), fname.size());
     if (fd->is_repeated()) {
-      PrintRepeated(msg, fd, refl, res);
+      PrintRepeated(msg, options, fd, refl, res);
     } else {
-      PrintValue(msg, fd, refl, res);
+      PrintValue(msg, options, fd, refl, res);
     }
   }
   res->EndObject();
 }
 
-void PrintValue(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
-                const gpb::Reflection* refl, RapidWriter* res) {
+void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
+                const gpb::FieldDescriptor* fd, const gpb::Reflection* refl, RapidWriter* res) {
   switch (fd->cpp_type()) {
     case FD::CPPTYPE_INT32:
       res->Int(refl->GetInt32(msg, fd));
@@ -87,13 +89,16 @@ void PrintValue(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
     }
     break;
 
-    case FD::CPPTYPE_ENUM: {
-      const auto& tmp = refl->GetEnum(msg, fd)->name();
-      res->String(tmp.c_str(), tmp.size());
-    }
+    case FD::CPPTYPE_ENUM:
+      if (options.enum_as_ints) {
+        res->Int(refl->GetEnum(msg, fd)->number());
+      } else {
+        const auto& tmp = refl->GetEnum(msg, fd)->name();
+        res->String(tmp.c_str(), tmp.size());
+      }
     break;
     case FD::CPPTYPE_MESSAGE:
-      Pb2JsonInternal(refl->GetMessage(msg, fd), res);
+      Pb2JsonInternal(refl->GetMessage(msg, fd), options, res);
     break;
     default:
       LOG(FATAL) << "Not supported field " << fd->cpp_type_name();
@@ -122,8 +127,8 @@ void UnwindArr(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
   std::for_each(std::begin(arr), std::end(arr), cb);
 }
 
-void PrintRepeated(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
-                   const gpb::Reflection* refl, RapidWriter* res) {
+void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
+                   const gpb::FieldDescriptor* fd, const gpb::Reflection* refl, RapidWriter* res) {
   res->StartArray();
   switch (fd->cpp_type()) {
     case FD::CPPTYPE_INT32:
@@ -166,7 +171,7 @@ void PrintRepeated(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
       const auto& arr = refl->GetRepeatedFieldRef<gpb::Message>(msg, fd);
       std::unique_ptr<gpb::Message> scratch_space(arr.NewMessage());
       for (int i = 0; i < arr.size(); ++i) {
-        Pb2JsonInternal(arr.Get(i, scratch_space.get()), res);
+        Pb2JsonInternal(arr.Get(i, scratch_space.get()), options, res);
       }
     }
     break;
@@ -178,12 +183,12 @@ void PrintRepeated(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
 
 }  // namespace
 
-std::string Pb2Json(const ::google::protobuf::Message& msg) {
+std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions& options) {
   rj::StringBuffer sb;
   RapidWriter rw(sb);
   rw.SetMaxDecimalPlaces(9);
 
-  Pb2JsonInternal(msg, &rw);
+  Pb2JsonInternal(msg, options, &rw);
   return string(sb.GetString(), sb.GetSize());
 }
 
