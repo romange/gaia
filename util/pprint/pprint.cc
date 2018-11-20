@@ -9,19 +9,19 @@
 #include <google/protobuf/text_format.h>
 
 #include <mutex>
-#include "base/init.h"
 #include "base/hash.h"
+#include "base/init.h"
 
+#include "absl/strings/match.h"
 #include "file/list_file.h"
 #include "file/proto_writer.h"
-#include "absl/strings/match.h"
 #include "strings/escaping.h"
 
+#include "util/pb2json.h"
 #include "util/plang/plang.h"
 #include "util/plang/plang_parser.hh"
 #include "util/plang/plang_scanner.h"
 #include "util/pprint/pprint_utils.h"
-#include "util/pb2json.h"
 
 #include "base/map-util.h"
 #include "util/sp_task_pool.h"
@@ -34,8 +34,9 @@ DECLARE_string(csv);
 DEFINE_bool(json, false, "");
 DEFINE_bool(raw, false, "");
 DEFINE_bool(count, false, "");
-DEFINE_string(schema, "", "Prints the schema of the underlying proto."
-                          "Can be either 'json' or 'proto'.");
+DEFINE_string(schema, "",
+              "Prints the schema of the underlying proto."
+              "Can be either 'json' or 'proto'.");
 DEFINE_bool(sizes, false, "Prints a rough estimation of the size of every field");
 DEFINE_bool(parallel, true, "");
 DEFINE_string(sample_key, "", "");
@@ -45,6 +46,7 @@ using namespace util::pprint;
 namespace gpc = gpb::compiler;
 using std::string;
 using strings::AsString;
+using util::Status;
 
 class ErrorCollector : public gpc::MultiFileErrorCollector {
   void AddError(const string& filenname, int line, int column, const string& message) {
@@ -95,9 +97,8 @@ struct PrintSharedData {
   mutex m;
   const plang::Expr* expr = nullptr;
   const Printer* printer = nullptr;
-  SizeSummarizer *size_summarizer = nullptr;
+  SizeSummarizer* size_summarizer = nullptr;
 };
-
 
 bool ShouldSkip(const gpb::Message& msg, const FdPath& fd_path) {
   if (FLAGS_sample_factor <= 0 || FLAGS_sample_key.empty())
@@ -120,7 +121,9 @@ class PrintTask {
  public:
   typedef PrintSharedData* SharedData;
 
-  void InitShared(SharedData d) { shared_data_ = d;}
+  void InitShared(SharedData d) {
+    shared_data_ = d;
+  }
 
   void operator()(const std::string& obj) {
     if (FLAGS_raw) {
@@ -149,7 +152,7 @@ class PrintTask {
     }
   }
 
-  explicit PrintTask(gpb::Message* to_clone) {
+  explicit PrintTask(const gpb::Message* to_clone) {
     if (to_clone) {
       local_msg_.reset(to_clone->New());
     }
@@ -166,23 +169,163 @@ class PrintTask {
   SharedData shared_data_;
 };
 
-
 void sigpipe_handler(int signal) {
   exit(1);
 }
 
-int main(int argc, char **argv) {
-  MainInitGuard guard(&argc, &argv);
+class FilePrinter {
+ public:
+  FilePrinter() {
+  }
+  virtual ~FilePrinter() {
+  }
 
-  signal(SIGPIPE, sigpipe_handler);
+  void Init(const std::string& fname);
+  util::Status Run();
 
-  std::unique_ptr<plang::Expr> test_expr;
+  uint64_t count() const {
+    return count_;
+  }
+
+ protected:
+  virtual void LoadFile(const std::string& fname) = 0;
+
+  // Returns false if EOF reached, true if Next call succeeded and status code overthise.
+  virtual util::StatusObject<bool> Next(StringPiece* record) = 0;
+
+  virtual void PostRun() {}
+
+  std::unique_ptr<const gpb::Message> descr_msg_;
+
+ private:
+  using TaskPool = util::SingleProducerTaskPool<PrintTask>;
+
+  std::unique_ptr<TaskPool> pool_;
+  std::unique_ptr<Printer> printer_;
+  std::unique_ptr<SizeSummarizer> size_summarizer_;
+  std::unique_ptr<plang::Expr> test_expr_;
+
+  PrintSharedData shared_data_;
+  uint64_t count_ = 0;
+};
+
+void FilePrinter::Init(const string& fname) {
+  CHECK(!descr_msg_);
+
   if (!FLAGS_where.empty()) {
     std::istringstream istr(FLAGS_where);
     plang::Scanner scanner(&istr);
-    plang::Parser parser(&scanner, &test_expr);
+    plang::Parser parser(&scanner, &test_expr_);
     CHECK_EQ(0, parser.parse()) << "Could not parse " << FLAGS_where;
   }
+
+  LoadFile(fname);
+
+  if (descr_msg_) {
+    if (!FLAGS_schema.empty()) {
+      if (FLAGS_schema == "json") {
+        PrintBqSchema(descr_msg_->GetDescriptor());
+      } else if (FLAGS_schema == "proto") {
+        cout << descr_msg_->GetDescriptor()->DebugString() << std::endl;
+      } else {
+        LOG(FATAL) << "Unknown schema";
+      }
+      exit(0);  // Geez!.
+    }
+
+    if (FLAGS_sizes)
+      size_summarizer_.reset(new SizeSummarizer(descr_msg_->GetDescriptor()));
+    printer_.reset(new Printer(descr_msg_->GetDescriptor()));
+  } else {
+    CHECK(!FLAGS_sizes && FLAGS_schema.empty());
+  }
+
+  pool_.reset(new TaskPool("pool", 10));
+
+  shared_data_.size_summarizer = size_summarizer_.get();
+  shared_data_.printer = printer_.get();
+  shared_data_.expr = test_expr_.get();
+  pool_->SetSharedData(&shared_data_);
+  pool_->Launch(descr_msg_.get());
+
+  if (FLAGS_parallel) {
+    LOG(INFO) << "Running in parallel " << pool_->thread_count() << " threads";
+  }
+}
+
+Status FilePrinter::Run() {
+  StringPiece record;
+  while (true) {
+    util::StatusObject<bool> res = Next(&record);
+    if (!res.ok())
+      return res.status;
+    if (!res.obj)
+      break;
+    if (FLAGS_count) {
+      ++count_;
+    } else {
+      if (FLAGS_parallel) {
+        pool_->RunTask(AsString(record));
+      } else {
+        pool_->RunInline(AsString(record));
+      }
+    }
+  }
+  pool_->WaitForTasksToComplete();
+
+  if (size_summarizer_.get())
+    std::cout << *size_summarizer_ << "\n";
+  return Status::OK;
+}
+
+class ListReaderPrinter final : public FilePrinter {
+ protected:
+  void LoadFile(const std::string& fname) override;
+  util::StatusObject<bool> Next(StringPiece* record) override;
+  void PostRun() override;
+
+ private:
+  std::unique_ptr<file::ListReader> reader_;
+  string record_buf_;
+  util::Status st_;
+};
+
+void ListReaderPrinter::LoadFile(const std::string& fname) {
+  auto corrupt_cb = [this](size_t bytes, const util::Status& status) { st_ = status; };
+
+  reader_.reset(new ListReader(fname, false, corrupt_cb));
+
+  if (!FLAGS_raw && !FLAGS_count) {
+    std::map<std::string, std::string> meta;
+    if (!reader_->GetMetaData(&meta)) {
+      LOG(FATAL) << "Error fetching metadata from " << fname;
+    }
+    string ptype = FindValueWithDefault(meta, file::kProtoTypeKey, string());
+    string fd_set = FindValueWithDefault(meta, file::kProtoSetKey, string());
+    if (!ptype.empty() && !fd_set.empty())
+      descr_msg_.reset(AllocateMsgByMeta(ptype, fd_set));
+    else
+      descr_msg_.reset(AllocateMsgFromDescr(FindDescriptor()));
+  }
+}
+
+util::StatusObject<bool> ListReaderPrinter::Next(StringPiece* record) {
+  bool res = reader_->ReadRecord(record, &record_buf_);
+  if (!st_.ok())
+    return st_;
+
+  return res;
+}
+
+void ListReaderPrinter::PostRun() {
+  LOG(INFO) << "Data bytes: " << reader_->read_data_bytes()
+            << " header bytes: " << reader_->read_header_bytes();
+}
+
+int main(int argc, char** argv) {
+  MainInitGuard guard(&argc, &argv);
+
+  signal(SIGPIPE, sigpipe_handler);
 
   size_t count = 0;
 
@@ -191,86 +334,18 @@ int main(int argc, char **argv) {
     StringPiece path(argv[i]);
     LOG(INFO) << "Opening " << path;
 
-    string ptype;
-    string fd_set;
-    const string kEmptyKey;
-    std::unique_ptr<gpb::Message> tmp_msg;
-
     if (absl::EndsWith(path, ".sst")) {
       LOG(FATAL) << "Not supported " << path;
     } else {
-      file::ListReader reader(argv[i]);
-      string record_buf;
-      StringPiece record;
-      std::unique_ptr<Printer> printer;
-      std::unique_ptr<SizeSummarizer> size_summarizer;
-
-      if (!FLAGS_raw && !FLAGS_count) {
-        std::map<std::string, std::string> meta;
-        if (!reader.GetMetaData(&meta)) {
-          LOG(ERROR) << "Error reading " << argv[i];
-          return 1;
-        }
-        ptype = FindWithDefault(meta, file::kProtoTypeKey, kEmptyKey);
-        fd_set = FindWithDefault(meta, file::kProtoSetKey, kEmptyKey);
-        if (!ptype.empty() && !fd_set.empty())
-          tmp_msg.reset(AllocateMsgByMeta(ptype, fd_set));
-        else
-          tmp_msg.reset(AllocateMsgFromDescr(FindDescriptor()));
-
-        if (!FLAGS_schema.empty()) {
-          if (FLAGS_schema == "json") {
-            PrintBqSchema(tmp_msg->GetDescriptor());
-          } else if (FLAGS_schema == "proto") {
-            cout << tmp_msg->GetDescriptor()->DebugString() << std::endl;
-          } else {
-            LOG(FATAL) << "Unknown schema";
-          }
-          return 0;
-        }
-
-        if (FLAGS_sizes)
-          size_summarizer.reset(new SizeSummarizer(tmp_msg->GetDescriptor()));
-        printer.reset(new Printer(tmp_msg->GetDescriptor()));
-      }
-
-      using TaskPool = util::SingleProducerTaskPool<PrintTask>;
-      std::unique_ptr<TaskPool> pool;
-      pool.reset(new TaskPool("pool", 10));
-
-      PrintSharedData shared_data;
-      shared_data.size_summarizer = size_summarizer.get();
-      shared_data.printer = printer.get();
-      shared_data.expr = test_expr.get();
-      pool->SetSharedData(&shared_data);
-
-      pool->Launch(tmp_msg.get());
-
-      if (FLAGS_parallel) {
-        LOG(INFO) << "Running in parallel " << pool->thread_count() << " threads";
-      }
-
-      while (reader.ReadRecord(&record, &record_buf)) {
-        if (FLAGS_count) {
-          ++count;
-        } else {
-          if (FLAGS_parallel) {
-            pool->RunTask(AsString(record));
-          } else {
-            pool->RunInline(AsString(record));
-          }
-        }
-      }
-      if (pool)
-        pool->WaitForTasksToComplete();
-      if (size_summarizer)
-        std::cout << *size_summarizer << "\n";
-      LOG(INFO) << "Data bytes: " << reader.read_data_bytes() << " header bytes: "
-                << reader.read_header_bytes();
+      ListReaderPrinter printer;
+      printer.Init(argv[i]);
+      auto st = printer.Run();
+      CHECK_STATUS(st);
+      count += printer.count();
     }
   }
   if (FLAGS_count)
-    std::cout << "Count: " << count;
+    std::cout << "Count: " << count << std::endl;
 
   return 0;
 }

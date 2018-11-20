@@ -219,6 +219,49 @@ template<typename T> void ReadProtoRecords(StringPiece name,
   }
 }
 
+
+
+
+template<typename MsgT> class PbMsgIter {
+ public:
+  PbMsgIter() : reader_(nullptr) {}
+  explicit PbMsgIter(ListReader* lr) : reader_(lr) {
+    this->operator++();
+  }
+
+  MsgT& operator*() { return instance_; }
+  MsgT* operator->() { return &instance_; }
+
+  PbMsgIter<MsgT> begin() { return PbMsgIter<MsgT>(reader_); }
+  PbMsgIter<MsgT> end() { return PbMsgIter<MsgT>(); }
+
+  PbMsgIter& operator++() {
+    StringPiece record;
+    if (!reader_->ReadRecord(&record, &scratch_)) {
+      reader_ = nullptr;
+    } else {
+      if (!instance_.ParseFromArray(record.data(), record.size())) {
+        status_.AddErrorMsg("Invalid record");
+        reader_ = nullptr;
+      }
+    }
+    return *this;
+  }
+
+  // Not really equality. Special casing for sentinel (end()).
+  bool operator!=(const PbMsgIter& o) const {
+    return o.reader_ != reader_;
+  }
+  operator bool() const { return reader_ != nullptr; }
+
+  const util::Status& status() const { return status_; }
+ private:
+  MsgT instance_;
+  std::string scratch_;
+  ListReader* reader_;
+  util::Status status_;
+};
+
 template<typename T> util::Status SafeReadProtoRecords(StringPiece name,
                                                       std::function<void(T&&)> cb) {
   auto res = file::ReadonlyFile::Open(name);
@@ -228,17 +271,12 @@ template<typename T> util::Status SafeReadProtoRecords(StringPiece name,
   CHECK(res.obj);   // Fatal error. If status ok, must contains file pointer.
 
   file::ListReader reader(res.obj, TAKE_OWNERSHIP);
-  std::string record_buf;
-  StringPiece record;
-  while (reader.ReadRecord(&record, &record_buf)) {
-    T item;
-    if (!item.ParseFromArray(record.data(), record.size())) {
-      return util::Status("Invalid record");
-    }
-    cb(std::move(item));
+  PbMsgIter<T> it(&reader);
+  while (it) {
+    cb(std::move(*it));
+    ++it;
   }
-
-  return util::Status::OK;
+  return it.status();
 }
 
 }  // namespace file
