@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 
 #include "strings/stringpiece.h"
@@ -23,6 +24,9 @@ class Printer;
 
 class FilePrinter {
  public:
+  using FieldNameCb = std::function<std::string(const ::google::protobuf::FieldOptions& fo,
+                                                const ::google::protobuf::FieldDescriptor& fd)>;
+
   FilePrinter();
   virtual ~FilePrinter();
 
@@ -33,6 +37,9 @@ class FilePrinter {
     return count_;
   }
 
+  template<typename Func> void set_fieldname_cb(Func&& f) {
+    name_cb_ = f;
+  }
  protected:
   virtual void LoadFile(const std::string& fname) = 0;
 
@@ -62,6 +69,7 @@ class FilePrinter {
   std::unique_ptr<plang::Expr> test_expr_;
 
   PrintSharedData shared_data_;
+  FieldNameCb name_cb_;
   uint64_t count_ = 0;
 };
 

@@ -11,8 +11,7 @@
 namespace util {
 
 struct Pb2JsonOptions {
-  typedef std::function<std::string(const ::google::protobuf::FieldOptions& fo,
-                                    const ::google::protobuf::FieldDescriptor& fd)>
+  typedef std::function<std::string(const ::google::protobuf::FieldDescriptor& fd)>
       FieldNameCb;
 
   bool enum_as_ints = false;

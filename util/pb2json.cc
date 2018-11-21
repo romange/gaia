@@ -38,8 +38,7 @@ void Pb2JsonInternal(const ::google::protobuf::Message& msg, const Pb2JsonOption
     if (!is_set)
       continue;
 
-    const gpb::FieldOptions& fo = fd->options();
-    const string& fname = options.field_name_cb ? options.field_name_cb(fo, *fd) : fd->name();
+    const string& fname = options.field_name_cb ? options.field_name_cb(*fd) : fd->name();
     if (fname.empty())
       continue;
     res->Key(fname.c_str(), fname.size());

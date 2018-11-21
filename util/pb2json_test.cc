@@ -84,7 +84,9 @@ TEST_F(Pb2JsonTest, Options) {
   AddressBook book;
   book.set_fd1(1);
   Pb2JsonOptions options;
-  options.field_name_cb = [](const FieldOptions& fo, const FieldDescriptor& fd) {
+
+  options.field_name_cb = [](const FieldDescriptor& fd) {
+    const FieldOptions& fo = fd.options();
     return fo.HasExtension(fd_name) ? fo.GetExtension(fd_name) : fd.name();
   };
   string res = Pb2Json(book, options);
