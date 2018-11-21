@@ -11,6 +11,10 @@
 #include "util/sp_task_pool.h"
 #include "util/status.h"
 
+namespace file {
+class ListReader;
+} // namespace file
+
 namespace util {
 namespace pprint {
 
@@ -50,7 +54,6 @@ class FilePrinter {
     SizeSummarizer* size_summarizer = nullptr;
   };
 
-
   using TaskPool = util::SingleProducerTaskPool<PrintTask>;
 
   std::unique_ptr<TaskPool> pool_;
@@ -60,6 +63,18 @@ class FilePrinter {
 
   PrintSharedData shared_data_;
   uint64_t count_ = 0;
+};
+
+class ListReaderPrinter final : public FilePrinter {
+ protected:
+  void LoadFile(const std::string& fname) override;
+  util::StatusObject<bool> Next(StringPiece* record) override;
+  void PostRun() override;
+
+ private:
+  std::unique_ptr<file::ListReader> reader_;
+  std::string record_buf_;
+  util::Status st_;
 };
 
 }  // namespace pprint
