@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <google/protobuf/text_format.h>
 #include <functional>
 #include <string>
 
@@ -14,7 +15,7 @@
 
 namespace file {
 class ListReader;
-} // namespace file
+}  // namespace file
 
 namespace util {
 namespace pprint {
@@ -24,8 +25,10 @@ class Printer;
 
 class FilePrinter {
  public:
-  using FieldNameCb = std::function<std::string(const ::google::protobuf::FieldOptions& fo,
-                                                const ::google::protobuf::FieldDescriptor& fd)>;
+  using FieldDescriptor = ::google::protobuf::FieldDescriptor;
+  using FieldNameCb = std::function<std::string(const FieldDescriptor& fd)>;
+  using FieldPrinterPredicate = std::function<::google::protobuf::TextFormat::FieldValuePrinter*(
+      const FieldDescriptor& fd)>;
 
   FilePrinter();
   virtual ~FilePrinter();
@@ -37,9 +40,14 @@ class FilePrinter {
     return count_;
   }
 
-  template<typename Func> void set_fieldname_cb(Func&& f) {
-    name_cb_ = f;
+  void set_fieldname_cb(FieldNameCb cb) {
+    name_cb_ = cb;
   }
+
+  void RegisterFieldPrinter(FieldPrinterPredicate pred) {
+    field_printer_cb_ = pred;
+  }
+
  protected:
   virtual void LoadFile(const std::string& fname) = 0;
 
@@ -70,6 +78,12 @@ class FilePrinter {
 
   PrintSharedData shared_data_;
   FieldNameCb name_cb_;
+
+  typedef std::pair<FieldPrinterPredicate,
+                    std::unique_ptr<::google::protobuf::TextFormat::FieldValuePrinter>>
+      FieldPrinterType;
+
+  FieldPrinterPredicate field_printer_cb_;
   uint64_t count_ = 0;
 };
 

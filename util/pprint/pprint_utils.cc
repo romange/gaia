@@ -25,7 +25,6 @@ DEFINE_bool(aggregate_repeated, false, "When printing csv format, aggregate repe
                                        "line: \"xx,yy,..\"");
 
 DEFINE_bool(omit_blobs, true, "");
-DEFINE_bool(omit_custom_formatting, false, "");
 DEFINE_bool(skip_value_escaping, false, "");
 DEFINE_string(root_node, "", "");
 DEFINE_bool(omit_double_quotes, false, "Omits double quotes when printing string values");
@@ -196,7 +195,7 @@ public:
 };
 
 void RegisterCustomFieldPrinter(
-      const gpb::Descriptor* descriptor,
+      const gpb::Descriptor* descriptor, Printer::FieldPrinterPredicate pred,
       const std::unordered_map<int, const gpb::FieldDescriptor*>& fo_tags_map,
       gpb::TextFormat::Printer* printer) {
   CHECK_NOTNULL(descriptor);
@@ -205,16 +204,20 @@ void RegisterCustomFieldPrinter(
     const gpb::FieldDescriptor* fd = descriptor->field(i);
 
     if (fd->cpp_type() == gpb::FieldDescriptor::CPPTYPE_MESSAGE) {
-      RegisterCustomFieldPrinter(fd->message_type(), fo_tags_map, printer);
+      RegisterCustomFieldPrinter(fd->message_type(), pred, fo_tags_map, printer);
       continue;
+    }
+    gpb::TextFormat::FieldValuePrinter* custom = pred(*fd);
+    if (custom) {
+      printer->RegisterFieldValuePrinter(fd, custom);
     }
   }
 }
 
-Printer::Printer(const gpb::Descriptor* descriptor): type_name_(descriptor->full_name()) {
+Printer::Printer(const gpb::Descriptor* descriptor, FieldPrinterPredicate pred)
+  : type_name_(descriptor->full_name()) {
   printer_.SetDefaultFieldValuePrinter(new BetterPrinter());
   printer_.SetUseShortRepeatedPrimitives(true);
-  // printer_.SetUseUtf8StringEscaping(true);
 
 
   std::vector<StringPiece> tags = absl::StrSplit(FLAGS_csv, ",", absl::SkipWhitespace());
@@ -255,8 +258,8 @@ Printer::Printer(const gpb::Descriptor* descriptor): type_name_(descriptor->full
     fo_tags_map[fl->number()] = fl;
   }
 
-
-  RegisterCustomFieldPrinter(descriptor, fo_tags_map, &printer_);
+  if (pred)
+    RegisterCustomFieldPrinter(descriptor, pred, fo_tags_map, &printer_);
 
   google::FlushLogFiles(google::GLOG_INFO);
 

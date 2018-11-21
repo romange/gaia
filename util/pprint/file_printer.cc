@@ -182,7 +182,7 @@ void FilePrinter::Init(const string& fname) {
 
     if (FLAGS_sizes)
       size_summarizer_.reset(new SizeSummarizer(descr_msg_->GetDescriptor()));
-    printer_.reset(new Printer(descr_msg_->GetDescriptor()));
+    printer_.reset(new Printer(descr_msg_->GetDescriptor(), field_printer_cb_));
   } else {
     CHECK(!FLAGS_sizes && FLAGS_schema.empty());
   }

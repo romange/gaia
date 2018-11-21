@@ -22,7 +22,7 @@ namespace gpb = ::google::protobuf;
 class FdPath {
 public:
   // msg, fd, index in repeated array.
-  typedef std::function<void(const gpb::Message& msg, const gpb::FieldDescriptor*, int, int)> 
+  typedef std::function<void(const gpb::Message& msg, const gpb::FieldDescriptor*, int, int)>
           ValueCb;
   FdPath() {}
   FdPath(const gpb::Descriptor* root, StringPiece path);
@@ -62,8 +62,6 @@ struct PathNode {
 
   explicit PathNode(const gpb::FieldDescriptor* fdescr = nullptr) : fd(fdescr) {}
 
-  // FdPath CheckForRepeated() const;
-
   PathNode* AddChild(const gpb::FieldDescriptor* fd);
 };
 
@@ -79,8 +77,11 @@ class Printer {
   // void ExtractValueRecur(const gpb::Message& msg, const FdPath& fd_path, uint32 index, ValueCb cb);
   void PrintValueRecur(size_t path_index, const std::string& prefix,
                        bool has_value, const gpb::Message& msg) const;
-public:
-  explicit Printer(const gpb::Descriptor* descriptor);
+ public:
+   using FieldPrinterPredicate
+    = std::function<gpb::TextFormat::FieldValuePrinter*(const gpb::FieldDescriptor& fd)>;
+
+  explicit Printer(const gpb::Descriptor* descriptor, FieldPrinterPredicate pred = nullptr);
   void Output(const gpb::Message& msg) const;
 };
 
