@@ -22,7 +22,7 @@ DECLARE_bool(sizes);
 DECLARE_bool(raw);
 DECLARE_bool(count);
 
-using namespace util::pprint;
+using namespace util;
 using std::string;
 using util::Status;
 
@@ -46,15 +46,11 @@ int main(int argc, char** argv) {
     StringPiece path(argv[i]);
     LOG(INFO) << "Opening " << path;
 
-    if (absl::EndsWith(path, ".sst")) {
-      LOG(FATAL) << "Not supported " << path;
-    } else {
-      ListReaderPrinter printer;
-      printer.Init(argv[i]);
-      auto st = printer.Run();
-      CHECK_STATUS(st);
-      count += printer.count();
-    }
+    pprint::ListReaderPrinter printer;
+    printer.Init(argv[i]);
+    auto st = printer.Run();
+    CHECK_STATUS(st);
+    count += printer.count();
   }
   if (FLAGS_count)
     std::cout << "Count: " << count << std::endl;
