@@ -107,6 +107,17 @@ class FilePrinter::PrintTask {
     shared_data_ = d;
   }
 
+  PrintTask(const gpb::Message* to_clone, const Pb2JsonOptions& opts) : options_(opts) {
+    if (to_clone) {
+      local_msg_.reset(to_clone->New());
+    }
+    if (!FLAGS_sample_key.empty()) {
+      fd_path_ = FdPath(to_clone->GetDescriptor(), FLAGS_sample_key);
+      CHECK(!fd_path_.IsRepeated());
+      CHECK_EQ(gpb::FieldDescriptor::CPPTYPE_STRING, fd_path_.path().back()->cpp_type());
+    }
+  }
+
   void operator()(const std::string& obj) {
     if (FLAGS_raw) {
       std::lock_guard<mutex> lock(shared_data_->m);
@@ -127,23 +138,10 @@ class FilePrinter::PrintTask {
     }
 
     if (FLAGS_json) {
-      Pb2JsonOptions options;
-      options.enum_as_ints = true;
-      string str = Pb2Json(*local_msg_, options);
+      string str = Pb2Json(*local_msg_, options_);
       std::cout << str << "\n";
     } else {
       shared_data_->printer->Output(*local_msg_);
-    }
-  }
-
-  explicit PrintTask(const gpb::Message* to_clone) {
-    if (to_clone) {
-      local_msg_.reset(to_clone->New());
-    }
-    if (!FLAGS_sample_key.empty()) {
-      fd_path_ = FdPath(to_clone->GetDescriptor(), FLAGS_sample_key);
-      CHECK(!fd_path_.IsRepeated());
-      CHECK_EQ(gpb::FieldDescriptor::CPPTYPE_STRING, fd_path_.path().back()->cpp_type());
     }
   }
 
@@ -151,6 +149,7 @@ class FilePrinter::PrintTask {
   std::unique_ptr<gpb::Message> local_msg_;
   FdPath fd_path_;
   SharedData shared_data_;
+  Pb2JsonOptions options_;
 };
 
 FilePrinter::FilePrinter() {}
@@ -193,7 +192,7 @@ void FilePrinter::Init(const string& fname) {
   shared_data_.printer = printer_.get();
   shared_data_.expr = test_expr_.get();
   pool_->SetSharedData(&shared_data_);
-  pool_->Launch(descr_msg_.get());
+  pool_->Launch(descr_msg_.get(), options_);
 
   if (FLAGS_parallel) {
     LOG(INFO) << "Running in parallel " << pool_->thread_count() << " threads";

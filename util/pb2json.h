@@ -14,8 +14,12 @@ struct Pb2JsonOptions {
   typedef std::function<std::string(const ::google::protobuf::FieldDescriptor& fd)>
       FieldNameCb;
 
+  typedef std::function<bool(const ::google::protobuf::FieldDescriptor& fd)> BoolAsIntegerPred;
+
   bool enum_as_ints = false;
+
   FieldNameCb field_name_cb;
+  BoolAsIntegerPred bool_as_int;
 };
 
 std::string Pb2Json(const ::google::protobuf::Message& msg,

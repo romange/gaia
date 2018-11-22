@@ -12,6 +12,7 @@
 #include "util/plang/plang.h"
 #include "util/sp_task_pool.h"
 #include "util/status.h"
+#include "util/pb2json.h"
 
 namespace file {
 class ListReader;
@@ -26,7 +27,7 @@ class Printer;
 class FilePrinter {
  public:
   using FieldDescriptor = ::google::protobuf::FieldDescriptor;
-  using FieldNameCb = std::function<std::string(const FieldDescriptor& fd)>;
+
   using FieldPrinterPredicate = std::function<::google::protobuf::TextFormat::FieldValuePrinter*(
       const FieldDescriptor& fd)>;
 
@@ -40,8 +41,8 @@ class FilePrinter {
     return count_;
   }
 
-  void set_fieldname_cb(FieldNameCb cb) {
-    name_cb_ = cb;
+  void SetJsonPrinterOptions(const Pb2JsonOptions& options) {
+    options_ = options;
   }
 
   void RegisterFieldPrinter(FieldPrinterPredicate pred) {
@@ -77,7 +78,7 @@ class FilePrinter {
   std::unique_ptr<plang::Expr> test_expr_;
 
   PrintSharedData shared_data_;
-  FieldNameCb name_cb_;
+  Pb2JsonOptions options_;
 
   typedef std::pair<FieldPrinterPredicate,
                     std::unique_ptr<::google::protobuf::TextFormat::FieldValuePrinter>>

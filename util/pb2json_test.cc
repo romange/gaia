@@ -97,6 +97,15 @@ TEST_F(Pb2JsonTest, Options) {
   pnum.set_type(Person::WORK);
   res = Pb2Json(pnum, options);
   EXPECT_EQ(R"({"number":"","type":2})", res);
+
+  options = Pb2JsonOptions();
+  options.bool_as_int = [](const FieldDescriptor& fd) {
+    return fd.name() == "bval" ? true : false;
+  };
+  JsonParse jp;
+  jp.set_bval(true);
+  res = Pb2Json(jp, options);
+  EXPECT_EQ(R"({"bval":1})", res);
 }
 
 }  // namespace util

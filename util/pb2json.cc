@@ -84,7 +84,12 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
     break;
     case FD::CPPTYPE_BOOL: {
       bool b = refl->GetBool(msg, fd);
-      res->Bool(b);
+      // Unfortunate hack in our company code.
+      if (options.bool_as_int && options.bool_as_int(*fd)) {
+        res->Int(int(b));
+      } else {
+        res->Bool(b);
+      }
     }
     break;
 
