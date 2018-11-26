@@ -27,6 +27,7 @@ class Printer;
 class FilePrinter {
  public:
   using FieldDescriptor = ::google::protobuf::FieldDescriptor;
+  using Descriptor = ::google::protobuf::Descriptor;
 
   using FieldPrinterPredicate = std::function<::google::protobuf::TextFormat::FieldValuePrinter*(
       const FieldDescriptor& fd)>;
@@ -48,6 +49,9 @@ class FilePrinter {
   void RegisterFieldPrinter(FieldPrinterPredicate pred) {
     field_printer_cb_ = pred;
   }
+
+  // Valid only after Init was called.
+  const Descriptor* GetDescriptor() const;
 
  protected:
   virtual void LoadFile(const std::string& fname) = 0;

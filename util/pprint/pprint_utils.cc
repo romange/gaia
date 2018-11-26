@@ -322,13 +322,15 @@ void Printer::PrintValueRecur(size_t path_index, const string& prefix,
 
 using FD = gpb::FieldDescriptor;
 
-static void PrintBqSchemaInternal(unsigned offset, const gpb::Descriptor* descr) {
+static void PrintBqSchemaInternal(unsigned offset, const gpb::Descriptor* descr,
+                                  const PrintBqSchemaOptions& options) {
   cout << "[\n";
   bool continuation_field = false;
   for (int i = 0; i < descr->field_count(); ++i) {
     const gpb::FieldDescriptor* fd = descr->field(i);
-    string fname = fd->name();
-    CHECK(!fname.empty());
+    string fname = options.field_name_cb ? options.field_name_cb(*fd) : fd->name();
+    if (fname.empty())
+      continue;
 
     if (continuation_field) {
       cout << ",\n";  // Finalize previous field.
@@ -336,35 +338,40 @@ static void PrintBqSchemaInternal(unsigned offset, const gpb::Descriptor* descr)
 
     continuation_field = true;
     cout << string(offset, ' ') << R"(  { "name": ")" << fname << R"(",  "type": ")";
+    const string& type_name = options.type_name_cb ? options.type_name_cb(*fd) : string{};
 
-    switch (fd->cpp_type()) {
-      case FD::CPPTYPE_INT32:
-      case FD::CPPTYPE_UINT32:
-      case FD::CPPTYPE_INT64:
-      case FD::CPPTYPE_UINT64:
-        cout << "INTEGER\"";
-      break;
-      case FD::CPPTYPE_BOOL:
-        cout << "BOOLEAN\"";
-      break;
+    if (type_name.empty()) {
+      switch (fd->cpp_type()) {
+        case FD::CPPTYPE_INT32:
+        case FD::CPPTYPE_UINT32:
+        case FD::CPPTYPE_INT64:
+        case FD::CPPTYPE_UINT64:
+          cout << "INTEGER\"";
+        break;
+        case FD::CPPTYPE_BOOL:
+          cout << "BOOLEAN\"";
+        break;
 
-      case FD::CPPTYPE_STRING:
-        cout << "STRING\"";
-      break;
-      case FD::CPPTYPE_DOUBLE:
-      case FD::CPPTYPE_FLOAT:
-        cout << "FLOAT\"";
-      break;
-      case FD::CPPTYPE_ENUM:
-        cout << "INTEGER\"";
-      break;
-      case FD::CPPTYPE_MESSAGE:
-        cout << R"(RECORD",  "fields": )";
-        PrintBqSchemaInternal(offset + 2, fd->message_type());
-        cout << string(offset + 4, ' ');
-      break;
-      default:
-        LOG(FATAL) << " not supported " << fd->cpp_type_name();
+        case FD::CPPTYPE_STRING:
+          cout << "STRING\"";
+        break;
+        case FD::CPPTYPE_DOUBLE:
+        case FD::CPPTYPE_FLOAT:
+          cout << "FLOAT\"";
+        break;
+        case FD::CPPTYPE_ENUM:
+          cout << "INTEGER\"";
+        break;
+        case FD::CPPTYPE_MESSAGE:
+          cout << R"(RECORD",  "fields": )";
+          PrintBqSchemaInternal(offset + 2, fd->message_type(), options);
+          cout << string(offset + 4, ' ');
+        break;
+        default:
+          LOG(FATAL) << " not supported " << fd->cpp_type_name();
+      }
+    } else {
+      cout << type_name << "\"";
     }
     if (fd->is_repeated()) {
       cout << R"(, "mode": "REPEATED")";
@@ -376,8 +383,8 @@ static void PrintBqSchemaInternal(unsigned offset, const gpb::Descriptor* descr)
   cout << " ]\n";
 }
 
-void PrintBqSchema(const gpb::Descriptor* descr) {
-  PrintBqSchemaInternal(0, descr);
+void PrintBqSchema(const gpb::Descriptor* descr, const PrintBqSchemaOptions& options) {
+  PrintBqSchemaInternal(0, descr, options);
 }
 
 static std::vector<const gpb::FieldDescriptor *> ListFields(const gpb::Message &msg) {

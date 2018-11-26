@@ -22,9 +22,6 @@ DEFINE_string(proto_db_file, "s3://test/roman/proto_db.lst", "");
 DEFINE_string(type, "", "");
 
 DEFINE_string(where, "", "boolean constraint in plang language");
-DEFINE_string(schema, "",
-              "Prints the schema of the underlying proto."
-              "Can be either 'json' or 'proto'.");
 DEFINE_bool(sizes, false, "Prints a rough estimation of the size of every field");
 DEFINE_bool(json, false, "");
 DEFINE_bool(raw, false, "");
@@ -168,22 +165,11 @@ void FilePrinter::Init(const string& fname) {
   LoadFile(fname);
 
   if (descr_msg_) {
-    if (!FLAGS_schema.empty()) {
-      if (FLAGS_schema == "json") {
-        PrintBqSchema(descr_msg_->GetDescriptor());
-      } else if (FLAGS_schema == "proto") {
-        cout << descr_msg_->GetDescriptor()->DebugString() << std::endl;
-      } else {
-        LOG(FATAL) << "Unknown schema";
-      }
-      exit(0);  // Geez!.
-    }
-
     if (FLAGS_sizes)
       size_summarizer_.reset(new SizeSummarizer(descr_msg_->GetDescriptor()));
     printer_.reset(new Printer(descr_msg_->GetDescriptor(), field_printer_cb_));
   } else {
-    CHECK(!FLAGS_sizes && FLAGS_schema.empty());
+    CHECK(!FLAGS_sizes);
   }
 
   pool_.reset(new TaskPool("pool", 10));
@@ -197,6 +183,10 @@ void FilePrinter::Init(const string& fname) {
   if (FLAGS_parallel) {
     LOG(INFO) << "Running in parallel " << pool_->thread_count() << " threads";
   }
+}
+
+auto FilePrinter::GetDescriptor() const -> const Descriptor* {
+  return descr_msg_ ? descr_msg_->GetDescriptor() : nullptr;
 }
 
 Status FilePrinter::Run() {
