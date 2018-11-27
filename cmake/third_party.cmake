@@ -345,6 +345,7 @@ add_third_party(s2geometry
   GIT_REPOSITORY https://github.com/romange/s2geometry.git
   DEPENDS glog_project
   CMAKE_PASS_FLAGS "-DWITH_GFLAGS=ON  -DWITH_GLOG=ON -DCMAKE_PREFIX_PATH=${GLOG_LIB_DIR}/cmake/glog/|${GFLAGS_LIB_DIR}/cmake/gflags"
+  LIB "libs2.so"
 )
 
 
