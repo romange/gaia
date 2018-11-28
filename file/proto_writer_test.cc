@@ -12,12 +12,15 @@ protected:
 };
 
 TEST_F(ProtoWriterTest, Basic) {
-  ProtoWriter writer("foo.lst", test::Container::descriptor());
+  ListProtoWriter writer("foo.lst", test::Container::descriptor());
   test::Container boo;
   boo.mutable_person()->set_name("Roman");
   boo.mutable_person()->set_id(5);
   ASSERT_TRUE(writer.Add(boo).ok());
 }
 
+TEST_F(ProtoWriterTest, Empty) {
+  ListProtoWriter writer("foo.lst", test::Container::descriptor());
+}
 
 }  // namespace file

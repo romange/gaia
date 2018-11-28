@@ -25,22 +25,18 @@ class ListWriter;
 extern const char kProtoSetKey[];
 extern const char kProtoTypeKey[];
 
-class ProtoWriter {
-  std::unique_ptr<ListWriter> writer_;
-  
-  const ::google::protobuf::Descriptor* dscr_;
-  base::Arena arena_;
-
-  bool was_init_ = false;
-  uint32 entries_per_shard_ = 0;
-  uint32 shard_index_ = 0;
-  std::string base_name_, fd_set_str_;
+class BaseProtoWriter {
 public:
-  enum Format {LIST_FILE};
+  explicit BaseProtoWriter(const ::google::protobuf::Descriptor* dscr);
 
+protected:
+  const ::google::protobuf::Descriptor* dscr_;
+  std::string fd_set_str_;
+};
+
+class ListProtoWriter : public BaseProtoWriter {
+ public:
   struct Options {
-    Format format;
-
     enum CompressMethod {ZLIB_COMPRESS = 2, LZ4_COMPRESS = 3} compress_method
           = LZ4_COMPRESS;
     uint8 compress_level = 1;
@@ -54,24 +50,30 @@ public:
     // Whether to append to the existing file or otherwrite it.
     bool append = false;
 
-    Options() : format(LIST_FILE) {}
+    Options() {}
   };
 
-  ProtoWriter(StringPiece filename, const ::google::protobuf::Descriptor* dscr,
-              Options opts = Options());
+  ListProtoWriter(StringPiece filename, const ::google::protobuf::Descriptor* dscr,
+                  const Options& opts = Options());
+  ~ListProtoWriter();
 
-  ~ProtoWriter();
+  const ListWriter* writer() const { return writer_.get();}
 
   util::Status Add(const ::google::protobuf::MessageLite& msg);
 
   util::Status Flush();
 
-  const ListWriter* writer() const { return writer_.get();}
+ private:
+  void CreateWriter(StringPiece name);
 
-private:
+  std::string base_name_;
+  bool was_init_ = false;
+  uint32 entries_per_shard_ = 0;
+  uint32 shard_index_ = 0;
+
+  std::unique_ptr<ListWriter> writer_;
   Options options_;
 };
-
 
 }  // namespace file
 
