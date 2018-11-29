@@ -7,3 +7,5 @@ cxx_link(http_main http_v2)
 # requires  sudo apt-get install libcurl4-gnutls-dev
 add_library(http_client http_client.cc http_status_code.cc)
 cxx_link(http_client strings curl util)
+
+cxx_test(http_test http_v2 LABELS CI)
