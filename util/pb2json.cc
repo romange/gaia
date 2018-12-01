@@ -67,9 +67,8 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
       res->Uint64(refl->GetUInt64(msg, fd));
     break;
     case FD::CPPTYPE_FLOAT: {
-      // absl::AlphaNum al(refl->GetFloat(msg, fd));
-      // res->RawNumber(al.data(), al.size());
-      res->Double(refl->GetFloat(msg, fd));
+      absl::AlphaNum al(refl->GetFloat(msg, fd));
+      res->RawValue(al.data(), al.size(), rj::kNumberType);
     }
     break;
     case FD::CPPTYPE_DOUBLE:

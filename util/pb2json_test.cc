@@ -74,10 +74,8 @@ TEST_F(Pb2JsonTest, Double) {
   p.set_fval(26.1f);
   string res = Pb2Json(p);
 
-  // Json has only double representation so it may change floats.
-  // If we want to fix it, we must use different formatter for floats.
-  // For some reason RawNumber adds quotes, need to fix it or fork rapidjson.
-  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":26.100000381})", res);
+  // We use RawValue with AlphaNum internally to allow correct float outputs.
+  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":26.1})", res);
 }
 
 TEST_F(Pb2JsonTest, Options) {
