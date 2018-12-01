@@ -22,6 +22,10 @@ using namespace asio::ip;
 namespace h2 = beast::http;
 };
 
+/*
+  Single threaded, fiber-friendly synchronous client: Upon IO block, the calling fiber blocks
+  but the thread can switch to other active fibers.
+*/
 class Client {
  public:
   using Response = detail::h2::response<detail::h2::dynamic_body>;
