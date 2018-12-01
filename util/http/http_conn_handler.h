@@ -124,5 +124,4 @@ class Listener : public ListenerBase {
 };
 
 }  // namespace http
-
 }  // namespace util
