@@ -54,20 +54,19 @@ class IoContext {
 
   io_context& get_context() { return *context_ptr_; }
 
+  // Runs `f` asynchronously in io-context fiber. `f` should not block or lock on mutexes.
   template<typename Func> void Post(Func&& f) {
     context_ptr_->post(std::forward<Func>(f));
   }
 
-  bool InContextThread() const { return std::this_thread::get_id() == thread_id_; }
-
-  // Runs 'f' in Io Context thread and waits for it to finish,
-  // therefore might block the current fiber.
-  // If we run in context thread - runs 'f' directly.
-  // f should not block on IO because it might block the IO fiber directly.
+  // Similarly to Post(), runs 'f' in Io Context thread, but waits for it to finish by blocking
+  // the current fiber. If we call PostSynchronous from the context thread,
+  // runs `f` directly. `f` should not block because since it runs directly in IO loop.
   template<typename Func> void PostSynchronous(Func&& f) {
     if (InContextThread()) {
       return f();
     }
+
     fibers_ext::Done done;
     Post([f = std::forward<Func>(f), &done] {
       f();
@@ -78,6 +77,8 @@ class IoContext {
   }
 
   auto get_executor() { return context_ptr_->get_executor(); }
+
+  bool InContextThread() const { return std::this_thread::get_id() == thread_id_; }
 
  private:
   void StartLoop();
