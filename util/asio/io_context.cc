@@ -269,15 +269,16 @@ void IoContext::StartLoop() {
 
   // We run the main loop inside the callback of io_context, blocking it until the loop exits.
   // The reason for this is that io_context::running_in_this_thread() is deduced based on the
-  // call-stack. We might right our own utility function based on thread id since
-  // we run single thread per io context.
+  // call-stack. GAIA code should use InContextThread() to check whether the code runs in the
+  // context's thread.
   Post([scheduler] { scheduler->MainLoop(); });
 
   // Bootstrap - launch the callback handler above.
   // It will block until MainLoop exits.
   io_cntx.run_one();
 
-  // scheduler->switch_limit = 10000;
+  // Shutdown sequence and cleanup.
+  cancel_ = true;
 
   // We stopped io_context. Lets spin it more until all ready handlers are run.
   // That should make sure that fibers are unblocked.
@@ -286,6 +287,9 @@ void IoContext::StartLoop() {
   while (io_cntx.poll() || scheduler->has_ready_fibers()) {
     this_fiber::yield();  // while something happens, pass the ownership to other fiber.
   }
+
+  for (auto& f : child_fibers_)
+    f.join();
   VLOG(1) << "MainSwitch Resumes :" << main_resumes;
 }
 

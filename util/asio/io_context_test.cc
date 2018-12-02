@@ -78,6 +78,21 @@ TEST_F(IoContextTest, RunAndStop) {
   pool.Stop();
 }
 
+TEST_F(IoContextTest, AttachCancellable) {
+  IoContextPool pool(1);
+  pool.Run();
+
+  bool cancellable_finished = false;
+  pool.GetNextContext().AttachCancellable([&](bool* cancel) {
+    while (!*cancel) {
+      this_fiber::sleep_for(300us);
+    }
+    cancellable_finished = true;
+  });
+  pool.Stop();
+  EXPECT_TRUE(cancellable_finished);
+}
+
 static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);   // no locking
 

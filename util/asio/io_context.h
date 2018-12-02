@@ -68,7 +68,7 @@ class IoContext {
     }
 
     fibers_ext::Done done;
-    Post([f = std::forward<Func>(f), &done] {
+    Post([f = std::forward<Func>(f), &done] () mutable {
       f();
       done.Notify();
     });
@@ -80,11 +80,21 @@ class IoContext {
 
   bool InContextThread() const { return std::this_thread::get_id() == thread_id_; }
 
+  // Runs `f` in a dedicated fiber. `f` should accept `bool*`, which will point to true
+  // when InContext is shuttind down.
+  template<typename Func> void  AttachCancellable(Func&& func) {
+    PostSynchronous([func = std::forward<Func>(func), this] () mutable {
+      child_fibers_.emplace_back(std::forward<Func>(func), &cancel_);
+    });
+  }
+
  private:
   void StartLoop();
 
   ptr_t context_ptr_;
   std::thread::id thread_id_;
+  std::vector<::boost::fibers::fiber> child_fibers_;
+  bool cancel_ = false;
 };
 
 }  // namespace util

@@ -64,7 +64,8 @@ class IoContextPool {
     }
   }
 
-  // func must accept IoContext&. It will run in a dedicated detached fiber.
+  // Runs `func` in a fiber asynchronously. func must accept IoContext&.
+  // It will run in a dedicated detached fiber.
   template <typename Func> void MapFiber(Func&& func) {
     MapTask([func = std::forward<Func>(func)] (IoContext& context) {
       ::boost::fibers::fiber(func, std::ref(context)).detach();
