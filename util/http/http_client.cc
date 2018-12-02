@@ -64,5 +64,17 @@ system::error_code Client::Get(StringPiece url, Response* response) {
   return ec;
 }
 
+::boost::system::error_code Client::Cancel() {
+  system::error_code ec;
+  if (socket_.is_open()) {
+    VLOG(1) << "Before shutdown " << socket_.native_handle();
+    socket_.cancel(ec);
+
+    socket_.shutdown(detail::tcp::socket::shutdown_both, ec);
+    VLOG(1) << "After shutdown: " << ec << " " << ec.message();
+  }
+  return ec;
+}
+
 }  // namespace http
 }  // namespace util

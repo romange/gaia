@@ -45,6 +45,14 @@ class IoContext {
  public:
   using io_context = ::boost::asio::io_context;
 
+  class Cancellable {
+   public:
+    virtual ~Cancellable() {}
+
+    virtual void Run() = 0;
+    virtual void Cancel() = 0;
+  };
+
   IoContext() : context_ptr_(std::make_shared<io_context>()) {}
 
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
@@ -80,11 +88,13 @@ class IoContext {
 
   bool InContextThread() const { return std::this_thread::get_id() == thread_id_; }
 
-  // Runs `f` in a dedicated fiber. `f` should accept `bool*`, which will point to true
-  // when InContext is shuttind down.
-  template<typename Func> void  AttachCancellable(Func&& func) {
-    PostSynchronous([func = std::forward<Func>(func), this] () mutable {
-      child_fibers_.emplace_back(std::forward<Func>(func), &cancel_);
+  // Takes ownership over Cancellable runner. Runs it in the fiber on io context thread.
+  // During the shutdown process signals the object to cancel by running Cancellable::Cancel()
+  // method.
+  void AttachCancellable(Cancellable* obj) {
+    PostSynchronous([obj, this] () mutable {
+      cancellable_arr_.emplace_back(obj);
+      ::boost::fibers::fiber([obj] { obj->Run(); }).detach();
     });
   }
 
@@ -93,8 +103,7 @@ class IoContext {
 
   ptr_t context_ptr_;
   std::thread::id thread_id_;
-  std::vector<::boost::fibers::fiber> child_fibers_;
-  bool cancel_ = false;
+  std::vector<std::unique_ptr<Cancellable>> cancellable_arr_;
 };
 
 }  // namespace util

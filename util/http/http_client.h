@@ -35,6 +35,7 @@ class Client {
   ::boost::system::error_code Connect(StringPiece host, StringPiece service);
   ::boost::system::error_code Get(StringPiece url, Response* response);
 
+  ::boost::system::error_code Cancel();
  private:
   detail::tcp::socket socket_;
 };

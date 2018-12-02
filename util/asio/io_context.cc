@@ -278,7 +278,9 @@ void IoContext::StartLoop() {
   io_cntx.run_one();
 
   // Shutdown sequence and cleanup.
-  cancel_ = true;
+  for (auto& ptr : cancellable_arr_) {
+    ptr->Cancel();
+  }
 
   // We stopped io_context. Lets spin it more until all ready handlers are run.
   // That should make sure that fibers are unblocked.
@@ -288,8 +290,6 @@ void IoContext::StartLoop() {
     this_fiber::yield();  // while something happens, pass the ownership to other fiber.
   }
 
-  for (auto& f : child_fibers_)
-    f.join();
   VLOG(1) << "MainSwitch Resumes :" << main_resumes;
 }
 

@@ -71,8 +71,9 @@ void IoContextPool::Stop() {
     tinfo.work->reset();
   }
 
-  for (TInfo& tinfo : thread_arr_) {
-    pthread_join(tinfo.tid, nullptr);
+  for (size_t i = 0; i <thread_arr_.size(); ++i) {
+    pthread_join(thread_arr_[i].tid, nullptr);
+    VLOG(2) << "Thread " << i << " has joined";
   }
   state_ = STOPPED;
 }
