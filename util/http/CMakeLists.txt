@@ -7,4 +7,7 @@ cxx_link(http_main http_v2)
 add_library(http_client_lib http_client.cc)
 cxx_link(http_client_lib strings asio_fiber_lib)
 
-cxx_test(http_test http_v2 http_client_lib LABELS CI)
+add_library(http_test_lib http_testing.cc)
+cxx_link(http_test_lib rpc gtest_main)
+
+cxx_test(http_test http_v2 http_client_lib http_test_lib LABELS CI)
