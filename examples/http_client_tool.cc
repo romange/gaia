@@ -19,6 +19,8 @@ DEFINE_string(connect, "localhost:8080", "");
 class HttpClientFiber : public IoContext::Cancellable {
   IoContext& cntx_;
   http::Client client_;
+  bool cancelled_ = false;
+
  public:
   HttpClientFiber(IoContext& cntx) : cntx_(cntx), client_(cntx_) {}
 
@@ -29,7 +31,7 @@ class HttpClientFiber : public IoContext::Cancellable {
       return;
     }
 
-    while (true) {
+    while (!cancelled_) {
       http::Client::Response resp;
       ec = client_.Get("/", &resp);
       LOG_IF(WARNING, ec) << ec.message();
@@ -40,6 +42,7 @@ class HttpClientFiber : public IoContext::Cancellable {
   }
 
   void Cancel() final {
+    cancelled_ = true;
     client_.Cancel();
   };
 };
