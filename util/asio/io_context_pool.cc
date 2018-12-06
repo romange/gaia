@@ -31,13 +31,13 @@ IoContextPool::~IoContextPool() {
   Stop();
 }
 
-void IoContextPool::ContextLoop(size_t index) {
+void IoContextPool::WrapLoop(size_t index, fibers_ext::BlockingCounter* bc) {
   context_indx_ = index;
 
   auto& context = context_arr_[index];
   VLOG(1) << "Starting io thread " << index << " " << &context.get_context();
 
-  context.StartLoop();
+  context.StartLoop(bc);
 
   VLOG(1) << "Finished io thread " << index;
 }
@@ -45,15 +45,19 @@ void IoContextPool::ContextLoop(size_t index) {
 void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
+  fibers_ext::BlockingCounter bc(thread_arr_.size());
+
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
-    thread_arr_[i].tid = base::StartThread("IoPool", [this, i]() { ContextLoop(i); });
+    thread_arr_[i].tid = base::StartThread("IoPool", [this, i, &bc] {
+      this->WrapLoop(i, &bc);
+    });
   }
 
-  // Wait for all the IO loops to start runnning.
-  for (auto& cntx : context_arr_) {
-    cntx.PostSynchronous([]{});
-  }
+  // We can not use PostSynchronous here yet because StartLoop might not run and it
+  // assumes internally that the first posted handler is issued from StartLoop.
+  // Therefore we use BlockingCounter to wait for all the IO loops to start running.
+  bc.Wait();
 
   LOG(INFO) << "Running " << thread_arr_.size() << " io threads";
   state_ = RUN;

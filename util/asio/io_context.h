@@ -99,7 +99,7 @@ class IoContext {
   }
 
  private:
-  void StartLoop();
+  void StartLoop(fibers_ext::BlockingCounter* bc);
 
   ptr_t context_ptr_;
   std::thread::id thread_id_;

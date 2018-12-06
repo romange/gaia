@@ -11,10 +11,11 @@
 #include "base/logging.h"
 #include "util/asio/io_context.h"
 
+namespace util {
+
+using fibers_ext::BlockingCounter;
 using namespace boost;
 using namespace std;
-
-namespace util {
 
 namespace {
 constexpr unsigned MAIN_NICE_LEVEL = 0;
@@ -254,7 +255,7 @@ void IoFiberProperties::SetNiceLevel(unsigned p) {
   }
 }
 
-void IoContext::StartLoop() {
+void IoContext::StartLoop(BlockingCounter* bc) {
   // I do not use use_scheduling_algorithm because I want to retain access to the scheduler.
   // fibers::use_scheduling_algorithm<AsioScheduler>(io_ptr);
   AsioScheduler* scheduler = new AsioScheduler(context_ptr_);
@@ -271,11 +272,16 @@ void IoContext::StartLoop() {
   // The reason for this is that io_context::running_in_this_thread() is deduced based on the
   // call-stack. GAIA code should use InContextThread() to check whether the code runs in the
   // context's thread.
-  Post([scheduler] { scheduler->MainLoop(); });
+  Post([scheduler, bc] {
+    bc->Dec();
+    scheduler->MainLoop();
+  });
 
   // Bootstrap - launch the callback handler above.
   // It will block until MainLoop exits.
   io_cntx.run_one();
+
+  VLOG(1) << "Cancelling " << cancellable_arr_.size() << " cancellables";
 
   // Shutdown sequence and cleanup.
   for (auto& ptr : cancellable_arr_) {

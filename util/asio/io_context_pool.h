@@ -86,7 +86,7 @@ class IoContextPool {
   }
 
  private:
-  void ContextLoop(size_t index);
+  void WrapLoop(size_t index, fibers_ext::BlockingCounter* bc);
 
   typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
 

@@ -78,17 +78,32 @@ TEST_F(IoContextTest, RunAndStop) {
   pool.Stop();
 }
 
+class CancelImpl final : public IoContext::Cancellable {
+ bool cancel_ = false;
+ bool& finished_;
+ public:
+  CancelImpl(bool* finished) : finished_(*finished) {}
+
+  void Run() override {
+    while (!cancel_) {
+      this_fiber::sleep_for(300us);
+    }
+    finished_ = true;
+  }
+
+  void Cancel() override {
+    cancel_ = true;
+  }
+};
+
 TEST_F(IoContextTest, AttachCancellable) {
   IoContextPool pool(1);
   pool.Run();
 
   bool cancellable_finished = false;
-  pool.GetNextContext().AttachCancellable([&](bool* cancel) {
-    while (!*cancel) {
-      this_fiber::sleep_for(300us);
-    }
-    cancellable_finished = true;
-  });
+
+  pool.GetNextContext().AttachCancellable(new CancelImpl(&cancellable_finished));
+
   pool.Stop();
   EXPECT_TRUE(cancellable_finished);
 }

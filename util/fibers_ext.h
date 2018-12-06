@@ -72,11 +72,7 @@ class BlockingCounter {
   explicit BlockingCounter(unsigned count) : count_(count) {
   }
 
-  void Add(unsigned delta) {
-    std::lock_guard<mutex> g(mutex_);
-    count_ += delta;
-  }
-
+  // Producer side -> should decrement the counter.
   void Dec() {
     if (0 == count_)  // should not happen
       return;
@@ -92,6 +88,10 @@ class BlockingCounter {
     cond_.wait(lock, [this] { return count_ == 0; });
   }
 
+  void Add(unsigned delta) {
+    std::lock_guard<mutex> g(mutex_);
+    count_ += delta;
+  }
  private:
   unsigned count_;
 
