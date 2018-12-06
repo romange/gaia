@@ -194,7 +194,7 @@ add_third_party(
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
         "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"  --prefix=${PROTOBUF_DIR}
     COMMAND make clean
-    BUILD_IN_SOURCE 1
+
     LIB libprotobuf.so libprotoc.so
 )
 
@@ -244,19 +244,19 @@ add_third_party(
   xxhash
   GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
   GIT_TAG v0.6.4
-  CONFIGURE_COMMAND cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=${THIRD_PARTY_LIB_DIR}/xxhash
-                          -DBUILD_SHARED_LIBS=OFF <SOURCE_DIR>/cmake_unofficial/
+  SOURCE_SUBDIR cmake_unofficial
+  CMAKE_PASS_FLAGS "-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF"
 )
 
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
 add_third_party(lz4
   GIT_REPOSITORY https://github.com/lz4/lz4.git
-  GIT_TAG v1.8.0
+  GIT_TAG v1.8.3
   BUILD_IN_SOURCE 1
   UPDATE_COMMAND ""
-  CONFIGURE_COMMAND echo foo
-  BUILD_COMMAND make -e "CFLAGS=-fPIC -O3" lib-release
-  INSTALL_COMMAND make install -e PREFIX=${LZ4_DIR}
+  SOURCE_SUBDIR contrib/cmake_unofficial
+  
+  CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=OFF"
 )
 
 add_third_party(
