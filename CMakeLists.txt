@@ -9,6 +9,7 @@ set(PACKAGE_BUGREPORT "TBD")
 set(PROJECT_CONTACT romange@gmail.com)
 
 project(${PACKAGE_NAME})
+set(CMAKE_CXX_STANDARD 14)
 
 option (ONLY_THIRD_PARTY "Build third party only")
 
