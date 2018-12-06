@@ -35,8 +35,9 @@ install:
 script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
   - env && cat $HOME/supress.txt
-  - ls build-dbg
+  - du -hc build-dbg
   - mkdir testresults && ./blaze.sh -ninja && cd build-dbg
+  - du -hc build-dbg
   - ninja -j4 base
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
   - ninja -j4 $tests_list -k 10
