@@ -88,22 +88,26 @@ class IoContext {
 
   bool InContextThread() const { return std::this_thread::get_id() == thread_id_; }
 
-  // Takes ownership over Cancellable runner. Runs it in the fiber on io context thread.
+  // Attaches user processes that should live along IoContext. IoContext will shut them down via
+  // Cancel() call right before closing its IO loop.
+  // Takes ownership over Cancellable runner. Runs it in a dedicated fiber in IoContext thread.
   // During the shutdown process signals the object to cancel by running Cancellable::Cancel()
   // method.
   void AttachCancellable(Cancellable* obj) {
     PostSynchronous([obj, this] () mutable {
-      cancellable_arr_.emplace_back(obj);
-      ::boost::fibers::fiber([obj] { obj->Run(); }).detach();
+      CancellablePair pair{obj, [obj] { obj->Run(); }};
+      cancellable_arr_.emplace_back(std::move(pair));
     });
   }
 
  private:
   void StartLoop(fibers_ext::BlockingCounter* bc);
 
+  using CancellablePair = std::pair<std::unique_ptr<Cancellable>, ::boost::fibers::fiber>;
+
   ptr_t context_ptr_;
   std::thread::id thread_id_;
-  std::vector<std::unique_ptr<Cancellable>> cancellable_arr_;
+  std::vector<CancellablePair> cancellable_arr_;
 };
 
 }  // namespace util

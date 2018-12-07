@@ -86,7 +86,7 @@ class CancelImpl final : public IoContext::Cancellable {
 
   void Run() override {
     while (!cancel_) {
-      this_fiber::sleep_for(300us);
+      this_fiber::sleep_for(10ms);
     }
     finished_ = true;
   }
