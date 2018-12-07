@@ -229,16 +229,15 @@ add_third_party(
 )
 set(SPARSE_HASH_INCLUDE_DIR ${SPARSE_HASH_DIR}/include)
 
-
 add_third_party(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-  # GIT_SUBMODULES third_party/foo
+  GIT_TAG 66eb6067b10fd02e419f88816a8833a64eb33551
+  GIT_SHALLOW 1
   CMAKE_PASS_FLAGS "-DRAPIDJSON_BUILD_TESTS=OFF -DRAPIDJSON_BUILD_EXAMPLES=OFF \
                     -DRAPIDJSON_BUILD_DOC=OFF"
   LIB "none"
 )
-set(RAPIDJSON_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/rapidjson/include)
 
 add_third_party(
   xxhash
@@ -255,7 +254,7 @@ add_third_party(lz4
   BUILD_IN_SOURCE 1
   UPDATE_COMMAND ""
   SOURCE_SUBDIR contrib/cmake_unofficial
-  
+
   CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=OFF"
 )
 
