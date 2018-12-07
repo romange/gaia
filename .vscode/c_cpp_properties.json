@@ -2,8 +2,10 @@
   "configurations": [
     {
       "name": "Linux",
-      "defines": [],
+      "defines": ["_TEST_BASE_FILE_=\"mytest.cc\""],
       "compilerPath": "/usr/bin/clang++",
+      "cppStandard": "c++14",
+
       "includePath": [
         "${workspaceFolder}/abseil-cpp",
         "${workspaceFolder}/third_party/libs/protobuf/include",

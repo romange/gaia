@@ -239,7 +239,7 @@ add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
 function(cxx_test name)
   add_executable(${name} ${name}.cc)
   add_dependencies(${name} benchmark_project gtest_project)
-  add_compile_flag(${name} "-Wno-sign-compare")
+  # add_compile_flag(${name} "-Wno-sign-compare")
   CMAKE_PARSE_ARGUMENTS(parsed "" "" "LABELS" ${ARGN})
 
   if (NOT parsed_LABELS)
@@ -247,7 +247,7 @@ function(cxx_test name)
   endif()
 
   add_include(${name} ${GTEST_INCLUDE_DIR} ${BENCHMARK_INCLUDE_DIR})
-
+  target_compile_definitions(${name} PRIVATE _TEST_BASE_FILE_=\"${name}.cc\")
   cxx_link(${name} gtest_main TRDP::gmock fast_malloc ${parsed_UNPARSED_ARGUMENTS})
 
   add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
