@@ -85,7 +85,7 @@ static void BM_RoundUp64(benchmark::State& state) {
   std::fill(val, val + arraysize(val), 1ULL << 47);
 
   while (state.KeepRunning()) {
-    for (int i = 0; i < arraysize(val); ++i) {
+    for (unsigned i = 0; i < arraysize(val); ++i) {
       DoNotOptimize(Bits::RoundUp64(val[i]));
     }
   }
@@ -97,7 +97,7 @@ static void BM_RoundUp(benchmark::State& state) {
   std::fill(val, val + arraysize(val), 1ULL << 47);
 
   while (state.KeepRunning()) {
-    for (int i = 0; i < arraysize(val); ++i) {
+    for (unsigned i = 0; i < arraysize(val); ++i) {
       DoNotOptimize(Bits::RoundUp(val[i]));
     }
   }

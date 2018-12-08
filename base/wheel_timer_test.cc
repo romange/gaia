@@ -228,7 +228,8 @@ TEST_F(TimerWheelTest, ScheduleInRange) {
     int r1 = rand() % (1 << len1);
     int r2 = r1 + (1 + rand() % (1 << len2));
     timers.schedule_in_range(&timer, r1, r2);
-    EXPECT_TRUE(timers.ticks_to_next_event() >= r1);
+
+    EXPECT_GE(timers.ticks_to_next_event(), r1);
     ASSERT_LE(timers.ticks_to_next_event(), r2);
   }
 }
@@ -330,7 +331,7 @@ TEST_F(TimerWheelTest, MaxExec) {
   std::vector<std::unique_ptr<Event>> events;
 
   // Schedule 512 timers, each setting the matching bit in "done".
-  for (int i = 0; i < done.size(); ++i) {
+  for (unsigned i = 0; i < done.size(); ++i) {
     auto event = new Event([&done, i]() { done[i] = true; });
     events.emplace_back(event);
     timers.schedule(event, i + 1);
@@ -340,7 +341,7 @@ TEST_F(TimerWheelTest, MaxExec) {
   EXPECT_TRUE(timers.advance(0, 100));
 
   // Now check that all timers were scheduled in the right location.
-  for (int i = 0; i < done.size(); ++i) {
+  for (unsigned i = 0; i < done.size(); ++i) {
     EXPECT_EQ(std::count(done.begin(), done.end(), true), i);
     EXPECT_TRUE(!done[i]);
     timers.advance(1);

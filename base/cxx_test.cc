@@ -13,7 +13,7 @@ using std::string;
 
 static unsigned LoopSwitch(int val, int cnt) {
   unsigned sum = 0;
-  for (unsigned i = 0; i < cnt; ++i) {
+  for (int i = 0; i < cnt; ++i) {
       switch (val) {
         case 0: sum += (i >> 3)*i; break;
         case 1: sum += i*5; break;
@@ -25,7 +25,7 @@ static unsigned LoopSwitch(int val, int cnt) {
 
 static unsigned SwitchLoop(int val, int cnt) {
   unsigned sum = 0;
-  unsigned i = 0;
+  int i = 0;
   switch (val) {
       case 0:
               for (; i < cnt; ++i) sum+= (i >> 3)*i;
