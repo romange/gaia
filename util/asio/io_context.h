@@ -95,7 +95,7 @@ class IoContext {
   // method.
   void AttachCancellable(Cancellable* obj) {
     PostSynchronous([obj, this] () mutable {
-      CancellablePair pair(obj, [obj] { obj->Run(); });
+      CancellablePair pair(std::unique_ptr<Cancellable>(obj), [obj] { obj->Run(); });
       cancellable_arr_.emplace_back(std::move(pair));
     });
   }
