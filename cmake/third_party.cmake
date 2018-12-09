@@ -189,6 +189,7 @@ add_third_party(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
     GIT_TAG v3.6.1
+    GIT_SHALLOW 1
     PATCH_COMMAND ./autogen.sh
 
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
