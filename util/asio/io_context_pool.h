@@ -64,6 +64,16 @@ class IoContextPool {
     }
   }
 
+  template <typename Func> void MapTaskSync(Func&& func) {
+    fibers_ext::BlockingCounter bc(size());
+    auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
+      func(context);
+      bc.Dec();
+    };
+    MapTask(std::move(cb));
+    bc.Wait();
+  }
+
   // Runs `func` in a fiber asynchronously. func must accept IoContext&.
   // It will run in a dedicated detached fiber.
   template <typename Func> void MapFiber(Func&& func) {
@@ -81,7 +91,7 @@ class IoContextPool {
       func(context);
       bc.Dec();
     };
-    MapFiber(cb);
+    MapFiber(std::move(cb));
     bc.Wait();
   }
 
