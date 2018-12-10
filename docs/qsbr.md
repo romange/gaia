@@ -33,7 +33,7 @@ In addition, the write path blocks readers which, in turn, affects our tail late
 
 To summarize, lock-less reference counting is considered [as less efficient method](http://www2.rdrop.com/~paulmck/RCU/hart_ipdps06_slides.pdf) in lockless
 memory reclamation schemes. How can we improve? PE McKenney generalized the flow above to
-Read-modify-write or RCU scheme. There are few overview articles explaining this, I suggest to read
+Read-Change-Write or RCU scheme. There are few overview articles explaining this, I suggest to read
 [this one](https://kukuruku.co/post/lock-free-data-structures-the-inside-rcu).
 
 Tom Hard and PE McKenney conducted a thorough comparison of most performant implementations
