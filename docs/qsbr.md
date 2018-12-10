@@ -40,8 +40,7 @@ Tom Hard and PE McKenney conducted a thorough comparison of most performant impl
 within this scheme. One of them is a cooperative algorithm called "Quiescent-State-Based Reclamation".
 
 In short, each "read" thread accessing our `data_ptr_` should call a function `quiescent_state();`
-which notifies a system that this thread does do any "user"-level work (i.e. suspended or going to be suspended) 
-i.e. in part does not hold references to `data_ptr_`.
+which notifies a system that this thread does do any "user"-level work (i.e. it's going to be suspended or handles system tasks), in particular it does not hold references to `data_ptr_`.
 This call has almost no performance penalty and can be called when a thread is going to rest or
 finished running user callbacks that access `data_ptr_`.
 
