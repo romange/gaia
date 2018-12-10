@@ -14,7 +14,7 @@ namespace util {
 class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
  public:
   GlogAsioSink();
-  ~GlogAsioSink();
+  ~GlogAsioSink() noexcept;
 
   void Run() override;
   void Cancel() override;
