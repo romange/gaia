@@ -31,7 +31,21 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
           << "hostname: " << hostname_ << ", service: " << service_;
 
   time_point tp = steady_clock::now() + milliseconds(ms);
-  ResolveAndConnect(tp);
+  fibers_ext::Done done;
+
+  // TODO: to introduce synchronous Fiber launching method in IoContext.
+  // I prefer moving the work to IoContext thread to keep all the data-structure updates as
+  // single-threaded. It seems that Asio components (timer, for example) in rare cases have
+  // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
+  // it can ignore "cancel()" call in some cases.
+  io_context_.Post([&] {
+    auto cb = [&] {
+      this->ResolveAndConnect(tp);
+      done.Notify();
+    };
+    fibers::fiber(std::move(cb)).detach();
+  });
+  done.Wait();
 
   return status_;
 }
@@ -61,19 +75,20 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
     system::error_code resolve_ec;
     auto results = Resolve(fibers_ext::yield[resolve_ec]);
-    if (!resolve_ec) {
+    if (!resolve_ec) {  // OK
       system::error_code ec;
       VLOG(2) << "Connecting to " << results.size() << " endpoints";
 
       done.Reset();
+      timer.expires_at(until);  // Alarm the timer.
       asio::async_connect(sock_, results, connect_cb);
 
-      timer.expires_at(until);
       timer.async_wait(fibers_ext::yield[ec]);
       if (status_ && !ec) {
         // Timer successfully fired, and status_ is still not ok, so cancel async_connect operation.
         sock_.cancel();
       } else if (!status_) {
+        VLOG(2) << "Connected, timer status: " << ec.message();
         return;  // connected.
       }
       done.Wait();  // wait for connect_cb to run.
