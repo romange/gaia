@@ -27,9 +27,8 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
   if (!status_)
     return status_;
 
-  VLOG(1) << "Connecting on socket " << sock_.native_handle() << " " << sock_.non_blocking();
-
-  CHECK(!hostname_.empty());
+  VLOG(1) << "Connecting on socket " << sock_.native_handle() << " " << sock_.non_blocking()
+          << "hostname: " << hostname_ << ", service: " << service_;
 
   time_point tp = steady_clock::now() + milliseconds(ms);
   ResolveAndConnect(tp);
@@ -50,6 +49,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
     if (!ec) {
       sock_.non_blocking(true);
+
       VLOG(1) << "Connected to endpoint " << ep;
     }
     status_ = ec;
