@@ -37,7 +37,7 @@ script:
   - env && cat $HOME/supress.txt
   - du -hcs build-dbg
   - mkdir testresults && ./blaze.sh -ninja && cd build-dbg
-  - du -hc third_party
+  # - du -hc third_party
   - ninja -j4 base array_test
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
   - ninja -j4 $tests_list -k 10
