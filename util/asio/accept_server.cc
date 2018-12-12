@@ -153,8 +153,11 @@ void AcceptServer::Run() {
 }
 
 void AcceptServer::Wait() {
-  if (was_run_)
+  if (was_run_) {
     bc_.Wait();
+  } else {
+    CHECK(listeners_.empty()) << "Must Call Run() if added listeners";
+  }
 }
 
 }  // namespace util
