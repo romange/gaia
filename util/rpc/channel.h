@@ -21,8 +21,8 @@ namespace rpc {
 // Fiber-safe rpc client.
 // Send(..) is also thread-safe and may be used from multiple threads differrent than
 // of IoContext containing the channel, however it might incur performance penalty.
-// Therefore to achieve maximal performance - it's advised to ClientBase only from IoContext thread.
-class ClientBase {
+// Therefore to achieve maximal performance - it's advised to use Channel from IoContext thread.
+class Channel {
  public:
   using error_code = ClientChannel::error_code;
   using future_code_t = boost::fibers::future<error_code>;
@@ -31,14 +31,14 @@ class ClientBase {
   // if bool(error_code) returns true, aborts receiving the stream and returns the error.
   using MessageCallback = std::function<error_code(Envelope&)>;
 
-  ClientBase(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
+  Channel(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
 
-  ClientBase(IoContext& cntx, const std::string& hostname, const std::string& service)
-      : ClientBase(ClientChannel(cntx, hostname, service)) {
+  Channel(IoContext& cntx, const std::string& hostname, const std::string& service)
+      : Channel(ClientChannel(cntx, hostname, service)) {
   }
 
-  ~ClientBase();
+  ~Channel();
 
   // Blocks at least for 'ms' milliseconds to connect to the host.
   // Should be called once during the initialization phase before sending the requests.
@@ -101,7 +101,7 @@ class ClientBase {
 
   class ExpiryEvent : public base::TimerEventInterface {
    public:
-    explicit ExpiryEvent(ClientBase* me) : me_(me) {
+    explicit ExpiryEvent(Channel* me) : me_(me) {
    }
 
    // ExpiryEvent can not be moved because its address is registered inside TimerWheel.
@@ -110,7 +110,7 @@ class ClientBase {
    void set_id(RpcId i) { id_ = i; }
 
   private:
-    ClientBase* me_;
+    Channel* me_;
     RpcId id_ = 0;
   };
 

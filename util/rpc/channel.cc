@@ -4,7 +4,7 @@
 #include <boost/fiber/future.hpp>
 #include <chrono>
 
-#include "util/rpc/client_base.h"
+#include "util/rpc/channel.h"
 
 #include "base/logging.h"
 #include "util/asio/asio_utils.h"
@@ -38,7 +38,7 @@ constexpr uint32_t kTickPrecision = 3;  // 3ms per timer tick.
 
 }  // namespace
 
-ClientBase::~ClientBase() {
+Channel::~Channel() {
   Shutdown();
 
   CHECK(read_fiber_.joinable());
@@ -47,18 +47,18 @@ ClientBase::~ClientBase() {
   VLOG(1) << "After ReadFiberJoin";
 }
 
-void ClientBase::Shutdown() {
+void Channel::Shutdown() {
   channel_.Shutdown();
 }
 
-auto ClientBase::Connect(uint32_t ms) -> error_code {
+auto Channel::Connect(uint32_t ms) -> error_code {
   CHECK(!read_fiber_.joinable());
   error_code ec = channel_.Connect(ms);
 
   IoContext& context = channel_.context();
   context.PostSynchronous([this] {
-    read_fiber_ = fibers::fiber(&ClientBase::ReadFiber, this);
-    flush_fiber_ = fibers::fiber(&ClientBase::FlushFiber, this);
+    read_fiber_ = fibers::fiber(&Channel::ReadFiber, this);
+    flush_fiber_ = fibers::fiber(&Channel::FlushFiber, this);
   });
   expiry_task_.reset(new PeriodicTask(context, chrono::milliseconds(kTickPrecision)));
 
@@ -71,7 +71,7 @@ auto ClientBase::Connect(uint32_t ms) -> error_code {
   return ec;
 }
 
-auto ClientBase::PresendChecks() -> error_code {
+auto Channel::PresendChecks() -> error_code {
   if (channel_.is_shut_down()) {
     return asio::error::shut_down;
   }
@@ -92,8 +92,8 @@ auto ClientBase::PresendChecks() -> error_code {
   return ec;
 }
 
-auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t {
-  DCHECK(read_fiber_.joinable()) << "Call ClientBase::Connect(), stupid.";
+auto Channel::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t {
+  DCHECK(read_fiber_.joinable()) << "Call Channel::Connect(), stupid.";
   DCHECK_GT(deadline_msec, 0);
 
   // ----
@@ -130,7 +130,7 @@ auto ClientBase::Send(uint32 deadline_msec, Envelope* envelope) -> future_code_t
   return res;
 }
 
-auto ClientBase::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_code {
+auto Channel::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_code {
   DCHECK(read_fiber_.joinable());
 
   // ----
@@ -160,7 +160,7 @@ auto ClientBase::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_c
   return ec;
 }
 
-void ClientBase::ReadFiber() {
+void Channel::ReadFiber() {
   CHECK(channel_.context().get_executor().running_in_this_thread());
 
   VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
@@ -188,7 +188,7 @@ void ClientBase::ReadFiber() {
   VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
 }
 
-void ClientBase::FlushFiber() {
+void Channel::FlushFiber() {
   using namespace std::chrono_literals;
   CHECK(channel_.context().get_executor().running_in_this_thread());
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
@@ -208,7 +208,7 @@ void ClientBase::FlushFiber() {
   }
 }
 
-auto ClientBase::FlushSends() -> error_code {
+auto Channel::FlushSends() -> error_code {
   // We call FlushSendsGuarded directly from Send fiber because it calls socket.Write
   // synchronously and we can not Post blocking function into io_context.
   std::lock_guard<fibers::mutex> guard(send_mu_);
@@ -225,7 +225,7 @@ auto ClientBase::FlushSends() -> error_code {
   return ec;  // Return the last known status code.
 }
 
-auto ClientBase::FlushSendsGuarded() -> error_code {
+auto Channel::FlushSendsGuarded() -> error_code {
   error_code ec;
   // This function runs only in IOContext thread. Therefore only
   if (outgoing_buf_.empty())
@@ -279,7 +279,7 @@ auto ClientBase::FlushSendsGuarded() -> error_code {
   return ec;
 }
 
-void ClientBase::ExpirePending(RpcId id) {
+void Channel::ExpirePending(RpcId id) {
   DVLOG(1) << "Expire rpc id " << id;
 
   auto it = this->pending_calls_.find(id);
@@ -293,7 +293,7 @@ void ClientBase::ExpirePending(RpcId id) {
   pr.set_value(asio::error::timed_out);
 }
 
-void ClientBase::CancelSentBufferGuarded(error_code ec) {
+void Channel::CancelSentBufferGuarded(error_code ec) {
   std::vector<SendItem> tmp;
 
   buf_lock_.lock_shared();
@@ -306,7 +306,7 @@ void ClientBase::CancelSentBufferGuarded(error_code ec) {
   }
 }
 
-auto ClientBase::ReadEnvelope() -> error_code {
+auto Channel::ReadEnvelope() -> error_code {
   Frame f;
   error_code ec = f.Read(&br_);
   if (ec)
@@ -356,7 +356,7 @@ auto ClientBase::ReadEnvelope() -> error_code {
   return ec;
 }
 
-void ClientBase::HandleStreamResponse(RpcId rpc_id) {
+void Channel::HandleStreamResponse(RpcId rpc_id) {
   auto it = pending_calls_.find(rpc_id);
   if (it == pending_calls_.end()) {
     return;  // Might happen if pending_calls_ was cancelled when we read the envelope.
@@ -379,7 +379,7 @@ void ClientBase::HandleStreamResponse(RpcId rpc_id) {
   promise.set_value(ec);
 }
 
-void ClientBase::CancelPendingCalls(error_code ec) {
+void Channel::CancelPendingCalls(error_code ec) {
   PendingMap tmp;
   tmp.swap(pending_calls_);
   pending_calls_size_.store(0, std::memory_order_relaxed);
