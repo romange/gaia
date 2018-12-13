@@ -4,8 +4,8 @@
 // based on MurmurHash code.
 //
 #include "base/hash.h"
-#include "base/macros.h"
-
+#include "absl/base/macros.h"
+#include "absl/base/optimization.h"
 #include <string.h>
 #include <xxhash.h>
 
@@ -86,8 +86,8 @@ uint32_t MurmurHash3_x86_32(const uint8_t* data, uint32_t len, uint32_t seed) {
 
   switch(len & 3)
   {
-      case 3: k1 ^= tail[2] << 16;
-      case 2: k1 ^= tail[1] << 8;
+      case 3: k1 ^= tail[2] << 16;ABSL_FALLTHROUGH_INTENDED;
+      case 2: k1 ^= tail[1] << 8;ABSL_FALLTHROUGH_INTENDED;
       case 1: k1 ^= tail[0];
             k1 *= c1; k1 = rotl32(k1,15); k1 *= c2; h1 ^= k1;
   }
@@ -104,7 +104,7 @@ uint32_t MurmurHash3_x86_32(const uint8_t* data, uint32_t len, uint32_t seed) {
 
 uint64_t Fingerprint(const char* str, uint32_t len) {
   uint64_t res = XXH64(str, len, 24061983);
-  if (LIKELY(res > 1))
+  if (ABSL_PREDICT_TRUE(res > 1))
     return res;
   return 2;
 }
