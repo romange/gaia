@@ -49,10 +49,12 @@ endif()
 # can not set -Wshadow  due to numerous warnings in protobuf compilation.
 # mcx16 to support double word CAS.
 # Protobuf needs run-time information so no -fno-rtti switch.
+# If we use "noexcept" we must use -Wno-noexcept-type in c++14 because of the weird warning of gcc.
+# When we switch to c++17 we can remove it.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -march=broadwell -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-malloc -fno-builtin-calloc ")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-realloc -fno-builtin-free")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -Wno-unused-parameter")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -Wno-unused-parameter -Wno-noexcept-type")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DGOOGLE_PROTOBUF_NO_RTTI")
 
 # Need -fPIC in order to link against shared libraries. For example when creating python modules.
