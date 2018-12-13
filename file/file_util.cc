@@ -65,9 +65,6 @@ static void TraverseRecursivelyInternal(StringPiece path, std::function<void(Str
     return;
   }
 
-  char buf[offsetof(struct dirent, d_name) + NAME_MAX + 1];
-  struct dirent* entry = new (buf) dirent;
-
   if (S_ISDIR(stats.st_mode)) {
     string current_name;
     DIR* dir = opendir(path.data());
@@ -76,17 +73,17 @@ static void TraverseRecursivelyInternal(StringPiece path, std::function<void(Str
                  << ", error: " << error_str(errno);
       return;
     }
+
     while (true) {
-      struct dirent* der = nullptr;
-      CHECK_EQ(readdir_r(dir, entry, &der), 0);
+      struct dirent* der = readdir(dir);
       if (der == nullptr)
         break;
-      StringPiece entry_name(entry->d_name);
+      StringPiece entry_name(der->d_name);
       if (entry_name == StringPiece(".") || entry_name == StringPiece("..")) {
         continue;
       }
       current_name = JoinPath(path, entry_name);
-      if (entry->d_type == DT_DIR) {
+      if (der->d_type == DT_DIR) {
         TraverseRecursivelyInternal(current_name, cb, offset);
       } else {
         StringPiece cn(current_name);

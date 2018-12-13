@@ -93,8 +93,7 @@ class LocalFileImpl : public WriteFile {
   // virtual bool Delete();
   virtual bool Close();
 
-  Status Write(const uint8* buffer, uint64 length) override;
-  Status Flush();
+  Status Write(const uint8* buffer, uint64 length) final;
 
  protected:
   int fd_ = 0;
@@ -139,11 +138,6 @@ Status LocalFileImpl::Write(const uint8* buffer, uint64 length) {
     left_to_write -= written;
   }
 
-  return Status::OK;
-}
-
-Status LocalFileImpl::Flush() {
-  if (fsync(fd_) < 0) return StatusFileError();
   return Status::OK;
 }
 

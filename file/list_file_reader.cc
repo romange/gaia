@@ -95,6 +95,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
 
           return true;
         }
+        ABSL_FALLTHROUGH_INTENDED;
       case kFirstType:
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "partial record without end(2)");
