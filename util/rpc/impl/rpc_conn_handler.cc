@@ -38,6 +38,7 @@ RpcConnectionHandler::~RpcConnectionHandler() {
 }
 
 void RpcConnectionHandler::OnOpenSocket() {
+  // TODO: To make flush_fiber_ thread-local, handling all the subscribed rpc connection handlers.
   flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
   bridge_->InitInThread();
 }

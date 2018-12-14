@@ -73,7 +73,6 @@ class ConnectionHandler {
     boost::fibers::mutex mu_;
     ListType* list_;
 
-
    public:
     explicit Notifier(ListType* list) : list_(list) {}
 
@@ -95,18 +94,19 @@ class ConnectionHandler {
 
  protected:
   // called once after connection was initialized. Will run in io context thread.
-  virtual void OnOpenSocket() {};
+  virtual void OnOpenSocket() {}
 
   // Called before the class destroyed but after the socket was signalled to stop.
-  // Might blocks the calling fiber. Does not have to be called from io context thread.
+  // May block the calling fiber. Does not have to be called from io context thread.
   // ConnectionHandler should clean here resources that must closed before the object is destroyed.
-  virtual void OnCloseSocket() {};
+  virtual void OnCloseSocket() {}
 
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
   std::experimental::optional<socket_t> socket_;
   bool is_open_ = false;
+
  private:
   void RunInIOThread();
 
@@ -121,6 +121,7 @@ class ListenerInterface {
 
   void RegisterPool(IoContextPool* pool);
 
+  // Creates a dedicated handler for a new connection.
   virtual ConnectionHandler* NewConnection() = 0;
 
   // Called by AcceptServer when shutting down start and before all connections are closed.
