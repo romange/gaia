@@ -149,7 +149,8 @@ add_third_party(
 add_third_party(
   gtest
   GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG release-1.8.0
+  GIT_TAG release-1.8.1
+  GIT_SHALLOW 1
   LIB libgtest.a libgmock.a
 )
 
