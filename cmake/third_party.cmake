@@ -164,10 +164,10 @@ add_third_party(
 add_third_party(
   gperf
   GIT_REPOSITORY https://github.com/gperftools/gperftools.git
-  GIT_TAG gperftools-2.7
+  GIT_TAG e9ab4c53041ac62feefbbb076d326e9a77dd1567
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
-                    --enable-libunwind
+                    --enable-libunwind "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"
                     --prefix=${THIRD_PARTY_LIB_DIR}/gperf
   LIB libtcmalloc_and_profiler.so
 )
@@ -194,7 +194,8 @@ add_third_party(
     PATCH_COMMAND ./autogen.sh
 
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
-        "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} -DPROTOBUF_USE_EXCEPTIONS=0"  --prefix=${PROTOBUF_DIR}
+        "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} -DPROTOBUF_USE_EXCEPTIONS=0 -DGOOGLE_PROTOBUF_NO_RTTI"
+        --prefix=${PROTOBUF_DIR}
     COMMAND make clean
 
     LIB libprotobuf.so libprotoc.so
