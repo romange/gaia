@@ -21,6 +21,11 @@ using namespace std::chrono_literals;
 
 namespace {
 
+using RpcConnList =
+      detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
+                    detail::constant_time_size<true>, detail::cache_last<true>>;
+thread_local RpcConnList flush_conn_list;
+
 class Flusher : public IoContext::Cancellable {
  public:
   Flusher() {}
@@ -38,12 +43,13 @@ void Flusher::Run() {
   std::unique_lock<fibers::mutex> lock(mu_);
 
   while (!stop_) {
-    cv_.wait_for(lock, 300us, [this] { return stop_; });
-    if (stop_) {
-      VLOG(1) << "Flusher broke down";
-      break;
+    cv_.wait_for(lock, 300us);
+
+    for (auto it = flush_conn_list.begin(); it != flush_conn_list.end(); ++it) {
+      it->PollAndFlushWrites();
     }
   }
+  VLOG(1) << "Flusher exited";
 }
 
 void Flusher::Cancel() {
@@ -54,7 +60,6 @@ void Flusher::Cancel() {
   }
   cv_.notify_all();
 }
-
 
 thread_local Flusher* flusher = nullptr;
 
@@ -74,9 +79,9 @@ RpcConnectionHandler::RpcConnectionHandler(IoContext& context, ConnectionBridge*
 
 RpcConnectionHandler::~RpcConnectionHandler() {
   VLOG_IF(1, buf_read_sock_) << "Saved " << buf_read_sock_->saved() << " bytes";
-  if (flush_fiber_.joinable()) {
+  /*if (flush_fiber_.joinable()) {
     flush_fiber_.join();
-  }
+  }*/
   bridge_->Join();
 
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
@@ -89,18 +94,28 @@ void RpcConnectionHandler::OnOpenSocket() {
     flusher = new Flusher;
     io_context_.AttachCancellable(flusher);
   }
+  flush_conn_list.push_back(*this);
 
-  // TODO: To make flush_fiber_ thread-local, handling all the subscribed rpc connection handlers.
-  flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
+  // flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
   bridge_->InitInThread();
 }
 
 void RpcConnectionHandler::OnCloseSocket() {
-  // CHECK(socket_->get_executor().running_in_this_thread());
+  // OnCloseSocket might run in a different thread. TODO: need to reorganize this.
   VLOG(1) << "OnCloseSocket: Before flush fiber join " << socket_->native_handle();
-  if (flush_fiber_.joinable()) {
+
+  // To make sure this->FlushWrites does not run. Since Flusher and IoContext fibers are
+  // thread-local, it's either the iteration on flush_conn_list has been blocked on socket
+  // write in another handler or it passed this object exited due to locked wr_mu_.
+  // In any case, Flusher can not hold reference to this object.
+  std::lock_guard<fibers::mutex> ul(wr_mu_);
+  io_context_.PostSynchronous([this] {
+    flush_conn_list.erase(RpcConnList::s_iterator_to(*this));
+  });
+
+  /*if (flush_fiber_.joinable()) {
     flush_fiber_.join();
-  }
+  }*/
   VLOG(1) << "After flush fiber join";
 }
 
@@ -120,8 +135,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   DCHECK_NE(-1, socket_->native_handle());
 
   if (ShouldFlush()) {
-    std::lock_guard<fibers::mutex> l(wr_mu_);
-    FlushWritesGuarded();
+    FlushWrites();
   }
 
   RpcItem* item = rpc_items_.Get();
@@ -135,22 +149,18 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
   DCHECK_NE(-1, socket_->native_handle());
 
-  struct WriterData {
-    RpcId rpc_id;
-    RpcItem* item;
-  };
-
   // To support streaming we have this writer that can write multiple envelopes per
   // single rpc request. We pass additional data by value to allow asynchronous invocation
   // of ConnectionBridge::HandleEnvelope. We move writer into it, this it will be responsible to
-  // own it until the handler finishes.
-  auto writer = [data = WriterData{frame.rpc_id, item}, this](Envelope&& env) mutable {
-    RpcItem* next = data.item ? data.item : rpc_items_.Get();
+  // own it until the handler finishes. Please note that writer changes the contents of 'data'
+  // field so only for the first time it uses the same RpcItem to reduce allocations.
+  auto writer = [rpc_id = frame.rpc_id, item, this](Envelope&& env) mutable {
+    RpcItem* next = item ? item : rpc_items_.Get();
 
     next->envelope = std::move(env);
-    next->id = data.rpc_id;
+    next->id = rpc_id;
     outgoing_buf_.push_back(*next);
-    data.item = nullptr;
+    item = nullptr;
   };
 
   bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
@@ -158,17 +168,21 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   return ec_;
 }
 
-void RpcConnectionHandler::FlushWritesGuarded() {
-  if (outgoing_buf_.empty() || !socket_->is_open())
+void RpcConnectionHandler::FlushWrites() {
+  // Serves as critical section. We can not allow interleaving writes into the socket.
+  // If another fiber flushes - we just exit without blocking.
+  std::unique_lock<fibers::mutex> ul(wr_mu_, std::try_to_lock_t{});
+  if (!ul || outgoing_buf_.empty() || !socket_->is_open())
     return;
+
   VLOG(2) << "FlushWritesGuarded: " << outgoing_buf_.size();
   size_t count = outgoing_buf_.size();
   write_seq_.resize(count * 3);
   frame_buf_.resize(count);
-  ItemList tmp;
 
+  ItemList tmp;
   size_t item_index = 0;
-  for (RpcItem& item : outgoing_buf_) {
+  for (RpcItem& item : outgoing_buf_) {  // iterate over intrusive list.
     Frame f(item.id, item.envelope.header.size(), item.envelope.letter.size());
 
     uint8_t* buf = frame_buf_[item_index].data();
@@ -187,6 +201,7 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   VLOG(2) << "Wrote " << count << " requests with " << write_sz << " bytes";
 }
 
+#if 0
 void RpcConnectionHandler::FlushFiber() {
   using namespace std::chrono_literals;
 
@@ -211,6 +226,7 @@ void RpcConnectionHandler::FlushFiber() {
   }
   VLOG(1) << "RpcConnectionHandler::FlushFiberExit";
 }
+#endif
 
 inline bool RpcConnectionHandler::ShouldFlush() {
   return rpc_items_.empty() && !outgoing_buf_.empty();
