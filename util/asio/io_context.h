@@ -67,6 +67,12 @@ class IoContext {
     context_ptr_->post(std::forward<Func>(f));
   }
 
+  template<typename Func> void PostFiber(Func&& f) {
+    Post([f = std::forward<Func>(f)] {
+      ::boost::fibers::fiber(f).detach();
+    });
+  }
+
   // Similarly to Post(), runs 'f' in Io Context thread, but waits for it to finish by blocking
   // the current fiber. If we call PostSynchronous from the context thread,
   // runs `f` directly. `f` should not block because since it runs directly in IO loop.
@@ -81,6 +87,20 @@ class IoContext {
       done.Notify();
     });
 
+    done.Wait();
+  }
+
+  template<typename Func> void PostFiberSync(Func&& f) {
+    if (InContextThread()) {
+      return f();
+    }
+
+    fibers_ext::Done done;
+    auto cb = [f = std::forward<Func>(f), &done] () mutable {
+      f();
+      done.Notify();
+    };
+    PostFiber(std::move(cb));
     done.Wait();
   }
 

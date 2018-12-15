@@ -8,6 +8,7 @@
 #include <boost/asio/write.hpp>
 
 #include "base/logging.h"
+#include "util/asio/io_context.h"
 #include "util/stats/varz_stats.h"
 
 using namespace boost;
@@ -74,8 +75,8 @@ void ConnectionHandler::Run() {
 }
 
 /*****************************************************************************
-*   fiber function per server connection
-*****************************************************************************/
+ *   fiber function per server connection
+ *****************************************************************************/
 void ConnectionHandler::RunInIOThread() {
   connections.Inc();
 
@@ -89,14 +90,14 @@ void ConnectionHandler::RunInIOThread() {
       ec = HandleRequest();
       if (ec) {
         if (!IsExpectedFinish(ec)) {
-          LOG(WARNING) << "Error : " << ec.message() << ", "
-                       << ec.category().name() << "/" << ec.value();
+          LOG(WARNING) << "Error : " << ec.message() << ", " << ec.category().name() << "/"
+                       << ec.value();
         }
         break;
       }
     }
     VLOG(1) << "ConnectionHandler closed: " << socket_->native_handle();
-  } catch ( std::exception const& ex) {
+  } catch (std::exception const& ex) {
     string str = ex.what();
     LOG(ERROR) << str;
   }
@@ -129,13 +130,14 @@ void ConnectionHandler::Close() {
     VLOG(1) << "After shutdown" << ec << " " << ec.message();
   }
 
+  io_context_.PostFiberSync([this] { OnCloseSocket(); });
+
   // I do not launch this task on executors thread because then it would hold guard-pointer to
   // this. If a io_context stops without running this callback, then ConnectionHandler won't
   // delete itself. This is a hack until we fix the shutdown behavior of io_context.
-  OnCloseSocket();
+  // OnCloseSocket();
 
-
-  #if 0
+#if 0
   VLOG(1) << "Is open " << is_open_.load();
   // We close asynchronously via the thread that owns the socket to ensure thread-safety
   // for that connection.
@@ -159,9 +161,8 @@ void ConnectionHandler::Close() {
     }
 
   });
-  #endif
+#endif
 }
-
 
 void ListenerInterface::RegisterPool(IoContextPool* pool) {
   CHECK(pool_ == nullptr);
