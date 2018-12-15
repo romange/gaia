@@ -10,21 +10,66 @@
 #include "base/logging.h"
 
 #include "util/asio/asio_utils.h"
+#include "util/asio/io_context.h"
 
 DEFINE_uint32(rpc_server_buffer_size, 4096, "");
 
 namespace util {
 namespace rpc {
 
+using namespace std::chrono_literals;
+
+namespace {
+
+class Flusher : public IoContext::Cancellable {
+ public:
+  Flusher() {}
+
+  void Run() final;
+  void Cancel() final;
+
+private:
+  bool stop_ = false;
+  fibers::condition_variable cv_;
+  fibers::mutex mu_;
+};
+
+void Flusher::Run() {
+  std::unique_lock<fibers::mutex> lock(mu_);
+
+  while (!stop_) {
+    cv_.wait_for(lock, 300us, [this] { return stop_; });
+    if (stop_) {
+      VLOG(1) << "Flusher broke down";
+      break;
+    }
+  }
+}
+
+void Flusher::Cancel() {
+  VLOG(1) << "Flusher::Cancel";
+  {
+    std::lock_guard<fibers::mutex> lock(mu_);
+    stop_ = true;
+  }
+  cv_.notify_all();
+}
+
+
+thread_local Flusher* flusher = nullptr;
+
+}  // namespace
+
 using asio::ip::tcp;
 using fibers_ext::yield;
 
 constexpr size_t kRpcPoolSize = 32;
 
-RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge)
-    : bridge_(bridge), buf_read_sock_(
-      new BufferedReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size)),
-      rpc_items_(kRpcPoolSize)  {
+RpcConnectionHandler::RpcConnectionHandler(IoContext& context, ConnectionBridge* bridge)
+    : ConnectionHandler(context),
+      bridge_(bridge),
+      buf_read_sock_(new BufferedReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size)),
+      rpc_items_(kRpcPoolSize) {
 }
 
 RpcConnectionHandler::~RpcConnectionHandler() {
@@ -34,10 +79,17 @@ RpcConnectionHandler::~RpcConnectionHandler() {
   }
   bridge_->Join();
 
-  outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
+  outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 }
 
 void RpcConnectionHandler::OnOpenSocket() {
+  VLOG(1) << "OnOpenSocket: Before starting the fiber, " << socket_->native_handle();
+
+  if (!flusher) {
+    flusher = new Flusher;
+    io_context_.AttachCancellable(flusher);
+  }
+
   // TODO: To make flush_fiber_ thread-local, handling all the subscribed rpc connection handlers.
   flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
   bridge_->InitInThread();
@@ -45,7 +97,7 @@ void RpcConnectionHandler::OnOpenSocket() {
 
 void RpcConnectionHandler::OnCloseSocket() {
   // CHECK(socket_->get_executor().running_in_this_thread());
-  VLOG(1) << "Before flush fiber join " << socket_->native_handle();
+  VLOG(1) << "OnCloseSocket: Before flush fiber join " << socket_->native_handle();
   if (flush_fiber_.joinable()) {
     flush_fiber_.join();
   }
@@ -92,7 +144,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   // single rpc request. We pass additional data by value to allow asynchronous invocation
   // of ConnectionBridge::HandleEnvelope. We move writer into it, this it will be responsible to
   // own it until the handler finishes.
-  auto writer = [data = WriterData{frame.rpc_id, item}, this] (Envelope&& env) mutable {
+  auto writer = [data = WriterData{frame.rpc_id, item}, this](Envelope&& env) mutable {
     RpcItem* next = data.item ? data.item : rpc_items_.Get();
 
     next->envelope = std::move(env);
@@ -130,13 +182,14 @@ void RpcConnectionHandler::FlushWritesGuarded() {
   size_t write_sz = asio::async_write(*socket_, write_seq_, yield[ec_]);
 
   // We should use clear_and_dispose to delete items safely while unlinking them from tmp.
-  tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i);});
+  tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 
   VLOG(2) << "Wrote " << count << " requests with " << write_sz << " bytes";
 }
 
 void RpcConnectionHandler::FlushFiber() {
   using namespace std::chrono_literals;
+
   CHECK(socket_->get_executor().running_in_this_thread());
   VLOG(1) << "RpcConnectionHandler::FlushFiber";
 

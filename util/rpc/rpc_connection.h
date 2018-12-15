@@ -49,11 +49,11 @@ class ServiceInterface : public ListenerInterface {
   virtual ~ServiceInterface() {}
 
  protected:
-  // A factory method creating a handler that should handles requests for a single connection.
+  // A factory method creating a handler that handles requests for a single connection.
   // The ownership over handler is passed to the caller.
   virtual ConnectionBridge* CreateConnectionBridge() = 0;
 
-  ConnectionHandler* NewConnection() final;
+  ConnectionHandler* NewConnection(IoContext& context) final;
 };
 
 }  // namespace rpc

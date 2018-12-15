@@ -5,6 +5,8 @@
 #pragma once
 
 #include "base/object_pool.h"
+
+#include "util/asio/io_context.h"
 #include "util/asio/connection_handler.h"
 #include "util/rpc/buffered_read_adaptor.h"
 #include "util/rpc/frame_format.h"
@@ -22,7 +24,7 @@ class RpcConnectionHandler : public ConnectionHandler {
  public:
   // bridge is owned by RpcConnectionHandler instance.
   // RpcConnectionHandler is created in acceptor thread and not in the socket thread.
-  explicit RpcConnectionHandler(ConnectionBridge* bridge);
+  explicit RpcConnectionHandler(IoContext& context, ConnectionBridge* bridge);
   ~RpcConnectionHandler();
 
   system::error_code HandleRequest() final override;

@@ -36,7 +36,7 @@ void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
     cnd_.notify_one();
 }
 
-ConnectionHandler::ConnectionHandler() noexcept {
+ConnectionHandler::ConnectionHandler(IoContext& context) noexcept : io_context_(context) {
 }
 
 ConnectionHandler::~ConnectionHandler() {

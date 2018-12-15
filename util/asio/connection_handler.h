@@ -11,6 +11,7 @@
 namespace util {
 
 class IoContextPool;
+class IoContext;
 
 namespace detail {
 using namespace ::boost::intrusive;
@@ -41,7 +42,7 @@ class ConnectionHandler {
                     detail::constant_time_size<true>, detail::cache_last<true>>;
   class Notifier;
 
-  explicit ConnectionHandler() noexcept;
+  explicit ConnectionHandler(IoContext& context) noexcept;
 
   virtual ~ConnectionHandler();
 
@@ -106,6 +107,7 @@ class ConnectionHandler {
 
   std::experimental::optional<socket_t> socket_;
   bool is_open_ = false;
+  IoContext& io_context_;
 
  private:
   void RunInIOThread();
@@ -122,7 +124,7 @@ class ListenerInterface {
   void RegisterPool(IoContextPool* pool);
 
   // Creates a dedicated handler for a new connection.
-  virtual ConnectionHandler* NewConnection() = 0;
+  virtual ConnectionHandler* NewConnection(IoContext& context) = 0;
 
   // Called by AcceptServer when shutting down start and before all connections are closed.
   virtual void PreShutdown() {}

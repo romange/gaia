@@ -95,7 +95,7 @@ class HttpHandler : public ConnectionHandler {
   using SendFunction = ListenerBase::SendFunction;
 
 
-  HttpHandler(const ListenerBase* registry);
+  HttpHandler(IoContext& cntx, const ListenerBase* registry);
 
   boost::system::error_code HandleRequest() final override;
 
@@ -118,8 +118,8 @@ class Listener : public ListenerBase {
   static_assert(std::is_base_of<HttpHandler, Handler>::value,
                 "Handler must be derived from HttpHandler");
 
-  ConnectionHandler* NewConnection() final {
-    return new Handler(this);
+  ConnectionHandler* NewConnection(IoContext& cntx) final {
+    return new Handler(cntx, this);
   }
 };
 

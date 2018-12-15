@@ -129,7 +129,7 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper,
     return AcceptResult(nullptr, ec);
   DCHECK(sock.is_open()) << sock.native_handle();
 
-  ConnectionHandler* conn = wrapper->listener->NewConnection();
+  ConnectionHandler* conn = wrapper->listener->NewConnection(io_cntx);
   conn->Init(std::move(sock), notifier);
 
   return AcceptResult(conn, ec);

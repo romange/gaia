@@ -10,9 +10,9 @@
 namespace util {
 namespace rpc {
 
-ConnectionHandler* ServiceInterface::NewConnection() {
+ConnectionHandler* ServiceInterface::NewConnection(IoContext& context) {
   ConnectionBridge* bridge = CreateConnectionBridge();
-  return new RpcConnectionHandler(bridge);
+  return new RpcConnectionHandler(context, bridge);
 }
 
 }  // namespace rpc
