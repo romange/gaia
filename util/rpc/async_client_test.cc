@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/walltime.h"
 
+#include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
 #include "util/rpc/channel.h"
 #include "util/rpc/frame_format.h"
@@ -21,7 +22,6 @@ using namespace std;
 using namespace boost;
 using testing::internal::CaptureStderr;
 using testing::internal::GetCapturedStderr;
-
 
 TEST_F(ServerTest, SendOk) {
   Channel client(std::move(*channel_));
@@ -96,11 +96,11 @@ TEST_F(ServerTest, Sleep) {
   envelope.letter.resize_fill(42, 2);
 
   ec = client->SendSync(1, &envelope);
-  ASSERT_EQ(asio::error::timed_out, ec) << ec.message();   // expect timeout.
+  ASSERT_EQ(asio::error::timed_out, ec) << ec.message();  // expect timeout.
 
   envelope.header.clear();
   ec = client->SendSync(20, &envelope);
-  ASSERT_FALSE(ec) << ec.message();   // expect normal execution.
+  ASSERT_FALSE(ec) << ec.message();  // expect normal execution.
 }
 
 }  // namespace rpc

@@ -5,15 +5,14 @@
 
 #include <memory>
 
-#include "util/asio/accept_server.h"
+#include "util/asio/connection_handler.h"
+
 #include "util/rpc/rpc_envelope.h"
 #include "strings/stringpiece.h"
 
 namespace util {
 
 // RPC-Server side part.
-
-class AcceptServer;
 
 namespace rpc {
 

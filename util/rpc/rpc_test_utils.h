@@ -1,24 +1,30 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#pragma once
+
 #include "base/gtest.h"
-#include "util/rpc/rpc_connection.h"
 #include "util/asio/io_context_pool.h"
+#include "util/rpc/rpc_connection.h"
 
 namespace util {
 class ClientChannel;
+class AcceptServer;
 
 namespace rpc {
 
-template <typename Src, typename Dest> void Copy(const Src& src, Dest* dest) {
+template <typename Src, typename Dest>
+void Copy(const Src& src, Dest* dest) {
   dest->resize(src.size());
   std::copy(src.begin(), src.end(), dest->begin());
 }
 
 class TestBridge final : public ConnectionBridge {
   bool clear_;
+
  public:
-  TestBridge(bool clear) : clear_(clear) {}
+  TestBridge(bool clear) : clear_(clear) {
+  }
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
@@ -27,9 +33,14 @@ class TestBridge final : public ConnectionBridge {
 
 class TestInterface final : public ServiceInterface {
   bool clear_ = false;
+
  public:
-  void set_clear(bool c) { clear_ = c; }
-  ConnectionBridge* CreateConnectionBridge() override { return new TestBridge{clear_}; }
+  void set_clear(bool c) {
+    clear_ = c;
+  }
+  ConnectionBridge* CreateConnectionBridge() override {
+    return new TestBridge{clear_};
+  }
 };
 
 class ServerTest : public testing::Test {
@@ -37,9 +48,11 @@ class ServerTest : public testing::Test {
   ServerTest();
 
  protected:
-  static void SetUpTestCase() {}
+  static void SetUpTestCase() {
+  }
 
-  static void TearDownTestCase() {}
+  static void TearDownTestCase() {
+  }
 
   void SetUp() override;
 

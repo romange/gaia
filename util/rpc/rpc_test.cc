@@ -13,6 +13,7 @@
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
+#include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/client_channel.h"
 #include "util/asio/yield.h"

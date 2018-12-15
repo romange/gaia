@@ -8,10 +8,11 @@
 
 #include <boost/asio.hpp>
 
+#include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
 #include "util/http/http_conn_handler.h"
-#include "util/rpc/client_base.h"
+#include "util/rpc/channel.h"
 #include "util/rpc/rpc_connection.h"
 #include "util/stats/varz_stats.h"
 
@@ -27,7 +28,7 @@ DEFINE_int32(io_threads, 0, "");
 DEFINE_uint32(deadline_msec, 10, "");
 
 using asio::ip::tcp;
-using rpc::ClientBase;
+using rpc::Channel;
 using util::IoContextPool;
 using util::fibers_ext::yield;
 
@@ -38,8 +39,7 @@ class PingBridge final : public rpc::ConnectionBridge {
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.
-  void HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input,
-                      EnvelopeWriter writer) override {
+  void HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input, EnvelopeWriter writer) override {
     qps.Inc();
     VLOG(1) << "RpcId: " << rpc_id;
     writer(std::move(*input));
@@ -57,7 +57,7 @@ std::atomic_ulong latency_usec(0);
 std::atomic_ulong latency_count(0);
 std::atomic_ulong timeouts(0);
 
-void Driver(ClientBase* client, size_t index, unsigned msg_count) {
+void Driver(Channel* channel, size_t index, unsigned msg_count) {
   rpc::Envelope envelope;
   envelope.letter.resize(64);
 
@@ -71,7 +71,7 @@ void Driver(ClientBase* client, size_t index, unsigned msg_count) {
 
     VLOG(1) << ": Sending: " << msgbuf;
 
-    system::error_code ec = client->SendSync(FLAGS_deadline_msec, &envelope);
+    system::error_code ec = channel->SendSync(FLAGS_deadline_msec, &envelope);
     if (ec == asio::error::timed_out) {
       timeouts.fetch_add(1, std::memory_order_relaxed);
       continue;
@@ -99,7 +99,7 @@ void Driver(ClientBase* client, size_t index, unsigned msg_count) {
 void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::Done* done) {
   LOG(INFO) << ": echo-client started";
   {
-    std::unique_ptr<ClientBase> client(new ClientBase(context, FLAGS_connect, "9999"));
+    std::unique_ptr<Channel> client(new Channel(context, FLAGS_connect, "9999"));
     system::error_code ec = client->Connect(100);
     CHECK(!ec) << ec.message();
 
@@ -116,7 +116,6 @@ void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::D
   LOG(INFO) << ": echo-client stopped";
 }
 
-
 void client_pool(IoContextPool* pool) {
   vector<util::fibers_ext::Done> done_arr(pool->size());
   {
@@ -130,7 +129,8 @@ void client_pool(IoContextPool* pool) {
       f.Wait();
   }
   LOG(INFO) << "client_pool ended";
-  cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000 << endl;
+  cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000
+       << endl;
   cout << "Timeouts " << timeouts.load() << endl;
 }
 
@@ -149,7 +149,6 @@ int main(int argc, char** argv) {
     util::http::Listener<> http_listener;
     uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
     LOG(INFO) << "Started http server on port " << port;
-
 
     PingInterface pi;
     server->AddListener(9999, &pi);

@@ -9,6 +9,7 @@
 #include "absl/strings/strip.h"
 #include "base/logging.h"
 
+#include "util/asio/accept_server.h"
 #include "util/asio/client_channel.h"
 
 using namespace std;
