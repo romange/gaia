@@ -17,9 +17,13 @@ install_boost() {
     fi
 
     cd $BOOST && ./bootstrap.sh --prefix=/opt/boost --without-libraries=graph_parallel,graph,wave,test,mpi,python
-    ./b2 link=shared variant=release debug-symbols=on threading=multi cxxflags="-std=c++14 -Wno-deprecated-declarations -fPIC -O3"  \
-         --without-test --without-math --without-log --without-locale --without-wave --without-regex --without-python -j4
-    ./b2 install -d0
+    b2_args=(link=shared variant=release debug-symbols=on threading=multi
+             --without-test --without-math --without-log --without-locale --without-wave
+             --without-regex --without-python -j4)
+
+    ./b2 "${b2_args[@]}" cxxflags="-std=c++14 -Wno-deprecated-declarations -fPIC -O3"  \
+
+    ./b2 install "${b2_args[@]}" -d0
 }
 
 if ! [ -d /opt/boost/lib ]; then
