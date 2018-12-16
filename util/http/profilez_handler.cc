@@ -56,7 +56,7 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
     body.append("<h3>Profiling is off, commander!</h3> \n");
     return;
   }
-  string cmd("nice -n 15 pprof --svg ");
+  string cmd("nice -n 15 pprof -noinlines -lines -unit ms --svg ");
   string symbols_name = base::ProgramAbsoluteFileName() + ".debug";
   LOG(INFO) << "Symbols " << symbols_name << ", suffix: " << last_profile_suffix;
   if (access(symbols_name.c_str(), R_OK) != 0) {
