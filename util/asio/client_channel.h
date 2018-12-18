@@ -14,12 +14,6 @@
 
 namespace util {
 
-struct do_not_lock_t {
-  explicit do_not_lock_t() = default;
-};
-
-constexpr do_not_lock_t do_not_lock{};
-
 namespace detail {
 using namespace boost;
 using asio::is_const_buffer_sequence;
@@ -57,7 +51,7 @@ class ClientChannelImpl {
         hostname_(hname),
         service_(s),
         sock_(cntx.get_context(), tcp::v4()),
-        handle_(sock_.native_handle()) {
+        handle_(sock_.native_handle()), shutdown_latch_(true) {
   }
 
   ~ClientChannelImpl();
@@ -143,24 +137,21 @@ class ClientChannelImpl {
     return resolver_.async_resolve(tcp::v4(), hostname_, service_, std::move(token));
   }
 
-  void ReconnectAsync() {
-    sock_.get_executor().context().post(
-        [this] { fiber_t(&ClientChannelImpl::ReconnectFiber, this).detach(); });
-  }
-
   void ResolveAndConnect(const time_point& until);
   void HandleErrorStatus();
   void ReconnectFiber();
+  bool ReconnectActive() const { return !shutdown_latch_.IsReady(); }
 
   std::string hostname_, service_;
   tcp::socket sock_;
   system::error_code status_ = asio::error::not_connected;
 
-  mutex shd_mu_;
-  bool shutting_down_{false}, reconnect_active_{false};
+  bool shutting_down_{false};
 
-  ::boost::fibers::condition_variable shd_cnd_;
   tcp::socket::native_handle_type handle_;
+
+  // To block during the shutdown.
+  fibers_ext::Done shutdown_latch_;
 };
 
 }  // namespace detail
@@ -175,8 +166,8 @@ class ClientChannel {
   }
 
   // "service" - port to which to connect.
-  ClientChannel(IoContext& cntx, const std::string& hostname, const std::string& service)
-      : impl_(new detail::ClientChannelImpl(cntx, hostname, service)) {
+  ClientChannel(const std::string& hostname, const std::string& service, IoContext* cntx)
+      : impl_(new detail::ClientChannelImpl(*cntx, hostname, service)) {
   }
 
   ClientChannel(ClientChannel&&) noexcept = default;

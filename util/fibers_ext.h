@@ -33,8 +33,7 @@ namespace fibers_ext {
 // Wrap canonical pattern for condition_variable + bool flag
 class Done {
  public:
-  Done() {
-  }
+  explicit Done(bool val = false) : ready_(val)  {}
   Done(const Done&) = delete;
 
   void operator=(const Done&) = delete;
@@ -62,7 +61,7 @@ class Done {
  private:
   ::boost::fibers::condition_variable cond_;
   ::boost::fibers::mutex mutex_;
-  bool ready_ = false;
+  bool ready_;
 };
 
 class BlockingCounter {

@@ -62,7 +62,8 @@ void ServerTest::SetUp() {
   uint16_t port = server_->AddListener(0, service_.get());
 
   server_->Run();
-  channel_.reset(new ClientChannel(pool_->GetNextContext(), "127.0.0.1", std::to_string(port)));
+  channel_ =
+      std::make_unique<ClientChannel>("127.0.0.1", std::to_string(port), &pool_->GetNextContext());
   ec_ = channel_->Connect(100);
   CHECK(!ec_) << ec_.message();
 }

@@ -34,8 +34,8 @@ class Channel {
   Channel(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
 
-  Channel(IoContext& cntx, const std::string& hostname, const std::string& service)
-      : Channel(ClientChannel(cntx, hostname, service)) {
+  Channel(const std::string& hostname, const std::string& service, IoContext* cntx)
+      : Channel(ClientChannel(hostname, service, cntx)) {
   }
 
   ~Channel();

@@ -21,7 +21,7 @@ namespace http {
 using fibers_ext::yield;
 using namespace detail;
 
-Client::Client(IoContext& io_context) : socket_(io_context.get_context()) {
+Client::Client(IoContext* io_context) : socket_(io_context->get_context()) {
 }
 
 system::error_code Client::Connect(StringPiece host, StringPiece service) {

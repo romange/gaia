@@ -30,12 +30,14 @@ class Client {
  public:
   using Response = detail::h2::response<detail::h2::dynamic_body>;
 
-  explicit Client(IoContext& io_context);
+  explicit Client(IoContext* io_context);
 
   ::boost::system::error_code Connect(StringPiece host, StringPiece service);
   ::boost::system::error_code Get(StringPiece url, Response* response);
 
   ::boost::system::error_code Cancel();
+
+  bool is_connected() const { return socket_.is_open(); }
  private:
   detail::tcp::socket socket_;
 };

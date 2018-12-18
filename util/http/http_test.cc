@@ -23,10 +23,12 @@ using namespace asio::ip;
 TEST_F(HttpTest, Client) {
   IoContext& io_context = pool_->GetNextContext();
 
-  http::Client client(io_context);
+  http::Client client(&io_context);
 
   system::error_code ec = client.Connect("localhost", std::to_string(port_));
   ASSERT_FALSE(ec) << ec << " " << ec.message();
+
+  ASSERT_TRUE(client.is_connected());
 
   http::Client::Response res;
   ec = client.Get("/", &res);
@@ -34,6 +36,9 @@ TEST_F(HttpTest, Client) {
 
   // Write the message to standard out
   VLOG(1) << res;
+
+  server_->Stop();
+  // ASSERT_FALSE(client.is_connected());
 }
 
 }  // namespace util

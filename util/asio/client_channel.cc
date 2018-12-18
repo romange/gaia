@@ -17,11 +17,11 @@ using namespace asio::ip;
 namespace util {
 
 namespace detail {
-ClientChannelImpl::~ClientChannelImpl() {
-}
+
+ClientChannelImpl::~ClientChannelImpl() {}
 
 system::error_code ClientChannelImpl::Connect(uint32_t ms) {
-  CHECK(!shutting_down_ && !reconnect_active_);
+  CHECK(!shutting_down_ && shutdown_latch_.IsReady());
 
   // If we are connected
   if (!status_)
@@ -31,21 +31,12 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
           << "hostname: " << hostname_ << ", service: " << service_;
 
   time_point tp = steady_clock::now() + milliseconds(ms);
-  fibers_ext::Done done;
 
-  // TODO: to introduce synchronous Fiber launching method in IoContext.
-  // I prefer moving the work to IoContext thread to keep all the data-structure updates as
+  // I prefer moving the work to IoContext thread to keep all the data-structure updates
   // single-threaded. It seems that Asio components (timer, for example) in rare cases have
   // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
   // it can ignore "cancel()" call in some cases.
-  io_context_.Post([&] {
-    auto cb = [&] {
-      this->ResolveAndConnect(tp);
-      done.Notify();
-    };
-    fibers::fiber(std::move(cb)).detach();
-  });
-  done.Wait();
+  io_context_.PostFiberSync([this, tp] { ResolveAndConnect(tp);});
 
   return status_;
 }
@@ -110,59 +101,49 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
 void ClientChannelImpl::Shutdown() {
   if (!shutting_down_) {
-    system::error_code ec;
 
-    shutting_down_ = true;
-    // I had crashes when resolver_ was executing in one thread and cancel has been called from
-    // here. Lets hope resolver does not take time to finish. resolver_.cancel();
+    io_context_.PostFiberSync([this] {
+      system::error_code ec;
 
-    VLOG(1) << "Cancelling " << sock_.native_handle();
-    sock_.shutdown(tcp::socket::shutdown_both, ec);
-    if (!ec) {
-      sock_.cancel(ec);
-      LOG_IF(INFO, ec) << "Cancelled with status " << ec << " " << ec.message();
-    }
-    VLOG(1) << "ClientChannelImpl::Shutdown end " << sock_.native_handle() << " " << ec.message();
+      shutting_down_ = true;
+      VLOG(1) << "Cancelling " << sock_.native_handle();
+      sock_.shutdown(tcp::socket::shutdown_both, ec);
+      if (!ec) {
+        sock_.cancel(ec);
+        LOG_IF(INFO, ec) << "Cancelled with status " << ec << " " << ec.message();
+      }
+      VLOG(1) << "ClientChannelImpl::Shutdown end " << sock_.native_handle() << " " << ec.message();
+    });
   }
-  std::unique_lock<mutex> l(shd_mu_);
-  shd_cnd_.wait(l, [this] { return !reconnect_active_; });
+
+  shutdown_latch_.Wait();
 }
 
 void ClientChannelImpl::ReconnectFiber() {
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
-  ResolveAndConnect(steady_clock::now() + 30s);
-  DCHECK(reconnect_active_);
+  DCHECK(ReconnectActive());
 
-  if (!shutting_down_ && status_) {
-    ReconnectAsync();  // continue trying.
-    return;
+  while (!shutting_down_ && status_) {
+    ResolveAndConnect(steady_clock::now() + 30s);
   }
 
-  std::lock_guard<mutex> guard(shd_mu_);
+  shutdown_latch_.Notify();
 
-  reconnect_active_ = false;
-
-  if (shutting_down_) {
-    shd_cnd_.notify_one();
-  } else {
-    DCHECK(!status_);
-
-    LOG(INFO) << "Socket " << sock_.native_handle() << " reconnected";
+  if (!status_) {
+    VLOG(1) << "Socket " << sock_.native_handle() << " reconnected";
   }
 }
 
 void ClientChannelImpl::HandleErrorStatus() {
-  if (shutting_down_ || reconnect_active_) {
+  if (shutting_down_ || ReconnectActive()) {
     return;
   }
   LOG(INFO) << "Got " << status_.message() << ", reconnecting " << sock_.native_handle();
 
-  std::lock_guard<mutex> guard(shd_mu_);
+  shutdown_latch_.Reset();
 
-  reconnect_active_ = true;
-
-  ReconnectAsync();
+  io_context_.PostFiber([this] { ReconnectFiber(); });
 }
 
 }  // namespace detail

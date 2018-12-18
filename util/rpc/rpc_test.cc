@@ -145,8 +145,7 @@ static void BM_ChannelConnection(benchmark::State& state) {
 
   server.Run();
 
-  ClientChannel channel(pool.GetNextContext(), "127.0.0.1",
-                        std::to_string(port));
+  ClientChannel channel("127.0.0.1", std::to_string(port), &pool.GetNextContext());
   CHECK(!channel.Connect(500));
   Frame frame;
   std::string send_msg(100, 'a');
