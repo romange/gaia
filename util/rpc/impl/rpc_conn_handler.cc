@@ -138,6 +138,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
     FlushWrites();
   }
 
+  // We use item for reading the envelope.
   RpcItem* item = rpc_items_.Get();
 
   item->envelope.Resize(frame.header_size, frame.letter_size);
@@ -151,15 +152,19 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   // To support streaming we have this writer that can write multiple envelopes per
   // single rpc request. We pass additional data by value to allow asynchronous invocation
-  // of ConnectionBridge::HandleEnvelope. We move writer into it, this it will be responsible to
-  // own it until the handler finishes. Please note that writer changes the contents of 'data'
-  // field so only for the first time it uses the same RpcItem to reduce allocations.
+  // of ConnectionBridge::HandleEnvelope. We move writer object into HandleEnvelope,
+  // thus it will be responsible to own it until the handler finishes.
+  // Please note that writer changes the value of 'item' field,
+  // so only for the first time it uses the same RpcItem used for reading the data
+  // to reduce allocations.
   auto writer = [rpc_id = frame.rpc_id, item, this](Envelope&& env) mutable {
     RpcItem* next = item ? item : rpc_items_.Get();
 
     next->envelope = std::move(env);
     next->id = rpc_id;
     outgoing_buf_.push_back(*next);
+
+    // after the first use we can not anymore, because it's sent to the outgoing_buf_
     item = nullptr;
   };
 

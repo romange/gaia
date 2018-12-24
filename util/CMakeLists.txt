@@ -1,6 +1,7 @@
+cxx_proto_lib(status PY)
+
 add_library(status status.cc)
 cxx_link(status base status_proto)
-cxx_proto_lib(status PY)
 
 add_library(util zlib_source.cc bzip_source.cc
             sinksource.cc zstd_sinksource.cc)

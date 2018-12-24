@@ -17,6 +17,15 @@ message StatusCode {
     IO_TIMEOUT = 21;
 
     PARSE_ERROR = 31;
+
+    RPC_INVALID_METHOD = 43;
+    RPC_DEADLINE_EXCEEDED = 44;
+    RPC_CONNECTION_REFUSED = 45;
+    RPC_PARSE_ERROR = 46;
+    // 47
+    RPC_PROTOCOL_ERROR = 48;
+    // 49
+    RPC_APPLICATION_ERROR = 50;
   }
 }
 
