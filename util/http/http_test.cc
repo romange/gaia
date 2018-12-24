@@ -28,7 +28,7 @@ TEST_F(HttpTest, Client) {
   system::error_code ec = client.Connect("localhost", std::to_string(port_));
   ASSERT_FALSE(ec) << ec << " " << ec.message();
 
-  ASSERT_TRUE(client.is_connected());
+  ASSERT_TRUE(client.IsConnected());
 
   http::Client::Response res;
   ec = client.Get("/", &res);
@@ -38,7 +38,9 @@ TEST_F(HttpTest, Client) {
   VLOG(1) << res;
 
   server_->Stop();
-  // ASSERT_FALSE(client.is_connected());
+  ec = client.Get("/", &res);
+  ASSERT_FALSE(client.IsConnected());
+  ASSERT_TRUE(ec);
 }
 
 }  // namespace util

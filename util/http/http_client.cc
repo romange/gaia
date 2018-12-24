@@ -12,33 +12,26 @@
 #include <boost/beast/http/write.hpp>
 
 #include "base/logging.h"
+#include "util/asio/reconnectable_socket.h"
 #include "util/asio/yield.h"
-#include "util/asio/io_context.h"
 
 namespace util {
 namespace http {
 
 using fibers_ext::yield;
-using namespace detail;
+using namespace boost;
 
-Client::Client(IoContext* io_context) : socket_(io_context->get_context()) {
-}
+namespace h2 = beast::http;
+
+Client::Client(IoContext* io_context) : io_context_(*io_context) {}
+
+Client::~Client() {}
 
 system::error_code Client::Connect(StringPiece host, StringPiece service) {
-  tcp::resolver resolver{socket_.get_io_context()};
+  socket_.reset(
+      new ReconnectableSocket(strings::AsString(host), strings::AsString(service), &io_context_));
 
-  system::error_code ec;
-  auto results =
-      resolver.async_resolve(asio::string_view(host.data(), host.size()),
-                             asio::string_view(service.data(), service.size()), yield[ec]);
-
-  if (ec)
-    return ec;
-  VLOG(1) << "Got " << results.size() << " resolver results";
-
-  asio::async_connect(socket_, results.begin(), results.end(), yield[ec]);
-
-  return ec;
+  return socket_->Connect(connect_timeout_ms_);
 }
 
 system::error_code Client::Get(StringPiece url, Response* response) {
@@ -46,34 +39,37 @@ system::error_code Client::Get(StringPiece url, Response* response) {
   h2::request<h2::string_body> req{h2::verb::get, boost::string_view(url.data(), url.size()), 11};
 
   // Optional headers
-  req.set(h2::field::user_agent, "mytest");
-
-  system::error_code ec;
+  // req.set(h2::field::user_agent, "mytest");
 
   // Send the HTTP request to the remote host.
-  h2::async_write(socket_, req, yield[ec]);
-  if (ec)
+  system::error_code ec = socket_->Apply([&] (ReconnectableSocket::socket_t& s) {
+    system::error_code ec;
+    h2::async_write(s, req, yield[ec]);
     return ec;
-
-  // This buffer is used for reading and must be persisted
-  beast::flat_buffer buffer;
+  });
 
   // Receive the HTTP response
-  h2::async_read(socket_, buffer, *response, yield[ec]);
+  ec = socket_->Apply([&] (ReconnectableSocket::socket_t& s) {
+    system::error_code ec;
+    // This buffer is used for reading and must be persisted
+    beast::flat_buffer buffer;
+
+    h2::async_read(s, buffer, *response, yield[ec]);
+    return ec;
+  });
 
   return ec;
 }
 
-::boost::system::error_code Client::Cancel() {
-  system::error_code ec;
-  if (socket_.is_open()) {
-    VLOG(1) << "Before shutdown " << socket_.native_handle();
-    socket_.cancel(ec);
-
-    socket_.shutdown(detail::tcp::socket::shutdown_both, ec);
-    VLOG(1) << "After shutdown: " << ec << " " << ec.message();
+void Client::Shutdown() {
+  if (socket_) {
+    socket_->Shutdown();
+    socket_.reset();
   }
-  return ec;
+}
+
+bool Client::IsConnected() const {
+  return socket_ && !socket_->is_shut_down() && !socket_->status();
 }
 
 }  // namespace http

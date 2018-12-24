@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <boost/asio/ip/tcp.hpp>
+// #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/message.hpp>
 
@@ -12,15 +12,9 @@
 
 namespace util {
 class IoContext;
+class ReconnectableSocket;
 
 namespace http {
-
-namespace detail {
-using namespace boost;
-using namespace asio::ip;
-
-namespace h2 = beast::http;
-};
 
 /*
   Single threaded, fiber-friendly synchronous client: Upon IO block, the calling fiber blocks
@@ -28,20 +22,25 @@ namespace h2 = beast::http;
 */
 class Client {
  public:
-  using Response = detail::h2::response<detail::h2::dynamic_body>;
+  using Response = boost::beast::http::response<boost::beast::http::dynamic_body>;
 
   explicit Client(IoContext* io_context);
+  ~Client();
 
   ::boost::system::error_code Connect(StringPiece host, StringPiece service);
   ::boost::system::error_code Get(StringPiece url, Response* response);
 
-  ::boost::system::error_code Cancel();
+  void Shutdown();
 
-  bool is_connected() const { return socket_.is_open(); }
+  bool IsConnected() const;
+
+  void set_connect_timeout_ms(uint32_t ms) { connect_timeout_ms_ = ms; }
  private:
-  detail::tcp::socket socket_;
+  IoContext& io_context_;
+  uint32_t connect_timeout_ms_ = 2000;
+
+  std::unique_ptr<ReconnectableSocket> socket_;
 };
 
 }  // namespace http
 }  // namespace util
-
