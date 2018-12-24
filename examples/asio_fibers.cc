@@ -99,7 +99,7 @@ void Driver(Channel* channel, size_t index, unsigned msg_count) {
 void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::Done* done) {
   LOG(INFO) << ": echo-client started";
   {
-    std::unique_ptr<Channel> client(new Channel(context, FLAGS_connect, "9999"));
+    std::unique_ptr<Channel> client(new Channel(FLAGS_connect, "9999", &context));
     system::error_code ec = client->Connect(100);
     CHECK(!ec) << ec.message();
 

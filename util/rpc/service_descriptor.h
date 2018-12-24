@@ -1,6 +1,8 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#include <functional>
+
 #include <google/protobuf/message.h>
 
 #include "absl/strings/string_view.h"
