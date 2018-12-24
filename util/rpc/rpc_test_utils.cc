@@ -10,7 +10,7 @@
 #include "base/logging.h"
 
 #include "util/asio/accept_server.h"
-#include "util/asio/client_channel.h"
+#include "util/asio/reconnectable_socket.h"
 
 using namespace std;
 using namespace boost;

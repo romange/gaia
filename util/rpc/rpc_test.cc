@@ -15,7 +15,7 @@
 
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
-#include "util/asio/client_channel.h"
+#include "util/asio/reconnectable_socket.h"
 #include "util/asio/yield.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_test_utils.h"

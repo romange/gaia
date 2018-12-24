@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "util/asio/client_channel.h"
+#include "util/asio/reconnectable_socket.h"
 #include <boost/asio/connect.hpp>
 #include <boost/fiber/fiber.hpp>
 

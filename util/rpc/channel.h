@@ -8,7 +8,7 @@
 #include "base/RWSpinLock.h"  //
 #include "base/wheel_timer.h"
 
-#include "util/asio/client_channel.h"
+#include "util/asio/reconnectable_socket.h"
 #include "util/asio/periodic_task.h"
 
 #include "util/rpc/buffered_read_adaptor.h"
