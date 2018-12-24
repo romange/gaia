@@ -8,7 +8,7 @@
 #include "util/rpc/rpc_connection.h"
 
 namespace util {
-class ClientChannel;
+class ReconnectableSocket;
 class AcceptServer;
 
 namespace rpc {
@@ -61,7 +61,7 @@ class ServerTest : public testing::Test {
   std::unique_ptr<TestInterface> service_;
   std::unique_ptr<AcceptServer> server_;
   std::unique_ptr<IoContextPool> pool_;
-  std::unique_ptr<ClientChannel> channel_;
+  std::unique_ptr<ReconnectableSocket> socket_;
   ::boost::system::error_code ec_;
 };
 

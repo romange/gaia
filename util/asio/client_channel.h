@@ -156,24 +156,24 @@ class ClientChannelImpl {
 
 }  // namespace detail
 
-class ClientChannel {
+class ReconnectableSocket {
  public:
   using error_code = boost::system::error_code;
   using socket_t = detail::tcp::socket;
 
   // since we allow moveable semantics we should support default c'tor as well.
-  ClientChannel() {
+  ReconnectableSocket() {
   }
 
   // "service" - port to which to connect.
-  ClientChannel(const std::string& hostname, const std::string& service, IoContext* cntx)
+  ReconnectableSocket(const std::string& hostname, const std::string& service, IoContext* cntx)
       : impl_(new detail::ClientChannelImpl(*cntx, hostname, service)) {
   }
 
-  ClientChannel(ClientChannel&&) noexcept = default;
-  ~ClientChannel();
+  ReconnectableSocket(ReconnectableSocket&&) noexcept = default;
+  ~ReconnectableSocket();
 
-  ClientChannel& operator=(ClientChannel&&) noexcept = default;
+  ReconnectableSocket& operator=(ReconnectableSocket&&) noexcept = default;
 
   // Should be called at most once to trigger the connection process. Should not be called more
   // than once because ClientChannel handles reconnects by itself.

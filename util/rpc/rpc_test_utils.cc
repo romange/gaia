@@ -62,15 +62,15 @@ void ServerTest::SetUp() {
   uint16_t port = server_->AddListener(0, service_.get());
 
   server_->Run();
-  channel_ =
-      std::make_unique<ClientChannel>("127.0.0.1", std::to_string(port), &pool_->GetNextContext());
-  ec_ = channel_->Connect(100);
+  socket_ = std::make_unique<ReconnectableSocket>("127.0.0.1", std::to_string(port),
+                                                  &pool_->GetNextContext());
+  ec_ = socket_->Connect(100);
   CHECK(!ec_) << ec_.message();
 }
 
 void ServerTest::TearDown() {
   server_.reset();
-  channel_.reset();
+  socket_.reset();
   pool_->Stop();
   VLOG(1) << "ServerTest::TearDown";
 }

@@ -24,18 +24,18 @@ namespace rpc {
 // Therefore to achieve maximal performance - it's advised to use Channel from IoContext thread.
 class Channel {
  public:
-  using error_code = ClientChannel::error_code;
+  using error_code = ReconnectableSocket::error_code;
   using future_code_t = boost::fibers::future<error_code>;
 
   // Returns boost::asio::error::eof if the Stream has been finished,
   // if bool(error_code) returns true, aborts receiving the stream and returns the error.
   using MessageCallback = std::function<error_code(Envelope&)>;
 
-  Channel(ClientChannel&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
+  Channel(ReconnectableSocket&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
   }
 
   Channel(const std::string& hostname, const std::string& service, IoContext* cntx)
-      : Channel(ClientChannel(hostname, service, cntx)) {
+      : Channel(ReconnectableSocket(hostname, service, cntx)) {
   }
 
   ~Channel();
@@ -115,8 +115,8 @@ class Channel {
   };
 
   RpcId next_send_rpc_id_ = 1;
-  ClientChannel channel_;
-  BufferedReadAdaptor<ClientChannel::socket_t> br_;
+  ReconnectableSocket channel_;
+  BufferedReadAdaptor<ReconnectableSocket::socket_t> br_;
   typedef boost::fibers::promise<error_code> EcPromise;
 
   struct PendingCall {

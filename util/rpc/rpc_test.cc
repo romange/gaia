@@ -42,10 +42,10 @@ class RpcTest : public ServerTest {
 TEST_F(RpcTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
-  ec_ = channel_->Write(make_buffer_seq(control, message));
+  ec_ = socket_->Write(make_buffer_seq(control, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Read(make_buffer_seq(control, message));
+  ec_ = socket_->Read(make_buffer_seq(control, message));
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
@@ -55,27 +55,27 @@ TEST_F(RpcTest, Basic) {
   frame_.header_size = header.size();
   frame_.letter_size = message.size();
 
-  ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
+  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, message));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Apply([this](auto& s) {
+  ec_ = socket_->Apply([this](auto& s) {
     return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_);
   EXPECT_EQ(frame_.header_size, header.size());
   EXPECT_EQ(frame_.letter_size, message.size());
 
-  ec_ = channel_->Read(make_buffer_seq(header, message));
+  ec_ = socket_->Read(make_buffer_seq(header, message));
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
 
 TEST_F(RpcTest, Socket) {
   std::string send_msg(500, 'a');
-  ec_ = channel_->Write(make_buffer_seq(send_msg));
+  ec_ = socket_->Write(make_buffer_seq(send_msg));
   ASSERT_FALSE(ec_);
 
-  ec_ = channel_->Apply([this] (tcp::socket& s) {
+  ec_ = socket_->Apply([this] (tcp::socket& s) {
     return frame_.Read(&s);
   });
   ASSERT_TRUE(ec_) << ec_.message();
@@ -86,18 +86,18 @@ TEST_F(RpcTest, Socket) {
   // Wait for reconnect.
   while (ec_) {
     SleepForMilliseconds(10);
-    ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), send_msg));
+    ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), send_msg));
   }
-  ec_ = channel_->Apply([this] (tcp::socket& s) {
+  ec_ = socket_->Apply([this] (tcp::socket& s) {
     return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
 TEST_F(RpcTest, SocketRead) {
-  tcp::socket& sock = channel_->socket();
+  tcp::socket& sock = socket_->socket();
   ASSERT_TRUE(sock.non_blocking());
-  ec_ = channel_->Write(make_buffer_seq(FrameBuffer()));
+  ec_ = socket_->Write(make_buffer_seq(FrameBuffer()));
   ASSERT_FALSE(ec_);
   // std::vector<uint8_t> tmp(10000);
   //size_t sz = sock.read_some(asio::buffer(tmp));
@@ -105,7 +105,7 @@ TEST_F(RpcTest, SocketRead) {
 }
 
 TEST_F(RpcTest, Repeat) {
-  tcp::socket& sock = channel_->socket();
+  tcp::socket& sock = socket_->socket();
   ASSERT_TRUE(sock.non_blocking());
 
   const char kPayload[] = "World!!!";
@@ -113,12 +113,12 @@ TEST_F(RpcTest, Repeat) {
   frame_.header_size = header.size();
   frame_.letter_size = message.size();
 
-  ec_ = channel_->Write(make_buffer_seq(FrameBuffer(), header, message));
+  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, message));
   ASSERT_FALSE(ec_);
 
 
   for (unsigned i = 0; i < 3; ++i) {
-    ec_ = channel_->Apply([&] (tcp::socket& s) {
+    ec_ = socket_->Apply([&] (tcp::socket& s) {
       return frame_.Read(&s);
     });
     EXPECT_FALSE(ec_);
@@ -126,7 +126,7 @@ TEST_F(RpcTest, Repeat) {
     header.resize(frame_.header_size);
     ASSERT_EQ(frame_.letter_size, message.size());
 
-    ec_ = channel_->Read(make_buffer_seq(header, message));
+    ec_ = socket_->Read(make_buffer_seq(header, message));
     ASSERT_FALSE(ec_);
     string expected = absl::StrCat("cont:", i + 1 < 3);
     EXPECT_EQ(expected, header);
@@ -145,8 +145,8 @@ static void BM_ChannelConnection(benchmark::State& state) {
 
   server.Run();
 
-  ClientChannel channel("127.0.0.1", std::to_string(port), &pool.GetNextContext());
-  CHECK(!channel.Connect(500));
+  ReconnectableSocket recon_socket("127.0.0.1", std::to_string(port), &pool.GetNextContext());
+  CHECK(!recon_socket.Connect(500));
   Frame frame;
   std::string send_msg(100, 'a');
   uint8_t buf[Frame::kMaxByteSize];
@@ -155,7 +155,7 @@ static void BM_ChannelConnection(benchmark::State& state) {
   letter.resize(frame.letter_size);
 
   uint64_t fs = frame.Write(buf);
-  auto& socket = channel.socket();
+  auto& socket = recon_socket.socket();
   BufferType tmp;
   tmp.resize(10000);
 
@@ -163,7 +163,7 @@ static void BM_ChannelConnection(benchmark::State& state) {
   size_t total_sz = 0, buf_seq_sz = asio::buffer_size(buf_seq);
 
   while (state.KeepRunning()) {
-    system::error_code ec = channel.Write(buf_seq);
+    system::error_code ec = recon_socket.Write(buf_seq);
     CHECK(!ec);
     total_sz += buf_seq_sz;
 

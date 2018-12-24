@@ -24,7 +24,7 @@ using testing::internal::CaptureStderr;
 using testing::internal::GetCapturedStderr;
 
 TEST_F(ServerTest, SendOk) {
-  Channel client(std::move(*channel_));
+  Channel client(std::move(*socket_));
   client.Connect(10);
 
   Envelope envelope;
@@ -35,7 +35,7 @@ TEST_F(ServerTest, SendOk) {
 }
 
 TEST_F(ServerTest, ServerStopped) {
-  std::unique_ptr<Channel> client(new Channel(std::move(*channel_)));
+  std::unique_ptr<Channel> client(new Channel(std::move(*socket_)));
   client->Connect(10);
 
   Envelope envelope;
@@ -55,7 +55,7 @@ TEST_F(ServerTest, ServerStopped) {
 }
 
 TEST_F(ServerTest, Stream) {
-  std::unique_ptr<Channel> client(new Channel(std::move(*channel_)));
+  std::unique_ptr<Channel> client(new Channel(std::move(*socket_)));
   system::error_code ec = client->Connect(20);
 
   ASSERT_FALSE(ec);
@@ -85,7 +85,7 @@ TEST_F(ServerTest, Stream) {
 }
 
 TEST_F(ServerTest, Sleep) {
-  std::unique_ptr<Channel> client(new Channel(std::move(*channel_)));
+  std::unique_ptr<Channel> client(new Channel(std::move(*socket_)));
   system::error_code ec = client->Connect(20);
   ASSERT_FALSE(ec);
 

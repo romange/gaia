@@ -148,7 +148,7 @@ void ClientChannelImpl::HandleErrorStatus() {
 
 }  // namespace detail
 
-ClientChannel::~ClientChannel() {
+ReconnectableSocket::~ReconnectableSocket() {
   Shutdown();
 }
 
