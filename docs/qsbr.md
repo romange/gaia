@@ -67,9 +67,8 @@ delete tmp.load();
 ```
 
 The function `BlockUntilAllThreadsPassQuiescentState();` allows grace period, during which
-the writer is blocked until all readers stopped accessing their current pointers to `Index`.
-Please note that `BlockUntilAllThreadsPassQuiescentState();` is not obliged to wait for there readers
-that meanwhile start accessing the new value of `data_ptr_`.
+the writer is blocked until all current readers stopped accessing their pointers to `Index`.
+All the new readers will start accessing the new pointer because it was updated before `BlockUntilAllThreadsPassQuiescentState();` call. Please note that `BlockUntilAllThreadsPassQuiescentState();` is not obliged to wait for the new readers that meanwhile start accessing the new value of `data_ptr_`.
 
 In RCU scheme this blocking function is called `synchronize_rcu();` and as I said QSBR is only one
 of the implementations for that function. I wrote down the simple pseudo-code
@@ -77,12 +76,13 @@ for `BlockUntilAllThreadsPassQuiescentState()` and `quiescent_state()` below to 
 
 ```cpp
 std::atomic<int64_t> global_state = 0;
+
 void BlockUntilAllThreadsPassQuiescentState() {
   ScopedCriticalSection(); // Only one concurrent writer is permitted.
 
-  global_state += 2;
-  for (t : registered_threads) {
-    while (local_state(t) < global_state) {
+  global_state += 2;  // Advances the version to new value.
+  for (t : registered_threads) {    // Waits for all threads to catch up. 
+    while (local_state(t) < global_state) {  // local_state(t) returns valye of local_state as t sees it.
       Poll();
     }
   }
@@ -90,12 +90,12 @@ void BlockUntilAllThreadsPassQuiescentState() {
 
 thread_local int64_t local_state = 0;
 void quiescent_state() {
-  local_state = global_state + 1;
+  local_state = global_state + 1;  // Catch up with global state.
 }
 
 ```
 Please note that the algorithm assumes that reader threads preempt or call `quiescent_state()`
-frequently enough so that the writer won't burn the cpu while polling.
+frequently enough so that the writer won't burn the cpu while polling. The blocking function makes sure that all threads called `quiescent_state()` at least once since we entered the blocking function. That means that all threads dropped released their temporary ownerships over shared pointer and it can be safely deleted.
 
 ## State of things in Gaia.
 Gaia framework assumes a thread-per-core architecture with dedicated IO loop per thread.
