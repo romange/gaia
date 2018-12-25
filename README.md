@@ -52,10 +52,13 @@ as its core libraries for asynchronous processing.
 1. [IoContextPool](https://github.com/romange/gaia/blob/master/util/asio/io_context_pool.h)
 is used for managing thread-per-core asynchronous engine based on ASIO.
 For periodic tasks, look at `asio/period_task.h`.
+
 2. The listening server (AcceptServer) is protocol agnostic and serves both http and RPC.
+
 3. RPC-service methods run inside a fiber. That fiber belongs to a thread that probably serves
 many other fiber-based connections in the server. Using regular locking mechanisms
 (`std::mutex`, `pthread_mutex`) or calling 3rd party libraries (libmysqlcpp) will block the whole thread and all its connections will be stalled. We need to be mindful about this, and as a policy prohibit thread blocking in fiber-based server code.
+
 4. Nevetheless, RPC service methods might need to issue RPC calls by themselves or block for some other reason.
 To do it correctly, we must use fiber-friendly synchronization routines. But even in this case we will still block the calling fiber (not thread). All other connections will continue processing but this one will stall. By default, there is one dedicated fiber per RPC connection that reads rpc requests and delegates them to the RPC application code. We need to remember that if higher level server-code stalls its fiber during its request processing, it effectively limits total QPS per that socket connection. For spinlock use-cases (i.e. RAM access locking with rw-spinlocks with low contention) having single fiber per rpc-connection is usually good enough to sustain high throughput. For more complicated cases, it's advised to implement fiber-pool (currently not exposed in GAIA).
 
