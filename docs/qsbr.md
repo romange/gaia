@@ -117,7 +117,7 @@ thread_local Index* local_index_ = nullptr;
 Index* current_index = nullptr;
 
 // Read fiber
-auto index = local_index_;
+auto* index = local_index_;
 if (index)
   res = index->Query();
 ...
@@ -133,7 +133,8 @@ new_index->Load();
 
 IoContextPool& pool = RefMyPool();
 
-// Blocks until the lambda task has been run in each of the IO threads.
+// Blocks until the lambda task has been run in each of the IO threads. Also serves 
+// as BlockUntilAllThreadsPassQuiescentState() call at the same time.
 pool.MapTaskSync([new_index] { local_index_ = new_index; });
 
 // Now all thread-local instances are updated.
