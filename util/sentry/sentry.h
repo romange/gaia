@@ -8,5 +8,6 @@
 
 namespace util {
 
+void EnableSentry(IoContext* context);
 
 }  // namespace util
