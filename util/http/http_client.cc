@@ -43,7 +43,6 @@ system::error_code Client::Connect(StringPiece host, StringPiece service) {
   for (const auto& k_v : headers_) {
     req.set(k_v.first, k_v.second);
   }
-
   req.body().assign(body.begin(), body.end());
 
   // Send the HTTP request to the remote host.
@@ -52,7 +51,12 @@ system::error_code Client::Connect(StringPiece host, StringPiece service) {
     h2::async_write(s, req, yield[ec]);
     return ec;
   });
+
   VLOG(2) << "Req: " << req;
+  if (ec) {
+    VLOG(1) << "Error " << ec;
+    return ec;
+  }
 
   // Receive the HTTP response
   ec = socket_->Apply([&] (ReconnectableSocket::socket_t& s) {
