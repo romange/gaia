@@ -39,8 +39,8 @@ TEST_F(HttpTest, Client) {
 
   server_->Stop();
   ec = client.Get("/", &res);
-  ASSERT_FALSE(client.IsConnected());
-  ASSERT_TRUE(ec);
+  EXPECT_TRUE(ec);
+  EXPECT_FALSE(client.IsConnected());
 }
 
 }  // namespace util

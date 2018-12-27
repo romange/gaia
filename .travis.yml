@@ -41,6 +41,7 @@ script:
   - ninja -j4 base array_test
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
   - ninja -j4 $tests_list asio_fibers -k 10
+  - ./http_test --logtostderr --vmodule=http_client=1
   - echo $tests_list |  xargs -n1 -t ../scripts/run_test.sh -l ../testresults -t 25 --name
 
 after_failure:
