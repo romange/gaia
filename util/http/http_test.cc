@@ -38,6 +38,8 @@ TEST_F(HttpTest, Client) {
   VLOG(1) << res;
 
   server_->Stop();
+  server_->Wait();  // To wait till server stops.
+
   ec = client.Get("/", &res);
   EXPECT_TRUE(ec);
   EXPECT_FALSE(client.IsConnected());

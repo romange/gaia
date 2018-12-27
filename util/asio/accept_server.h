@@ -26,6 +26,8 @@ class AcceptServer {
 
   void Run();
 
+  // Does not wait for the server to stop.
+  // You need to run Wait() to wait for proper shutdown.
   void Stop() {
     // No need to close acceptor because signals.cancel will trigger its callback that
     // will close it anyway.
