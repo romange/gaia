@@ -15,6 +15,7 @@
 #include "util/rpc/channel.h"
 #include "util/rpc/rpc_connection.h"
 #include "util/stats/varz_stats.h"
+#include "util/sentry/sentry.h"
 
 using namespace boost;
 using namespace std;
@@ -143,6 +144,9 @@ int main(int argc, char** argv) {
 
   IoContextPool pool(io_threads);
   pool.Run();
+  util::EnableSentry(&pool.GetNextContext());
+
+  LOG(ERROR) << "Roman test!";
 
   if (FLAGS_connect.empty()) {
     std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));

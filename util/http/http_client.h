@@ -28,19 +28,33 @@ class Client {
   ~Client();
 
   ::boost::system::error_code Connect(StringPiece host, StringPiece service);
-  ::boost::system::error_code Get(StringPiece url, Response* response);
+
+  ::boost::system::error_code Get(StringPiece url, StringPiece body, Response* response);
+  ::boost::system::error_code Get(StringPiece url, Response* response) {
+    return Get(url, StringPiece{}, response);
+  }
 
   void Shutdown();
 
   bool IsConnected() const;
 
   void set_connect_timeout_ms(uint32_t ms) { connect_timeout_ms_ = ms; }
+
+  // Adds header to all future requests.
+  void AddHeader(std::string name, std::string value) {
+    headers_.emplace_back(std::move(name), std::move(value));
+  }
+
  private:
   IoContext& io_context_;
   uint32_t connect_timeout_ms_ = 2000;
 
+  using HeaderPair = std::pair<std::string, std::string>;
+
+  std::vector<HeaderPair> headers_;
   std::unique_ptr<ReconnectableSocket> socket_;
 };
 
 }  // namespace http
 }  // namespace util
+

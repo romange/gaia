@@ -16,7 +16,7 @@ cxx_link(asio_co fibers base absl_strings ${Boost_LIBRARIES})
 target_compile_definitions(asio_co PRIVATE BOOST_COROUTINES_NO_DEPRECATION_WARNING)
 
 add_executable(asio_fibers asio_fibers.cc)
-cxx_link(asio_fibers base http_v2 dl strings rpc)
+cxx_link(asio_fibers base http_v2 rpc sentry strings)
 
 add_executable(http_client_tool http_client_tool.cc)
 cxx_link(http_client_tool http_client_lib asio_fiber_lib)

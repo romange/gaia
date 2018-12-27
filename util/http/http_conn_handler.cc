@@ -194,6 +194,7 @@ void HttpHandler::HandleRequestInternal(const RequestType& request, SendFunction
 
     return send->Invoke(std::move(resp));
   }
+
   StringPiece path, query;
   tie(path, query) = Parse(target);
   auto args = SplitQuery(query);

@@ -3,9 +3,11 @@
 //
 #include "util/sentry/sentry.h"
 
-#include <boost/fiber/operations.hpp>
+#include <boost/beast/http/write.hpp>  // For serializing req/resp to ostream
+
 #include <cstring>
 
+#include "strings/strcat.h"
 #include "util/asio/glog_asio_sink.h"
 #include "util/http/http_client.h"
 
@@ -21,7 +23,7 @@ namespace {
 struct Dsn {
   string key;
   string hostname;
-  string project_id;
+  string url;
 };
 
 
@@ -50,6 +52,9 @@ SentrySink::SentrySink(Dsn dsn, IoContext* io_context) : client_(io_context), ds
   } else {
     port_ = "80";
   }
+  client_.AddHeader("'X-Sentry-Auth",
+    absl::StrCat("Sentry sentry_version=6, sentry_key=", dsn_.key));
+  dsn_.url = absl::StrCat("/api", dsn_.url, "/store");
 }
 
 void SentrySink::HandleItem(const Item& item) {
@@ -60,11 +65,11 @@ void SentrySink::HandleItem(const Item& item) {
   }
 
   http::Client::Response resp;
-  ec = client_.Get(dsn_.project_id, &resp);
+  ec = client_.Get(dsn_.url, &resp);
   if (ec) {
     ++lost_messages_;
   } else {
-    LOG(INFO) << "Success";
+    LOG(INFO) << "Success: " << resp;
   }
 }
 
@@ -79,15 +84,20 @@ bool ParseDsn(const string& dsn, Dsn* res) {
   if (kpos == string::npos)
     return false;
   res->hostname = dsn.substr(kpos, pos - kpos);
-  res->project_id = dsn.substr(pos);
+  res->url = dsn.substr(pos);
 
-  VLOG(1) << "Dsn is: " << res->key << "|" << res->hostname << "|" << res->project_id;
+  VLOG(1) << "Dsn is: " << res->key << "|" << res->hostname << "|" << res->url;
   return true;
 }
 
 }  // namespace
 
 void EnableSentry(IoContext* context) {
+  if (FLAGS_sentry_dsn.empty()) {
+    LOG(INFO) << "--sentry_dsn is not defined, sentry is disabled";
+    return;
+  }
+
   Dsn dsn;
   CHECK(ParseDsn(FLAGS_sentry_dsn, &dsn)) << "Could not parse " << FLAGS_sentry_dsn;
 
