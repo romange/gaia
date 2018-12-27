@@ -14,8 +14,8 @@
 #include "util/http/http_conn_handler.h"
 #include "util/rpc/channel.h"
 #include "util/rpc/rpc_connection.h"
-#include "util/stats/varz_stats.h"
 #include "util/sentry/sentry.h"
+#include "util/stats/varz_stats.h"
 
 using namespace boost;
 using namespace std;
@@ -62,15 +62,11 @@ void Driver(Channel* channel, size_t index, unsigned msg_count) {
   rpc::Envelope envelope;
   envelope.letter.resize(64);
 
-  char msgbuf[64];
-
   char* start = reinterpret_cast<char*>(envelope.letter.data());
   auto tp = chrono::steady_clock::now();
   for (unsigned msg = 0; msg < msg_count; ++msg) {
     char* next = StrAppend(start, envelope.letter.size(), index, ".", msg);
     envelope.letter.resize(next - start);
-
-    VLOG(1) << ": Sending: " << msgbuf;
 
     system::error_code ec = channel->SendSync(FLAGS_deadline_msec, &envelope);
     if (ec == asio::error::timed_out) {
@@ -97,7 +93,7 @@ void Driver(Channel* channel, size_t index, unsigned msg_count) {
 /*****************************************************************************
  *   fiber function per client
  *****************************************************************************/
-void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::Done* done) {
+void RunClient(util::IoContext& context, unsigned msg_count) {
   LOG(INFO) << ": echo-client started";
   {
     std::unique_ptr<Channel> client(new Channel(FLAGS_connect, "9999", &context));
@@ -113,26 +109,7 @@ void RunClient(util::IoContext& context, unsigned msg_count, util::fibers_ext::D
 
     client->Shutdown();
   }
-  done->Notify();
   LOG(INFO) << ": echo-client stopped";
-}
-
-void client_pool(IoContextPool* pool) {
-  vector<util::fibers_ext::Done> done_arr(pool->size());
-  {
-    for (unsigned i = 0; i < pool->size(); ++i) {
-      util::IoContext& cntx = pool->at(i);
-      cntx.Post([&cntx, done = &done_arr[i]] {
-        fibers::fiber(RunClient, std::ref(cntx), FLAGS_count, done).detach();
-      });
-    }
-    for (auto& f : done_arr)
-      f.Wait();
-  }
-  LOG(INFO) << "client_pool ended";
-  cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000
-       << endl;
-  cout << "Timeouts " << timeouts.load() << endl;
 }
 
 int main(int argc, char** argv) {
@@ -146,9 +123,10 @@ int main(int argc, char** argv) {
   pool.Run();
   util::EnableSentry(&pool.GetNextContext());
 
-  LOG(ERROR) << "Roman test!";
+  // LOG(ERROR) << "Roman test!";
 
   if (FLAGS_connect.empty()) {
+    // Server-side flow.
     std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
     util::http::Listener<> http_listener;
     uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
@@ -160,8 +138,14 @@ int main(int argc, char** argv) {
     server->Run();
     server->Wait();
   } else {
-    client_pool(&pool);
-    // server.reset();
+    // Dispatches asynchronously RunClient on each pool-thread in a dedicated fiber and
+    // wait for them to finish.
+    pool.MapFiberSync([](util::IoContext& cntx) { RunClient(cntx, FLAGS_count); });
+
+    LOG(INFO) << "ClientLoadTest ended";
+    cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000
+         << endl;
+    cout << "Timeouts " << timeouts.load() << endl;
   }
 
   pool.Stop();
