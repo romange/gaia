@@ -127,7 +127,7 @@ void ConnectionHandler::Close() {
     VLOG(1) << "Before shutdown " << socket_->native_handle();
     socket_->cancel(ec);
     socket_->shutdown(socket_t::shutdown_both, ec);
-    VLOG(1) << "After shutdown" << ec << " " << ec.message();
+    VLOG(1) << "After shutdown: " << ec << " " << ec.message();
   }
 
   io_context_.PostFiberSync([this] { OnCloseSocket(); });

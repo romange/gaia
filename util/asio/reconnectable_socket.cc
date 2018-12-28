@@ -36,7 +36,8 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
   // single-threaded. It seems that Asio components (timer, for example) in rare cases have
   // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
   // it can ignore "cancel()" call in some cases.
-  io_context_.PostFiberSync([this, tp] { ResolveAndConnect(tp);});
+  io_context_.PostFiberSync([this, tp] {
+    ResolveAndConnect(tp);});
 
   return status_;
 }
@@ -80,7 +81,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
         sock_.cancel();
       } else if (!status_) {
         VLOG(2) << "Connected, timer status: " << ec.message();
-        return;  // connected.
+        break;  // connected.
       }
       done.Wait();  // wait for connect_cb to run.
     }
@@ -97,6 +98,15 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
     if (sleep_dur < 1s)
       sleep_dur += 100ms;
   }
+  DCHECK(!status_);  // Connected
+  #if 0
+  sock_.async_wait(tcp::socket::wait_read, [this](const boost::system::error_code& ec) {
+    system::error_code rec;
+    sock_.receive(asio::mutable_buffer(), tcp::socket::message_peek, rec);
+    LOG(INFO) << "Got error " << ec.message() << " " << rec << " " << sock_.available();
+    //if (!shut)
+  });
+  #endif
 }
 
 void ClientChannelImpl::Shutdown() {

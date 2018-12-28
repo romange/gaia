@@ -25,9 +25,15 @@ using testing::internal::GetCapturedStderr;
 
 TEST_F(ServerTest, Reconnect) {
   ASSERT_FALSE(socket_->status());
-  server_->Stop();
-  server_->Wait();
+
+  string message(1024, 'A');
+  ec_ = socket_->Write(make_buffer_seq(message));
+  ASSERT_FALSE(ec_);
   ASSERT_FALSE(socket_->status());
+  //SleepForMilliseconds(120);
+  //ec_ = socket_->Write(make_buffer_seq(message));
+  // EXPECT_TRUE(ec_);
+  // ec_ = socket_->Write(make_buffer_seq(message));
 }
 
 TEST_F(ServerTest, SendOk) {
