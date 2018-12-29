@@ -35,10 +35,9 @@ install:
 
 script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
-  - env && cat $HOME/supress.txt
+  - cmake --version # env && cat $HOME/supress.txt
   - du -hcs build-dbg
   - mkdir testresults && ./blaze.sh -ninja && cd build-dbg
-  # - du -hc third_party
   - ninja -j4 base array_test
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
   - ninja -j4 $tests_list asio_fibers -k 10

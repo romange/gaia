@@ -19,13 +19,13 @@ cxx_link(threads base)
 cxx_test(sp_task_pool_test base threads util LABELS CI)
 
 add_library(fibers sq_threadpool.cc)
-cxx_link(fibers base status strings ${Boost_LIBRARIES})
+cxx_link(fibers base status strings Boost::fiber)
 
 add_library(proc_stats proc_stats.cc spawn.cc)
 cxx_link(proc_stats strings)
 
 cxx_test(sinksource_test strings util LABELS CI)
-cxx_test(sq_threadpool_test base fibers LABELS CI)
+cxx_test(sq_threadpool_test fibers LABELS CI)
 cxx_test(pb2json_test pb2json addressbook_proto LABELS CI)
 
 add_subdirectory(asio)

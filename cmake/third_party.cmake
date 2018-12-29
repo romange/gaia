@@ -271,10 +271,10 @@ set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
 
 set(BOOST_ROOT /usr/local)
-find_package(Boost 1.67.0 QUIET COMPONENTS coroutine fiber context system thread)
+find_package(Boost 1.68.0 QUIET COMPONENTS coroutine fiber context system thread)
 if (NOT Boost_FOUND)
   set(BOOST_ROOT /opt/boost)
-  find_package(Boost 1.67.0 REQUIRED COMPONENTS coroutine fiber context system thread)
+  find_package(Boost 1.68.0 REQUIRED COMPONENTS coroutine fiber context system thread)
 endif()
 Message("Found Boost ${Boost_LIBRARY_DIRS} ${Boost_LIB_VERSION}")
 
