@@ -98,7 +98,10 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
     if (sleep_dur < 1s)
       sleep_dur += 100ms;
   }
-  DCHECK(!status_);  // Connected
+  // If this code run ReconnectFiber, it became connected DCHECK(!status_);
+  // However other thread could call a function that would trigger disconnect again.
+  // DCHECK(!status_) would fail in this case.
+  // 
   #if 0
   sock_.async_wait(tcp::socket::wait_read, [this](const boost::system::error_code& ec) {
     system::error_code rec;
