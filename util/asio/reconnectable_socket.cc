@@ -101,7 +101,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
   // If this code run ReconnectFiber, it became connected DCHECK(!status_);
   // However other thread could call a function that would trigger disconnect again.
   // DCHECK(!status_) would fail in this case.
-  // 
+  //
   #if 0
   sock_.async_wait(tcp::socket::wait_read, [this](const boost::system::error_code& ec) {
     system::error_code rec;
@@ -157,6 +157,35 @@ void ClientChannelImpl::HandleErrorStatus() {
   shutdown_latch_.Reset();
 
   io_context_.PostFiber([this] { ReconnectFiber(); });
+}
+
+void FiberClientSocket::Initiate(const std::string& hname, const std::string& port) {
+  CHECK(!worker_.get_id());
+
+  io_context_.PostSynchronous([hname, port, this] {
+    worker_ = fibers::fiber(&FiberClientSocket::Worker, this, hname, port);
+  });
+}
+
+// Waits for socket to become connected. Can be called from any thread.
+system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
+  return system::error_code{};
+}
+
+// Shuts down all background processes. Can be called from any thread.
+void FiberClientSocket::Shutdown() {
+  io_context_.PostFiberSync([this] {
+    sock_.close();
+    if (worker_.joinable())
+      worker_.join();
+  });
+}
+
+void FiberClientSocket::Worker(const std::string& hname, const std::string& service) {
+  sock_.non_blocking(true);
+  while (sock_.is_open()) {
+
+  }
 }
 
 }  // namespace detail

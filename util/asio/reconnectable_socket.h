@@ -155,9 +155,10 @@ class FiberClientSocket {
 
   // Asynchronous function that initiates connection process. Should be called once.
   // Can be called from any thread.
-  void Start(const std::string& hname, const std::string& port);
+  void Initiate(const std::string& hname, const std::string& port);
 
   // Waits for socket to become connected. Can be called from any thread.
+  // Please note that connection status might be stale if called from a foreigh thread.
   system::error_code WaitToConnect(uint32_t ms);
 
   // Shuts down all background processes. Can be called from any thread.
@@ -168,12 +169,15 @@ class FiberClientSocket {
   template <typename MBS> size_t read_some(const MBS& bufs, system::error_code& ec);
 
  private:
+  void Worker(const std::string& hname, const std::string& service);
+
   IoContext& io_context_;
   size_t rbuf_size_;
   std::string hostname_, service_;
   tcp::socket sock_;
   system::error_code status_ = asio::error::not_connected;
   std::unique_ptr<uint8_t[]> rbuf_;
+  fibers::fiber worker_;
 };
 
 }  // namespace detail
