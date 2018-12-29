@@ -51,22 +51,16 @@ class ClientChannelImpl {
         hostname_(hname),
         service_(s),
         sock_(cntx.get_context(), tcp::v4()),
-        handle_(sock_.native_handle()), shutdown_latch_(true) {
-  }
+        handle_(sock_.native_handle()),
+        shutdown_latch_(true) {}
 
   ~ClientChannelImpl();
 
-  tcp::socket::native_handle_type handle() const {
-    return handle_;
-  }
+  tcp::socket::native_handle_type handle() const { return handle_; }
 
-  system::error_code status() const {
-    return status_;
-  }
+  system::error_code status() const { return status_; }
 
-  bool shutting_down() const {
-    return shutting_down_;
-  }
+  bool shutting_down() const { return shutting_down_; }
 
   system::error_code Connect(uint32_t ms);
 
@@ -104,29 +98,23 @@ class ClientChannelImpl {
     return status_;
   }
 
-  template <typename Func>
-  socket_callable_t<Func> Apply(Func&& f) {
+  template <typename Func> socket_callable_t<Func> Apply(Func&& f) {
     status_ = f(sock_);
     if (status_)
       HandleErrorStatus();
     return status_;
   }
 
-  template <typename Func>
-  ec_returnable_t<Func> Apply(Func&& f) {
+  template <typename Func> ec_returnable_t<Func> Apply(Func&& f) {
     status_ = f();
     if (status_)
       HandleErrorStatus();
     return status_;
   }
 
-  IoContext& context() {
-    return io_context_;
-  }
+  IoContext& context() { return io_context_; }
 
-  tcp::socket& socket() {
-    return sock_;
-  }
+  tcp::socket& socket() { return sock_; }
 
  private:
   using time_point = std::chrono::steady_clock::time_point;
@@ -154,6 +142,40 @@ class ClientChannelImpl {
   fibers_ext::Done shutdown_latch_;
 };
 
+/* Design of this class - all fibers, all variables are single threaded and fiber friendly.
+   FiberSocket has background fiber that handles its status. The socket tries to reconnect upon
+   error. All functions unless specified explicitly should be called from IoContext thread.
+*/
+class FiberClientSocket {
+ public:
+  // C'tor can be called from any thread.
+  // Constructs the client socket which tries to connect to the destination.
+  FiberClientSocket(size_t rbuf_size, IoContext* cntx)
+      : io_context_(*cntx), rbuf_size_(rbuf_size), sock_(cntx->get_context(), tcp::v4()) {}
+
+  // Asynchronous function that initiates connection process. Should be called once.
+  // Can be called from any thread.
+  void Start(const std::string& hname, const std::string& port);
+
+  // Waits for socket to become connected. Can be called from any thread.
+  system::error_code WaitToConnect(uint32_t ms);
+
+  // Shuts down all background processes. Can be called from any thread.
+  void Shutdown();
+
+  // (fiber) SyncRead interface:
+  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
+  template <typename MBS> size_t read_some(const MBS& bufs, system::error_code& ec);
+
+ private:
+  IoContext& io_context_;
+  size_t rbuf_size_;
+  std::string hostname_, service_;
+  tcp::socket sock_;
+  system::error_code status_ = asio::error::not_connected;
+  std::unique_ptr<uint8_t[]> rbuf_;
+};
+
 }  // namespace detail
 
 class ReconnectableSocket {
@@ -162,13 +184,11 @@ class ReconnectableSocket {
   using socket_t = detail::tcp::socket;
 
   // since we allow moveable semantics we should support default c'tor as well.
-  ReconnectableSocket() {
-  }
+  ReconnectableSocket() {}
 
   // "service" - port to which to connect.
   ReconnectableSocket(const std::string& hostname, const std::string& service, IoContext* cntx)
-      : impl_(new detail::ClientChannelImpl(*cntx, hostname, service)) {
-  }
+      : impl_(new detail::ClientChannelImpl(*cntx, hostname, service)) {}
 
   ReconnectableSocket(ReconnectableSocket&&) noexcept = default;
   ~ReconnectableSocket();
@@ -177,9 +197,7 @@ class ReconnectableSocket {
 
   // Should be called at most once to trigger the connection process. Should not be called more
   // than once because ClientChannel handles reconnects by itself.
-  error_code Connect(uint32_t ms) {
-    return impl_->Connect(ms);
-  }
+  error_code Connect(uint32_t ms) { return impl_->Connect(ms); }
 
   // impl_ might be null due to object move.
   // Blocks the calling fiber until impl_ is shut down.
@@ -188,45 +206,30 @@ class ReconnectableSocket {
       impl_->Shutdown();
   }
 
-  error_code WaitForReadAvailable() {
-    return impl_->WaitForReadAvailable();
-  }
+  error_code WaitForReadAvailable() { return impl_->WaitForReadAvailable(); }
 
   // impl_ might be null due to object move.
-  bool is_shut_down() const {
-    return !impl_ || impl_->shutting_down();
-  }
+  bool is_shut_down() const { return !impl_ || impl_->shutting_down(); }
 
-  template <typename Writeable>
-  error_code Write(Writeable&& wr) {
+  template <typename Writeable> error_code Write(Writeable&& wr) {
     return impl_->Write(std::forward<Writeable>(wr));
   }
 
-  template <typename BufferSequence>
-  error_code Read(const BufferSequence& bs) {
+  template <typename BufferSequence> error_code Read(const BufferSequence& bs) {
     return impl_->Read(bs);
   }
 
-  template <typename Func>
-  error_code Apply(Func&& f) {
+  template <typename Func> error_code Apply(Func&& f) {
     return impl_->Apply(std::forward<Func>(f));
   }
 
-  error_code status() const {
-    return impl_->status();
-  }
+  error_code status() const { return impl_->status(); }
 
-  socket_t::native_handle_type handle() const {
-    return impl_->handle();
-  }
+  socket_t::native_handle_type handle() const { return impl_->handle(); }
 
-  IoContext& context() {
-    return impl_->context();
-  }
+  IoContext& context() { return impl_->context(); }
 
-  socket_t& socket() {
-    return impl_->socket();
-  }
+  socket_t& socket() { return impl_->socket(); }
 
  private:
   // Factor out most fields into Impl struct to allow moveable semantics for the channel.
