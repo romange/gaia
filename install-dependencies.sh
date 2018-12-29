@@ -32,8 +32,10 @@ install_boost() {
 
 if ! [ -d /opt/${BOOST}/lib ]; then
   install_boost
-  ln -sf /opt/${BOOST} /opt/boost
 else
   echo "Skipping installing ${BOOST}"
 fi
 
+if ! [ -d /opt/boost ]; then
+  ln -sf /opt/${BOOST} /opt/boost
+fi
