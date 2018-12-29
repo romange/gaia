@@ -49,28 +49,29 @@ TEST_F(RpcTest, BadHeader) {
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
-TEST_F(RpcTest, Basic) {
-  // Must be large enough to pass the initial RPC server read.
-  string header("Hello "), message("world!!!");
+TEST_F(RpcTest, HelloFrame) {
+  string header("Hello "), letter("world!!!");
   frame_.header_size = header.size();
-  frame_.letter_size = message.size();
+  frame_.letter_size = letter.size();
 
-  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, message));
+  // Write correct frame and the envelope.
+  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, letter));
   ASSERT_FALSE(ec_);
 
+  // Read back envelope.
   ec_ = socket_->Apply([this](auto& s) {
     return frame_.Read(&s);
   });
   ASSERT_FALSE(ec_);
   EXPECT_EQ(frame_.header_size, header.size());
-  EXPECT_EQ(frame_.letter_size, message.size());
+  EXPECT_EQ(frame_.letter_size, letter.size());
 
-  ec_ = socket_->Read(make_buffer_seq(header, message));
+  // Read header/letter.
+  ec_ = socket_->Read(make_buffer_seq(header, letter));
   ASSERT_FALSE(ec_) << ec_.message();
 }
 
-
-TEST_F(RpcTest, Socket) {
+TEST_F(RpcTest, InvalidAndConnect) {
   std::string send_msg(500, 'a');
   ec_ = socket_->Write(make_buffer_seq(send_msg));
   ASSERT_FALSE(ec_);

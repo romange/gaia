@@ -44,6 +44,7 @@ template <typename Stream> class BufferedReadAdaptor {
  private:
   template <typename BufferSequence>
   error_code ReadAndLoad(const BufferSequence& bufs, size_t total_size) {
+    using namespace ::boost;
     error_code ec;
     // assert: buf_ does not hold any useful data.
 
@@ -54,6 +55,11 @@ template <typename Stream> class BufferedReadAdaptor {
 
     // First - try non-blocking call to check if there is data pending to read.
     size_t read = sock_.read_some(new_seq, ec);
+
+    if (ec && ec != system::errc::resource_unavailable_try_again) {
+      return ec;
+    }
+    ec.clear();
 
     while (!ec) {
       if (read >= total_size) {
