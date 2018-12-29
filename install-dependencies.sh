@@ -9,18 +9,25 @@ BVER=1.69.0
 BOOST=boost_${BVER//./_}   # replace all . with _
 
 install_boost() {
+    mkdir -p /tmp/boost && pushd /tmp/boost
     if ! [ -d $BOOST ]; then
-      wget -nv http://dl.bintray.com/boostorg/release/${BVER}/source/$BOOST.tar.bz2 \
-        && tar -xjf $BOOST.tar.bz2
+      url="http://dl.bintray.com/boostorg/release/${BVER}/source/$BOOST.tar.bz2"
+      echo "Downloading from $url"
+      wget -nv ${url} && tar -xjf $BOOST.tar.bz2
+      chown ${SUDO_USER}:${SUDO_USER} -R $BOOST.tar.bz2 $BOOST
     fi
 
-    cd $BOOST && ./bootstrap.sh --prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python
+    booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"
+    cd $BOOST
+    boostrap_cmd=`readlink -f bootstrap.sh`
+    ${boostrap_cmd} ${booststap_arg}
     b2_args=(define=BOOST_COROUTINES_NO_DEPRECATION_WARNING=1 link=shared variant=release debug-symbols=off
              threading=multi --without-test --without-math --without-log --without-locale --without-wave
              --without-regex --without-python -j4)
 
-    ./b2 "${b2_args[@]}" cxxflags="-std=c++14 -Wno-deprecated-declarations -fPIC -O3"
+    ./b2 "${b2_args[@]}" cxxflags='-std=c++14 -Wno-deprecated-declarations -fPIC -O3'
     ./b2 install "${b2_args[@]}" -d0
+    popd
 }
 
 if ! [ -d /opt/${BOOST}/lib ]; then
