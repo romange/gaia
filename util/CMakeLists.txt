@@ -19,7 +19,7 @@ cxx_link(threads base)
 cxx_test(sp_task_pool_test base threads util LABELS CI)
 
 add_library(fibers sq_threadpool.cc)
-cxx_link(fibers base status strings Boost::fiber)
+cxx_link(fibers base status strings Boost::fiber Boost::thread)
 
 add_library(proc_stats proc_stats.cc spawn.cc)
 cxx_link(proc_stats strings)
