@@ -27,7 +27,7 @@ class SentryTest : public util::HttpBaseTest {
 
 
 TEST_F(SentryTest, Basic) {
-  listener_.RegisterCb("/api/id/store", false,
+  listener_.RegisterCb("/api/id/store/", false,
       [this](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
     this->req_++;
     http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
