@@ -34,19 +34,20 @@ system::error_code Client::Connect(StringPiece host, StringPiece service) {
   return socket_->Connect(connect_timeout_ms_);
 }
 
-
-::boost::system::error_code Client::Get(StringPiece url, StringPiece body, Response* response) {
+::boost::system::error_code Client::Send(Verb verb, StringPiece url, StringPiece body,
+                                         Response* response) {
   // Set the URL
-  h2::request<h2::string_body> req{h2::verb::get, boost::string_view(url.data(), url.size()), 11};
+  h2::request<h2::string_body> req{verb, boost::string_view(url.data(), url.size()), 11};
 
   // Optional headers
   for (const auto& k_v : headers_) {
     req.set(k_v.first, k_v.second);
   }
   req.body().assign(body.begin(), body.end());
+  req.prepare_payload();
 
   // Send the HTTP request to the remote host.
-  system::error_code ec = socket_->Apply([&] (ReconnectableSocket::socket_t& s) {
+  system::error_code ec = socket_->Apply([&](ReconnectableSocket::socket_t& s) {
     system::error_code ec;
     h2::async_write(s, req, yield[ec]);
     return ec;
@@ -59,7 +60,7 @@ system::error_code Client::Connect(StringPiece host, StringPiece service) {
   }
 
   // Receive the HTTP response
-  ec = socket_->Apply([&] (ReconnectableSocket::socket_t& s) {
+  ec = socket_->Apply([&](ReconnectableSocket::socket_t& s) {
     system::error_code ec;
     // This buffer is used for reading and must be persisted
     beast::flat_buffer buffer;
@@ -67,6 +68,7 @@ system::error_code Client::Connect(StringPiece host, StringPiece service) {
     h2::async_read(s, buffer, *response, yield[ec]);
     return ec;
   });
+  VLOG(2) << "Resp: " << *response;
 
   return ec;
 }

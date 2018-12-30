@@ -22,15 +22,16 @@ namespace http {
 class Client {
  public:
   using Response = boost::beast::http::response<boost::beast::http::dynamic_body>;
+  using Verb = boost::beast::http::verb;
 
   explicit Client(IoContext* io_context);
   ~Client();
 
-  ::boost::system::error_code Connect(StringPiece host, StringPiece service);
+  boost::system::error_code Connect(StringPiece host, StringPiece service);
 
-  ::boost::system::error_code Get(StringPiece url, StringPiece body, Response* response);
-  ::boost::system::error_code Get(StringPiece url, Response* response) {
-    return Get(url, StringPiece{}, response);
+  boost::system::error_code Send(Verb verb, StringPiece url, StringPiece body, Response* response);
+  boost::system::error_code Send(Verb verb, StringPiece url, Response* response) {
+    return Send(verb, url, StringPiece{}, response);
   }
 
   void Shutdown();

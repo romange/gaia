@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
   pool.Run();
   util::EnableSentry(&pool.GetNextContext());
 
-  // LOG(ERROR) << "Roman test!";
+  LOG(ERROR) << "AsioFibers sentry test!";
 
   if (FLAGS_connect.empty()) {
     // Server-side flow.

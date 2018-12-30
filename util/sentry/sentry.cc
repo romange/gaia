@@ -13,8 +13,7 @@
 #include "util/asio/glog_asio_sink.h"
 #include "util/http/http_client.h"
 
-DEFINE_string(sentry_dsn, "",
-              "Sentry DSN in the format <pivatekey>@hostname/<project_id>");
+DEFINE_string(sentry_dsn, "", "Sentry DSN in the format <pivatekey>@hostname/<project_id>");
 
 namespace util {
 using namespace ::boost;
@@ -65,9 +64,12 @@ SentrySink::SentrySink(Dsn dsn, IoContext* io_context) : client_(io_context), ds
   } else {
     port_ = "80";
   }
-  client_.AddHeader("'X-Sentry-Auth",
+  client_.AddHeader("X-Sentry-Auth",
                     absl::StrCat("Sentry sentry_version=6, sentry_key=", dsn_.key));
-  dsn_.url = absl::StrCat("/api", dsn_.url, "/store");
+  client_.AddHeader("Content-Type", "application/json");
+  client_.AddHeader("Host", dsn_.hostname);
+  client_.AddHeader("User-Agent", "gaia-cpp/0.1");
+  dsn_.url = absl::StrCat("/api", dsn_.url, "/store/");
 }
 
 void SentrySink::HandleItem(const Item& item) {
@@ -79,27 +81,26 @@ void SentrySink::HandleItem(const Item& item) {
 
   http::Client::Response resp;
   string body = GenSentryBody(item);
-  VLOG(1) << "Body: " << body;
-  ec = client_.Get(dsn_.url, body, &resp);
+  ec = client_.Send(http::Client::Verb::post, dsn_.url, body, &resp);
 
   if (ec) {
     ++lost_messages_;
-    LOG(INFO) << "Error " << ec << " " << ec.message();
-  } else {
-    VLOG(1) << "Success: " << resp;
   }
 }
 
 string SentrySink::GenSentryBody(const Item& item) {
-  uuids::uuid id = uuid_gen_();
-  string res = absl::StrCat(R"({"event_id": ")", uuids::to_string(id), R"(","culprit":")",
-                            item.base_filename, ":", item.line, R"(", "server_name":"TBD")");
+  string res = absl::StrCat(R"({"culprit":")", item.base_filename, ":", item.line,
+                            R"(", "server_name":"TBD")");
 
-  absl::StrAppend(&res, ",\n" R"( "message":")", item.message,
-                  R"(", "level":"error", "platform": "c++", "timestamp":")");
-  absl::StrAppend(&res, 1900 + item.tm_time.tm_year, "-", item.tm_time.tm_mon, "-",
-                  item.tm_time.tm_mday, "T", item.tm_time.tm_hour, ":",
-                  item.tm_time.tm_min, ":", item.tm_time.tm_sec);
+  absl::StrAppend(&res,
+                  ",\n"
+                  R"( "message":")",
+                  item.message,
+                  R"(", "level":"error", "platform": "c++", "sdk": {"name": "sentry-cpp",
+                  "version": "1.0.0"}, "timestamp":")");
+  absl::StrAppend(&res, 1900 + item.tm_time.tm_year, "-", item.tm_time.tm_mon + 1, "-",
+                  item.tm_time.tm_mday, "T", item.tm_time.tm_hour, ":", item.tm_time.tm_min, ":",
+                  item.tm_time.tm_sec);
   absl::StrAppend(&res, R"("})");
 
   return res;
