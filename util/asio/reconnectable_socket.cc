@@ -3,8 +3,10 @@
 //
 
 #include "util/asio/reconnectable_socket.h"
+
 #include <boost/asio/connect.hpp>
 #include <boost/fiber/fiber.hpp>
+#include <boost/fiber/operations.hpp>
 
 #include "base/logging.h"
 
@@ -13,6 +15,7 @@ using chrono::milliseconds;
 using chrono::steady_clock;
 using namespace boost;
 using namespace asio::ip;
+using namespace chrono_literals;
 
 namespace util {
 
@@ -36,8 +39,7 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
   // single-threaded. It seems that Asio components (timer, for example) in rare cases have
   // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
   // it can ignore "cancel()" call in some cases.
-  io_context_.PostFiberSync([this, tp] {
-    ResolveAndConnect(tp);});
+  io_context_.PostFiberSync([this, tp] { ResolveAndConnect(tp); });
 
   return status_;
 }
@@ -98,23 +100,22 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
     if (sleep_dur < 1s)
       sleep_dur += 100ms;
   }
-  // If this code run ReconnectFiber, it became connected DCHECK(!status_);
-  // However other thread could call a function that would trigger disconnect again.
-  // DCHECK(!status_) would fail in this case.
-  //
-  #if 0
+// If this code run ReconnectFiber, it became connected DCHECK(!status_);
+// However other thread could call a function that would trigger disconnect again.
+// DCHECK(!status_) would fail in this case.
+//
+#if 0
   sock_.async_wait(tcp::socket::wait_read, [this](const boost::system::error_code& ec) {
     system::error_code rec;
     sock_.receive(asio::mutable_buffer(), tcp::socket::message_peek, rec);
     LOG(INFO) << "Got error " << ec.message() << " " << rec << " " << sock_.available();
     //if (!shut)
   });
-  #endif
+#endif
 }
 
 void ClientChannelImpl::Shutdown() {
   if (!shutting_down_) {
-
     io_context_.PostFiberSync([this] {
       system::error_code ec;
 
@@ -159,6 +160,8 @@ void ClientChannelImpl::HandleErrorStatus() {
   io_context_.PostFiber([this] { ReconnectFiber(); });
 }
 
+FiberClientSocket::~FiberClientSocket() { Shutdown(); }
+
 void FiberClientSocket::Initiate(const std::string& hname, const std::string& port) {
   CHECK(!worker_.get_id());
 
@@ -169,12 +172,17 @@ void FiberClientSocket::Initiate(const std::string& hname, const std::string& po
 
 // Waits for socket to become connected. Can be called from any thread.
 system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
-  return system::error_code{};
+  std::unique_lock<::boost::fibers::mutex> lock(mu_st_);
+  cv_st_.wait_for(lock, milliseconds(ms), [this] { return !status_; });
+  return status_;
 }
 
 // Shuts down all background processes. Can be called from any thread.
 void FiberClientSocket::Shutdown() {
   io_context_.PostFiberSync([this] {
+    if (!sock_.is_open())
+      return;
+
     sock_.close();
     if (worker_.joinable())
       worker_.join();
@@ -183,15 +191,51 @@ void FiberClientSocket::Shutdown() {
 
 void FiberClientSocket::Worker(const std::string& hname, const std::string& service) {
   sock_.non_blocking(true);
-  while (sock_.is_open()) {
 
+  while (sock_.is_open()) {
+    if (status_) {
+      auto ec = Reconnect(hname, service);
+      if (ec) {
+        VLOG(1) << "Error " << ec << "/" << ec.message();
+        this_fiber::sleep_for(10ms);
+      }
+      continue;
+    }
+    this_fiber::sleep_for(20ms);
   }
+}
+
+system::error_code FiberClientSocket::Reconnect(const std::string& hname,
+                                                const std::string& service) {
+  auto& asio_io_cntx = io_context_.get_context();
+  tcp::resolver resolver(asio_io_cntx);
+
+  system::error_code ec;
+  VLOG(2) << "Before AsyncResolve";
+
+  // It seems that resolver waits for 10s and ignores cancel command.
+  auto results = resolver.async_resolve(tcp::v4(), hname, service, fibers_ext::yield[ec]);
+  if (ec) {
+    return ec;
+  }
+
+  asio::steady_timer timer(asio_io_cntx, connect_duration_);
+  timer.async_wait([&](const system::error_code& ec) {
+    if (!ec) {  // Successfully expired.
+      VLOG(1) << "Cancelling sock_";
+      sock_.cancel();
+    }
+  });
+  asio::async_connect(sock_, results, fibers_ext::yield[status_]);
+  if (!status_) {
+    cv_st_.notify_all();
+  }
+
+  return status_;
 }
 
 }  // namespace detail
 
-ReconnectableSocket::~ReconnectableSocket() {
-  Shutdown();
-}
+ReconnectableSocket::~ReconnectableSocket() { Shutdown(); }
 
 }  // namespace util

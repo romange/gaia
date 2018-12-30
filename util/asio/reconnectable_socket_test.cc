@@ -25,6 +25,12 @@ class SocketTest : public HttpBaseTest {
 using namespace asio::ip;
 
 TEST_F(SocketTest, Client) {
+  detail::FiberClientSocket sock(1 << 16, &pool_->GetNextContext());
+
+  sock.Initiate("localhost", std::to_string(port_));
+
+  auto ec = sock.WaitToConnect(1000);
+  EXPECT_FALSE(ec) << ec << "/" << ec.message();
 }
 
 }  // namespace util

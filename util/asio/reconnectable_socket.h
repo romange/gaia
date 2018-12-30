@@ -142,16 +142,21 @@ class ClientChannelImpl {
   fibers_ext::Done shutdown_latch_;
 };
 
-/* Design of this class - all fibers, all variables are single threaded and fiber friendly.
+/* Design of this class:
+   1. all methods, all variables are updated from a single thread.
+   2. The code is fiber friendly.
    FiberSocket has background fiber that handles its status. The socket tries to reconnect upon
    error. All functions unless specified explicitly should be called from IoContext thread.
 */
 class FiberClientSocket {
  public:
+
   // C'tor can be called from any thread.
   // Constructs the client socket which tries to connect to the destination.
   FiberClientSocket(size_t rbuf_size, IoContext* cntx)
       : io_context_(*cntx), rbuf_size_(rbuf_size), sock_(cntx->get_context(), tcp::v4()) {}
+
+  ~FiberClientSocket();
 
   // Asynchronous function that initiates connection process. Should be called once.
   // Can be called from any thread.
@@ -170,6 +175,7 @@ class FiberClientSocket {
 
  private:
   void Worker(const std::string& hname, const std::string& service);
+  system::error_code Reconnect(const std::string& hname, const std::string& service);
 
   IoContext& io_context_;
   size_t rbuf_size_;
@@ -178,6 +184,11 @@ class FiberClientSocket {
   system::error_code status_ = asio::error::not_connected;
   std::unique_ptr<uint8_t[]> rbuf_;
   fibers::fiber worker_;
+
+  fibers::mutex mu_st_;
+  fibers::condition_variable cv_st_;
+
+  ::std::chrono::steady_clock::duration connect_duration_ =  ::std::chrono::seconds(2);
 };
 
 }  // namespace detail
