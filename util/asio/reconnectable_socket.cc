@@ -201,6 +201,13 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       }
       continue;
     }
+    system::error_code ec;
+    sock_.async_wait(tcp::socket::wait_read, fibers_ext::yield[ec]);
+    if (ec) {
+      continue;
+    }
+    
+    LOG(INFO) << "AsyncWait: " << ec;
     this_fiber::sleep_for(20ms);
   }
 }

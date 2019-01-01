@@ -173,6 +173,8 @@ class FiberClientSocket {
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
   template <typename MBS> size_t read_some(const MBS& bufs, system::error_code& ec);
 
+  tcp::socket& socket() { return sock_; }
+
  private:
   void Worker(const std::string& hname, const std::string& service);
   system::error_code Reconnect(const std::string& hname, const std::string& service);
