@@ -36,10 +36,11 @@ TEST_F(SocketTest, Client) {
   h2::request<h2::string_body> req{h2::verb::get, "/", 11};
   size_t written = h2::async_write(sock.socket(), req, fibers_ext::yield[ec]);
 
-  beast::flat_buffer buffer;
+  this_fiber::sleep_for(1000ms);
+  /*beast::flat_buffer buffer;
   h2::response<h2::dynamic_body> resp;
   LOG(INFO) << "Before async read";
-  size_t sz = h2::async_read(sock.socket(), buffer, resp, fibers_ext::yield[ec]);
+  size_t sz = h2::async_read(sock.socket(), buffer, resp, fibers_ext::yield[ec]);*/
   LOG(INFO) << "After async read";
 
 }

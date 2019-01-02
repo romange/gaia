@@ -173,6 +173,10 @@ class FiberClientSocket {
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
   template <typename MBS> size_t read_some(const MBS& bufs, system::error_code& ec);
 
+  // To calm SyncReadStream compile-checker we provide exception-enabled interface without
+  // implementing. It's not intended for use.
+  template <typename MBS> size_t read_some(const MBS& bufs);
+
   tcp::socket& socket() { return sock_; }
 
  private:
@@ -185,13 +189,32 @@ class FiberClientSocket {
   tcp::socket sock_;
   system::error_code status_ = asio::error::not_connected;
   std::unique_ptr<uint8_t[]> rbuf_;
+  asio::mutable_buffer rslice_;
   fibers::fiber worker_;
+
+  enum State { IDLE, READ_PENDING, READ_AVAILABLE} state_ = IDLE;
 
   fibers::mutex mu_st_;
   fibers::condition_variable cv_st_;
 
-  ::std::chrono::steady_clock::duration connect_duration_ =  ::std::chrono::seconds(2);
+  ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };
+
+template <typename MBS> size_t FiberClientSocket::read_some(const MBS& bufs,
+                                                            system::error_code& ec) {
+  if (rslice_.size()) {
+    size_t copied = asio::buffer_copy(bufs, rslice_);
+    rslice_ += copied;
+
+    if (rslice_.size() == 0) {
+      // TODO: to wake worker.
+    }
+
+    return copied;
+  }
+  state_ = READ_PENDING;
+  return sock_.async_read_some(bufs, fibers_ext::yield[ec]);
+}
 
 }  // namespace detail
 

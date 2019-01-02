@@ -204,9 +204,18 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
     system::error_code ec;
     sock_.async_wait(tcp::socket::wait_read, fibers_ext::yield[ec]);
     if (ec) {
+      LOG(ERROR) << "AsyncWait: " << ec.message();
       continue;
     }
-    
+
+    if (state_ == IDLE) {
+      char buf[1];
+      // Sync. but non-blocking call since we know we can receive.
+      sock_.receive(asio::buffer(buf), tcp::socket::message_peek, status_);
+      if (status_)
+        continue;
+      // block on read.
+    }
     LOG(INFO) << "AsyncWait: " << ec;
     this_fiber::sleep_for(20ms);
   }
