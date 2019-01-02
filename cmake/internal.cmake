@@ -23,14 +23,21 @@ include(CheckCXXCompilerFlag)
 include(useGoldLinker)
 
 CHECK_CXX_COMPILER_FLAG("-std=c++14" COMPILER_SUPPORTS_CXX14)
+CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
 
 if(NOT COMPILER_SUPPORTS_CXX14)
-    message(STATUS "The compiler ${CMAKE_CXX_COMPILER} has no C++14 support. Please use a different C++ compiler.")
+    message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++14 support. \
+                         Please use a different C++ compiler.")
 endif()
 
 message(STATUS "Compiler ${CMAKE_CXX_COMPILER}, version: ${CMAKE_CXX_COMPILER_VERSION}")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+if (COMPILER_SUPPORTS_CXX17 AND FALSE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+endif()
+
 
 # ---[ Color diagnostics
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -42,7 +49,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fdiagnostics-color=auto")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -fsanitize=undefined \
-                             -fno-sanitize=vptr")
+  -fno-sanitize=vptr")
 
                              # If we use "noexcept" we must use -Wno-noexcept-type in c++14 because of the weird warning of gcc.
   # When we switch to c++17 we can remove it.
