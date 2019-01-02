@@ -174,8 +174,11 @@ void FiberClientSocket::Initiate(const std::string& hname, const std::string& po
 
 // Waits for socket to become connected. Can be called from any thread.
 system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
-  std::unique_lock<::boost::fibers::mutex> lock(mu_st_);
+  fibers::mutex mu;  // really weird usage. Since I expect
+
+  std::unique_lock<fibers::mutex> lock(mu);
   cv_st_.wait_for(lock, milliseconds(ms), [this] { return !status_; });
+
   return status_;
 }
 
@@ -229,7 +232,9 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       continue;
     }
     VLOG(2) << "BeforeCvReadWait";
-    std::unique_lock<::boost::fibers::mutex> lock(read_mu_);
+
+    fibers::mutex mu;
+    std::unique_lock<fibers::mutex> lock(mu);
     cv_read_.wait(lock, [this] { return !WorkerShouldBlock(); });
 
     LOG(INFO) << "WorkerIteration: ";

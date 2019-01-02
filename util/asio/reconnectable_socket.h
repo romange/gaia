@@ -195,7 +195,7 @@ class FiberClientSocket {
   system::error_code Reconnect(const std::string& hname, const std::string& service);
 
   bool WorkerShouldBlock() const {
-    return sock_.is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_PENDING);
+    return sock_.is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_CALL_ACTIVE);
   }
 
   IoContext& io_context_;
@@ -207,9 +207,8 @@ class FiberClientSocket {
   asio::mutable_buffer rslice_;
   fibers::fiber worker_;
 
-  enum State { IDLE, READ_PENDING} state_ = IDLE;
+  enum State { IDLE, READ_CALL_ACTIVE} state_ = IDLE;
 
-  fibers::mutex mu_st_, read_mu_;
   fibers::condition_variable cv_st_, cv_read_;
 
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
@@ -217,7 +216,7 @@ class FiberClientSocket {
 
 template <typename MBS> size_t FiberClientSocket::read_some(
       const MBS& bufs, system::error_code& ec) {
-  if (rslice_.size()) {
+  if (rslice_.size() > 0) {
     size_t copied = asio::buffer_copy(bufs, rslice_);
     rslice_ += copied;
 
@@ -227,8 +226,11 @@ template <typename MBS> size_t FiberClientSocket::read_some(
 
     return copied;
   }
-
-  state_ = READ_PENDING;
+  if (status_) {
+    ec = status_;
+    return 0;
+  }
+  state_ = READ_CALL_ACTIVE;
   size_t res = sock_.async_read_some(bufs, fibers_ext::yield[ec]);
   state_ = IDLE;
   return res;
@@ -236,6 +238,10 @@ template <typename MBS> size_t FiberClientSocket::read_some(
 
 template <typename BS> size_t FiberClientSocket::write_some(
       const BS& bufs, system::error_code& ec) {
+   if (status_) {
+     ec = status_;
+     return 0;
+   }
    return sock_.async_write_some(bufs, fibers_ext::yield[ec]);
 }
 
