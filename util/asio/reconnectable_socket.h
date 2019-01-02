@@ -183,6 +183,10 @@ class FiberClientSocket {
   void Worker(const std::string& hname, const std::string& service);
   system::error_code Reconnect(const std::string& hname, const std::string& service);
 
+  bool WorkerShouldBlock() const {
+    return sock_.is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_PENDING);
+  }
+
   IoContext& io_context_;
   size_t rbuf_size_;
   std::string hostname_, service_;
@@ -194,8 +198,8 @@ class FiberClientSocket {
 
   enum State { IDLE, READ_PENDING, READ_AVAILABLE} state_ = IDLE;
 
-  fibers::mutex mu_st_;
-  fibers::condition_variable cv_st_;
+  fibers::mutex mu_st_, read_mu_;
+  fibers::condition_variable cv_st_, cv_read_;
 
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };
@@ -207,13 +211,15 @@ template <typename MBS> size_t FiberClientSocket::read_some(const MBS& bufs,
     rslice_ += copied;
 
     if (rslice_.size() == 0) {
-      // TODO: to wake worker.
+      cv_read_.notify_one();
     }
 
     return copied;
   }
   state_ = READ_PENDING;
-  return sock_.async_read_some(bufs, fibers_ext::yield[ec]);
+  size_t res = sock_.async_read_some(bufs, fibers_ext::yield[ec]);
+  state_ = IDLE;
+  return res;
 }
 
 }  // namespace detail

@@ -166,6 +166,8 @@ void FiberClientSocket::Initiate(const std::string& hname, const std::string& po
   CHECK(!worker_.get_id());
 
   io_context_.PostSynchronous([hname, port, this] {
+    rbuf_.reset(new uint8_t[rbuf_size_]);
+    rslice_ = asio::buffer(rbuf_.get(), 0);
     worker_ = fibers::fiber(&FiberClientSocket::Worker, this, hname, port);
   });
 }
@@ -208,16 +210,24 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       continue;
     }
 
-    if (state_ == IDLE) {
-      char buf[1];
-      // Sync. but non-blocking call since we know we can receive.
-      sock_.receive(asio::buffer(buf), tcp::socket::message_peek, status_);
-      if (status_)
-        continue;
-      // block on read.
+    size_t read_capacity = rbuf_size_ - rslice_.size();
+    if (state_ == IDLE && read_capacity) {
+      uint8_t* next = static_cast<uint8_t*>(rslice_.data()) + rslice_.size();
+      // Direct but non-blocking call since we know we should be able to receive.
+      // Since it's direct - we do not context-switch.
+      size_t read_cnt = sock_.receive(asio::mutable_buffer(next, read_capacity), 0, status_);
+      if (status_) {
+        LOG(ERROR) << "SockReceive: " << status_.message();
+      } else {
+        rslice_ = asio::mutable_buffer(rslice_.data(), rslice_.size() + read_cnt);
+      }
+      continue;
     }
-    LOG(INFO) << "AsyncWait: " << ec;
-    this_fiber::sleep_for(20ms);
+    std::unique_lock<::boost::fibers::mutex> lock(read_mu_);
+    cv_read_.wait(lock, [this] { return !WorkerShouldBlock(); });
+
+    LOG(INFO) << "WorkerIteration: ";
+    // this_fiber::sleep_for(20ms);
   }
 }
 
