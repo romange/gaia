@@ -25,7 +25,7 @@ class SocketTest : public HttpBaseTest {
  protected:
   void SetUp() final {
     HttpBaseTest::SetUp();
-    sock_.reset(new detail::FiberClientSocket(1 << 16, &pool_->GetNextContext()));
+    sock_.reset(new detail::FiberClientSocket(&pool_->GetNextContext(), 1 << 16));
     sock_->Initiate("localhost", std::to_string(port_));
   }
 
@@ -46,14 +46,16 @@ TEST_F(SocketTest, Normal) {
   EXPECT_FALSE(ec) << ec << "/" << ec.message();
 
   h2::request<h2::string_body> req{h2::verb::get, "/", 11};
-  size_t written = h2::async_write(sock_->socket(), req, fibers_ext::yield[ec]);
+  size_t written = h2::write(*sock_, req, ec);
+  EXPECT_GT(written, 0);
 
-  // this_fiber::sleep_for(1000ms);
-  beast::flat_buffer buffer;
-  h2::response<h2::dynamic_body> resp;
-  size_t sz = h2::read(*sock_, buffer, resp, ec);
-  EXPECT_FALSE(ec);
-  EXPECT_GT(sz, 0);
+  sock_->context().AwaitFiber([&] {
+    beast::flat_buffer buffer;
+    h2::response<h2::dynamic_body> resp;
+    size_t sz = h2::read(*sock_, buffer, resp, ec);
+    EXPECT_FALSE(ec);
+    EXPECT_GT(sz, 0);
+  });
 }
 
 TEST_F(SocketTest, StarvedRead) {
@@ -71,7 +73,8 @@ TEST_F(SocketTest, StarvedRead) {
 
   EXPECT_FALSE(ec) << ec << "/" << ec.message();
   h2::request<h2::string_body> req{h2::verb::get, "/null", 11};
-  size_t written = h2::async_write(sock_->socket(), req, fibers_ext::yield[ec]);
+  size_t written = h2::write(*sock_, req, ec);
+  EXPECT_GT(written, 0);
 
   fibers::fiber fb;
   sock_->context().Await([&] {

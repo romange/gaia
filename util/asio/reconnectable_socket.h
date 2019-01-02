@@ -153,7 +153,7 @@ class FiberClientSocket {
 
   // C'tor can be called from any thread.
   // Constructs the client socket which tries to connect to the destination.
-  FiberClientSocket(size_t rbuf_size, IoContext* cntx)
+  FiberClientSocket(IoContext* cntx, size_t rbuf_size = 1 << 14)
       : io_context_(*cntx), rbuf_size_(rbuf_size), sock_(cntx->get_context(), tcp::v4()) {}
 
   ~FiberClientSocket();
@@ -169,17 +169,27 @@ class FiberClientSocket {
   // Shuts down all background processes. Can be called from any thread.
   void Shutdown();
 
+  // Read/Write functions should be called from IoContext thread.
   // (fiber) SyncRead interface:
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
   template <typename MBS> size_t read_some(const MBS& bufs, system::error_code& ec);
 
   // To calm SyncReadStream compile-checker we provide exception-enabled interface without
-  // implementing. It's not intended for use.
+  // implementing it.
   template <typename MBS> size_t read_some(const MBS& bufs);
+
+  // SyncWrite interface:
+  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
+  template <typename BS> size_t write_some(const BS& bufs, system::error_code& ec);
+
+  // To calm SyncWriteStream compile-checker we provide exception-enabled interface without
+  // implementing it.
+  template <typename BS> size_t write_some(const BS& bufs);
 
   tcp::socket& socket() { return sock_; }
 
   IoContext& context() { return io_context_; }
+
  private:
   void Worker(const std::string& hname, const std::string& service);
   system::error_code Reconnect(const std::string& hname, const std::string& service);
@@ -205,8 +215,8 @@ class FiberClientSocket {
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };
 
-template <typename MBS> size_t FiberClientSocket::read_some(const MBS& bufs,
-                                                            system::error_code& ec) {
+template <typename MBS> size_t FiberClientSocket::read_some(
+      const MBS& bufs, system::error_code& ec) {
   if (rslice_.size()) {
     size_t copied = asio::buffer_copy(bufs, rslice_);
     rslice_ += copied;
@@ -217,10 +227,16 @@ template <typename MBS> size_t FiberClientSocket::read_some(const MBS& bufs,
 
     return copied;
   }
+
   state_ = READ_PENDING;
   size_t res = sock_.async_read_some(bufs, fibers_ext::yield[ec]);
   state_ = IDLE;
   return res;
+}
+
+template <typename BS> size_t FiberClientSocket::write_some(
+      const BS& bufs, system::error_code& ec) {
+   return sock_.async_write_some(bufs, fibers_ext::yield[ec]);
 }
 
 }  // namespace detail

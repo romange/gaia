@@ -181,11 +181,14 @@ system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
 
 // Shuts down all background processes. Can be called from any thread.
 void FiberClientSocket::Shutdown() {
+  VLOG(1) << "FiberClientSocket::Shutdown";
+
   io_context_.AwaitFiber([this] {
     if (!sock_.is_open())
       return;
 
     sock_.close();
+    VLOG(1) << "Sock Closed";
     cv_read_.notify_one();
     if (worker_.joinable())
       worker_.join();
@@ -205,6 +208,7 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       continue;
     }
     system::error_code ec;
+    VLOG(2) << "BeforeAsyncWait";
     sock_.async_wait(tcp::socket::wait_read, fibers_ext::yield[ec]);
     if (ec) {
       LOG(ERROR) << "AsyncWait: " << ec.message();
@@ -224,12 +228,14 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       }
       continue;
     }
+    VLOG(2) << "BeforeCvReadWait";
     std::unique_lock<::boost::fibers::mutex> lock(read_mu_);
     cv_read_.wait(lock, [this] { return !WorkerShouldBlock(); });
 
     LOG(INFO) << "WorkerIteration: ";
     // this_fiber::sleep_for(20ms);
   }
+  VLOG(1) << "WorkerExit";
 }
 
 system::error_code FiberClientSocket::Reconnect(const std::string& hname,
