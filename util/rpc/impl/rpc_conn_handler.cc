@@ -109,7 +109,7 @@ void RpcConnectionHandler::OnCloseSocket() {
   // write in another handler or it passed this object exited due to locked wr_mu_.
   // In any case, Flusher can not hold reference to this object.
   std::lock_guard<fibers::mutex> ul(wr_mu_);
-  io_context_.PostSynchronous([this] {
+  io_context_.Await([this] {
     flush_conn_list.erase(RpcConnList::s_iterator_to(*this));
   });
 

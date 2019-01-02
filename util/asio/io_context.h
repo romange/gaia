@@ -63,12 +63,12 @@ class IoContext {
   io_context& get_context() { return *context_ptr_; }
 
   // Runs `f` asynchronously in io-context fiber. `f` should not block or lock on mutexes.
-  template<typename Func> void Post(Func&& f) {
+  template<typename Func> void Async(Func&& f) {
     context_ptr_->post(std::forward<Func>(f));
   }
 
-  template<typename Func> void PostFiber(Func&& f) {
-    Post([f = std::forward<Func>(f)] {
+  template<typename Func> void AsyncFiber(Func&& f) {
+    Async([f = std::forward<Func>(f)] {
       ::boost::fibers::fiber(f).detach();
     });
   }
@@ -76,13 +76,13 @@ class IoContext {
   // Similarly to Post(), runs 'f' in Io Context thread, but waits for it to finish by blocking
   // the current fiber. If we call PostSynchronous from the context thread,
   // runs `f` directly. `f` should not block because since it runs directly in IO loop.
-  template<typename Func> void PostSynchronous(Func&& f) {
+  template<typename Func> void Await(Func&& f) {
     if (InContextThread()) {
       return f();
     }
 
     fibers_ext::Done done;
-    Post([f = std::forward<Func>(f), &done] () mutable {
+    Async([f = std::forward<Func>(f), &done] () mutable {
       f();
       done.Notify();
     });
@@ -90,7 +90,7 @@ class IoContext {
     done.Wait();
   }
 
-  template<typename Func> void PostFiberSync(Func&& f) {
+  template<typename Func> void AwaitFiber(Func&& f) {
     if (InContextThread()) {
       return f();
     }
@@ -100,7 +100,7 @@ class IoContext {
       f();
       done.Notify();
     };
-    PostFiber(std::move(cb));
+    AsyncFiber(std::move(cb));
     done.Wait();
   }
 
@@ -114,7 +114,7 @@ class IoContext {
   // During the shutdown process signals the object to cancel by running Cancellable::Cancel()
   // method.
   void AttachCancellable(Cancellable* obj) {
-    PostSynchronous([obj, this] () mutable {
+    Await([obj, this] () mutable {
       CancellablePair pair(std::unique_ptr<Cancellable>(obj), [obj] { obj->Run(); });
       cancellable_arr_.emplace_back(std::move(pair));
     });

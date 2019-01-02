@@ -56,7 +56,7 @@ auto Channel::Connect(uint32_t ms) -> error_code {
   error_code ec = channel_.Connect(ms);
 
   IoContext& context = channel_.context();
-  context.PostSynchronous([this] {
+  context.Await([this] {
     read_fiber_ = fibers::fiber(&Channel::ReadFiber, this);
     flush_fiber_ = fibers::fiber(&Channel::FlushFiber, this);
   });

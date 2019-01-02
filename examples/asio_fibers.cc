@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
   } else {
     // Dispatches asynchronously RunClient on each pool-thread in a dedicated fiber and
     // wait for them to finish.
-    pool.MapFiberSync([](util::IoContext& cntx) { RunClient(cntx, FLAGS_count); });
+    pool.AwaitMapFiber([](util::IoContext& cntx) { RunClient(cntx, FLAGS_count); });
 
     LOG(INFO) << "ClientLoadTest ended";
     cout << "Average latency(ms) is " << double(latency_usec.load()) / (latency_count + 1) / 1000

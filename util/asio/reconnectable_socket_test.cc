@@ -21,28 +21,78 @@ using namespace std;
 namespace h2 = beast::http;
 
 class SocketTest : public HttpBaseTest {
+
  protected:
+  void SetUp() final {
+    HttpBaseTest::SetUp();
+    sock_.reset(new detail::FiberClientSocket(1 << 16, &pool_->GetNextContext()));
+    sock_->Initiate("localhost", std::to_string(port_));
+  }
+
+  void TearDown() final {
+    sock_.reset();
+
+    HttpBaseTest::TearDown();
+  }
+
+  std::unique_ptr<detail::FiberClientSocket> sock_;
 };
 
 using namespace asio::ip;
+using namespace http;
 
-TEST_F(SocketTest, Client) {
-  detail::FiberClientSocket sock(1 << 16, &pool_->GetNextContext());
-
-  sock.Initiate("localhost", std::to_string(port_));
-
-  auto ec = sock.WaitToConnect(1000);
+TEST_F(SocketTest, Normal) {
+  auto ec = sock_->WaitToConnect(1000);
   EXPECT_FALSE(ec) << ec << "/" << ec.message();
+
   h2::request<h2::string_body> req{h2::verb::get, "/", 11};
-  size_t written = h2::async_write(sock.socket(), req, fibers_ext::yield[ec]);
+  size_t written = h2::async_write(sock_->socket(), req, fibers_ext::yield[ec]);
 
-  this_fiber::sleep_for(1000ms);
-  /*beast::flat_buffer buffer;
+  // this_fiber::sleep_for(1000ms);
+  beast::flat_buffer buffer;
   h2::response<h2::dynamic_body> resp;
-  LOG(INFO) << "Before async read";
-  size_t sz = h2::async_read(sock.socket(), buffer, resp, fibers_ext::yield[ec]);*/
-  LOG(INFO) << "After async read";
+  size_t sz = h2::read(*sock_, buffer, resp, ec);
+  EXPECT_FALSE(ec);
+  EXPECT_GT(sz, 0);
+}
 
+TEST_F(SocketTest, StarvedRead) {
+  fibers_ext::Done done;
+
+  listener_.RegisterCb("/null", false,  // does not send anything.
+                       [&](const http::QueryArgs& args, HttpHandler::SendFunction* send) {
+                         StringResponse resp = MakeStringResponse(h2::status::ok);
+                         done.Wait();
+                         LOG(INFO) << "NullCb run";
+                         return send->Invoke(std::move(resp));
+                       });
+
+  auto ec = sock_->WaitToConnect(1000);
+
+  EXPECT_FALSE(ec) << ec << "/" << ec.message();
+  h2::request<h2::string_body> req{h2::verb::get, "/null", 11};
+  size_t written = h2::async_write(sock_->socket(), req, fibers_ext::yield[ec]);
+
+  fibers::fiber fb;
+  sock_->context().Await([&] {
+    fb = fibers::fiber([&] {
+      beast::flat_buffer buffer;
+      h2::response<h2::dynamic_body> resp;
+      LOG(INFO) << "Before h2::read";
+      size_t sz = h2::read(*sock_, buffer, resp, ec);
+      LOG(INFO) << "After h2::read";
+
+      EXPECT_FALSE(ec);
+      EXPECT_GT(sz, 0);
+    });
+  });
+
+  this_fiber::sleep_for(10ms);
+  done.Notify();
+  LOG(INFO) << "After done.notify";
+
+  fb.join();
+  LOG(INFO) << "After fb.join";
 }
 
 }  // namespace util

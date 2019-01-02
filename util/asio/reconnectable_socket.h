@@ -179,6 +179,7 @@ class FiberClientSocket {
 
   tcp::socket& socket() { return sock_; }
 
+  IoContext& context() { return io_context_; }
  private:
   void Worker(const std::string& hname, const std::string& service);
   system::error_code Reconnect(const std::string& hname, const std::string& service);
@@ -196,7 +197,7 @@ class FiberClientSocket {
   asio::mutable_buffer rslice_;
   fibers::fiber worker_;
 
-  enum State { IDLE, READ_PENDING, READ_AVAILABLE} state_ = IDLE;
+  enum State { IDLE, READ_PENDING} state_ = IDLE;
 
   fibers::mutex mu_st_, read_mu_;
   fibers::condition_variable cv_st_, cv_read_;

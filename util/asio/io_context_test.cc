@@ -108,12 +108,12 @@ TEST_F(IoContextTest, FiberJoin) {
     ++i;
     EXPECT_TRUE(cntx.InContextThread());
   };
-  cntx.PostSynchronous(cb);
+  cntx.Await(cb);
   EXPECT_EQ(1, i);
 
   fibers::fiber fb;
   EXPECT_FALSE(fb.joinable());
-  cntx.PostSynchronous([cb, &fb] { fb = fibers::fiber(cb); });
+  cntx.Await([cb, &fb] { fb = fibers::fiber(cb); });
   EXPECT_TRUE(fb.joinable());
   fb.join();
   EXPECT_EQ(2, i);

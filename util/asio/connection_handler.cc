@@ -130,7 +130,7 @@ void ConnectionHandler::Close() {
     VLOG(1) << "After shutdown: " << ec << " " << ec.message();
   }
 
-  io_context_.PostFiberSync([this] { OnCloseSocket(); });
+  io_context_.AwaitFiber([this] { OnCloseSocket(); });
 
   // I do not launch this task on executors thread because then it would hold guard-pointer to
   // this. If a io_context stops without running this callback, then ConnectionHandler won't

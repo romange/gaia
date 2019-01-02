@@ -39,7 +39,7 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
   // single-threaded. It seems that Asio components (timer, for example) in rare cases have
   // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
   // it can ignore "cancel()" call in some cases.
-  io_context_.PostFiberSync([this, tp] { ResolveAndConnect(tp); });
+  io_context_.AwaitFiber([this, tp] { ResolveAndConnect(tp); });
 
   return status_;
 }
@@ -116,7 +116,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
 void ClientChannelImpl::Shutdown() {
   if (!shutting_down_) {
-    io_context_.PostFiberSync([this] {
+    io_context_.AwaitFiber([this] {
       system::error_code ec;
 
       shutting_down_ = true;
@@ -157,7 +157,7 @@ void ClientChannelImpl::HandleErrorStatus() {
 
   shutdown_latch_.Reset();
 
-  io_context_.PostFiber([this] { ReconnectFiber(); });
+  io_context_.AsyncFiber([this] { ReconnectFiber(); });
 }
 
 FiberClientSocket::~FiberClientSocket() { Shutdown(); }
@@ -165,7 +165,7 @@ FiberClientSocket::~FiberClientSocket() { Shutdown(); }
 void FiberClientSocket::Initiate(const std::string& hname, const std::string& port) {
   CHECK(!worker_.get_id());
 
-  io_context_.PostSynchronous([hname, port, this] {
+  io_context_.Await([hname, port, this] {
     rbuf_.reset(new uint8_t[rbuf_size_]);
     rslice_ = asio::buffer(rbuf_.get(), 0);
     worker_ = fibers::fiber(&FiberClientSocket::Worker, this, hname, port);
@@ -181,11 +181,12 @@ system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
 
 // Shuts down all background processes. Can be called from any thread.
 void FiberClientSocket::Shutdown() {
-  io_context_.PostFiberSync([this] {
+  io_context_.AwaitFiber([this] {
     if (!sock_.is_open())
       return;
 
     sock_.close();
+    cv_read_.notify_one();
     if (worker_.joinable())
       worker_.join();
   });

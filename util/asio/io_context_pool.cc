@@ -54,8 +54,8 @@ void IoContextPool::Run() {
     });
   }
 
-  // We can not use PostSynchronous here yet because StartLoop might not run and it
-  // assumes internally that the first posted handler is issued from StartLoop.
+  // We can not use Await() here yet because StartLoop might not run yet and its implementation
+  // assumes internally that the first posted handler is issued from the StartLoop.
   // Therefore we use BlockingCounter to wait for all the IO loops to start running.
   bc.Wait();
 

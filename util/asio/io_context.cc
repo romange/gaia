@@ -272,7 +272,7 @@ void IoContext::StartLoop(BlockingCounter* bc) {
   // The reason for this is that io_context::running_in_this_thread() is deduced based on the
   // call-stack. GAIA code should use InContextThread() to check whether the code runs in the
   // context's thread.
-  Post([scheduler, bc] {
+  Async([scheduler, bc] {
     bc->Dec();
     scheduler->MainLoop();
   });
@@ -281,7 +281,8 @@ void IoContext::StartLoop(BlockingCounter* bc) {
   // It will block until MainLoop exits.
   io_cntx.run_one();
 
-  VLOG(1) << "Cancelling " << cancellable_arr_.size() << " cancellables";
+  VLOG_IF(1, cancellable_arr_.size() > 0) << "Cancelling "
+        << cancellable_arr_.size() << " cancellables";
 
   // Shutdown sequence and cleanup.
   for (auto& ptr : cancellable_arr_) {
