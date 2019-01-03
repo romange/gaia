@@ -26,7 +26,7 @@ class RpcConnectionHandler : public ConnectionHandler {
  public:
   // bridge is owned by RpcConnectionHandler instance.
   // RpcConnectionHandler is created in acceptor thread and not in the socket thread.
-  explicit RpcConnectionHandler(IoContext& context, ConnectionBridge* bridge);
+  RpcConnectionHandler(ConnectionBridge* bridge, IoContext* context);
   ~RpcConnectionHandler();
 
   system::error_code HandleRequest() final override;

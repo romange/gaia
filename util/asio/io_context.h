@@ -80,7 +80,7 @@ class IoContext {
 
   void Stop() { context_ptr_->stop(); }
 
-  io_context& get_context() { return *context_ptr_; }
+  io_context& raw_context() { return *context_ptr_; }
 
   // Runs `f` asynchronously in io-context fiber. `f` should not block or lock on mutexes.
   template <typename Func> void Async(Func&& f) { context_ptr_->post(std::forward<Func>(f)); }

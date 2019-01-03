@@ -42,19 +42,21 @@ class ConnectionHandler {
                     detail::constant_time_size<true>, detail::cache_last<true>>;
   class Notifier;
 
-  explicit ConnectionHandler(IoContext& context) noexcept;
+  explicit ConnectionHandler(IoContext* context) noexcept;
 
   virtual ~ConnectionHandler();
 
   void Init(socket_t&& sock, Notifier* notifier);
 
-  // Can be trigerred from any thread. Schedules RunInIOThread to run in io_context loop.
-  void Run();
+  // Can be trigerred from any thread.
+  // Schedules ConnectionHandler::RunInIOThread to run in the socket thread.
+  void Run(IoContext* accept_context);
 
   void Close();
 
   socket_t& socket() { return *socket_;}
 
+  IoContext& context() { return io_context_;}
 
   friend void intrusive_ptr_add_ref(ConnectionHandler* ctx) noexcept {
     ctx->use_count_.fetch_add(1, std::memory_order_relaxed);

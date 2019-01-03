@@ -47,10 +47,10 @@ class ClientChannelImpl {
 
   ClientChannelImpl(IoContext& cntx, const std::string& hname, const std::string& s)
       : io_context_(cntx),
-        resolver_(cntx.get_context()),
+        resolver_(cntx.raw_context()),
         hostname_(hname),
         service_(s),
-        sock_(cntx.get_context(), tcp::v4()),
+        sock_(cntx.raw_context(), tcp::v4()),
         handle_(sock_.native_handle()),
         shutdown_latch_(true) {}
 
@@ -154,7 +154,7 @@ class FiberClientSocket {
   // C'tor can be called from any thread.
   // Constructs the client socket which tries to connect to the destination.
   FiberClientSocket(IoContext* cntx, size_t rbuf_size = 1 << 14)
-      : io_context_(*cntx), rbuf_size_(rbuf_size), sock_(cntx->get_context(), tcp::v4()) {}
+      : io_context_(*cntx), rbuf_size_(rbuf_size), sock_(cntx->raw_context(), tcp::v4()) {}
 
   ~FiberClientSocket();
 

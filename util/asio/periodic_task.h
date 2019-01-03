@@ -22,7 +22,7 @@ class PeriodicTask {
   using duration_t = timer_t::duration;
   using error_code = boost::system::error_code;
 
-  PeriodicTask(IoContext& cntx, duration_t d) : timer_(cntx.get_context()), d_(d), state_(0) {}
+  PeriodicTask(IoContext& cntx, duration_t d) : timer_(cntx.raw_context()), d_(d), state_(0) {}
   PeriodicTask(PeriodicTask&&) = default;
 
   ~PeriodicTask() { Cancel(); }

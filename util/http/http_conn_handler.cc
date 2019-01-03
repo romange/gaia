@@ -160,7 +160,7 @@ void FilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
 
 }  // namespace
 
-HttpHandler::HttpHandler(IoContext& cntx, const ListenerBase* lb)
+HttpHandler::HttpHandler(const ListenerBase* lb, IoContext* cntx)
     : ConnectionHandler(cntx), registry_(lb) {
   favicon_ = "https://rawcdn.githack.com/romange/gaia/master/util/http/favicon-32x32.png";
   resource_prefix_ = "https://rawcdn.githack.com/romange/gaia/05a9c02/util/http";

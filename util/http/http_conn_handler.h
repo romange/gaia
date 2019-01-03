@@ -94,8 +94,7 @@ class HttpHandler : public ConnectionHandler {
   using RequestType = ::boost::beast::http::request<::boost::beast::http::string_body>;
   using SendFunction = ListenerBase::SendFunction;
 
-
-  HttpHandler(IoContext& cntx, const ListenerBase* registry);
+  HttpHandler(const ListenerBase* registry, IoContext* cntx);
 
   boost::system::error_code HandleRequest() final override;
 
@@ -119,7 +118,7 @@ class Listener : public ListenerBase {
                 "Handler must be derived from HttpHandler");
 
   ConnectionHandler* NewConnection(IoContext& cntx) final {
-    return new Handler(cntx, this);
+    return new Handler(this, &cntx);
   }
 };
 

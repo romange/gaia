@@ -35,7 +35,7 @@ void IoContextPool::WrapLoop(size_t index, fibers_ext::BlockingCounter* bc) {
   context_indx_ = index;
 
   auto& context = context_arr_[index];
-  VLOG(1) << "Starting io thread " << index << " " << &context.get_context();
+  VLOG(1) << "Starting io thread " << index;
 
   context.StartLoop(bc);
 

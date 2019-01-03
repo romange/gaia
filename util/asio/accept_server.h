@@ -15,6 +15,7 @@
 namespace util {
 
 class IoContextPool;
+class IoContext;
 
 class AcceptServer {
  public:
@@ -58,14 +59,13 @@ class AcceptServer {
   IoContextPool* pool_;
 
   struct ListenerWrapper {
+    IoContext& io_context;
     ::boost::asio::ip::tcp::acceptor acceptor;
     ListenerInterface* listener;
     unsigned short port;
 
-    ListenerWrapper(io_context* cntx, const endpoint& ep,
-             ListenerInterface* si) : acceptor(*cntx, ep), listener(si) {
-      port = acceptor.local_endpoint().port();
-    }
+    ListenerWrapper(const endpoint& ep, IoContext* io_context,
+                    ListenerInterface* si);
   };
 
   ::boost::asio::signal_set signals_;

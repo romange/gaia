@@ -37,7 +37,8 @@ void ConnectionHandler::Notifier::Unlink(ConnectionHandler* item) noexcept {
     cnd_.notify_one();
 }
 
-ConnectionHandler::ConnectionHandler(IoContext& context) noexcept : io_context_(context) {
+ConnectionHandler::ConnectionHandler(IoContext* context) noexcept : io_context_(*context) {
+  CHECK_NOTNULL(context);
 }
 
 ConnectionHandler::~ConnectionHandler() {
@@ -63,7 +64,7 @@ void ConnectionHandler::Init(socket_t&& sock, Notifier* notifier) {
   is_open_ = true;
 }
 
-void ConnectionHandler::Run() {
+void ConnectionHandler::Run(IoContext* accept_context) {
   CHECK(notifier_);
 
   asio::post(socket_->get_executor(), [guard = ptr_t(this)] {
@@ -130,6 +131,7 @@ void ConnectionHandler::Close() {
       socket_->cancel(ec);
       socket_->shutdown(socket_t::shutdown_both, ec);
       VLOG(1) << "After shutdown: " << ec << " " << ec.message();
+      socket_->close();
     }
 
     OnCloseSocket();

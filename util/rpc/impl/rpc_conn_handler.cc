@@ -70,7 +70,7 @@ using fibers_ext::yield;
 
 constexpr size_t kRpcPoolSize = 32;
 
-RpcConnectionHandler::RpcConnectionHandler(IoContext& context, ConnectionBridge* bridge)
+RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge, IoContext* context)
     : ConnectionHandler(context),
       bridge_(bridge),
       buf_read_sock_(new BufferedReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size)),

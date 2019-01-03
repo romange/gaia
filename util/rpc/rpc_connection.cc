@@ -12,7 +12,7 @@ namespace rpc {
 
 ConnectionHandler* ServiceInterface::NewConnection(IoContext& context) {
   ConnectionBridge* bridge = CreateConnectionBridge();
-  return new RpcConnectionHandler(context, bridge);
+  return new RpcConnectionHandler(bridge, &context);
 }
 
 }  // namespace rpc

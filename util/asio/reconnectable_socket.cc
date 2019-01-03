@@ -245,7 +245,7 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
 
 system::error_code FiberClientSocket::Reconnect(const std::string& hname,
                                                 const std::string& service) {
-  auto& asio_io_cntx = io_context_.get_context();
+  auto& asio_io_cntx = io_context_.raw_context();
   tcp::resolver resolver(asio_io_cntx);
 
   system::error_code ec;

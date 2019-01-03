@@ -14,8 +14,14 @@ namespace util {
 using namespace boost;
 using asio::ip::tcp;
 
+AcceptServer::ListenerWrapper::ListenerWrapper(
+    const endpoint& ep, IoContext* io_context, ListenerInterface* si)
+     : io_context(*io_context), acceptor(io_context->raw_context(), ep), listener(si) {
+  port = acceptor.local_endpoint().port();
+}
+
 AcceptServer::AcceptServer(IoContextPool* pool)
-    : pool_(pool), signals_(pool->GetNextContext().get_context(), SIGINT, SIGTERM), bc_(1) {
+    : pool_(pool), signals_(pool->GetNextContext().raw_context(), SIGINT, SIGTERM), bc_(1) {
   signals_.async_wait([this](system::error_code /*ec*/, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
@@ -45,7 +51,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
   tcp::endpoint endpoint(tcp::v4(), port);
   IoContext& io_context = pool_->GetNextContext();
-  listeners_.emplace_back(&io_context.get_context(), endpoint, si);
+  listeners_.emplace_back(endpoint, &io_context, si);
   auto& listener = listeners_.back();
 
   LOG(INFO) << "AcceptServer - listening on port " << listener.port;
@@ -81,7 +87,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
         DCHECK(!clist.empty());
         DCHECK(handler->hook_.is_linked());
 
-        handler->Run();
+        handler->Run(&wrapper->io_context);
       }
     }
   } catch (std::exception const& ex) {
@@ -120,7 +126,7 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper,
   IoContext& io_cntx = pool_->GetNextContext();
 
   system::error_code ec;
-  tcp::socket sock(io_cntx.get_context());
+  tcp::socket sock(io_cntx.raw_context());
 
   wrapper->acceptor.async_accept(sock, fibers_ext::yield[ec]);
   if (!ec && !sock.is_open())
