@@ -41,57 +41,48 @@ class IoContextPool {
   /// Get an io_context to use. Thread-safe.
   IoContext& GetNextContext();
 
-  IoContext& operator[](size_t i) {
-    return context_arr_[i];
-  }
-  IoContext& at(size_t i) {
-    return context_arr_[i];
-  }
+  IoContext& operator[](size_t i) { return context_arr_[i]; }
+  IoContext& at(size_t i) { return context_arr_[i]; }
 
-  size_t size() const {
-    return context_arr_.size();
-  }
+  size_t size() const { return context_arr_.size(); }
 
   // Runs func in all IO threads asynchronously. The task must be CPU-only non IO-blocking code
   // because it runs directly in IO-fiber. MapTask runs asynchronously and will exit before
   // the task finishes. The 'func' must accept context as its argument.
-  template <typename Func> void AsyncMap(Func&& func) {
+  template <typename Func> void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
-      context.Async([&context, func = std::forward<Func>(func)]() mutable {
-        func(context);
-      });
+      context.Async([&context, func = std::forward<Func>(func)]() mutable { func(context); });
     }
   }
 
-  template <typename Func> void AwaitMap(Func&& func) {
+  template <typename Func> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
       func(context);
       bc.Dec();
     };
-    MapTask(std::move(cb));
+    AsyncOnAll(std::move(cb));
     bc.Wait();
   }
 
   // Runs `func` in a fiber asynchronously. func must accept IoContext&.
-  // It will run in a dedicated detached fiber.
-  template <typename Func> void AsyncMapFiber(Func&& func) {
-    AsyncMap([func = std::forward<Func>(func)] (IoContext& context) {
+  // The callback runs inside a wrapping fiber.
+  template <typename Func> void AsyncFiberOnAll(Func&& func) {
+    AsyncOnAll([func = std::forward<Func>(func)](IoContext& context) {
       ::boost::fibers::fiber(func, std::ref(context)).detach();
     });
   }
 
-  // Runs func in all IO threads in parallel, but waits for it to finish. The function runs
-  // inside a temporary fiber to allow the execution of IO loop.
-  template <typename Func>
-  void AwaitMapFiber(Func&& func) {
+  // Runs func in all IO threads in parallel, but waits for all the callbacks to finish.
+  // The callback runs inside a wrapping fiber.
+  template <typename Func> void AwaitFiberOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
       func(context);
       bc.Dec();
     };
-    AsyncMapFiber(std::move(cb));
+    AsyncFiberOnAll(std::move(cb));
     bc.Wait();
   }
 

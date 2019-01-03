@@ -73,8 +73,8 @@ class IoContext {
     });
   }
 
-  // Similarly to Post(), runs 'f' in Io Context thread, but waits for it to finish by blocking
-  // the current fiber. If we call PostSynchronous from the context thread,
+  // Similarly to Async(), runs 'f' in Io Context thread, but waits for it to finish by blocking
+  // the current fiber. If we call Await from the context thread,
   // runs `f` directly. `f` should not block because since it runs directly in IO loop.
   template<typename Func> void Await(Func&& f) {
     if (InContextThread()) {
@@ -90,7 +90,12 @@ class IoContext {
     done.Wait();
   }
 
-  template<typename Func> void AwaitFiber(Func&& f) {
+  // Runs possibly blocking function 'f' safely in ContextThread and waits for it to finish,
+  // If we are in the context thread already, runs 'f' directly, otherwise
+  // runs it wrapped in a fiber. Should be used instead of 'Await' when 'f' can block the calling
+  // fiber.
+  // 'f' should not block a thread, it is allowed to block its fiber.
+  template<typename Func> void AwaitSafe(Func&& f) {
     if (InContextThread()) {
       return f();
     }
@@ -102,6 +107,12 @@ class IoContext {
     };
     AsyncFiber(std::move(cb));
     done.Wait();
+  }
+
+  template<typename... Args> ::boost::fibers::fiber LaunchFiber(Args&&... args) {
+    ::boost::fibers::fiber fb;
+    Await([&] { fb = ::boost::fibers::fiber(std::forward<Args>(args)...);});
+    return fb;
   }
 
   auto get_executor() { return context_ptr_->get_executor(); }

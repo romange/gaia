@@ -118,50 +118,22 @@ void ConnectionHandler::Close() {
 
   is_open_ = false;
 
-  // socket::close() closes the underlying socket and cancels the pending operations.
-  // The problem is that those operations return with ec = ok() so the flow  is not aware
-  // that the socket is closed. That can lead to nasty bugs. Therefore the only place we close
-  // socket is from the listener loop. Here we only signal that we are ready to close.
-  if (socket_->is_open()) {
-    system::error_code ec;
-    VLOG(1) << "Before shutdown " << socket_->native_handle();
-    socket_->cancel(ec);
-    socket_->shutdown(socket_t::shutdown_both, ec);
-    VLOG(1) << "After shutdown: " << ec << " " << ec.message();
-  }
-
-  io_context_.AwaitFiber([this] { OnCloseSocket(); });
-
-  // I do not launch this task on executors thread because then it would hold guard-pointer to
-  // this. If a io_context stops without running this callback, then ConnectionHandler won't
-  // delete itself. This is a hack until we fix the shutdown behavior of io_context.
-  // OnCloseSocket();
-
-#if 0
-  VLOG(1) << "Is open " << is_open_.load();
-  // We close asynchronously via the thread that owns the socket to ensure thread-safety
-  // for that connection.
-  // We use intrusive ptr to increment the reference of this in order to allow
-  // safe callback execution even if RunInIOThread released the ownership.
-  asio::post(socket_->get_executor(), [me = ptr_t(this)] {
-    // The socket might already be closed if RunInIOThread has finished running.
-    if (me->socket_->is_open()) {
+  // Run Listener hook in the connection thread.
+  io_context_.AwaitSafe([this] {
+    // socket::close() closes the underlying socket and cancels the pending operations.
+    // The problem is that those operations return with ec = ok() so the flow  is not aware
+    // that the socket is closed. That can lead to nasty bugs. Therefore the only place we close
+    // socket is from the listener loop. Here we only signal that we are ready to close.
+    if (socket_->is_open()) {
       system::error_code ec;
-      VLOG(1) << "Before cancelling " << me->socket_->native_handle() << " " << me->is_open_.load();
-    //  me->socket_->shutdown(socket_t::shutdown_receive, ec);
-    //  LOG_IF(INFO, ec) << "Error closing socket " << me->socket_->native_handle()
-    //                   << ": " << ec.message();
-
-      // In case the socket is blocking a fiber lets break it.
-      me->socket_->cancel(ec);
-      LOG_IF(INFO, ec) << "Error canceling socket " << me->socket_->native_handle()
-                       << ": " << ec.message();
-
-
+      VLOG(1) << "Before shutdown " << socket_->native_handle();
+      socket_->cancel(ec);
+      socket_->shutdown(socket_t::shutdown_both, ec);
+      VLOG(1) << "After shutdown: " << ec << " " << ec.message();
     }
 
+    OnCloseSocket();
   });
-#endif
 }
 
 void ListenerInterface::RegisterPool(IoContextPool* pool) {

@@ -39,7 +39,7 @@ system::error_code ClientChannelImpl::Connect(uint32_t ms) {
   // single-threaded. It seems that Asio components (timer, for example) in rare cases have
   // data-races. For example, if I call timer.cancel() in one thread but wait on it in another
   // it can ignore "cancel()" call in some cases.
-  io_context_.AwaitFiber([this, tp] { ResolveAndConnect(tp); });
+  io_context_.AwaitSafe([this, tp] { ResolveAndConnect(tp); });
 
   return status_;
 }
@@ -116,7 +116,7 @@ void ClientChannelImpl::ResolveAndConnect(const time_point& until) {
 
 void ClientChannelImpl::Shutdown() {
   if (!shutting_down_) {
-    io_context_.AwaitFiber([this] {
+    io_context_.AwaitSafe([this] {
       system::error_code ec;
 
       shutting_down_ = true;
@@ -186,7 +186,7 @@ system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
 void FiberClientSocket::Shutdown() {
   VLOG(1) << "FiberClientSocket::Shutdown";
 
-  io_context_.AwaitFiber([this] {
+  io_context_.AwaitSafe([this] {
     if (!sock_.is_open())
       return;
 

@@ -49,7 +49,7 @@ TEST_F(SocketTest, Normal) {
   size_t written = h2::write(*sock_, req, ec);
   EXPECT_GT(written, 0);
 
-  sock_->context().AwaitFiber([&] {
+  sock_->context().AwaitSafe([&] {
     beast::flat_buffer buffer;
     h2::response<h2::dynamic_body> resp;
     size_t sz = h2::read(*sock_, buffer, resp, ec);
