@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <thread>
 #include <boost/asio/io_context.hpp>
+#include <thread>
 
 #include "util/fibers_ext.h"
 
@@ -38,21 +38,22 @@ class IoFiberProperties : public boost::fibers::fiber_properties {
 
 namespace detail {
 
-template<typename R> class ResultMover {
+template <typename R> class ResultMover {
   R r_;  // todo: to set as optional to support objects without default c'tor.
  public:
-  template<typename Func> void Apply(Func&& f) {
-    r_ = f();
-  }
+  template <typename Func> void Apply(Func&& f) { r_ = f(); }
 
-  R get() { return std::move(r_); }
+  // Returning rvalue-reference means returning the same object r_ instead of creating a
+  // temporary R{r_}. Please note that when we return function-local object, we do not need to
+  // return rvalue because RVO eliminates redundant object creation.
+  // But for returning data member r_ it's more efficient.
+  // "get() &&" means you can call this function only on rvalue ResultMover&& object.
+  R&& get() && { return std::forward<R>(r_); }
 };
 
 template<> class ResultMover<void> {
-public:
-  template<typename Func> void Apply(Func&& f) {
-    f();
-  }
+ public:
+  template <typename Func> void Apply(Func&& f) { f(); }
   void get() {}
 };
 
@@ -89,8 +90,8 @@ class IoContext {
   }
 
   // Similarly to Async(), runs 'f' in Io Context thread, but waits for it to finish by blocking
-  // the current fiber. If we call Await from the context thread,
-  // runs `f` directly. `f` should not block because since it runs directly in IO loop.
+  // the calling fiber. If we call Await from the context thread,
+  // runs `f` directly. `f` should not block because it runs directly from IO loop.
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
     if (InContextThread()) {
       return f();
@@ -106,12 +107,12 @@ class IoContext {
     });
 
     done.Wait();
-    return mover.get();
+    return std::move(mover).get();
   }
 
-  template <typename... Args>::boost::fibers::fiber LaunchFiber(Args&&... args) {
+  template <typename... Args> boost::fibers::fiber LaunchFiber(Args&&... args) {
     ::boost::fibers::fiber fb;
-    Await([&] { fb = ::boost::fibers::fiber(std::forward<Args>(args)...); });
+    Await([&] { fb = boost::fibers::fiber(std::forward<Args>(args)...); });
     return fb;
   }
 
@@ -127,11 +128,10 @@ class IoContext {
 
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
-    auto fb = LaunchFiber([&] {
-      mover.Apply(std::forward<Func>(f));
-    });
+    auto fb = LaunchFiber([&] { mover.Apply(std::forward<Func>(f)); });
     fb.join();
-    return mover.get();
+
+    return std::move(mover).get();
   }
 
   auto get_executor() { return context_ptr_->get_executor(); }
