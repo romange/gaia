@@ -4,9 +4,6 @@
 #include "util/sentry/sentry.h"
 
 #include <boost/beast/http/write.hpp>  // For serializing req/resp to ostream
-#include <boost/uuid/random_generator.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>  // for to_string
 #include <cstring>
 
 #include "strings/strcat.h"
@@ -44,7 +41,6 @@ class SentrySink : public GlogAsioSink {
   http::Client client_;
   Dsn dsn_;
   string port_;
-  uuids::random_generator uuid_gen_;
 };
 
 /* The structure is as follows:
