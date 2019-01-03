@@ -102,12 +102,13 @@ TEST_F(SocketTest, Reconnect) {
   ec = sock_->status();
   EXPECT_TRUE(ec);
 
-  sock_->context().AwaitSafe([&] {
+  size_t read_sz = sock_->context().AwaitSafe([&] {
     char buf[4];
     size_t res = sock_->read_some(asio::buffer(buf), ec);
     EXPECT_TRUE(ec);
-    EXPECT_EQ(0, res);
+    return res;
   });
+  EXPECT_EQ(0, read_sz);
 
   // Restart server and setup connection.
   server_.reset(new AcceptServer(pool_.get()));

@@ -113,10 +113,22 @@ TEST_F(IoContextTest, FiberJoin) {
 
   fibers::fiber fb;
   EXPECT_FALSE(fb.joinable());
-  cntx.Await([cb, &fb] { fb = fibers::fiber(cb); });
+  fb = cntx.LaunchFiber(cb);
   EXPECT_TRUE(fb.joinable());
   fb.join();
   EXPECT_EQ(2, i);
+}
+
+TEST_F(IoContextTest, Results) {
+  IoContextPool pool(1);
+  pool.Run();
+  IoContext& cntx = pool.GetNextContext();
+
+  int i = cntx.Await([] { return 5;});
+  EXPECT_EQ(5, i);
+
+  i = cntx.AwaitSafe([&] { return i + 5;});
+  EXPECT_EQ(10, i);
 }
 
 TEST_F(IoContextTest, RunAndStop) {
