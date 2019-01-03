@@ -23,7 +23,8 @@ namespace {
 
 using RpcConnList =
       detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
-                    detail::constant_time_size<true>, detail::cache_last<true>>;
+                    detail::constant_time_size<false>, detail::cache_last<false>>;
+
 thread_local RpcConnList flush_conn_list;
 
 class Flusher : public IoContext::Cancellable {
@@ -79,24 +80,21 @@ RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge, IoContext* 
 
 RpcConnectionHandler::~RpcConnectionHandler() {
   VLOG_IF(1, buf_read_sock_) << "Saved " << buf_read_sock_->saved() << " bytes";
-  /*if (flush_fiber_.joinable()) {
-    flush_fiber_.join();
-  }*/
+
   bridge_->Join();
 
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 }
 
 void RpcConnectionHandler::OnOpenSocket() {
-  VLOG(1) << "OnOpenSocket: Before starting the fiber, " << socket_->native_handle();
+  VLOG(1) << "OnOpenSocket: " << socket_->native_handle();
 
   if (!flusher) {
     flusher = new Flusher;
     io_context_.AttachCancellable(flusher);
   }
-  flush_conn_list.push_back(*this);
+  flush_conn_list.push_front(*this);
 
-  // flush_fiber_ = fibers::fiber(&RpcConnectionHandler::FlushFiber, this);
   bridge_->InitInThread();
 }
 

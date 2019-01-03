@@ -98,7 +98,7 @@ TEST_F(SocketTest, Reconnect) {
   EXPECT_FALSE(ec) << ec << "/" << ec.message();
 
   server_.reset();
-  this_fiber::sleep_for(0ms);
+  this_fiber::sleep_for(5ms);
   ec = sock_->status();
   EXPECT_TRUE(ec);
 

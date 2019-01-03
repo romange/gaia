@@ -77,9 +77,6 @@ class RpcConnectionHandler : public ConnectionHandler {
   fibers::mutex wr_mu_;
   std::vector<asio::const_buffer> write_seq_;
   base::PODArray<std::array<uint8_t, rpc::Frame::kMaxByteSize>> frame_buf_;
-
-
-  fibers::fiber flush_fiber_;
 };
 
 }  // namespace rpc

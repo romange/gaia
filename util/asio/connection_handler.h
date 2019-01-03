@@ -4,14 +4,17 @@
 #pragma once
 
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/fiber/condition_variable.hpp>
 #include <boost/intrusive/list.hpp>
+#include <boost/intrusive/slist_hook.hpp>
+#include <boost/smart_ptr/intrusive_ptr.hpp>
+
 #include <experimental/optional>
 
 namespace util {
 
 class IoContextPool;
 class IoContext;
+class AcceptServer;
 
 namespace detail {
 using namespace ::boost::intrusive;
@@ -19,13 +22,13 @@ using namespace ::boost::intrusive;
 // auto_unlink allows unlinking from the container during the destruction of
 // of hook without holding the reference to the container itself.
 // Requires that the container won't have O(1) size function.
-typedef slist_member_hook<link_mode<safe_link>> connection_hook;
+typedef slist_member_hook<link_mode<auto_unlink>> connection_hook;
 
 }  // namespace detail
 
-
 // An instance of this class handles a single connection in fiber.
 class ConnectionHandler {
+  friend class AcceptServer;
  public:
   using ptr_t = ::boost::intrusive_ptr<ConnectionHandler>;
   using io_context = ::boost::asio::io_context;
@@ -34,66 +37,35 @@ class ConnectionHandler {
 
   connection_hook_t hook_;
 
-  using member_hook_t = detail::member_hook<ConnectionHandler, detail::connection_hook,
-                                            &ConnectionHandler::hook_> ;
+  using member_hook_t =
+      detail::member_hook<ConnectionHandler, detail::connection_hook, &ConnectionHandler::hook_>;
 
-  using ListType =
-      detail::slist<ConnectionHandler, ConnectionHandler::member_hook_t,
-                    detail::constant_time_size<true>, detail::cache_last<true>>;
-  class Notifier;
+  // auto_unlink requires cache_last,constant_time_size = false.
+  using ListType = detail::slist<ConnectionHandler, ConnectionHandler::member_hook_t,
+                                 detail::constant_time_size<false>, detail::cache_last<false>>;
 
   explicit ConnectionHandler(IoContext* context) noexcept;
 
   virtual ~ConnectionHandler();
 
-  void Init(socket_t&& sock, Notifier* notifier);
-
-  // Can be trigerred from any thread.
-  // Schedules ConnectionHandler::RunInIOThread to run in the socket thread.
-  void Run(IoContext* accept_context);
+  void Init(socket_t&& sock);
 
   void Close();
 
-  socket_t& socket() { return *socket_;}
+  socket_t& socket() { return *socket_; }
 
-  IoContext& context() { return io_context_;}
+  IoContext& context() { return io_context_; }
 
   friend void intrusive_ptr_add_ref(ConnectionHandler* ctx) noexcept {
     ctx->use_count_.fetch_add(1, std::memory_order_relaxed);
   }
 
   friend void intrusive_ptr_release(ConnectionHandler* ctx) noexcept {
-    if (1 == ctx->use_count_.fetch_sub(1, std::memory_order_release) ) {
-      std::atomic_thread_fence( std::memory_order_acquire);
+    if (1 == ctx->use_count_.fetch_sub(1, std::memory_order_release)) {
+      std::atomic_thread_fence(std::memory_order_acquire);
       delete ctx;
     }
   }
-
-  // Fiber-safe wrapper around the list.
-  // Allows locking on the list or wait till it becomes empty.
-  class Notifier {
-    boost::fibers::condition_variable cnd_;
-    boost::fibers::mutex mu_;
-    ListType* list_;
-
-   public:
-    explicit Notifier(ListType* list) : list_(list) {}
-
-    void Unlink(ConnectionHandler* me) noexcept;
-
-    void Add(ConnectionHandler& item) {
-      auto guard = Lock();
-      list_->push_back(item);
-    }
-
-    void WaitTillEmpty(std::unique_lock<boost::fibers::mutex>& lock) noexcept {
-      cnd_.wait(lock, [this] { return list_->empty(); });
-    }
-
-    std::unique_lock<boost::fibers::mutex> Lock() noexcept {
-      return std::unique_lock<boost::fibers::mutex>(mu_);
-    }
-  };
 
  protected:
   // called once after connection was initialized. Will run in io context thread of this handler.
@@ -115,8 +87,7 @@ class ConnectionHandler {
  private:
   void RunInIOThread();
 
-  Notifier* notifier_ = nullptr;
-  std::atomic<std::uint32_t>  use_count_{0};
+  std::atomic<std::uint32_t> use_count_{0};
 };
 
 // Abstracts away connections implementation and their life-cycle.
@@ -136,7 +107,7 @@ class ListenerInterface {
   virtual void PostShutdown() {}
 
  protected:
-  IoContextPool* pool() { return pool_;}
+  IoContextPool* pool() { return pool_; }
 
  private:
   IoContextPool* pool_ = nullptr;

@@ -45,6 +45,7 @@ TEST_F(ServerTest, SendOk) {
   envelope.letter.resize_fill(42, 2);
   Channel::future_code_t fc = client.Send(20, &envelope);
   EXPECT_FALSE(fc.get());
+  LOG(INFO) << "SendOk finish";
 }
 
 TEST_F(ServerTest, ServerStopped) {

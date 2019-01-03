@@ -14,9 +14,9 @@ namespace util {
 using namespace boost;
 using asio::ip::tcp;
 
-AcceptServer::ListenerWrapper::ListenerWrapper(
-    const endpoint& ep, IoContext* io_context, ListenerInterface* si)
-     : io_context(*io_context), acceptor(io_context->raw_context(), ep), listener(si) {
+AcceptServer::ListenerWrapper::ListenerWrapper(const endpoint& ep, IoContext* io_context,
+                                               ListenerInterface* si)
+    : io_context(*io_context), acceptor(io_context->raw_context(), ep), listener(si) {
   port = acceptor.local_endpoint().port();
 }
 
@@ -60,18 +60,29 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 }
 
 void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
-  util::ConnectionHandler::ListType clist;
+  CHECK(wrapper->io_context.InContextThread());
+
+  ConnectionHandler::ListType clist;
 
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
-  // wrap it to allow thread-safe and consistent access to the list.
-  ConnectionHandler::Notifier notifier(&clist);
-
+  fibers::condition_variable clist_empty_cnd;
   system::error_code ec;
   util::ConnectionHandler* handler = nullptr;
+
+  // We release intrusive pointer in our thread by delegating the code
+  auto clean_cb = [&](ConnectionHandler::ptr_t p) {
+    wrapper->io_context.Async([&, p = std::move(p)]() mutable {
+      p.reset();
+      if (clist.empty()) {
+        clist_empty_cnd.notify_one();
+      }
+    });
+  };
+
   try {
     for (;;) {
-      std::tie(handler, ec) = AcceptConnection(wrapper, &notifier);
+      std::tie(handler, ec) = AcceptConnection(wrapper);
       if (ec) {
         CHECK(!handler);
         if (ec == asio::error::try_again)
@@ -82,12 +93,16 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
                 << handler->socket().native_handle();
 
         CHECK_NOTNULL(handler);
-        notifier.Add(*handler);
+        clist.push_front(*handler);
 
         DCHECK(!clist.empty());
         DCHECK(handler->hook_.is_linked());
 
-        handler->Run(&wrapper->io_context);
+        handler->context().AsyncFiber(
+            [guard = ConnectionHandler::ptr_t(handler), clean_cb]() mutable {
+              guard->RunInIOThread();
+              clean_cb(std::move(guard));
+            });
       }
     }
   } catch (std::exception const& ex) {
@@ -96,33 +111,34 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
 
   wrapper->listener->PreShutdown();
 
-  int port = wrapper->port;
-
-  // We protect clist because we iterate over it and other threads could potentialy change it.
-  // connections are dispersed across few threads so clist requires true thread synchronization.
-  auto lock = notifier.Lock();
-
   if (!clist.empty()) {
-    VLOG(1) << "Closing " << clist.size() << " connections on port " << port;
-
-    for (auto it = clist.begin(); it != clist.end(); ++it) {
+    VLOG(1) << "Starting closing connections";
+    auto it = clist.begin();
+    unsigned cnt = 0;
+    while (it != clist.end()) {
+      // guarding the current item, preserving it for getting the next item
+      ConnectionHandler::ptr_t guard(&*it);
       it->Close();
+      ++it;
+      ++cnt;
     }
 
-    VLOG(1) << "Waiting for connections to close";
-    notifier.WaitTillEmpty(lock);
+    VLOG(1) << "Closed " << cnt << " connections";
+    fibers::mutex mu;
+    std::unique_lock<fibers::mutex> lk(mu);
+    clist_empty_cnd.wait(lk, [&] { return clist.empty(); });
   }
 
   wrapper->listener->PostShutdown();
 
-  // Notify that AcceptThread has stopped.
-  bc_.Dec();
+  LOG(INFO) << "Accept server stopped for port " << wrapper->port;
 
-  LOG(INFO) << "Accept server stopped for port " << port;
+  // Notify that AcceptThread is about to exit.
+  bc_.Dec();
+  // Here accessing wrapper might be unsafe.
 }
 
-auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper,
-                                    ConnectionHandler::Notifier* notifier) -> AcceptResult {
+auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper) -> AcceptResult {
   IoContext& io_cntx = pool_->GetNextContext();
 
   system::error_code ec;
@@ -136,7 +152,7 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper,
   DCHECK(sock.is_open()) << sock.native_handle();
 
   ConnectionHandler* conn = wrapper->listener->NewConnection(io_cntx);
-  conn->Init(std::move(sock), notifier);
+  conn->Init(std::move(sock));
 
   return AcceptResult(conn, ec);
 }
@@ -161,6 +177,7 @@ void AcceptServer::Run() {
 void AcceptServer::Wait() {
   if (was_run_) {
     bc_.Wait();
+    VLOG(1) << "AcceptServer::Wait completed";
   } else {
     CHECK(listeners_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
   }

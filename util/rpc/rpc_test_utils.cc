@@ -71,6 +71,7 @@ void ServerTest::SetUp() {
 void ServerTest::TearDown() {
   server_.reset();
   socket_.reset();
+  VLOG(1) << "ServerTest::TearDown";
   pool_->Stop();
   VLOG(1) << "ServerTest::TearDown";
 }

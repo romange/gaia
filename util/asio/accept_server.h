@@ -54,7 +54,7 @@ class AcceptServer {
   typedef std::tuple<ConnectionHandler*, ::boost::system::error_code>
     AcceptResult;
 
-  AcceptResult AcceptConnection(ListenerWrapper* listener, ConnectionHandler::Notifier* done);
+  AcceptResult AcceptConnection(ListenerWrapper* listener);
 
   IoContextPool* pool_;
 
