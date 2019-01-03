@@ -35,6 +35,13 @@ class SocketTest : public HttpBaseTest {
     HttpBaseTest::TearDown();
   }
 
+  size_t ReadResp(system::error_code& ec) {
+    beast::flat_buffer buffer;
+    h2::response<h2::dynamic_body> resp;
+
+    return h2::read(*sock_, buffer, resp, ec);
+  }
+
   std::unique_ptr<detail::FiberClientSocket> sock_;
 };
 
@@ -50,9 +57,7 @@ TEST_F(SocketTest, Normal) {
   EXPECT_GT(written, 0);
 
   sock_->context().AwaitSafe([&] {
-    beast::flat_buffer buffer;
-    h2::response<h2::dynamic_body> resp;
-    size_t sz = h2::read(*sock_, buffer, resp, ec);
+    size_t sz = ReadResp(ec);
     EXPECT_FALSE(ec);
     EXPECT_GT(sz, 0);
   });
@@ -76,26 +81,51 @@ TEST_F(SocketTest, StarvedRead) {
   size_t written = h2::write(*sock_, req, ec);
   EXPECT_GT(written, 0);
 
-  fibers::fiber fb;
-  sock_->context().Await([&] {
-    fb = fibers::fiber([&] {
-      beast::flat_buffer buffer;
-      h2::response<h2::dynamic_body> resp;
-      LOG(INFO) << "Before h2::read";
-      size_t sz = h2::read(*sock_, buffer, resp, ec);
-      LOG(INFO) << "After h2::read";
-
+  fibers::fiber fb = sock_->context().LaunchFiber([&] {
+      size_t sz = ReadResp(ec);
       EXPECT_FALSE(ec);
       EXPECT_GT(sz, 0);
-    });
   });
 
   this_fiber::sleep_for(10ms);
   done.Notify();
-  LOG(INFO) << "After done.notify";
-
   fb.join();
   LOG(INFO) << "After fb.join";
+}
+
+TEST_F(SocketTest, Reconnect) {
+  auto ec = sock_->WaitToConnect(1000);
+  EXPECT_FALSE(ec) << ec << "/" << ec.message();
+
+  server_.reset();
+  this_fiber::sleep_for(0ms);
+  ec = sock_->status();
+  EXPECT_TRUE(ec);
+
+  sock_->context().AwaitSafe([&] {
+    char buf[4];
+    size_t res = sock_->read_some(asio::buffer(buf), ec);
+    EXPECT_TRUE(ec);
+    EXPECT_EQ(0, res);
+  });
+
+  // Restart server and setup connection.
+  server_.reset(new AcceptServer(pool_.get()));
+  server_->AddListener(port_, &listener_);
+  server_->Run();
+
+  ec = sock_->WaitToConnect(100);
+  EXPECT_FALSE(ec) << ec << "/" << ec.message();
+
+  h2::request<h2::string_body> req{h2::verb::get, "/", 11};
+  size_t written = h2::write(*sock_, req, ec);
+  EXPECT_GT(written, 0);
+
+  sock_->context().AwaitSafe([&] {
+    size_t sz = ReadResp(ec);
+    EXPECT_FALSE(ec);
+    EXPECT_GT(sz, 0);
+  });
 }
 
 }  // namespace util

@@ -156,7 +156,7 @@ void AcceptServer::Wait() {
   if (was_run_) {
     bc_.Wait();
   } else {
-    CHECK(listeners_.empty()) << "Must Call Run() if added listeners";
+    CHECK(listeners_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
   }
 }
 

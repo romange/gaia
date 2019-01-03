@@ -186,9 +186,11 @@ class FiberClientSocket {
   // implementing it.
   template <typename BS> size_t write_some(const BS& bufs);
 
-  tcp::socket& socket() { return sock_; }
+  // tcp::socket& socket() { return sock_; }
 
   IoContext& context() { return io_context_; }
+
+  const system::error_code& status() const { return status_; }
 
  private:
   void Worker(const std::string& hname, const std::string& service);

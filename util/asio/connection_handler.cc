@@ -137,7 +137,9 @@ void ConnectionHandler::Close() {
 }
 
 void ListenerInterface::RegisterPool(IoContextPool* pool) {
-  CHECK(pool_ == nullptr);
+  // In tests we might relaunch AcceptServer with the same listener, so we allow
+  // reassigning the same pool.
+  CHECK(pool_ == nullptr || pool_ == pool);
   pool_ = pool;
 }
 

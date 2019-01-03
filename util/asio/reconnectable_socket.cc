@@ -225,7 +225,7 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
       // Since it's direct - we do not context-switch.
       size_t read_cnt = sock_.receive(asio::mutable_buffer(next, read_capacity), 0, status_);
       if (status_) {
-        LOG(ERROR) << "SockReceive: " << status_.message();
+        VLOG(1) << "SockReceive: " << status_.message();
       } else {
         rslice_ = asio::mutable_buffer(rslice_.data(), rslice_.size() + read_cnt);
       }
