@@ -212,6 +212,7 @@ class FiberClientSocket {
   enum State { IDLE, READ_CALL_ACTIVE} state_ = IDLE;
 
   fibers::condition_variable cv_st_, cv_read_;
+  fibers::mutex connect_mu_;
 
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };

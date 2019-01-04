@@ -174,9 +174,7 @@ void FiberClientSocket::Initiate(const std::string& hname, const std::string& po
 
 // Waits for socket to become connected. Can be called from any thread.
 system::error_code FiberClientSocket::WaitToConnect(uint32_t ms) {
-  fibers::mutex mu;  // really weird usage. Since I expect
-
-  std::unique_lock<fibers::mutex> lock(mu);
+  std::unique_lock<fibers::mutex> lock(connect_mu_);
   cv_st_.wait_for(lock, milliseconds(ms), [this] { return !status_; });
 
   return status_;
@@ -264,10 +262,17 @@ system::error_code FiberClientSocket::Reconnect(const std::string& hname,
       sock_.cancel();
     }
   });
-  asio::async_connect(sock_, results, fibers_ext::yield[status_]);
-  if (!status_) {
-    cv_st_.notify_all();
+
+  asio::async_connect(sock_, results, fibers_ext::yield[ec]);
+  if (!ec) {
+    // Use mutex to so that WaitToConnect would be thread-safe.
+    std::lock_guard<fibers::mutex> lock(connect_mu_);
+    status_ = ec;
+    // notify_one awakes only those threads that already suspend on cnd.wait(). Therefore
+    // we must change status_ under mutex.
+    cv_st_.notify_one();
   }
+  status_ = ec;
 
   return status_;
 }

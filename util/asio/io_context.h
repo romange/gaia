@@ -51,7 +51,7 @@ template <typename R> class ResultMover {
   R&& get() && { return std::forward<R>(r_); }
 };
 
-template<> class ResultMover<void> {
+template <> class ResultMover<void> {
  public:
   template <typename Func> void Apply(Func&& f) { f(); }
   void get() {}
@@ -82,11 +82,17 @@ class IoContext {
 
   io_context& raw_context() { return *context_ptr_; }
 
-  // Runs `f` asynchronously in io-context fiber. `f` should not block or lock on mutexes.
+  // Runs `f` asynchronously in io-context fiber. `f` should not block, lock on mutexes or Await.
+  // Spinlocks are ok but might cause performance degradation.
   template <typename Func> void Async(Func&& f) { context_ptr_->post(std::forward<Func>(f)); }
 
-  template <typename Func> void AsyncFiber(Func&& f) {
-    Async([f = std::forward<Func>(f)] { ::boost::fibers::fiber(f).detach(); });
+  template <typename Func, typename... Args> void AsyncFiber(Func&& f, Args&&... args) {
+    // Ideally we want to forward args into lambda but it's too complicated before C++20.
+    // So I just copy them into capture.
+    // We forward captured variables so we need lambda to be mutable.
+    Async([f = std::forward<Func>(f), args...] () mutable {
+      ::boost::fibers::fiber(std::forward<Func>(f), std::forward<Args>(args)...).detach();
+    });
   }
 
   // Similarly to Async(), runs 'f' in Io Context thread, but waits for it to finish by blocking
@@ -110,17 +116,20 @@ class IoContext {
     return std::move(mover).get();
   }
 
+  // Please note that this function uses Await, therefore can not be used inside Ring0
+  // (i.e. Async callbacks).
   template <typename... Args> boost::fibers::fiber LaunchFiber(Args&&... args) {
     ::boost::fibers::fiber fb;
+    // It's safe to use & capture since we await before returning.
     Await([&] { fb = boost::fibers::fiber(std::forward<Args>(args)...); });
     return fb;
   }
 
-  // Runs possibly blocking function 'f' safely in ContextThread and waits for it to finish,
+  // Runs possibly awating function 'f' safely in ContextThread and waits for it to finish,
   // If we are in the context thread already, runs 'f' directly, otherwise
-  // runs it wrapped in a fiber. Should be used instead of 'Await' when 'f' can block the calling
-  // fiber.
-  // 'f' should not block a thread, it is allowed to block its fiber.
+  // runs it wrapped in a fiber. Should be used instead of 'Await' when 'f' itself
+  // awaits on something.
+  // To summarize: 'f' should not block its thread, but allowed to block its fiber.
   template <typename Func> auto AwaitSafe(Func&& f) -> decltype(f()) {
     if (InContextThread()) {
       return f();
@@ -144,10 +153,9 @@ class IoContext {
   // During the shutdown process signals the object to cancel by running Cancellable::Cancel()
   // method.
   void AttachCancellable(Cancellable* obj) {
-    Await([obj, this]() mutable {
-      CancellablePair pair(std::unique_ptr<Cancellable>(obj), [obj] { obj->Run(); });
-      cancellable_arr_.emplace_back(std::move(pair));
-    });
+    auto fb = LaunchFiber([obj] { obj->Run(); });
+    cancellable_arr_.emplace_back(CancellablePair{std::unique_ptr<Cancellable>(obj),
+                                  std::move(fb)});
   }
 
  private:

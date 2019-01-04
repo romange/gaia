@@ -44,6 +44,9 @@ class Done {
   }
 
   void Notify() {
+    // notify_one/all guarantee to unwake already waiting thread.
+    // Therefore, to provide a consistent behavior on the wait side we should
+    // update ready_ under mutex_.
     mutex_.lock();
     ready_ = true;
     mutex_.unlock();

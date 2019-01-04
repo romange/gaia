@@ -70,9 +70,11 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
   system::error_code ec;
   util::ConnectionHandler* handler = nullptr;
 
-  // We release intrusive pointer in our thread by delegating the code
-  auto clean_cb = [&](ConnectionHandler::ptr_t p) {
-    wrapper->io_context.Async([&, p = std::move(p)]() mutable {
+  // We release intrusive pointer in our thread by delegating the code to accpt_cntxt.
+  // Please note that since we update clist in the same thread, we do not need mutex
+  // to protect the state.
+  auto clean_cb = [&, &accpt_cntxt = wrapper->io_context](ConnectionHandler::ptr_t p) {
+    accpt_cntxt.Async([&, p = std::move(p)]() mutable {
       p.reset();
       if (clist.empty()) {
         clist_empty_cnd.notify_one();
@@ -99,10 +101,10 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
         DCHECK(handler->hook_.is_linked());
 
         handler->context().AsyncFiber(
-            [guard = ConnectionHandler::ptr_t(handler), clean_cb]() mutable {
+            [clean_cb](ConnectionHandler::ptr_t guard) {
               guard->RunInIOThread();
               clean_cb(std::move(guard));
-            });
+            }, handler);
       }
     }
   } catch (std::exception const& ex) {
@@ -116,7 +118,8 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
     auto it = clist.begin();
     unsigned cnt = 0;
     while (it != clist.end()) {
-      // guarding the current item, preserving it for getting the next item
+      // guarding the current item, preserving it for getting the next item.
+      // The reason for this is it->Close() is interruptable.
       ConnectionHandler::ptr_t guard(&*it);
       it->Close();
       ++it;
@@ -124,8 +127,11 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
     }
 
     VLOG(1) << "Closed " << cnt << " connections";
-    fibers::mutex mu;
-    std::unique_lock<fibers::mutex> lk(mu);
+
+    // lk is really redundant but is required by cv-interface:
+    // We update clist only in this thread so the protection is not needed.
+    fibers::mutex empty_mu;
+    std::unique_lock<fibers::mutex> lk(empty_mu);
     clist_empty_cnd.wait(lk, [&] { return clist.empty(); });
   }
 

@@ -111,6 +111,8 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       suspend_timer_.expires_at(abs_time);
       suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
     }
+
+    // We do not need a mutex here.
     cnd_.notify_one();
   }
   //]
@@ -228,7 +230,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
         if (++switch_cnt_ > MAIN_SWITCH_LIMIT) {
           DVLOG(1) << "SwitchToMain on " << i << " " << switch_cnt_ << " " << active_cnt_;
           ++main_resumes;
-          cnd_.notify_one();
+          cnd_.notify_one();  // no need for mutex.
         }
       }
     }
