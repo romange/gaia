@@ -192,12 +192,16 @@ class FiberClientSocket {
 
   const system::error_code& status() const { return status_; }
 
+  bool is_open() const { return sock_.is_open(); }
+
+  auto handle() { return sock_.native_handle(); }
+
  private:
   void Worker(const std::string& hname, const std::string& service);
   system::error_code Reconnect(const std::string& hname, const std::string& service);
 
   bool WorkerShouldBlock() const {
-    return sock_.is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_CALL_ACTIVE);
+    return is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_CALL_ACTIVE);
   }
 
   IoContext& io_context_;
@@ -217,6 +221,9 @@ class FiberClientSocket {
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };
 
+// TODO: To extract synchronous FiberBufferredSocket.
+// FiberBufferredSocket should contain BufferedReadAdaptor functionality as well.
+// FiberClientSocket might derive from it.
 template <typename MBS> size_t FiberClientSocket::read_some(
       const MBS& bufs, system::error_code& ec) {
   if (rslice_.size() > 0) {
@@ -224,6 +231,7 @@ template <typename MBS> size_t FiberClientSocket::read_some(
     rslice_ += copied;
 
     if (rslice_.size() == 0) {
+      rslice_ = asio::mutable_buffer(rbuf_.get(), 0);
       cv_read_.notify_one();
     }
 
@@ -233,6 +241,9 @@ template <typename MBS> size_t FiberClientSocket::read_some(
     ec = status_;
     return 0;
   }
+
+  // TODO: to optimistically call direct read_some call.
+  // TODO: to concatenate bufs and rbuf_ into a single call.
   state_ = READ_CALL_ACTIVE;
   size_t res = sock_.async_read_some(bufs, fibers_ext::yield[ec]);
   state_ = IDLE;
@@ -295,9 +306,13 @@ class ReconnectableSocket {
     return impl_->Apply(std::forward<Func>(f));
   }
 
+  // To calm SyncReadStream compile-checker we provide exception-enabled interface without
+  // implementing it.
+  template <typename MBS> size_t read_some(const MBS& bufs);
+
   error_code status() const { return impl_->status(); }
 
-  socket_t::native_handle_type handle() const { return impl_->handle(); }
+  socket_t::native_handle_type handle() { return impl_->handle(); }
 
   IoContext& context() { return impl_->context(); }
 

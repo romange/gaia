@@ -31,7 +31,7 @@ class Channel {
   // if bool(error_code) returns true, aborts receiving the stream and returns the error.
   using MessageCallback = std::function<error_code(Envelope&)>;
 
-  Channel(ReconnectableSocket&& channel) : channel_(std::move(channel)), br_(channel_.socket(), 2048) {
+  Channel(ReconnectableSocket&& socket) : socket_(std::move(socket)), br_(socket_.socket(), 2048) {
   }
 
   Channel(const std::string& hostname, const std::string& service, IoContext* cntx)
@@ -80,7 +80,7 @@ class Channel {
   void ExpirePending(RpcId id);
 
   bool OutgoingBufLock() {
-    bool lock_exclusive = !channel_.context().InContextThread();
+    bool lock_exclusive = !socket_.context().InContextThread();
 
     if (lock_exclusive)
       buf_lock_.lock();
@@ -115,7 +115,7 @@ class Channel {
   };
 
   RpcId next_send_rpc_id_ = 1;
-  ReconnectableSocket channel_;
+  ReconnectableSocket socket_;
   BufferedReadAdaptor<ReconnectableSocket::socket_t> br_;
   typedef boost::fibers::promise<error_code> EcPromise;
 

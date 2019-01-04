@@ -48,14 +48,14 @@ Channel::~Channel() {
 }
 
 void Channel::Shutdown() {
-  channel_.Shutdown();
+  socket_.Shutdown();
 }
 
 auto Channel::Connect(uint32_t ms) -> error_code {
   CHECK(!read_fiber_.joinable());
-  error_code ec = channel_.Connect(ms);
+  error_code ec = socket_.Connect(ms);
 
-  IoContext& context = channel_.context();
+  IoContext& context = socket_.context();
   context.Await([this] {
     read_fiber_ = fibers::fiber(&Channel::ReadFiber, this);
     flush_fiber_ = fibers::fiber(&Channel::FlushFiber, this);
@@ -72,12 +72,12 @@ auto Channel::Connect(uint32_t ms) -> error_code {
 }
 
 auto Channel::PresendChecks() -> error_code {
-  if (channel_.is_shut_down()) {
+  if (socket_.is_shut_down()) {
     return asio::error::shut_down;
   }
 
-  if (channel_.status()) {
-    return channel_.status();
+  if (socket_.status()) {
+    return socket_.status();
   }
 
   if (pending_calls_size_.load(std::memory_order_relaxed) >= FLAGS_rpc_client_pending_limit) {
@@ -161,13 +161,13 @@ auto Channel::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_code
 }
 
 void Channel::ReadFiber() {
-  CHECK(channel_.context().get_executor().running_in_this_thread());
+  CHECK(socket_.context().get_executor().running_in_this_thread());
 
-  VLOG(1) << "Start ReadFiber on socket " << channel_.handle();
+  VLOG(1) << "Start ReadFiber on socket " << socket_.handle();
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
 
-  error_code ec = channel_.WaitForReadAvailable();
-  while (!channel_.is_shut_down()) {
+  error_code ec = socket_.WaitForReadAvailable();
+  while (!socket_.is_shut_down()) {
     if (ec) {
       LOG_IF(WARNING, !IsExpectedFinish(ec))
           << "Error reading envelope " << ec << " " << ec.message();
@@ -177,25 +177,25 @@ void Channel::ReadFiber() {
       continue;
     }
 
-    if (auto ch_st = channel_.status()) {
-      ec = channel_.WaitForReadAvailable();
+    if (auto ch_st = socket_.status()) {
+      ec = socket_.WaitForReadAvailable();
       VLOG(1) << "Channel status " << ch_st << " Read available st: " << ec;
       continue;
     }
-    ec = channel_.Apply([this] { return this->ReadEnvelope(); });
+    ec = socket_.Apply([this] { return this->ReadEnvelope(); });
   }
   CancelPendingCalls(ec);
-  VLOG(1) << "Finish ReadFiber on socket " << channel_.handle();
+  VLOG(1) << "Finish ReadFiber on socket " << socket_.handle();
 }
 
 void Channel::FlushFiber() {
   using namespace std::chrono_literals;
-  CHECK(channel_.context().get_executor().running_in_this_thread());
+  CHECK(socket_.context().get_executor().running_in_this_thread());
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
   while (true) {
     this_fiber::sleep_for(300us);
-    if (channel_.is_shut_down())
+    if (socket_.is_shut_down())
       break;
 
     if (outgoing_buf_size_.load(std::memory_order_acquire) == 0 || !send_mu_.try_lock())
@@ -231,7 +231,7 @@ auto Channel::FlushSendsGuarded() -> error_code {
   if (outgoing_buf_.empty())
     return ec;
 
-  ec = channel_.status();
+  ec = socket_.status();
   if (ec) {
     CancelSentBufferGuarded(ec);
     return ec;
@@ -269,7 +269,7 @@ auto Channel::FlushSendsGuarded() -> error_code {
   // Interrupt point during which outgoing_buf_ could grow.
   // We do not lock because this function is the only one that writes into channel and it's
   // guarded by send_mu_.
-  ec = channel_.Write(write_seq_);
+  ec = socket_.Write(write_seq_);
   if (ec) {
     // I do not know if we need to flush everything but I prefer doing it to make it simpler.
     CancelPendingCalls(ec);
@@ -312,7 +312,7 @@ auto Channel::ReadEnvelope() -> error_code {
   if (ec)
     return ec;
 
-  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << channel_.handle();
+  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << socket_.handle();
 
   auto it = pending_calls_.find(f.rpc_id);
   if (it == pending_calls_.end()) {
