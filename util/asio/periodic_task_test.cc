@@ -81,6 +81,7 @@ TEST_F(PeriodicTest, Cpp) {
   task->Start([nm, &bc, &task_thread_id] (int) {
     task_thread_id = std::this_thread::get_id();
     bc.Set(true);
+    (void)nm;
   });
   bc.Wait();
 

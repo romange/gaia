@@ -15,10 +15,6 @@ namespace base {
 
 static char test_path[1024] = {0};
 
-static constexpr char kProcSelf[] = "/proc/self/exe";
-static constexpr char kDeletedSuffix[] = " (deleted)";
-constexpr size_t kDeletedSuffixLen = sizeof(kDeletedSuffix) - 1;
-
 std::string GetTestTempDir() {
   if (test_path[0] == '\0') {
     strcpy(test_path, "/tmp/XXXXXX");
