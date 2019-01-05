@@ -44,7 +44,6 @@ class RpcConnectionHandler : public ConnectionHandler {
  private:
   // protected by wr_mu_ to preserve transcational semantics:
   void FlushWrites();
-  // void FlushFiber();
 
   // The following methods are run in the socket thread (thread that calls HandleRequest.)
   void OnOpenSocket() final;

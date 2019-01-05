@@ -91,9 +91,6 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
           continue;
         break;  // TODO: To refine it.
       } else {
-        VLOG(1) << "Accepted socket " << handler->socket().remote_endpoint() << "/"
-                << handler->socket().native_handle();
-
         CHECK_NOTNULL(handler);
         clist.push_front(*handler);
 
@@ -156,6 +153,7 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper) -> AcceptResult {
   if (ec)
     return AcceptResult(nullptr, ec);
   DCHECK(sock.is_open()) << sock.native_handle();
+  VLOG(1) << "Accepted socket " << sock.remote_endpoint() << "/" << sock.native_handle();
 
   ConnectionHandler* conn = wrapper->listener->NewConnection(io_cntx);
   conn->Init(std::move(sock));

@@ -40,6 +40,7 @@ class Dummy {
 
  public:
   void __attribute__((noinline)) f() noexcept {
+    buf[0] = 0;
   }
 
   static void __attribute__((noinline)) CallMethod(void* cntx) {

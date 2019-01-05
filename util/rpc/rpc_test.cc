@@ -28,7 +28,6 @@ using namespace boost;
 using asio::ip::tcp;
 
 class RpcTest : public ServerTest {
-
  protected:
   asio::mutable_buffer FrameBuffer() {
     size_t fr_sz = frame_.Write(buf_);
@@ -54,87 +53,74 @@ TEST_F(RpcTest, HelloFrame) {
   frame_.header_size = header.size();
   frame_.letter_size = letter.size();
 
-  // Write correct frame and the envelope.
-  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, letter));
-  ASSERT_FALSE(ec_);
+  IoContext& io_cntx = sock2_->context();
+  io_cntx.AwaitSafe([&] {
+    // Write correct frame and the envelope.
+    asio::write(*sock2_, make_buffer_seq(FrameBuffer(), header, letter), ec_);
+    ASSERT_FALSE(ec_) << ec_.message();
 
-  // Read back envelope.
-  ec_ = socket_->Apply([this](auto& s) {
-    return frame_.Read(&s);
+    // Read back envelope.
+    ec_ = frame_.Read(sock2_.get());
+    ASSERT_FALSE(ec_);
+    EXPECT_EQ(frame_.header_size, header.size());
+    EXPECT_EQ(frame_.letter_size, letter.size());
+
+    // Read header/letter.
+    asio::read(*sock2_, make_buffer_seq(header, letter), ec_);
+    ASSERT_FALSE(ec_) << ec_.message();
   });
-  ASSERT_FALSE(ec_);
-  EXPECT_EQ(frame_.header_size, header.size());
-  EXPECT_EQ(frame_.letter_size, letter.size());
-
-  // Read header/letter.
-  ec_ = socket_->Read(make_buffer_seq(header, letter));
-  ASSERT_FALSE(ec_) << ec_.message();
 }
 
 TEST_F(RpcTest, InvalidAndConnect) {
   std::string send_msg(500, 'a');
-  ec_ = socket_->Write(make_buffer_seq(send_msg));
-  ASSERT_FALSE(ec_);
+  IoContext& io_cntx = sock2_->context();
+  io_cntx.AwaitSafe([&] {
+    asio::write(*sock2_, make_buffer_seq(send_msg), ec_);
+    ASSERT_FALSE(ec_);
 
-  ec_ = socket_->Apply([this] (tcp::socket& s) {
-    return frame_.Read(&s);
+    ec_ = frame_.Read(sock2_.get());
+    ASSERT_TRUE(ec_) << ec_.message();
   });
-  ASSERT_TRUE(ec_) << ec_.message();
 
   frame_.header_size = send_msg.size();
   frame_.letter_size = 0;
 
-  // Wait for reconnect.
-  while (ec_) {
-    SleepForMilliseconds(10);
-    ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), send_msg));
-  }
-  ec_ = socket_->Apply([this] (tcp::socket& s) {
-    return frame_.Read(&s);
-  });
-  ASSERT_FALSE(ec_) << ec_.message();
-}
-
-TEST_F(RpcTest, SocketRead) {
-  tcp::socket& sock = socket_->socket();
-  ASSERT_TRUE(sock.non_blocking());
-  ec_ = socket_->Write(make_buffer_seq(FrameBuffer()));
+  ec_ = sock2_->WaitToConnect(1000);
   ASSERT_FALSE(ec_);
-  // std::vector<uint8_t> tmp(10000);
-  //size_t sz = sock.read_some(asio::buffer(tmp));
-  // LOG(INFO) << sz;
+  io_cntx.AwaitSafe([&] {
+    asio::write(*sock2_, make_buffer_seq(FrameBuffer(), send_msg), ec_);
+    ASSERT_FALSE(ec_);
+    ec_ = frame_.Read(sock2_.get());
+    ASSERT_FALSE(ec_) << ec_.message();
+  });
 }
 
 TEST_F(RpcTest, Repeat) {
-  tcp::socket& sock = socket_->socket();
-  ASSERT_TRUE(sock.non_blocking());
-
   const char kPayload[] = "World!!!";
   string header("repeat3"), message(kPayload);
   frame_.header_size = header.size();
   frame_.letter_size = message.size();
 
-  ec_ = socket_->Write(make_buffer_seq(FrameBuffer(), header, message));
-  ASSERT_FALSE(ec_);
-
-
-  for (unsigned i = 0; i < 3; ++i) {
-    ec_ = socket_->Apply([&] (tcp::socket& s) {
-      return frame_.Read(&s);
-    });
-    EXPECT_FALSE(ec_);
-
-    header.resize(frame_.header_size);
-    ASSERT_EQ(frame_.letter_size, message.size());
-
-    ec_ = socket_->Read(make_buffer_seq(header, message));
+  IoContext& io_cntx = sock2_->context();
+  io_cntx.AwaitSafe([&] {
+    asio::write(*sock2_, make_buffer_seq(FrameBuffer(), header, message), ec_);
     ASSERT_FALSE(ec_);
-    string expected = absl::StrCat("cont:", i + 1 < 3);
-    EXPECT_EQ(expected, header);
-    EXPECT_EQ(kPayload, message);
-  }
-}
 
+    for (unsigned i = 0; i < 3; ++i) {
+      ec_ = frame_.Read(sock2_.get());
+      EXPECT_FALSE(ec_);
+
+      header.resize(frame_.header_size);
+      ASSERT_EQ(frame_.letter_size, message.size());
+
+      asio::read(*sock2_, make_buffer_seq(header, message), ec_);
+      ASSERT_FALSE(ec_);
+      string expected = absl::StrCat("cont:", i + 1 < 3);
+      EXPECT_EQ(expected, header);
+      EXPECT_EQ(kPayload, message);
+    }
+  });
+}
 
 static void BM_ChannelConnection(benchmark::State& state) {
   IoContextPool pool(1);

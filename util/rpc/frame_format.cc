@@ -27,6 +27,10 @@ inline uint8 SizeByteCountMinus1(uint32 size) {
   return size <= 255 ? 0 : Bits::FindMSBSetNonZero(size) / 8;
 }
 
+inline constexpr uint32 byte_mask(uint8 n) {
+    return (1UL << (n + 1) * 8) - 1;
+}
+
 }  // namespace
 
 std::ostream& operator<<(std::ostream& o, const Frame& frame) {
@@ -37,9 +41,27 @@ std::ostream& operator<<(std::ostream& o, const Frame& frame) {
 
 const uint32 Frame::kHeaderVal = LittleEndian::Load32(kHeader);
 
-inline constexpr uint32 byte_mask(uint8 n) {
-  return (1UL << (n + 1) * 8) - 1;
+uint8_t Frame::DecodeStart(const uint8_t* src, ::boost::system::error_code& ec) {
+  if (kHeaderVal != LittleEndian::Load32(src)) {
+    ec = errc::make_error_code(errc::illegal_byte_sequence);
+    return 0;
+  }
+
+  if (src[4] >> 4 != 0) {  // version check
+    ec = errc::make_error_code(errc::illegal_byte_sequence);
+    return 0;
+  }
+  rpc_id = UNALIGNED_LOAD64(src + 4);
+  rpc_id >>= 8;
+
+  return src[4] & 15;
 }
+
+void Frame::DecodeEnd(const uint8_t* src, uint8_t hsz_len, uint8_t lsz_len) {
+  header_size = LittleEndian::Load32(src) & byte_mask(hsz_len);
+  letter_size = LittleEndian::Load32(src + hsz_len + 1) & byte_mask(lsz_len);
+}
+
 
 error_code Frame::Read(socket_t* input) {
   uint8 buf[kMaxByteSize + /* a little extra */ 8];

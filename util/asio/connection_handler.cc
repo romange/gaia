@@ -33,21 +33,19 @@ ConnectionHandler::ConnectionHandler(IoContext* context) noexcept : io_context_(
 ConnectionHandler::~ConnectionHandler() {
 }
 
-void ConnectionHandler::Init(socket_t&& sock) {
-  CHECK(!socket_);
-
-  socket_.emplace(std::move(sock));
-  CHECK(socket_->is_open());
-
+void ConnectionHandler::Init(asio::ip::tcp::socket&& sock) {
+  CHECK(!socket_ && sock.is_open());
   ip::tcp::no_delay nd(true);
   system::error_code ec;
-  socket_->set_option(nd, ec);
+  sock.set_option(nd, ec);
   if (ec)
     LOG(ERROR) << "Could not set socket option " << ec.message() << " " << ec;
 
-  socket_->non_blocking(true, ec);
+  sock.non_blocking(true, ec);
   if (ec)
     LOG(ERROR) << "Could not make socket nonblocking " << ec.message() << " " << ec;
+
+  socket_.emplace(std::move(sock));
   is_open_ = true;
 }
 

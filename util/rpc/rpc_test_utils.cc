@@ -66,11 +66,16 @@ void ServerTest::SetUp() {
                                                   &pool_->GetNextContext());
   ec_ = socket_->Connect(100);
   CHECK(!ec_) << ec_.message();
+  sock2_ = std::make_unique<detail::FiberClientSocket>(&pool_->GetNextContext());
+  sock2_->Initiate("localhost", std::to_string(port));
+  ec_ = sock2_->WaitToConnect(100);
+  CHECK(!ec_) << ec_.message();
 }
 
 void ServerTest::TearDown() {
   server_.reset();
   socket_.reset();
+  sock2_.reset();
   VLOG(1) << "ServerTest::TearDown";
   pool_->Stop();
   VLOG(1) << "ServerTest::TearDown";

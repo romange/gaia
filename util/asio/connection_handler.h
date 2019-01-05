@@ -48,11 +48,9 @@ class ConnectionHandler {
 
   virtual ~ConnectionHandler();
 
-  void Init(socket_t&& sock);
+  void Init(::boost::asio::ip::tcp::socket&& sock);
 
   void Close();
-
-  socket_t& socket() { return *socket_; }
 
   IoContext& context() { return io_context_; }
 
@@ -81,6 +79,9 @@ class ConnectionHandler {
   virtual boost::system::error_code HandleRequest() = 0;
 
   std::experimental::optional<socket_t> socket_;
+
+  // socket.is_open() is unreliable and does not reflect close() status even if is called
+  // in-thread.
   bool is_open_ = false;
   IoContext& io_context_;
 

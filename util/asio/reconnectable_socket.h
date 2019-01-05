@@ -150,7 +150,6 @@ class ClientChannelImpl {
 */
 class FiberClientSocket {
  public:
-
   // C'tor can be called from any thread.
   // Constructs the client socket which tries to connect to the destination.
   FiberClientSocket(IoContext* cntx, size_t rbuf_size = 1 << 14)
@@ -192,7 +191,7 @@ class FiberClientSocket {
 
   const system::error_code& status() const { return status_; }
 
-  bool is_open() const { return sock_.is_open(); }
+  bool is_open() const { return is_open_; }
 
   auto handle() { return sock_.native_handle(); }
 
@@ -213,7 +212,9 @@ class FiberClientSocket {
   asio::mutable_buffer rslice_;
   fibers::fiber worker_;
 
-  enum State { IDLE, READ_CALL_ACTIVE} state_ = IDLE;
+  // socket.close() seem to be unreliable, so we manage socket state ourselves.
+  bool is_open_ = true;
+  enum State { IDLE, READ_CALL_ACTIVE } state_ = IDLE;
 
   fibers::condition_variable cv_st_, cv_read_;
   fibers::mutex connect_mu_;
@@ -221,11 +222,8 @@ class FiberClientSocket {
   ::std::chrono::steady_clock::duration connect_duration_ = ::std::chrono::seconds(2);
 };
 
-// TODO: To extract synchronous FiberBufferredSocket.
-// FiberBufferredSocket should contain BufferedReadAdaptor functionality as well.
-// FiberClientSocket might derive from it.
-template <typename MBS> size_t FiberClientSocket::read_some(
-      const MBS& bufs, system::error_code& ec) {
+template <typename MBS>
+size_t FiberClientSocket::read_some(const MBS& bufs, system::error_code& ec) {
   if (rslice_.size() > 0) {
     size_t copied = asio::buffer_copy(bufs, rslice_);
     rslice_ += copied;
@@ -247,6 +245,11 @@ template <typename MBS> size_t FiberClientSocket::read_some(
   state_ = READ_CALL_ACTIVE;
   size_t res = sock_.async_read_some(bufs, fibers_ext::yield[ec]);
   state_ = IDLE;
+  if (ec) {
+    status_ = ec;
+    cv_read_.notify_one();
+  }
+
   return res;
 }
 

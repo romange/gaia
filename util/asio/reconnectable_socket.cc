@@ -185,21 +185,24 @@ void FiberClientSocket::Shutdown() {
   VLOG(1) << "FiberClientSocket::Shutdown";
 
   io_context_.AwaitSafe([this] {
-    if (!sock_.is_open())
+
+    if (!is_open())
       return;
+    is_open_ = false;
 
     sock_.close();
     VLOG(1) << "Sock Closed";
     cv_read_.notify_one();
     if (worker_.joinable())
       worker_.join();
+    VLOG(1) << "Worker Joined";
   });
 }
 
 void FiberClientSocket::Worker(const std::string& hname, const std::string& service) {
   sock_.non_blocking(true);
 
-  while (sock_.is_open()) {
+  while (is_open_) {
     if (status_) {
       auto ec = Reconnect(hname, service);
       if (ec) {
@@ -243,6 +246,8 @@ void FiberClientSocket::Worker(const std::string& hname, const std::string& serv
 
 system::error_code FiberClientSocket::Reconnect(const std::string& hname,
                                                 const std::string& service) {
+  DCHECK(sock_.is_open());
+
   auto& asio_io_cntx = io_context_.raw_context();
   tcp::resolver resolver(asio_io_cntx);
 

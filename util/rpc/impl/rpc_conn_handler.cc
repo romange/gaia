@@ -79,8 +79,6 @@ RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge, IoContext* 
 }
 
 RpcConnectionHandler::~RpcConnectionHandler() {
-  VLOG_IF(1, buf_read_sock_) << "Saved " << buf_read_sock_->saved() << " bytes";
-
   bridge_->Join();
 
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });

@@ -5,6 +5,7 @@
 
 #include "base/gtest.h"
 #include "util/asio/io_context_pool.h"
+#include "util/asio/reconnectable_socket.h"
 #include "util/rpc/rpc_connection.h"
 
 namespace util {
@@ -62,6 +63,7 @@ class ServerTest : public testing::Test {
   std::unique_ptr<AcceptServer> server_;
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<ReconnectableSocket> socket_;
+  std::unique_ptr<detail::FiberClientSocket> sock2_;
   ::boost::system::error_code ec_;
 };
 
