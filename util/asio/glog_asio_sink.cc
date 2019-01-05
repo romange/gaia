@@ -12,7 +12,7 @@ using namespace fibers;
 GlogAsioSink::GlogAsioSink() : msg_q_(64) {
 }
 
-GlogAsioSink::~GlogAsioSink() {
+GlogAsioSink::~GlogAsioSink() noexcept {
 }
 
 void GlogAsioSink::Run() {
