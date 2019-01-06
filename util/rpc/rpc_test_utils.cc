@@ -61,25 +61,21 @@ void ServerTest::SetUp() {
   port_ = server_->AddListener(0, service_.get());
 
   server_->Run();
-  socket_ = std::make_unique<ReconnectableSocket>("127.0.0.1", std::to_string(port_),
-                                                  &pool_->GetNextContext());
-  ec_ = socket_->Connect(100);
-  CHECK(!ec_) << ec_.message();
 
   sock2_ = std::make_unique<FiberSyncSocket>("localhost", std::to_string(port_),
                                              &pool_->GetNextContext());
 
   ec_ = sock2_->ClientWaitToConnect(1000);
   CHECK(!ec_) << ec_.message();
+  VLOG(1) << "Sock2 created " << sock2_->native_handle();
 }
 
 void ServerTest::TearDown() {
+  VLOG(1) << "ServerTest::TearDown Start";
   server_.reset();
-  socket_.reset();
   sock2_.reset();
-  VLOG(1) << "ServerTest::TearDown";
   pool_->Stop();
-  VLOG(1) << "ServerTest::TearDown";
+  VLOG(1) << "ServerTest::TearDown End";
 }
 
 }  // namespace rpc

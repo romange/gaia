@@ -4,7 +4,11 @@
 #include <chrono>
 #include <memory>
 
+#include <boost/asio/write.hpp>
+
 #include "absl/strings/str_cat.h"
+#include "absl/strings/strip.h"
+
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "base/walltime.h"
@@ -15,8 +19,9 @@
 
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
-#include "util/asio/reconnectable_socket.h"
 #include "util/asio/yield.h"
+
+#include "util/rpc/channel.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_test_utils.h"
 
@@ -27,6 +32,9 @@ using namespace std;
 using namespace boost;
 using asio::ip::tcp;
 
+using testing::internal::CaptureStderr;
+using testing::internal::GetCapturedStderr;
+
 class RpcTest : public ServerTest {
  protected:
   asio::mutable_buffer FrameBuffer() {
@@ -34,20 +42,33 @@ class RpcTest : public ServerTest {
     return asio::mutable_buffer(buf_, fr_sz);
   }
 
+  void SetUp() final {
+    ServerTest::SetUp();
+
+    channel_.reset(new Channel("localhost", std::to_string(port_), &pool_->GetNextContext()));
+    auto ec = channel_->Connect(1000);
+    CHECK(!ec) << ec.message();
+  }
+
+  void TearDown() final {
+    channel_.reset();
+    ServerTest::TearDown();
+  }
+
   uint8_t buf_[Frame::kMaxByteSize];
   Frame frame_;
+  std::unique_ptr<Channel> channel_;
 };
 
 TEST_F(RpcTest, BadHeader) {
   // Must be large enough to pass the initial RPC server read.
   string control("Hello "), message("world!!!");
-  ec_ = socket_->Write(make_buffer_seq(control, message));
+  asio::write(*sock2_, make_buffer_seq(control, message), ec_);
   ASSERT_FALSE(ec_);
 
-  ec_ = socket_->Read(make_buffer_seq(control, message));
-  ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
+  asio::read(*sock2_, make_buffer_seq(control, message), ec_);
 
-  FiberSyncSocket fss("localhost", std::to_string(port_), &pool_->GetNextContext());
+  ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }
 
 TEST_F(RpcTest, HelloFrame) {
@@ -124,6 +145,71 @@ TEST_F(RpcTest, Repeat) {
   });
 }
 
+TEST_F(RpcTest, SendOk) {
+  Envelope envelope;
+  envelope.header.resize_fill(14, 1);
+  envelope.letter.resize_fill(42, 2);
+  Channel::future_code_t fc = channel_->Send(20, &envelope);
+  EXPECT_FALSE(fc.get());
+}
+
+TEST_F(RpcTest, ServerStopped) {
+  Envelope envelope;
+  envelope.header.resize_fill(14, 1);
+  envelope.letter.resize_fill(42, 2);
+
+  Channel::future_code_t fc = channel_->Send(20, &envelope);
+  EXPECT_FALSE(fc.get());
+  CaptureStderr();
+  server_->Stop();
+  server_->Wait();
+
+  fc = channel_->Send(20, &envelope);
+  EXPECT_TRUE(fc.get());
+  GetCapturedStderr();
+  LOG(INFO) << "After channel::Send";
+}
+
+TEST_F(RpcTest, Stream) {
+  string header("repeat3");
+
+  Envelope envelope;
+  Copy(header, &envelope.header);
+
+  envelope.letter.resize_fill(42, 2);
+
+  int times = 0;
+  auto cb = [&](Envelope& env) -> system::error_code {
+    ++times;
+    absl::string_view header(strings::charptr(env.header.data()), env.header.size());
+    LOG(INFO) << "Stream resp: " << header;
+    if (absl::ConsumePrefix(&header, "cont:")) {
+      uint32_t cont = 0;
+      CHECK(absl::SimpleAtoi(header, &cont));
+      return cont ? system::error_code{} : asio::error::eof;
+    }
+    return system::errc::make_error_code(system::errc::invalid_argument);
+  };
+  system::error_code ec = channel_->SendAndReadStream(&envelope, cb);
+  EXPECT_FALSE(ec);
+  EXPECT_EQ(3, times);
+}
+
+TEST_F(RpcTest, Sleep) {
+  string header("sleep20");
+
+  Envelope envelope;
+  Copy(header, &envelope.header);
+  envelope.letter.resize_fill(42, 2);
+
+  system::error_code ec = channel_->SendSync(1, &envelope);
+  ASSERT_EQ(asio::error::timed_out, ec) << ec.message();  // expect timeout.
+
+  envelope.header.clear();
+  ec = channel_->SendSync(20, &envelope);
+  ASSERT_FALSE(ec) << ec.message();  // expect normal execution.
+}
+
 static void BM_ChannelConnection(benchmark::State& state) {
   IoContextPool pool(1);
   pool.Run();
@@ -134,8 +220,8 @@ static void BM_ChannelConnection(benchmark::State& state) {
 
   server.Run();
 
-  ReconnectableSocket recon_socket("127.0.0.1", std::to_string(port), &pool.GetNextContext());
-  CHECK(!recon_socket.Connect(500));
+  FiberSyncSocket socket("localhost", std::to_string(port), &pool.GetNextContext());
+  CHECK(!socket.ClientWaitToConnect(500));
   Frame frame;
   std::string send_msg(100, 'a');
   uint8_t buf[Frame::kMaxByteSize];
@@ -144,23 +230,26 @@ static void BM_ChannelConnection(benchmark::State& state) {
   letter.resize(frame.letter_size);
 
   uint64_t fs = frame.Write(buf);
-  auto& socket = recon_socket.socket();
   BufferType tmp;
   tmp.resize(10000);
 
   auto buf_seq = make_buffer_seq(asio::buffer(buf, fs), send_msg);
   size_t total_sz = 0, buf_seq_sz = asio::buffer_size(buf_seq);
 
-  while (state.KeepRunning()) {
-    system::error_code ec = recon_socket.Write(buf_seq);
-    CHECK(!ec);
-    total_sz += buf_seq_sz;
+  socket.context().AwaitSafe([&] {
+    system::error_code ec;
+    while (state.KeepRunning()) {
+      asio::write(socket, buf_seq, ec);
+      CHECK(!ec);
+      total_sz += buf_seq_sz;
 
-    DCHECK(!ec);
-    DCHECK_EQ(0, frame.header_size);
-    DCHECK_EQ(letter.size(), frame.letter_size);
-    socket.read_some(asio::buffer(tmp), ec);
-  }
+      DCHECK(!ec);
+      DCHECK_EQ(0, frame.header_size);
+      DCHECK_EQ(letter.size(), frame.letter_size);
+      socket.read_some(asio::buffer(tmp), ec);
+    }
+  });
+
   state.SetBytesProcessed(total_sz);
   server.Stop();
 }

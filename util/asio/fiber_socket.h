@@ -81,8 +81,11 @@ class FiberSyncSocket {
   error_code Reconnect(const std::string& hname, const std::string& service);
 
   error_code status_;
+
+  // socket.is_open() is unreliable and does not reflect close() status even if is called
+  // from the same thread.
   bool is_open_ = true;
-  enum State { IDLE, READ_CALL_ACTIVE } state_ = IDLE;
+  enum State { READ_IDLE, READ_ACTIVE } read_state_ = READ_IDLE;
 
   size_t rbuf_size_;
   socket_t sock_;
@@ -119,9 +122,9 @@ template <typename MBS> size_t FiberSyncSocket::read_some(const MBS& bufs, error
 
   size_t read_size = sock_.read_some(new_seq, ec);
   if (ec == asio::error::would_block) {
-    state_ = READ_CALL_ACTIVE;
+    read_state_ = READ_ACTIVE;
     read_size = sock_.async_read_some(new_seq, fibers_ext::yield[ec]);
-    state_ = IDLE;
+    read_state_ = READ_IDLE;
   }
   status_ = ec;
 

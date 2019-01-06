@@ -61,6 +61,8 @@ TEST_F(SocketTest, Normal) {
     EXPECT_FALSE(ec);
     EXPECT_GT(sz, 0);
   });
+
+  FiberSyncSocket fss("localhost", std::to_string(port_), &pool_->GetNextContext());
 }
 
 TEST_F(SocketTest, StarvedRead) {

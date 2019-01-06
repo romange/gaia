@@ -1,6 +1,7 @@
 // Copyright 2018, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#include <boost/asio/write.hpp>
 #include <boost/fiber/future.hpp>
 #include <chrono>
 
@@ -48,14 +49,15 @@ Channel::~Channel() {
 }
 
 void Channel::Shutdown() {
-  socket_.Shutdown();
+  error_code ec;
+  socket_->Shutdown(ec);
 }
 
 auto Channel::Connect(uint32_t ms) -> error_code {
   CHECK(!read_fiber_.joinable());
-  error_code ec = socket_.Connect(ms);
+  error_code ec = socket_->ClientWaitToConnect(ms);
 
-  IoContext& context = socket_.context();
+  IoContext& context = socket_->context();
   context.Await([this] {
     read_fiber_ = fibers::fiber(&Channel::ReadFiber, this);
     flush_fiber_ = fibers::fiber(&Channel::FlushFiber, this);
@@ -72,12 +74,12 @@ auto Channel::Connect(uint32_t ms) -> error_code {
 }
 
 auto Channel::PresendChecks() -> error_code {
-  if (socket_.is_shut_down()) {
+  if (!socket_->is_open()) {
     return asio::error::shut_down;
   }
 
-  if (socket_.status()) {
-    return socket_.status();
+  if (socket_->status()) {
+    return socket_->status();
   }
 
   if (pending_calls_size_.load(std::memory_order_relaxed) >= FLAGS_rpc_client_pending_limit) {
@@ -161,41 +163,40 @@ auto Channel::SendAndReadStream(Envelope* msg, MessageCallback cb) -> error_code
 }
 
 void Channel::ReadFiber() {
-  CHECK(socket_.context().get_executor().running_in_this_thread());
+  CHECK(socket_->context().InContextThread());
 
-  VLOG(1) << "Start ReadFiber on socket " << socket_.handle();
+  VLOG(1) << "Start ReadFiber on socket " << socket_->native_handle();
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
 
-  error_code ec = socket_.WaitForReadAvailable();
-  while (!socket_.is_shut_down()) {
+  while (socket_->is_open()) {
+    error_code ec = ReadEnvelope();
     if (ec) {
       LOG_IF(WARNING, !IsExpectedFinish(ec))
           << "Error reading envelope " << ec << " " << ec.message();
 
       CancelPendingCalls(ec);
-      ec.clear();
+      // Required for few reasons:
+      // 1. To preempt the fiber, otherwise it has busy loop in case socket returns the error
+      //    preventing other fibers to run.
+      // 2. To throttle cpu.
+      this_fiber::sleep_for(10ms);
       continue;
     }
-
-    if (auto ch_st = socket_.status()) {
-      ec = socket_.WaitForReadAvailable();
-      VLOG(1) << "Channel status " << ch_st << " Read available st: " << ec;
-      continue;
-    }
-    ec = socket_.Apply([this] { return this->ReadEnvelope(); });
   }
-  CancelPendingCalls(ec);
-  VLOG(1) << "Finish ReadFiber on socket " << socket_.handle();
+  CancelPendingCalls(error_code{});
+  VLOG(1) << "Finish ReadFiber on socket " << socket_->native_handle();
 }
 
+
+// TODO: To attach Flusher io context thread, similarly to server side.
 void Channel::FlushFiber() {
   using namespace std::chrono_literals;
-  CHECK(socket_.context().get_executor().running_in_this_thread());
+  CHECK(socket_->context().get_executor().running_in_this_thread());
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
   while (true) {
     this_fiber::sleep_for(300us);
-    if (socket_.is_shut_down())
+    if (!socket_->is_open())
       break;
 
     if (outgoing_buf_size_.load(std::memory_order_acquire) == 0 || !send_mu_.try_lock())
@@ -231,7 +232,7 @@ auto Channel::FlushSendsGuarded() -> error_code {
   if (outgoing_buf_.empty())
     return ec;
 
-  ec = socket_.status();
+  ec = socket_->status();
   if (ec) {
     CancelSentBufferGuarded(ec);
     return ec;
@@ -269,7 +270,7 @@ auto Channel::FlushSendsGuarded() -> error_code {
   // Interrupt point during which outgoing_buf_ could grow.
   // We do not lock because this function is the only one that writes into channel and it's
   // guarded by send_mu_.
-  ec = socket_.Write(write_seq_);
+  asio::write(*socket_, write_seq_, ec);
   if (ec) {
     // I do not know if we need to flush everything but I prefer doing it to make it simpler.
     CancelPendingCalls(ec);
@@ -308,11 +309,11 @@ void Channel::CancelSentBufferGuarded(error_code ec) {
 
 auto Channel::ReadEnvelope() -> error_code {
   Frame f;
-  error_code ec = f.Read(&br_);
+  error_code ec = f.Read(socket_.get());
   if (ec)
     return ec;
 
-  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << socket_.handle();
+  VLOG(2) << "Got rpc_id " << f.rpc_id << " from socket " << socket_->native_handle();
 
   auto it = pending_calls_.find(f.rpc_id);
   if (it == pending_calls_.end()) {
@@ -323,7 +324,7 @@ auto Channel::ReadEnvelope() -> error_code {
     Envelope envelope(f.header_size, f.letter_size);
 
     // ReadEnvelope is called via Channel::Apply, so no need to call it here.
-    ec = br_.Read(envelope.buf_seq());
+    asio::read(*socket_, envelope.buf_seq(), ec);
     return ec;
   }
 
@@ -335,7 +336,7 @@ auto Channel::ReadEnvelope() -> error_code {
 
   if (is_stream) {
     VLOG(1) << "Processing stream";
-    ec = br_.Read(env->buf_seq());
+    asio::read(*socket_, env->buf_seq(), ec);
     if (!ec) {
       HandleStreamResponse(f.rpc_id);
     }
@@ -350,7 +351,7 @@ auto Channel::ReadEnvelope() -> error_code {
   pending_calls_size_.fetch_sub(1, std::memory_order_relaxed);
   // -- NO interrupt section end
 
-  ec = br_.Read(env->buf_seq());
+  asio::read(*socket_, env->buf_seq(), ec);
   promise.set_value(ec);
 
   return ec;
@@ -380,6 +381,9 @@ void Channel::HandleStreamResponse(RpcId rpc_id) {
 }
 
 void Channel::CancelPendingCalls(error_code ec) {
+  if (pending_calls_.empty())
+    return;
+
   PendingMap tmp;
   tmp.swap(pending_calls_);
   pending_calls_size_.store(0, std::memory_order_relaxed);

@@ -8,7 +8,6 @@
 
 #include "util/asio/io_context.h"
 #include "util/asio/connection_handler.h"
-#include "util/rpc/buffered_read_adaptor.h"
 #include "util/rpc/frame_format.h"
 #include "util/rpc/rpc_connection.h"
 

@@ -42,6 +42,9 @@ FiberSyncSocket::FiberSyncSocket(const std::string& hname, const std::string& po
 }
 
 void FiberSyncSocket::Shutdown(error_code& ec) {
+  if (!is_open_)
+    return;
+
   auto cb = [&] {
     if (!is_open_)
       return;
@@ -59,6 +62,7 @@ void FiberSyncSocket::Shutdown(error_code& ec) {
   };
 
   if (clientsock_data_) {
+    VLOG(1) << "AwaitShutdown";
     clientsock_data_->io_cntx->AwaitSafe(cb);
   } else {
     cb();
@@ -110,7 +114,7 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
     }
 
     size_t read_capacity = rbuf_size_ - rslice_.size();
-    if (state_ == IDLE && read_capacity) {
+    if (read_state_ == READ_IDLE && read_capacity) {
       uint8_t* next = static_cast<uint8_t*>(rslice_.data()) + rslice_.size();
       // Direct but non-blocking call since we know we should be able to receive.
       // Since it's direct - we do not context-switch.
@@ -123,16 +127,15 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
       continue;
     }
     VLOG(2) << "BeforeCvReadWait";
-
-    auto should_block = [this] {
-      return is_open() && (rslice_.size() == rbuf_size_ || state_ == READ_CALL_ACTIVE);
+    auto should_iterate = [this] {
+      return !is_open() || (read_state_ == READ_IDLE && rslice_.size() != rbuf_size_);
     };
 
     fibers::mutex mu;
     std::unique_lock<fibers::mutex> lock(mu);
-    clientsock_data_->worker_cv.wait(lock, should_block);
+    clientsock_data_->worker_cv.wait(lock, should_iterate);
 
-    LOG(INFO) << "WorkerIteration: ";
+    VLOG(2) << "WorkerIteration: ";
   }
   VLOG(1) << "WorkerExit";
 }

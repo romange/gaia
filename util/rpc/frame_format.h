@@ -10,7 +10,6 @@
 
 #include "base/integral_types.h"
 #include "util/asio/asio_utils.h"
-#include "util/rpc/buffered_read_adaptor.h"
 
 namespace util {
 class FiberSyncSocket;
@@ -91,9 +90,6 @@ class Frame {
 
     return ec;
   }
-
-  // Still used by client Socket.
-  ::boost::system::error_code Read(BufferedReadAdaptor<socket_t>* input);
 
  private:
   uint8_t DecodeStart(const uint8_t* src, ::boost::system::error_code& ec);
