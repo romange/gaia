@@ -10,7 +10,6 @@
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/io_context_pool.h"
-#include "util/asio/reconnectable_socket.h"
 #include "util/http/http_client.h"
 #include "util/http/http_testing.h"
 
@@ -49,53 +48,6 @@ TEST_F(HttpTest, Client) {
   ec = client.Send(h2::verb::get, "/", &res);
   EXPECT_TRUE(ec);
   EXPECT_FALSE(client.IsConnected());
-}
-
-TEST_F(HttpTest, ReconnectSocket) {
-  fibers_ext::Done done;
-
-  listener_.RegisterCb("/cb", false,
-                       [&](const QueryArgs& args, HttpHandler::SendFunction* send) {
-                         StringResponse resp = MakeStringResponse(h2::status::ok);
-                         done.Wait();
-                         return send->Invoke(std::move(resp));
-                       });
-
-  ReconnectableSocket socket("localhost", std::to_string(port_), &pool_->GetNextContext());
-  system::error_code ec = socket.Connect(100);
-  ASSERT_FALSE(ec);
-
-  auto read_cb = [s = &socket.socket()](const system::error_code& ec) {
-    LOG(INFO) << "Got AsyncWait: " << ec << " " << ec.message();
-    char buf[1];
-    system::error_code rec;
-    size_t val = s->receive(make_buffer_seq(buf), ReconnectableSocket::socket_t::message_peek, rec);
-    LOG(INFO) << "Received " << rec.message() << " / " << val;
-  };
-
-  socket.socket().async_wait(tcp::socket::wait_read, read_cb);
-
-  string message(1024, 'A');
-  message.append("\r\n\r\n\r\n");
-  ec = socket.Write(make_buffer_seq(message));
-  ASSERT_FALSE(ec);
-  LOG(INFO) << "After socket write";
-  ec = socket.Read(make_buffer_seq(message));
-
-  LOG(INFO) << "After readsome " << ec.message() << " "
-            << " status: " << socket.status();
-  this_fiber::sleep_for(10ms);
-  LOG(INFO) << "After sleep status: " << socket.status();
-
-  h2::request<h2::string_body> req{h2::verb::get, "/", 11};
-  h2::response<h2::dynamic_body> resp;
-  socket.socket().async_wait(tcp::socket::wait_read, read_cb);
-
-  h2::async_write(socket.socket(), req, fibers_ext::yield[ec]);
-  ASSERT_FALSE(ec);
-  beast::flat_buffer buffer;
-  h2::async_read(socket.socket(), buffer, resp, fibers_ext::yield[ec]);
-  ASSERT_FALSE(ec);
 }
 
 }  // namespace http

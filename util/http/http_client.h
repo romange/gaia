@@ -11,7 +11,7 @@
 
 namespace util {
 class IoContext;
-class ReconnectableSocket;
+class FiberSyncSocket;
 
 namespace http {
 
@@ -52,7 +52,7 @@ class Client {
   using HeaderPair = std::pair<std::string, std::string>;
 
   std::vector<HeaderPair> headers_;
-  std::unique_ptr<ReconnectableSocket> socket_;
+  std::unique_ptr<FiberSyncSocket> socket_;
 };
 
 }  // namespace http
