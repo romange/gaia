@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "util/asio/reconnectable_socket.h"
+#include "util/asio/fiber_socket.h"
 
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
@@ -25,11 +25,13 @@ class SocketTest : public HttpBaseTest {
  protected:
   void SetUp() final {
     HttpBaseTest::SetUp();
-    sock_.reset(new detail::FiberClientSocket(&pool_->GetNextContext(), 1 << 16));
-    sock_->Initiate("localhost", std::to_string(port_));
+    sock_.reset(new FiberSyncSocket("localhost", std::to_string(port_), &pool_->GetNextContext()));
+    auto ec = sock_->ClientWaitToConnect(1000);
+    CHECK(!ec) << ec.message();
   }
 
   void TearDown() final {
+    LOG(INFO) << "TearDown";
     sock_.reset();
 
     HttpBaseTest::TearDown();
@@ -42,16 +44,14 @@ class SocketTest : public HttpBaseTest {
     return h2::read(*sock_, buffer, resp, ec);
   }
 
-  std::unique_ptr<detail::FiberClientSocket> sock_;
+  std::unique_ptr<FiberSyncSocket> sock_;
 };
 
 using namespace asio::ip;
 using namespace http;
 
 TEST_F(SocketTest, Normal) {
-  auto ec = sock_->WaitToConnect(1000);
-  EXPECT_FALSE(ec) << ec << "/" << ec.message();
-
+  system::error_code ec;
   h2::request<h2::string_body> req{h2::verb::get, "/", 11};
   size_t written = h2::write(*sock_, req, ec);
   EXPECT_GT(written, 0);
@@ -65,7 +65,6 @@ TEST_F(SocketTest, Normal) {
 
 TEST_F(SocketTest, StarvedRead) {
   fibers_ext::Done done;
-
   listener_.RegisterCb("/null", false,  // does not send anything.
                        [&](const http::QueryArgs& args, HttpHandler::SendFunction* send) {
                          StringResponse resp = MakeStringResponse(h2::status::ok);
@@ -74,10 +73,8 @@ TEST_F(SocketTest, StarvedRead) {
                          return send->Invoke(std::move(resp));
                        });
 
-  auto ec = sock_->WaitToConnect(1000);
-
-  EXPECT_FALSE(ec) << ec << "/" << ec.message();
   h2::request<h2::string_body> req{h2::verb::get, "/null", 11};
+  system::error_code ec;
   size_t written = h2::write(*sock_, req, ec);
   EXPECT_GT(written, 0);
 
@@ -94,12 +91,9 @@ TEST_F(SocketTest, StarvedRead) {
 }
 
 TEST_F(SocketTest, Reconnect) {
-  auto ec = sock_->WaitToConnect(1000);
-  EXPECT_FALSE(ec) << ec << "/" << ec.message();
-
   server_.reset();
   this_fiber::sleep_for(5ms);
-  ec = sock_->status();
+  system::error_code ec = sock_->status();
   EXPECT_TRUE(ec);
 
   size_t read_sz = sock_->context().AwaitSafe([&] {
@@ -115,7 +109,7 @@ TEST_F(SocketTest, Reconnect) {
   server_->AddListener(port_, &listener_);
   server_->Run();
 
-  ec = sock_->WaitToConnect(100);
+  ec = sock_->ClientWaitToConnect(100);
   EXPECT_FALSE(ec) << ec << "/" << ec.message();
 
   h2::request<h2::string_body> req{h2::verb::get, "/", 11};

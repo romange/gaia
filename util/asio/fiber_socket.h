@@ -64,6 +64,8 @@ class FiberSyncSocket {
     return sock_.remote_endpoint(ec);
   }
 
+  error_code status() const { return status_;}
+
   // For debugging.
   socket_t& next_layer() { return sock_; }
 

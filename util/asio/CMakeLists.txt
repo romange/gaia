@@ -5,4 +5,4 @@ cxx_link(asio_fiber_lib base stats_lib Boost::fiber)
 
 cxx_test(periodic_task_test asio_fiber_lib LABELS CI)
 cxx_test(io_context_test asio_fiber_lib LABELS CI)
-cxx_test(reconnectable_socket_test http_test_lib LABELS CI)
+cxx_test(fiber_socket_test http_test_lib LABELS CI)

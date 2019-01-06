@@ -60,6 +60,7 @@ void FiberSyncSocket::Shutdown(error_code& ec) {
   };
 
   if (clientsock_data_) {
+    VLOG(1) << "Before AwaitSafe";
     clientsock_data_->io_cntx->AwaitSafe(cb);
   } else {
     cb();
