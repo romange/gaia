@@ -37,7 +37,6 @@ FiberSyncSocket::FiberSyncSocket(socket_t&& sock, size_t rbuf_size)
 FiberSyncSocket::FiberSyncSocket(const std::string& hname, const std::string& port, IoContext* cntx,
                                  size_t rbuf_size)
     : FiberSyncSocket(socket_t(cntx->raw_context(), asio::ip::tcp::v4()), rbuf_size) {
-  sock_.non_blocking(true);
   status_ = asio::error::not_connected;
   InitiateConnection(hname, port, cntx);
 }
@@ -60,7 +59,6 @@ void FiberSyncSocket::Shutdown(error_code& ec) {
   };
 
   if (clientsock_data_) {
-    VLOG(1) << "Before AwaitSafe";
     clientsock_data_->io_cntx->AwaitSafe(cb);
   } else {
     cb();
@@ -74,7 +72,6 @@ void FiberSyncSocket::InitiateConnection(const std::string& hname, const std::st
   CHECK(!clientsock_data_ && (&cntx->raw_context() == &sock_.get_executor().context()));
 
   clientsock_data_.reset(new ClientData(cntx));
-
   cntx->Await([hname, port, this] {
     rslice_ = asio::buffer(rbuf_.get(), 0);
     clientsock_data_->worker = fibers::fiber(&FiberSyncSocket::Worker, this, hname, port);
@@ -102,6 +99,7 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
       }
       continue;
     }
+    DCHECK(sock_.non_blocking());
 
     error_code ec;
     VLOG(2) << "BeforeAsyncWait";
@@ -135,7 +133,6 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
     clientsock_data_->worker_cv.wait(lock, should_block);
 
     LOG(INFO) << "WorkerIteration: ";
-    // this_fiber::sleep_for(20ms);
   }
   VLOG(1) << "WorkerExit";
 }
@@ -149,7 +146,7 @@ system::error_code FiberSyncSocket::Reconnect(const std::string& hname,
   tcp::resolver resolver(asio_io_cntx);
 
   system::error_code ec;
-  VLOG(2) << "Before AsyncResolve";
+  VLOG(1) << "Before AsyncResolve";
 
   // It seems that resolver waits for 10s and ignores cancel command.
   auto results = resolver.async_resolve(tcp::v4(), hname, service, fibers_ext::yield[ec]);
@@ -167,6 +164,8 @@ system::error_code FiberSyncSocket::Reconnect(const std::string& hname,
 
   asio::async_connect(sock_, results, fibers_ext::yield[ec]);
   if (!ec) {
+    sock_.non_blocking(true);  // For some reason async_connect clears this option.
+
     // Use mutex to so that WaitToConnect would be thread-safe.
     std::lock_guard<fibers::mutex> lock(clientsock_data_->connect_mu);
     status_ = ec;
