@@ -11,6 +11,7 @@
 namespace util {
 class ReconnectableSocket;
 class AcceptServer;
+class FiberSyncSocket;
 
 namespace rpc {
 
@@ -63,7 +64,8 @@ class ServerTest : public testing::Test {
   std::unique_ptr<AcceptServer> server_;
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<ReconnectableSocket> socket_;
-  std::unique_ptr<detail::FiberClientSocket> sock2_;
+  std::unique_ptr<FiberSyncSocket> sock2_;
+
   ::boost::system::error_code ec_;
 };
 

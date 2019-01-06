@@ -85,7 +85,7 @@ TEST_F(RpcTest, InvalidAndConnect) {
   frame_.header_size = send_msg.size();
   frame_.letter_size = 0;
 
-  ec_ = sock2_->WaitToConnect(1000);
+  ec_ = sock2_->ClientWaitToConnect(1000);
   ASSERT_FALSE(ec_);
   io_cntx.AwaitSafe([&] {
     asio::write(*sock2_, make_buffer_seq(FrameBuffer(), send_msg), ec_);

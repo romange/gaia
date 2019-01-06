@@ -59,6 +59,32 @@ template <> class ResultMover<void> {
 
 }  // namespace detail
 
+namespace asio_ext {
+// Runs `f` asynchronously in io-context fiber. `f` should not block, lock on mutexes or Await.
+// Spinlocks are ok but might cause performance degradation.
+template <typename Func> void Async(::boost::asio::io_context& cntx, Func&& f) {
+  cntx.post(std::forward<Func>(f));
+}
+
+// Similarly to Async(), runs 'f' in io_context thread, but waits for it to finish by blocking
+// the calling fiber. `f` should not block because it runs directly from IO loop.
+template <typename Func>
+auto Await(::boost::asio::io_context& cntx, Func&& f) -> decltype(f()) {
+  fibers_ext::Done done;
+  using ResultType = decltype(f());
+  detail::ResultMover<ResultType> mover;
+
+  Async(cntx, [&, f = std::forward<Func>(f)]() mutable {
+    mover.Apply(f);
+    done.Notify();
+  });
+
+  done.Wait();
+  return std::move(mover).get();
+}
+
+};  // namespace asio_ext
+
 class IoContext {
   friend class IoContextPool;
 
@@ -82,38 +108,26 @@ class IoContext {
 
   io_context& raw_context() { return *context_ptr_; }
 
-  // Runs `f` asynchronously in io-context fiber. `f` should not block, lock on mutexes or Await.
-  // Spinlocks are ok but might cause performance degradation.
-  template <typename Func> void Async(Func&& f) { context_ptr_->post(std::forward<Func>(f)); }
+  template <typename Func> void Async(Func&& f) {
+    asio_ext::Async(*context_ptr_, std::forward<Func>(f));
+  }
 
   template <typename Func, typename... Args> void AsyncFiber(Func&& f, Args&&... args) {
     // Ideally we want to forward args into lambda but it's too complicated before C++20.
     // So I just copy them into capture.
     // We forward captured variables so we need lambda to be mutable.
-    Async([f = std::forward<Func>(f), args...] () mutable {
+    Async([f = std::forward<Func>(f), args...]() mutable {
       ::boost::fibers::fiber(std::forward<Func>(f), std::forward<Args>(args)...).detach();
     });
   }
 
-  // Similarly to Async(), runs 'f' in Io Context thread, but waits for it to finish by blocking
-  // the calling fiber. If we call Await from the context thread,
-  // runs `f` directly. `f` should not block because it runs directly from IO loop.
+  // Similar to asio_ext::Await(), but if we call Await from the context thread,
+  // runs `f` directly (minor optimization).
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
     if (InContextThread()) {
       return f();
     }
-
-    fibers_ext::Done done;
-    using ResultType = decltype(f());
-    detail::ResultMover<ResultType> mover;
-
-    Async([&, f = std::forward<Func>(f)]() mutable {
-      mover.Apply(f);
-      done.Notify();
-    });
-
-    done.Wait();
-    return std::move(mover).get();
+    return asio_ext::Await(*context_ptr_, std::forward<Func>(f));
   }
 
   // Please note that this function uses Await, therefore can not be used inside Ring0
@@ -154,8 +168,8 @@ class IoContext {
   // method.
   void AttachCancellable(Cancellable* obj) {
     auto fb = LaunchFiber([obj] { obj->Run(); });
-    cancellable_arr_.emplace_back(CancellablePair{std::unique_ptr<Cancellable>(obj),
-                                  std::move(fb)});
+    cancellable_arr_.emplace_back(
+        CancellablePair{std::unique_ptr<Cancellable>(obj), std::move(fb)});
   }
 
  private:

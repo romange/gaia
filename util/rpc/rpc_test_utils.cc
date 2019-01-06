@@ -10,7 +10,7 @@
 #include "base/logging.h"
 
 #include "util/asio/accept_server.h"
-#include "util/asio/reconnectable_socket.h"
+#include "util/asio/fiber_socket.h"
 
 using namespace std;
 using namespace boost;
@@ -51,8 +51,7 @@ void TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWri
   writer(std::move(*envelope));
 }
 
-ServerTest::ServerTest() {
-}
+ServerTest::ServerTest() {}
 
 void ServerTest::SetUp() {
   pool_.reset(new IoContextPool(FLAGS_rpc_test_io_pool));
@@ -66,9 +65,10 @@ void ServerTest::SetUp() {
                                                   &pool_->GetNextContext());
   ec_ = socket_->Connect(100);
   CHECK(!ec_) << ec_.message();
-  sock2_ = std::make_unique<detail::FiberClientSocket>(&pool_->GetNextContext());
-  sock2_->Initiate("localhost", std::to_string(port));
-  ec_ = sock2_->WaitToConnect(100);
+
+  sock2_ = std::make_unique<FiberSyncSocket>("localhost", std::to_string(port),
+                                             &pool_->GetNextContext());
+  ec_ = sock2_->ClientWaitToConnect(1000);
   CHECK(!ec_) << ec_.message();
 }
 
