@@ -67,6 +67,7 @@ class ServerTest : public testing::Test {
   std::unique_ptr<FiberSyncSocket> sock2_;
 
   ::boost::system::error_code ec_;
+  uint16_t port_ = 0;
 };
 
 }  // namespace rpc

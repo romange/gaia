@@ -58,16 +58,17 @@ void ServerTest::SetUp() {
   pool_->Run();
   service_.reset(new TestInterface);
   server_.reset(new AcceptServer(pool_.get()));
-  uint16_t port = server_->AddListener(0, service_.get());
+  port_ = server_->AddListener(0, service_.get());
 
   server_->Run();
-  socket_ = std::make_unique<ReconnectableSocket>("127.0.0.1", std::to_string(port),
+  socket_ = std::make_unique<ReconnectableSocket>("127.0.0.1", std::to_string(port_),
                                                   &pool_->GetNextContext());
   ec_ = socket_->Connect(100);
   CHECK(!ec_) << ec_.message();
 
-  sock2_ = std::make_unique<FiberSyncSocket>("localhost", std::to_string(port),
+  sock2_ = std::make_unique<FiberSyncSocket>("localhost", std::to_string(port_),
                                              &pool_->GetNextContext());
+
   ec_ = sock2_->ClientWaitToConnect(1000);
   CHECK(!ec_) << ec_.message();
 }

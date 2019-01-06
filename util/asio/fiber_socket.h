@@ -24,6 +24,7 @@ class FiberSyncSocket {
   FiberSyncSocket(const std::string& hname, const std::string& port,
                   IoContext* cntx, size_t rbuf_size = 1 << 12);
 
+  // FiberSyncSocket can not be moveable due to attached fiber.
   FiberSyncSocket(FiberSyncSocket&& other) = delete;
 
   ~FiberSyncSocket();
@@ -88,7 +89,7 @@ class FiberSyncSocket {
 
   // Stuff related to client sockets.
   struct ClientData;
-  ClientData* clientsock_data_ = nullptr;  // unique_ptr does not work for some reason.
+  std::unique_ptr<ClientData> clientsock_data_;
 };
 
 template <typename MBS> size_t FiberSyncSocket::read_some(const MBS& bufs, error_code& ec) {

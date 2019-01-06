@@ -46,6 +46,8 @@ TEST_F(RpcTest, BadHeader) {
 
   ec_ = socket_->Read(make_buffer_seq(control, message));
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
+
+  FiberSyncSocket fss("localhost", std::to_string(port_), &pool_->GetNextContext());
 }
 
 TEST_F(RpcTest, HelloFrame) {

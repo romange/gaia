@@ -17,15 +17,17 @@ using namespace std::chrono_literals;
 struct FiberSyncSocket::ClientData {
   ::boost::fibers::fiber worker;
   ::boost::fibers::condition_variable cv_st, worker_cv;
-  IoContext* io_cntx = nullptr;
+  IoContext* io_cntx;
+
   fibers::mutex connect_mu;
   ::std::chrono::steady_clock::duration connect_duration = ::std::chrono::seconds(2);
+
+  ClientData(IoContext* io) : io_cntx(io) {}
 };
 
 FiberSyncSocket::~FiberSyncSocket() {
   error_code ec;
   Shutdown(ec);
-  delete clientsock_data_;
 }
 
 FiberSyncSocket::FiberSyncSocket(socket_t&& sock, size_t rbuf_size)
@@ -70,8 +72,7 @@ void FiberSyncSocket::InitiateConnection(const std::string& hname, const std::st
                                          IoContext* cntx) {
   CHECK(!clientsock_data_ && (&cntx->raw_context() == &sock_.get_executor().context()));
 
-  clientsock_data_ = new ClientData;
-  clientsock_data_->io_cntx = cntx;
+  clientsock_data_.reset(new ClientData(cntx));
 
   cntx->Await([hname, port, this] {
     rslice_ = asio::buffer(rbuf_.get(), 0);
@@ -105,7 +106,7 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
     VLOG(2) << "BeforeAsyncWait";
     sock_.async_wait(socket_t::wait_read, fibers_ext::yield[ec]);
     if (ec) {
-      LOG(ERROR) << "AsyncWait: " << ec.message();
+      LOG_IF(ERROR, is_open_) << "AsyncWait: " << ec.message();
       continue;
     }
 
