@@ -92,8 +92,6 @@ class Frame {
     return ec;
   }
 
-  ::boost::system::error_code Read(socket_t* input);
-
   // Still used by client Socket.
   ::boost::system::error_code Read(BufferedReadAdaptor<socket_t>* input);
 

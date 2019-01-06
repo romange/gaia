@@ -17,8 +17,6 @@ namespace rpc {
 
 using namespace std::chrono_literals;
 
-#define USE_FIBER_SOCKET 0
-
 namespace {
 
 using RpcConnList = detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
@@ -186,11 +184,8 @@ void RpcConnectionHandler::FlushWrites() {
   }
   tmp.swap(outgoing_buf_);
 
-#if USE_FIBER_SOCKET
   size_t write_sz = asio::write(*socket_, write_seq_, ec_);
-#else
-  size_t write_sz = asio::async_write(socket_->next_layer(), write_seq_, yield[ec_]);
-#endif
+
   // We should use clear_and_dispose to delete items safely while unlinking them from tmp.
   tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 

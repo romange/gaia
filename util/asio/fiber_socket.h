@@ -51,7 +51,7 @@ class FiberSyncSocket {
   socket_t::endpoint_type remote_endpoint(error_code& ec) const {
     return sock_.remote_endpoint(ec);
   }
- 
+
   // For debugging.
   socket_t& next_layer() { return sock_; }
 
@@ -88,7 +88,7 @@ template <typename MBS> size_t FiberSyncSocket::read_some(const MBS& bufs, error
   size_t user_size = asio::buffer_size(bufs);
   auto new_seq = make_buffer_seq(bufs, asio::mutable_buffer(rbuf_.get(), rbuf_size_));
   size_t read_size = sock_.read_some(new_seq, ec);
-  if (ec == system::errc::resource_unavailable_try_again) {
+  if (ec == asio::error::would_block) {
     read_size = sock_.async_read_some(new_seq, fibers_ext::yield[ec]);
   }
   if (read_size > user_size) {
@@ -99,7 +99,11 @@ template <typename MBS> size_t FiberSyncSocket::read_some(const MBS& bufs, error
 }
 
 template <typename BS> size_t FiberSyncSocket::write_some(const BS& bufs, error_code& ec) {
-  return sock_.async_write_some(bufs, fibers_ext::yield[ec]);
+  size_t res = sock_.write_some(bufs, ec);
+  if (ec == ::boost::asio::error::would_block) {
+    return sock_.async_write_some(bufs, fibers_ext::yield[ec]);
+  }
+  return res;
 }
 
 }  // namespace util
