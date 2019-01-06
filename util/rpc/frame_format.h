@@ -10,7 +10,6 @@
 
 #include "base/integral_types.h"
 #include "util/asio/asio_utils.h"
-#include "util/asio/yield.h"
 #include "util/rpc/buffered_read_adaptor.h"
 
 namespace util {
@@ -64,11 +63,12 @@ class Frame {
   template <typename SyncReadStream>::boost::system::error_code Read(SyncReadStream* input) {
     static_assert(!std::is_same<SyncReadStream, socket_t>::value, "");
 
-    uint8 buf[kMaxByteSize + /* a little extra */ 8];
+    // Adding little extra to allow 64 bit loads from any address in the buf.
+    uint8 buf[kMaxByteSize + 8];
     using namespace boost;
 
     system::error_code ec;
-    size_t read = asio::read(*input, asio::buffer(buf, kMinByteSize), ec);
+    asio::read(*input, asio::buffer(buf, kMinByteSize), ec);
     if (ec)
       return ec;
     uint8_t code = DecodeStart(buf, ec);
@@ -82,7 +82,7 @@ class Frame {
     if (code) {
       size_t to_read = header_sz_len_minus1 + msg_sz_len_minus1;
       auto mbuf = asio::buffer(buf + kMinByteSize, to_read);
-      read = asio::read(*input, mbuf, ec);
+      asio::read(*input, mbuf, ec);
       if (ec)
         return ec;
     }
@@ -93,6 +93,8 @@ class Frame {
   }
 
   ::boost::system::error_code Read(socket_t* input);
+
+  // Still used by client Socket.
   ::boost::system::error_code Read(BufferedReadAdaptor<socket_t>* input);
 
  private:

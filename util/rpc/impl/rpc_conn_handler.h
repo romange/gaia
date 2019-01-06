@@ -53,7 +53,6 @@ class RpcConnectionHandler : public ConnectionHandler {
   using socket_t = asio::ip::tcp::socket;
 
   std::unique_ptr<ConnectionBridge> bridge_;
-  std::unique_ptr<BufferedReadAdaptor<socket_t>> buf_read_sock_;
 
   struct RpcItem : public intrusive::slist_base_hook<intrusive::link_mode<intrusive::normal_link>> {
     RpcId id;

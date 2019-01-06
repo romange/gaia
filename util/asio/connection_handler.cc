@@ -99,8 +99,7 @@ void ConnectionHandler::Close() {
     if (socket_->is_open()) {
       system::error_code ec;
       VLOG(1) << "Before shutdown " << socket_->native_handle();
-      socket_->cancel(ec);
-      socket_->shutdown(socket_t::shutdown_both, ec);
+      socket_->Shutdown(ec);
       VLOG(1) << "After shutdown: " << ec << " " << ec.message();
       // socket::close() closes the underlying socket and cancels the pending operations.
       // HOWEVER the problem is that those operations return with ec = ok()

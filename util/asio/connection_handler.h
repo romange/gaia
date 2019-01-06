@@ -10,6 +10,8 @@
 
 #include <experimental/optional>
 
+#include "util/asio/fiber_socket.h"
+
 namespace util {
 
 class IoContextPool;
@@ -32,7 +34,6 @@ class ConnectionHandler {
  public:
   using ptr_t = ::boost::intrusive_ptr<ConnectionHandler>;
   using io_context = ::boost::asio::io_context;
-  using socket_t = ::boost::asio::ip::tcp::socket;
   using connection_hook_t = detail::connection_hook;
 
   connection_hook_t hook_;
@@ -78,7 +79,7 @@ class ConnectionHandler {
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
-  std::experimental::optional<socket_t> socket_;
+  std::experimental::optional<FiberSyncSocket> socket_;
 
   // socket.is_open() is unreliable and does not reflect close() status even if is called
   // in-thread.

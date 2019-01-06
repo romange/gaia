@@ -12,18 +12,17 @@
 #include "util/asio/asio_utils.h"
 #include "util/asio/io_context.h"
 
-DEFINE_uint32(rpc_server_buffer_size, 4096, "");
-
 namespace util {
 namespace rpc {
 
 using namespace std::chrono_literals;
 
+#define USE_FIBER_SOCKET 0
+
 namespace {
 
-using RpcConnList =
-      detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
-                    detail::constant_time_size<false>, detail::cache_last<false>>;
+using RpcConnList = detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
+                                  detail::constant_time_size<false>, detail::cache_last<false>>;
 
 thread_local RpcConnList flush_conn_list;
 
@@ -34,7 +33,7 @@ class Flusher : public IoContext::Cancellable {
   void Run() final;
   void Cancel() final;
 
-private:
+ private:
   bool stop_ = false;
   fibers::condition_variable cv_;
   fibers::mutex mu_;
@@ -73,10 +72,7 @@ constexpr size_t kRpcPoolSize = 32;
 
 RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge, IoContext* context)
     : ConnectionHandler(context),
-      bridge_(bridge),
-      buf_read_sock_(new BufferedReadAdaptor<tcp::socket>(*socket_, FLAGS_rpc_server_buffer_size)),
-      rpc_items_(kRpcPoolSize) {
-}
+      bridge_(bridge), rpc_items_(kRpcPoolSize) {}
 
 RpcConnectionHandler::~RpcConnectionHandler() {
   bridge_->Join();
@@ -105,13 +101,8 @@ void RpcConnectionHandler::OnCloseSocket() {
   // write in another handler or it passed this object exited due to locked wr_mu_.
   // In any case, Flusher can not hold reference to this object.
   std::lock_guard<fibers::mutex> ul(wr_mu_);
-  io_context_.Await([this] {
-    flush_conn_list.erase(RpcConnList::s_iterator_to(*this));
-  });
+  io_context_.Await([this] { flush_conn_list.erase(RpcConnList::s_iterator_to(*this)); });
 
-  /*if (flush_fiber_.joinable()) {
-    flush_fiber_.join();
-  }*/
   VLOG(1) << "After flush fiber join";
 }
 
@@ -123,7 +114,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
     return ec_;
 
   rpc::Frame frame;
-  ec_ = frame.Read(buf_read_sock_.get());
+  ec_ = frame.Read(&socket_.value());
   if (ec_) {
     return ec_;
   }
@@ -139,7 +130,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
 
   item->envelope.Resize(frame.header_size, frame.letter_size);
   auto rbuf_seq = item->buf_seq();
-  ec_ = buf_read_sock_->Read(rbuf_seq);
+  asio::read(*socket_, rbuf_seq, ec_);
   if (ec_) {
     VLOG(1) << "async_read " << ec_ << " /" << socket_->native_handle();
     return ec_;
@@ -194,8 +185,12 @@ void RpcConnectionHandler::FlushWrites() {
     ++item_index;
   }
   tmp.swap(outgoing_buf_);
-  size_t write_sz = asio::async_write(*socket_, write_seq_, yield[ec_]);
 
+#if USE_FIBER_SOCKET
+  size_t write_sz = asio::write(*socket_, write_seq_, ec_);
+#else
+  size_t write_sz = asio::async_write(socket_->next_layer(), write_seq_, yield[ec_]);
+#endif
   // We should use clear_and_dispose to delete items safely while unlinking them from tmp.
   tmp.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 

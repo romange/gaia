@@ -39,7 +39,7 @@ class FiberSyncSocket {
   // implementing it.
   template <typename BS> size_t write_some(const BS& bufs);
 
-  auto handle() { return sock_.native_handle(); }
+  auto native_handle() { return sock_.native_handle(); }
 
   bool is_open() const { return sock_.is_open(); }
 
@@ -51,6 +51,9 @@ class FiberSyncSocket {
   socket_t::endpoint_type remote_endpoint(error_code& ec) const {
     return sock_.remote_endpoint(ec);
   }
+ 
+  // For debugging.
+  socket_t& next_layer() { return sock_; }
 
  protected:
   template <typename MBS> size_t FetchFromRBuf(const MBS& bufs) {

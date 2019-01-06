@@ -172,7 +172,7 @@ system::error_code HttpHandler::HandleRequest() {
 
   system::error_code ec;
 
-  h2::async_read(*socket_, buffer, request, yield[ec]);
+  h2::read(*socket_, buffer, request, ec);
   if (ec) {
     return to_asio(ec);
   }

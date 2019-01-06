@@ -10,7 +10,6 @@
 
 #include "strings/unique_strings.h"
 #include "util/asio/connection_handler.h"
-#include "util/asio/yield.h"
 
 namespace util {
 namespace http {
@@ -39,22 +38,20 @@ extern const char kTextMime[];
 
 // This is the C++11 equivalent of a generic lambda.
 // The function object is used to send an HTTP message.
-template <typename Stream>
+template <typename FiberSyncStream>
 struct SendLambda {
   template <typename Body>
   using Response = ::boost::beast::http::response<Body>;
   using error_code = ::boost::system::error_code;
 
-  Stream& stream_;
+  FiberSyncStream& stream_;
   error_code ec;
 
-  explicit SendLambda(Stream& stream) : stream_(stream) {
+  explicit SendLambda(FiberSyncStream& stream) : stream_(stream) {
   }
 
   template <typename Body>
   void Invoke(Response<Body>&& msg) {
-    using fibers_ext::yield;
-
     // Determine if we should close the connection after
     // close_ = msg.need_eof();
 
@@ -64,7 +61,7 @@ struct SendLambda {
     msg.prepare_payload();
     ::boost::beast::http::response_serializer<Body> sr{msg};
 
-    ::boost::beast::http::async_write(stream_, sr, yield[ec]);
+    ::boost::beast::http::write(stream_, sr, ec);
   }
 };
 
@@ -75,7 +72,7 @@ class ListenerBase : public ListenerInterface {
   friend class HttpHandler;
 
  public:
-  typedef SendLambda<::boost::asio::ip::tcp::socket> SendFunction;
+  typedef SendLambda<FiberSyncSocket> SendFunction;
   typedef std::function<void(const QueryArgs&, SendFunction*)> RequestCb;
 
   // Returns true if a callback was registered.
