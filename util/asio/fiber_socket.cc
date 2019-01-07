@@ -97,7 +97,7 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
   while (is_open_) {
     if (status_) {
       error_code ec = Reconnect(hname, service);
-      VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message();
+      VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message() << " is_open: " << is_open_;
       if (ec && is_open_) {  // Only sleep for open socket for the next reconnect.
         this_fiber::sleep_for(10ms);
       }

@@ -104,7 +104,7 @@ class IoContext {
   // We use shared_ptr because of the shared ownership with the fibers scheduler.
   typedef std::shared_ptr<io_context> ptr_t;
 
-  void Stop() { context_ptr_->stop(); }
+  void Stop();
 
   io_context& raw_context() { return *context_ptr_; }
 

@@ -140,20 +140,32 @@ TEST_F(IoContextTest, RunAndStop) {
 class CancelImpl final : public IoContext::Cancellable {
   bool cancel_ = false;
   bool &finished_;
-
+  fibers::fiber fb_;
  public:
   CancelImpl(bool *finished) : finished_(*finished) {
   }
 
+  ~CancelImpl() {
+    CHECK(finished_);
+  }
+
   void Run() override {
+    fb_ = fibers::fiber([this] {
+      while (!cancel_) {
+        this_fiber::sleep_for(10ms);
+      }
+    });
+
     while (!cancel_) {
-      this_fiber::sleep_for(10ms);
+      this_fiber::sleep_for(1ms);
     }
     finished_ = true;
   }
 
   void Cancel() override {
     cancel_ = true;
+
+    fb_.join();
   }
 };
 

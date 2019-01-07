@@ -279,30 +279,37 @@ void IoContext::StartLoop(BlockingCounter* bc) {
   // It will block until MainLoop exits. See comment above.
   io_cntx.run_one();
 
-  if (cancellable_arr_.size() > 0) {
-    VLOG(1) << "Cancelling " << cancellable_arr_.size() << " cancellables";
-    // Shutdown sequence and cleanup.
-    for (auto& ptr : cancellable_arr_) {
-      AsyncFiber(&Cancellable::Cancel, ptr.first.get());
+  for (unsigned i = 0; i < 2; ++i) {
+    DVLOG(1) << "Cleanup Loop " << i;
+    while (io_cntx.poll() || scheduler->has_ready_fibers()) {
+      this_fiber::yield();  // while something happens, pass the ownership to other fiber.
     }
+    io_cntx.restart();
   }
-
-  while (io_cntx.poll() || scheduler->has_ready_fibers()) {
-    this_fiber::yield();  // while something happens, pass the ownership to other fiber.
-  }
-
-  io_cntx.restart();
-  while (io_cntx.poll() || scheduler->has_ready_fibers()) {
-    this_fiber::yield();  // while something happens, pass the ownership to other fiber.
-  }
-
-  DVLOG(1) << "SecondLoop Exited";
-  for (auto& ptr : cancellable_arr_) {
-    ptr.second.join();
-  }
-  cancellable_arr_.clear();
 
   VLOG(1) << "MainSwitch Resumes :" << main_resumes;
+}
+
+void IoContext::Stop() {
+  if (cancellable_arr_.size() > 0) {
+    fibers_ext::BlockingCounter cancel_bc(cancellable_arr_.size());
+
+    VLOG(1) << "Cancelling " << cancellable_arr_.size() << " cancellables";
+    // Shutdown sequence and cleanup.
+    for (auto& k_v : cancellable_arr_) {
+      AsyncFiber([&] {
+        k_v.first->Cancel();
+        cancel_bc.Dec();
+      });
+    }
+    cancel_bc.Wait();
+    for (auto& k_v : cancellable_arr_) {
+      k_v.second.join();
+    }
+    cancellable_arr_.clear();
+  }
+
+  context_ptr_->stop();
 }
 
 }  // namespace util
