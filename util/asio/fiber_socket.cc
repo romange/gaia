@@ -48,10 +48,10 @@ void FiberSyncSocket::Shutdown(error_code& ec) {
   auto cb = [&] {
     if (!is_open_)
       return;
-
     is_open_ = false;
     sock_.cancel(ec);
     sock_.shutdown(socket_t::shutdown_both, ec);
+    VLOG(1) << "Sock Shutdown";
     if (clientsock_data_) {
       VLOG(1) << "Sock Closed";
       clientsock_data_->worker_cv.notify_one();
@@ -97,8 +97,8 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
   while (is_open_) {
     if (status_) {
       error_code ec = Reconnect(hname, service);
-      if (ec) {
-        VLOG(1) << "Error " << ec << "/" << ec.message();
+      VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message();
+      if (ec && is_open_) {  // Only sleep for open socket for the next reconnect.
         this_fiber::sleep_for(10ms);
       }
       continue;
@@ -142,11 +142,20 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
 
 system::error_code FiberSyncSocket::Reconnect(const std::string& hname,
                                               const std::string& service) {
-  DCHECK(sock_.is_open() && clientsock_data_);
+  DCHECK(clientsock_data_);
   using namespace asio::ip;
 
   auto& asio_io_cntx = clientsock_data_->io_cntx->raw_context();
+//  asio::steady_timer timer(asio_io_cntx, clientsock_data_->connect_duration);
+
   tcp::resolver resolver(asio_io_cntx);
+
+  /*timer.async_wait([&](const system::error_code& ec) {
+    if (!ec) {  // Successfully expired.
+      VLOG(1) << "Cancelling resolver";
+      resolver.cancel();
+    }
+  });*/
 
   system::error_code ec;
   VLOG(1) << "Before AsyncResolve";
@@ -156,6 +165,7 @@ system::error_code FiberSyncSocket::Reconnect(const std::string& hname,
   if (ec) {
     return ec;
   }
+  DVLOG(1) << "After AsyncResolve";
 
   asio::steady_timer timer(asio_io_cntx, clientsock_data_->connect_duration);
   timer.async_wait([&](const system::error_code& ec) {
@@ -166,6 +176,8 @@ system::error_code FiberSyncSocket::Reconnect(const std::string& hname,
   });
 
   asio::async_connect(sock_, results, fibers_ext::yield[ec]);
+  DVLOG(1) << "After async_connect " << ec;
+
   if (!ec) {
     sock_.non_blocking(true);  // For some reason async_connect clears this option.
 

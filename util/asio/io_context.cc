@@ -169,10 +169,6 @@ void AsioScheduler::WaitTillFibersSuspend() {
   // block this fiber till all pending (ready) fibers are processed
   // == AsioScheduler::suspend_until() has been called.
 
-  // TODO: We might want to limit the number of processed fibers per iterations
-  // based on their priority and count to allow better responsiveness
-  // for handling io_svc requests. For example, to process all HIGH, and then limit
-  // all other fibers.
   std::unique_lock<fibers::mutex> lk(mtx_);
   DVLOG(2) << "WaitTillFibersSuspend:Start";
   cnd_.wait(lk);
@@ -280,21 +276,27 @@ void IoContext::StartLoop(BlockingCounter* bc) {
   });
 
   // Bootstrap - launch the callback handler above.
-  // It will block until MainLoop exits.
+  // It will block until MainLoop exits. See comment above.
   io_cntx.run_one();
 
-  VLOG_IF(1, cancellable_arr_.size() > 0) << "Cancelling "
-        << cancellable_arr_.size() << " cancellables";
-
-  // Shutdown sequence and cleanup.
-  for (auto& ptr : cancellable_arr_) {
-    ptr.first->Cancel();
+  if (cancellable_arr_.size() > 0) {
+    VLOG(1) << "Cancelling " << cancellable_arr_.size() << " cancellables";
+    // Shutdown sequence and cleanup.
+    for (auto& ptr : cancellable_arr_) {
+      AsyncFiber(&Cancellable::Cancel, ptr.first.get());
+    }
   }
 
   while (io_cntx.poll() || scheduler->has_ready_fibers()) {
     this_fiber::yield();  // while something happens, pass the ownership to other fiber.
   }
 
+  io_cntx.restart();
+  while (io_cntx.poll() || scheduler->has_ready_fibers()) {
+    this_fiber::yield();  // while something happens, pass the ownership to other fiber.
+  }
+
+  DVLOG(1) << "SecondLoop Exited";
   for (auto& ptr : cancellable_arr_) {
     ptr.second.join();
   }

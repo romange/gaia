@@ -35,6 +35,12 @@ class SentrySink : public GlogAsioSink {
     return severity < google::GLOG_ERROR;
   }
 
+  void Cancel() final {
+    GlogAsioSink::Cancel();
+    client_.Shutdown();
+    VLOG(1) << "Sentry::Cancel End";
+  }
+
  private:
   string GenSentryBody(const Item& item);
 
