@@ -61,82 +61,6 @@ class TestGlogClient : public GlogAsioSink {
   }
 };
 
-}  // namespace
-
-class IoContextTest : public testing::Test {
- protected:
-  void SetUp() override {
-  }
-
-  void TearDown() {
-  }
-};
-
-TEST_F(IoContextTest, Basic) {
-  io_context cntx(1);  // no locking
-  int i = 0;
-  cntx.post([&i] { ++i; });
-  EXPECT_EQ(0, i);
-  EXPECT_EQ(1, cntx.run_one());
-  EXPECT_EQ(1, i);
-  EXPECT_EQ(0, cntx.run_one());
-}
-
-TEST_F(IoContextTest, Stop) {
-  io_context cntx;
-  int i = 0;
-  auto inc = [&i] { ++i; };
-  cntx.post(inc);
-  EXPECT_EQ(1, cntx.poll_one());
-  EXPECT_EQ(1, i);
-  cntx.post(inc);
-  cntx.stop();
-  EXPECT_EQ(0, cntx.poll_one());
-  EXPECT_EQ(1, i);
-  cntx.restart();
-  EXPECT_EQ(1, cntx.poll_one());
-  EXPECT_EQ(2, i);
-}
-
-TEST_F(IoContextTest, FiberJoin) {
-  IoContextPool pool(1);
-  pool.Run();
-  IoContext &cntx = pool.GetNextContext();
-
-  int i = 0;
-  auto cb = [&] {
-    ++i;
-    EXPECT_TRUE(cntx.InContextThread());
-  };
-  cntx.Await(cb);
-  EXPECT_EQ(1, i);
-
-  fibers::fiber fb;
-  EXPECT_FALSE(fb.joinable());
-  fb = cntx.LaunchFiber(cb);
-  EXPECT_TRUE(fb.joinable());
-  fb.join();
-  EXPECT_EQ(2, i);
-}
-
-TEST_F(IoContextTest, Results) {
-  IoContextPool pool(1);
-  pool.Run();
-  IoContext& cntx = pool.GetNextContext();
-
-  int i = cntx.Await([] { return 5;});
-  EXPECT_EQ(5, i);
-
-  i = cntx.AwaitSafe([&] { return i + 5;});
-  EXPECT_EQ(10, i);
-}
-
-TEST_F(IoContextTest, RunAndStop) {
-  IoContextPool pool(1);
-  pool.Run();
-  pool.Stop();
-}
-
 class CancelImpl final : public IoContext::Cancellable {
   bool cancel_ = false;
   bool &finished_;
@@ -169,15 +93,99 @@ class CancelImpl final : public IoContext::Cancellable {
   }
 };
 
-TEST_F(IoContextTest, AttachCancellable) {
-  IoContextPool pool(1);
-  pool.Run();
+}  // namespace
 
+class IoContextTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    pool_ = std::make_unique<IoContextPool>(1);
+    pool_->Run();
+  }
+
+  void TearDown() {
+    pool_->Stop();
+  }
+  std::unique_ptr<IoContextPool> pool_;
+};
+
+TEST_F(IoContextTest, Basic) {
+  io_context cntx(1);  // no locking
+  int i = 0;
+  cntx.post([&i] { ++i; });
+  EXPECT_EQ(0, i);
+  EXPECT_EQ(1, cntx.run_one());
+  EXPECT_EQ(1, i);
+  EXPECT_EQ(0, cntx.run_one());
+}
+
+TEST_F(IoContextTest, Stop) {
+  io_context cntx;
+  int i = 0;
+  auto inc = [&i] { ++i; };
+  cntx.post(inc);
+  EXPECT_EQ(1, cntx.poll_one());
+  EXPECT_EQ(1, i);
+  cntx.post(inc);
+  cntx.stop();
+  EXPECT_EQ(0, cntx.poll_one());
+  EXPECT_EQ(1, i);
+  cntx.restart();
+  EXPECT_EQ(1, cntx.poll_one());
+  EXPECT_EQ(2, i);
+}
+
+TEST_F(IoContextTest, FiberJoin) {
+  IoContext &cntx = pool_->GetNextContext();
+
+  int i = 0;
+  auto cb = [&] {
+    ++i;
+    EXPECT_TRUE(cntx.InContextThread());
+  };
+  cntx.Await(cb);
+  EXPECT_EQ(1, i);
+
+  fibers::fiber fb;
+  EXPECT_FALSE(fb.joinable());
+  fb = cntx.LaunchFiber(cb);
+  EXPECT_TRUE(fb.joinable());
+  fb.join();
+  EXPECT_EQ(2, i);
+}
+
+TEST_F(IoContextTest, Results) {
+  IoContext& cntx = pool_->GetNextContext();
+
+  int i = cntx.Await([] { return 5;});
+  EXPECT_EQ(5, i);
+
+  i = cntx.AwaitSafe([&] { return i + 5;});
+  EXPECT_EQ(10, i);
+}
+
+TEST_F(IoContextTest, RunAndStop) {
+}
+
+TEST_F(IoContextTest, RunAndStopFromContext) {
+  IoContext& cntx = pool_->GetNextContext();
+  cntx.AwaitSafe([this] { pool_->Stop(); });
+}
+
+TEST_F(IoContextTest, AttachCancellableStopFromMain) {
   bool cancellable_finished = false;
+  IoContext& cntx = pool_->GetNextContext();
+  cntx.AttachCancellable(new CancelImpl(&cancellable_finished));
 
-  pool.GetNextContext().AttachCancellable(new CancelImpl(&cancellable_finished));
+  pool_->Stop();
+  EXPECT_TRUE(cancellable_finished);
+}
 
-  pool.Stop();
+TEST_F(IoContextTest, AttachCancellableStopFromContext) {
+  bool cancellable_finished = false;
+  IoContext& cntx = pool_->GetNextContext();
+  cntx.AttachCancellable(new CancelImpl(&cancellable_finished));
+
+  cntx.AwaitSafe([this] { pool_->Stop(); });
   EXPECT_TRUE(cancellable_finished);
 }
 
@@ -202,18 +210,15 @@ TEST_F(IoContextTest, Sink) {
 }
 
 TEST_F(IoContextTest, Glog) {
-  IoContextPool pool(1);
-  pool.Run();
-
   unsigned num_calls = 0;
-  pool.GetNextContext().AttachCancellable(new TestGlogClient(&num_calls));
+  pool_->GetNextContext().AttachCancellable(new TestGlogClient(&num_calls));
   for (unsigned i = 0; i < 32; ++i) {
     LOG(INFO) << "TEST";
   }
   for (int i = 0; num_calls < 32 && i < 5; ++i) {
     SleepForMilliseconds(10);
   }
-  pool.Stop();
+  pool_->Stop();
   EXPECT_GE(32, num_calls);
 }
 
