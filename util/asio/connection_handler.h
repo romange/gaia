@@ -81,10 +81,6 @@ class ConnectionHandler {
 
   std::experimental::optional<FiberSyncSocket> socket_;
 
-  // socket.is_open() is unreliable and does not reflect close() status even if is called
-  // in-thread.
-  // TODO: To remove an use FiberSyncSocket::is_open().
-  bool is_open_ = false;
   IoContext& io_context_;
 
  private:

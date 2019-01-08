@@ -46,7 +46,7 @@ void ConnectionHandler::Init(asio::ip::tcp::socket&& sock) {
     LOG(ERROR) << "Could not make socket nonblocking " << ec.message() << " " << ec;
 
   socket_.emplace(std::move(sock));
-  is_open_ = true;
+  CHECK(socket_->is_open());
 }
 
 /*****************************************************************************
@@ -64,7 +64,7 @@ void ConnectionHandler::RunInIOThread() {
   system::error_code ec;
 
   try {
-    while (is_open_) {
+    while (socket_->is_open()) {
       ec = HandleRequest();
       if (ec) {
         if (!IsExpectedFinish(ec)) {
@@ -89,25 +89,20 @@ void ConnectionHandler::RunInIOThread() {
 }
 
 void ConnectionHandler::Close() {
-  if (!is_open_)
-    return;
-
-  is_open_ = false;
-
   // Run Listener hook in the connection thread.
   io_context_.AwaitSafe([this] {
-    if (socket_->is_open()) {
-      system::error_code ec;
-      VLOG(1) << "Before shutdown " << socket_->native_handle();
-      socket_->Shutdown(ec);
-      VLOG(1) << "After shutdown: " << ec << " " << ec.message();
-      // socket::close() closes the underlying socket and cancels the pending operations.
-      // HOWEVER the problem is that those operations return with ec = ok()
-      // so the flow  is not aware that the socket is closed.
-      // That can lead to nasty bugs. Therefore the only place we close
-      // socket is from the listener loop. Here we only signal that we are ready to close.
-    }
+    if (!socket_->is_open())
+      return;
 
+    system::error_code ec;
+    VLOG(1) << "Before shutdown " << socket_->native_handle();
+    socket_->Shutdown(ec);
+    VLOG(1) << "After shutdown: " << ec << " " << ec.message();
+    // socket::close() closes the underlying socket and cancels the pending operations.
+    // HOWEVER the problem is that those operations return with ec = ok()
+    // so the flow  is not aware that the socket is closed.
+    // That can lead to nasty bugs. Therefore the only place we close
+    // socket is from the listener loop. Here we only signal that we are ready to close.
     OnCloseSocket();
   });
 }

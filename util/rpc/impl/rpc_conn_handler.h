@@ -34,22 +34,20 @@ class RpcConnectionHandler : public ConnectionHandler {
                                         &RpcConnectionHandler::flush_hook_> ;
 
   // Called by Flusher fiber to flush the outgoing writes.
-  void PollAndFlushWrites() {
-    if (!is_open_ || !socket_->is_open() || outgoing_buf_.empty())
-      return;
-    FlushWrites();
+  bool PollAndFlushWrites() {
+    if (!socket_->is_open() || outgoing_buf_.empty())
+      return false;
+    return FlushWrites();
   }
 
  private:
-  // protected by wr_mu_ to preserve transcational semantics:
-  void FlushWrites();
+  // protected by wr_mu_ to preserve transcational semantics.
+  // Returns true if the flush ocurred.
+  bool FlushWrites();
 
   // The following methods are run in the socket thread (thread that calls HandleRequest.)
   void OnOpenSocket() final;
   void OnCloseSocket() final;
-  bool ShouldFlush();
-
-  using socket_t = asio::ip::tcp::socket;
 
   std::unique_ptr<ConnectionBridge> bridge_;
 
@@ -74,6 +72,7 @@ class RpcConnectionHandler : public ConnectionHandler {
   fibers::mutex wr_mu_;
   std::vector<asio::const_buffer> write_seq_;
   base::PODArray<std::array<uint8_t, rpc::Frame::kMaxByteSize>> frame_buf_;
+  uint64_t req_flushes_ = 0;
 };
 
 }  // namespace rpc

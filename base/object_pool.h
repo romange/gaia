@@ -29,6 +29,7 @@ class ObjectPool {
     available_ = storage_sz;
   }
 
+  // If the object pool is empty returns T from the heap.
   T* Get() {
     if (available_ == 0)
       return new T();
@@ -62,6 +63,7 @@ class ObjectPool {
     return available_;
   }
 
+  // Returns true if the object pool is empty.
   bool empty() const {
     return available_ == 0;
   }
