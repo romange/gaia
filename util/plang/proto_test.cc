@@ -24,5 +24,10 @@ TEST_F(ProtoTest, Clear) {
   Arena arena;
   Person* person = Arena::CreateMessage<Person>(&arena);
   person->mutable_account()->set_bank_name("Foo");
+  EXPECT_EQ(&arena, person->GetArena());
+
+  Person::PhoneNumber* pn = new Person::PhoneNumber;
+  person->mutable_phone()->AddAllocated(pn);
+  EXPECT_EQ("Foo", person->account().bank_name());
   person->Clear();
 }
