@@ -21,7 +21,12 @@ function JsonToHTML(json_obj) {
 				s += span(key + ':', 'key_text_bold')
 				s += objectObjectToHTML(value);
 			} else {
-				s += key_text(key) + value_text(value);
+				s += key_text(key);
+				if (key.endsWith('time') && Number.isInteger(value)) {
+					var date = new Date(timestamp*1000);
+					value = date.toISOString().slice(0, 19);
+				}
+				s += value_text(value);
 			}
 		});
 		return s;
