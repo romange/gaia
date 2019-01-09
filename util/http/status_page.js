@@ -4,7 +4,7 @@ function JsonToHTML(json_obj) {
 		value = json_obj[key];
 		str += "<div style='margin-top:20px;'>" + span(key, 'title_text');
 		if (!isObject(value)) {
-			str += value_text(value);
+			str += value_text(key, value);
 		} else {
 			str += objectObjectToHTML(value);
 		}
@@ -22,11 +22,7 @@ function JsonToHTML(json_obj) {
 				s += objectObjectToHTML(value);
 			} else {
 				s += key_text(key);
-				if (key.endsWith('time') && Number.isInteger(value)) {
-					var date = new Date(timestamp*1000);
-					value = date.toISOString().slice(0, 19);
-				}
-				s += value_text(value);
+				s += value_text(key, value);
 			}
 		});
 		return s;
@@ -42,7 +38,12 @@ function JsonToHTML(json_obj) {
 		return span(t + ':', 'key_text');
 	}
 
-	function value_text(t) {
+	function value_text(k, t) {
+		if (k.endsWith('time') && Number.isInteger(t)) {
+			var date = new Date(t*1000);
+			t = date.toISOString().slice(0, 19);
+		}
+
 		return span(t + ' ', 'value_text');
 	}
 
