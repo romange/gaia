@@ -20,8 +20,15 @@ TEST_F(ProtoTest, Basic) {
   person.set_name("Roman");
 }
 
-TEST_F(ProtoTest, Clear) {
-  Arena arena;
+TEST_F(ProtoTest, Arena) {
+  char buf[1024];
+  ArenaOptions opts;
+  opts.initial_block_size = sizeof(buf);
+  opts.initial_block = buf;
+
+  Arena arena(opts);
+  EXPECT_EQ(sizeof(buf), arena.SpaceAllocated());
+
   Person* person = Arena::CreateMessage<Person>(&arena);
   person->mutable_account()->set_bank_name("Foo");
   EXPECT_EQ(&arena, person->GetArena());
@@ -30,4 +37,7 @@ TEST_F(ProtoTest, Clear) {
   person->mutable_phone()->AddAllocated(pn);
   EXPECT_EQ("Foo", person->account().bank_name());
   person->Clear();
+  EXPECT_GT(arena.SpaceUsed(), 0);
+  arena.Reset();
+  EXPECT_EQ(sizeof(buf), arena.SpaceAllocated());
 }
