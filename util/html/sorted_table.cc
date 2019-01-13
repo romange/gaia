@@ -11,8 +11,11 @@ using std::string;
 namespace {
 
 struct THFormatter {
+  const char* token;
+
+  THFormatter(const char* t) : token(t) {}
   void operator()(string* out, StringPiece str) const {
-    out->append("<th>").append(str.data(), str.size()).append("</th>");
+    absl::StrAppend(out, "<", token, ">", str, "</", token, ">");
   }
 };
 
@@ -43,7 +46,7 @@ string SortedTable::HtmlStart() {
 }
 
 void SortedTable::StartTable(const std::vector<StringPiece>& header, string* dest) {
-  string col_names = absl::StrCat("\n", absl::StrJoin(header, "\n", THFormatter{}), "\n");
+  string col_names = absl::StrCat("\n", absl::StrJoin(header, "\n", THFormatter{"th"}), "\n");
   dest->append(R"(
   <table class="tablesorter" id="tablesorter">
     <thead class="thead-dark"> <!-- add class="thead-light" for a light header -->)").
@@ -79,7 +82,13 @@ void SortedTable::StartTable(const std::vector<StringPiece>& header, string* des
     <tbody>)");
 }
 
-void SortedTable::EndTable(std::string* dest) { dest->append("</tbody></table>\n"); }
+void SortedTable::EndTable(std::string* dest) {
+  dest->append("</tbody></table>\n");
+}
+
+void SortedTable::Row(const std::vector<StringPiece>& row, std::string* dest) {
+  absl::StrAppend(dest, "<tr>\n", absl::StrJoin(row, "\n", THFormatter{"td"}), "</tr>\n");
+}
 
 }  // namespace html
 }  // namespace util

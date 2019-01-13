@@ -34,10 +34,15 @@ int main(int argc, char** argv) {
   listener.RegisterCb("/foo", false, cb);
 
   auto table_cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
-    http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
-    resp.body() = html::SortedTable::HtmlStart();
-    html::SortedTable::StartTable({"Col1", "Col2", "Col3"}, &resp.body());
+    using html::SortedTable;
 
+    http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
+    resp.body() = SortedTable::HtmlStart();
+    SortedTable::StartTable({"Col1", "Col2", "Col3"}, &resp.body());
+    for (size_t i = 0; i < 10; ++i) {
+      SortedTable::Row({"Val1", "Val2", "Val3"}, &resp.body());
+    }
+    SortedTable::EndTable(&resp.body());
     return send->Invoke(std::move(resp));
   };
   listener.RegisterCb("/table", false, table_cb);
