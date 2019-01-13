@@ -5,6 +5,7 @@
 #include "util/asio/io_context_pool.h"
 
 #include "util/http/http_conn_handler.h"
+#include "util/html/sorted_table.h"
 
 #include "absl/strings/str_join.h"
 #include "base/init.h"
@@ -31,6 +32,17 @@ int main(int argc, char** argv) {
   };
 
   listener.RegisterCb("/foo", false, cb);
+
+  auto table_cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
+    http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
+    resp.body() = html::SortedTable::HtmlStart();
+    html::SortedTable::StartTable({"Col1", "Col2", "Col3"}, &resp.body());
+
+    return send->Invoke(std::move(resp));
+  };
+  listener.RegisterCb("/table", false, table_cb);
+
+
   uint16_t port = server.AddListener(FLAGS_port, &listener);
   LOG(INFO) << "Listening on port " << port;
 

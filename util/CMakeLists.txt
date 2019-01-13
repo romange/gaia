@@ -30,6 +30,7 @@ cxx_test(pb2json_test pb2json addressbook_proto LABELS CI)
 
 add_subdirectory(asio)
 add_subdirectory(http)
+add_subdirectory(html)
 add_subdirectory(math)
 add_subdirectory(coding)
 add_subdirectory(plang)
