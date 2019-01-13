@@ -206,7 +206,7 @@ TEST_F(RpcTest, Sleep) {
   ASSERT_EQ(asio::error::timed_out, ec) << ec.message();  // expect timeout.
 
   envelope.header.clear();
-  ec = channel_->SendSync(20, &envelope);
+  ec = channel_->SendSync(80, &envelope);
   ASSERT_FALSE(ec) << ec.message();  // expect normal execution.
 }
 
