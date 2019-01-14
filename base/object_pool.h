@@ -21,8 +21,11 @@ class ObjectPool {
   };
 
  public:
+  class Deleter;
+  using unique_ptr = std::unique_ptr<T, Deleter>;
+
   explicit ObjectPool(size_t storage_sz)
-      : storage_(new Item[storage_sz]), end_(storage_.get() + storage_sz) {
+      : storage_(new Item[storage_sz]), end_(reinterpret_cast<char*>(storage_.get() + storage_sz)) {
     for (size_t i = 0; i < storage_sz; ++i) {
       storage_[i].next = i + 1;
     }
@@ -41,6 +44,10 @@ class ObjectPool {
     return &item.t;
   }
 
+  unique_ptr make_unique() {
+    return unique_ptr(Get(), Deleter{this});
+  }
+
   void Release(T* t) {
     if (!IsFrom(t)) {
       delete t;
@@ -55,8 +62,8 @@ class ObjectPool {
   }
 
   bool IsFrom(const T* t) const {
-    const Item* item = reinterpret_cast<const Item*>(t);
-    return item >= storage_.get() && item < end_;
+    const char* addr = reinterpret_cast<const char*>(t);
+    return addr >= reinterpret_cast<const char*>(storage_.get()) && addr < end_;
   }
 
   size_t available() const {
@@ -68,9 +75,16 @@ class ObjectPool {
     return available_ == 0;
   }
 
+  class Deleter {
+    ObjectPool* pool_;
+   public:
+    Deleter(ObjectPool* pool) : pool_(pool) {}
+    void operator()(T* t) { pool_->Release(t); }
+  };
+
  private:
   std::unique_ptr<Item[]> storage_;
-  Item* end_;
+  char* end_;
   size_t avail_index_ = 0, available_ = 0;
 };
 

@@ -127,10 +127,11 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   }
 
   // We use item for reading the envelope.
-  RpcItem* item = rpc_items_.Get();
+  auto item_ptr = rpc_items_.make_unique();
 
-  item->envelope.Resize(frame.header_size, frame.letter_size);
-  auto rbuf_seq = item->buf_seq();
+  Envelope* envelope = &item_ptr->envelope;
+  envelope->Resize(frame.header_size, frame.letter_size);
+  auto rbuf_seq = item_ptr->buf_seq();
   asio::read(*socket_, rbuf_seq, ec_);
   if (ec_) {
     VLOG(1) << "async_read " << ec_ << " /" << socket_->native_handle();
@@ -145,19 +146,17 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   // Please note that writer changes the value of 'item' field (it's mutable),
   // so only for the first outgoing envelope it uses the same RpcItem used for reading the data
   // to reduce allocations.
-  auto writer = [rpc_id = frame.rpc_id, item, this](Envelope&& env) mutable {
+  auto writer = [rpc_id = frame.rpc_id, item = item_ptr.release(), this](Envelope&& env) mutable {
     RpcItem* next = item ? item : rpc_items_.Get();
 
     next->envelope = std::move(env);
     next->id = rpc_id;
     outgoing_buf_.push_back(*next);
-
-    // after the first use we can not anymore, because it's sent to the outgoing_buf_
     item = nullptr;
   };
 
   // Might by asynchronous, depends on the bridge_.
-  bridge_->HandleEnvelope(frame.rpc_id, &item->envelope, std::move(writer));
+  bridge_->HandleEnvelope(frame.rpc_id, envelope, std::move(writer));
 
   return ec_;
 }
