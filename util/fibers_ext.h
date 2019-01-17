@@ -5,6 +5,7 @@
 
 #include <boost/fiber/channel_op_status.hpp>
 #include <boost/fiber/condition_variable.hpp>
+#include <experimental/optional>
 #include <ostream>
 
 namespace std {
@@ -99,6 +100,49 @@ class BlockingCounter {
 
   ::boost::fibers::condition_variable cond_;
   ::boost::fibers::mutex mutex_;
+};
+
+// For synchronizing fibers in single-threaded environment.
+struct NoOpLock {
+  void lock() {}
+  void unlock() {}
+};
+
+template<typename Pred> void Await(::boost::fibers::condition_variable_any& cv, Pred&& pred) {
+  NoOpLock lock;
+  cv.wait(lock, std::forward<Pred>(pred));
+}
+
+// Single threaded synchronization primitive between fibers.
+// fibers::unbufferred_channel has bad design with respect to move semantics and
+// "try_push" method because it will move the value even if it was not pushed.
+// Therefore, for single producer, single consumer single threaded case we can use this
+// Cell class for emulating unbufferred_channel.
+template<typename T> class Cell {
+  std::experimental::optional<T> val_;
+  ::boost::fibers::condition_variable_any cv_;
+ public:
+  bool IsEmpty() const { return !bool(val_); }
+
+  // Might block the calling fiber.
+  void Emplace(T&& val) {
+    fibers_ext::Await(cv_, [this] { return IsEmpty();});
+    val_.emplace(std::forward<T>(val));
+    cv_.notify_one();
+  }
+
+  void WaitTillFull() {
+    fibers_ext::Await(cv_, [this] { return !IsEmpty();});
+  }
+
+  T& value() {
+    return *val_;   // optional stays engaged.
+  }
+
+  void Clear() {
+    val_ = std::experimental::nullopt;
+    cv_.notify_one();
+  }
 };
 
 }  // namespace fibers_ext
