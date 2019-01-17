@@ -78,7 +78,7 @@ class ObjectPool {
   class Deleter {
     ObjectPool* pool_;
    public:
-    Deleter(ObjectPool* pool) : pool_(pool) {}
+    Deleter(ObjectPool* pool = nullptr) : pool_(pool) {}
     void operator()(T* t) { pool_->Release(t); }
   };
 
