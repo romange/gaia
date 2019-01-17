@@ -52,38 +52,33 @@ void SortedTable::StartTable(const std::vector<StringPiece>& header, string* des
     <thead class="thead-dark"> <!-- add class="thead-light" for a light header -->)").
   append(absl::StrCat("<tr>", col_names, "</tr>", "</thead><tfoot>\n"));
   dest->append(absl::StrCat("<tr>", col_names));
-  dest->append(
-    R"(</tr>
-       <tr>
-          <th colspan="3" class="ts-pager">
-            <div class="form-inline">
-              <div class="btn-group btn-group-sm mx-1" role="group">
-                <button type="button" class="btn btn-secondary first" title="first">⇤</button>
-                <button type="button" class="btn btn-secondary prev" title="previous">←</button>
-              </div>
-              <span class="pagedisplay"></span>
-              <div class="btn-group btn-group-sm mx-1" role="group">
-                <button type="button" class="btn btn-secondary next" title="next">→</button>
-                <button type="button" class="btn btn-secondary last" title="last">⇥</button>
-              </div>
-            </div>
-            <div>
-                <select class="form-control-sm custom-select px-1 pagesize" title="Select page size">
-                    <option selected="selected" value="10">10</option>
-                    <option value="20">20</option>
-                    <option value="30">30</option>
-                    <option value="all">All Rows</option>
-                  </select>
-                  <select class="form-control-sm custom-select px-4 mx-1 pagenum" title="Select page number"></select>
-            </div>
-          </th>
-        </tr>
-      </tfoot>
+  dest->append(R"(</tr> </tfoot>
     <tbody>)");
 }
 
 void SortedTable::EndTable(std::string* dest) {
   dest->append("</tbody></table>\n");
+  dest->append(R"(<div class="ts-pager">
+    <form>
+      <div class="btn-group btn-group-sm mx-1" role="group">
+        <button type="button" class="btn btn-secondary first" title="first">⇤</button>
+        <button type="button" class="btn btn-secondary prev" title="previous">←</button>
+      </div>
+      <span class="pagedisplay"></span>
+      <div class="btn-group btn-group-sm mx-1" role="group">
+        <button type="button" class="btn btn-secondary next" title="next">→</button>
+        <button type="button" class="btn btn-secondary last" title="last">⇥</button>
+      </div>
+
+      <select class="form-control-sm custom-select px-1 pagesize" title="Select page size">
+          <option selected="selected" value="10">10</option>
+          <option value="20">20</option>
+          <option value="30">30</option>
+          <option value="all">All Rows</option>
+        </select>
+        <select class="form-control-sm custom-select px-4 mx-1 pagenum" title="Select page number"></select>
+    </form>
+  </div>)");
 }
 
 void SortedTable::Row(const std::vector<StringPiece>& row, std::string* dest) {

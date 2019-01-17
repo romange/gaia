@@ -36,11 +36,16 @@ int main(int argc, char** argv) {
   auto table_cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
     using html::SortedTable;
 
+    auto cell = [](auto i, auto j) {
+      return absl::StrCat("Val", i, "_", j);
+    };
+
+
     http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
     resp.body() = SortedTable::HtmlStart();
-    SortedTable::StartTable({"Col1", "Col2", "Col3"}, &resp.body());
-    for (size_t i = 0; i < 10; ++i) {
-      SortedTable::Row({"Val1", "Val2", "Val3"}, &resp.body());
+    SortedTable::StartTable({"Col1", "Col2", "Col3", "Col4"}, &resp.body());
+    for (size_t i = 0; i < 300; ++i) {
+      SortedTable::Row({cell(1, i), cell(2, i), cell(3, i), cell(4, i)}, &resp.body());
     }
     SortedTable::EndTable(&resp.body());
     return send->Invoke(std::move(resp));
