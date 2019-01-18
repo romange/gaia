@@ -3,12 +3,12 @@
 //
 #pragma once
 
+#include <absl/types/optional.h>
+
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/slist_hook.hpp>
 #include <boost/smart_ptr/intrusive_ptr.hpp>
-
-#include <experimental/optional>
 
 #include "util/asio/fiber_socket.h"
 
@@ -79,7 +79,7 @@ class ConnectionHandler {
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
 
-  std::experimental::optional<FiberSyncSocket> socket_;
+  absl::optional<FiberSyncSocket> socket_;
 
   IoContext& io_context_;
 

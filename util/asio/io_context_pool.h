@@ -9,7 +9,7 @@
 
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/fiber/fiber.hpp>
-#include <experimental/optional>
+#include <absl/types/optional.h>
 
 #include "util/asio/io_context.h"
 #include "util/fibers_ext.h"
@@ -94,7 +94,7 @@ class IoContextPool {
   std::vector<IoContext> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
-    std::experimental::optional<work_guard_t> work;
+    absl::optional<work_guard_t> work;
   };
 
   std::vector<TInfo> thread_arr_;

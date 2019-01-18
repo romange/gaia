@@ -72,7 +72,7 @@ void IoContextPool::Stop() {
   }
 
   for (TInfo& tinfo : thread_arr_) {
-    tinfo.work->reset();
+    tinfo.work.reset();
   }
 
   for (size_t i = 0; i <thread_arr_.size(); ++i) {
