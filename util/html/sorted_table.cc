@@ -27,7 +27,6 @@ string SortedTable::HtmlStart() {
 <html>
 <head>
   <meta charset="UTF-8">
-  <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.1/css/theme.bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.1/css/theme.bootstrap_4.min.css"> -->
   <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.1/css/theme.blue.min.css">
   <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.1/css/jquery.tablesorter.pager.min.css">
@@ -63,13 +62,10 @@ void SortedTable::EndTable(std::string* dest) {
       <div class="btn-group btn-group-sm mx-1" role="group">
         <button type="button" class="btn btn-secondary first" title="first">⇤</button>
         <button type="button" class="btn btn-secondary prev" title="previous">←</button>
-      </div>
-      <span class="pagedisplay"></span>
-      <div class="btn-group btn-group-sm mx-1" role="group">
         <button type="button" class="btn btn-secondary next" title="next">→</button>
         <button type="button" class="btn btn-secondary last" title="last">⇥</button>
       </div>
-
+      <span class="pagedisplay"></span>
       <select class="form-control-sm custom-select px-1 pagesize" title="Select page size">
           <option selected="selected" value="10">10</option>
           <option value="20">20</option>

@@ -175,8 +175,7 @@ function(cxx_proto_lib name)
            DEPENDS ${name}.proto protobuf_project ${parsed_DEPENDS} ${parsed_GEN_DEPENDS}
            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-  set_source_files_properties(${cxx_out_files}
-                              PROPERTIES GENERATED TRUE)
+  set_source_files_properties(${cxx_out_files} PROPERTIES GENERATED TRUE)
   set(lib_name "${name}_proto")
   add_library(${lib_name} ${cxx_out_files})
   target_link_libraries(${lib_name} ${parsed_DEPENDS} TRDP::protobuf)
