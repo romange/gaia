@@ -244,7 +244,7 @@ add_third_party(
 add_third_party(
   xxhash
   GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
-  GIT_TAG v0.6.4
+  GIT_TAG v0.6.5
   SOURCE_SUBDIR cmake_unofficial
   CMAKE_PASS_FLAGS "-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF"
 )

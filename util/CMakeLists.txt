@@ -12,14 +12,13 @@ add_dependencies(pb2json rapidjson_project)
 
 cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
 
-
 add_library(threads sp_task_pool.cc)
 cxx_link(threads base)
 
 cxx_test(sp_task_pool_test base threads util LABELS CI)
 
-add_library(fibers sq_threadpool.cc)
-cxx_link(fibers base status strings Boost::fiber Boost::thread)
+add_library(fibers sq_threadpool.cc fiberqueue_threadpool.cc)
+cxx_link(fibers base status strings Boost::fiber)
 
 add_library(proc_stats proc_stats.cc spawn.cc)
 cxx_link(proc_stats strings)
