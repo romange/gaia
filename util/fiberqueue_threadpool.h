@@ -4,6 +4,7 @@
 #pragma once
 
 #include <boost/fiber/buffered_channel.hpp>
+#include "util/fibers_ext.h"
 
 namespace util {
 
@@ -20,9 +21,26 @@ class FiberQueueThreadPool {
     return input_.push(std::forward<F>(f));
   }
 
+  template <typename Func> auto Await(Func&& f) -> decltype(f()) {
+    fibers_ext::Done done;
+    using ResultType = decltype(f());
+    detail::ResultMover<ResultType> mover;
+
+    auto op_st = Add([&, f = std::forward<Func>(f)]() mutable {
+      mover.Apply(f);
+      done.Notify();
+    });
+    VerifyChannelSt(op_st);
+
+    done.Wait();
+    return std::move(mover).get();
+  }
+
   void Shutdown();
 
  private:
+  static void VerifyChannelSt(boost::fibers::channel_op_status st);
+
   void WorkerFunction();
 
   std::vector<pthread_t> workers_;
@@ -30,4 +48,3 @@ class FiberQueueThreadPool {
 };
 
 }  // namespace util
-

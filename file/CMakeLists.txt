@@ -19,6 +19,10 @@ set_target_properties(list_file_py PROPERTIES PREFIX "")
 target_link_libraries(list_file_py python2.7 file)
 add_include(list_file_py "/usr/include/python2.7/")
 
+add_library(fiber_file fiber_file.cc)
+cxx_link(fiber_file file fibers)
+
+
 cxx_test(file_test file lz4_file LABELS CI)
 cxx_test(list_file_test file test_util LABELS CI)
 cxx_test(proto_writer_test proto_writer proto_writer_test_proto LABELS CI)

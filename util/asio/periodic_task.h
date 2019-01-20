@@ -11,9 +11,8 @@
 namespace util {
 
 // Single threaded but fiber friendly PeriodicTask. Runs directly from IO fiber therefore
-// should run only cpu, non-blocking tasks which should
-// not block the calling fiber.
-// 'Cancel' blocks the calling fiber until the scheduled callback finished running.
+// should run only cpu, non-blocking tasks which should not block the calling fiber.
+// 'Cancel' may block the calling fiber until the scheduled callback finished running.
 class PeriodicTask {
   enum {ALARMED = 0x1, SHUTDOWN = 0x2};
 

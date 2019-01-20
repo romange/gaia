@@ -55,5 +55,9 @@ void FiberQueueThreadPool::WorkerFunction() {
   }
 }
 
+void FiberQueueThreadPool::VerifyChannelSt(boost::fibers::channel_op_status st) {
+  CHECK(st == fibers::channel_op_status::success);
+}
+
 }  // namespace util
 
