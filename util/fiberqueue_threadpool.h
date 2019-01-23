@@ -17,10 +17,6 @@ class FiberQueueThreadPool {
   explicit FiberQueueThreadPool(unsigned num_threads, unsigned queue_size = 128);
   ~FiberQueueThreadPool();
 
-  template <typename F> boost::fibers::channel_op_status Add(F&& f) {
-    return input_.push(std::forward<F>(f));
-  }
-
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
     fibers_ext::Done done;
     using ResultType = decltype(f());
@@ -34,6 +30,15 @@ class FiberQueueThreadPool {
 
     done.Wait();
     return std::move(mover).get();
+  }
+
+  template <typename Func> void Async(Func&& f) {
+    auto op_st = Add(std::forward<Func>(f));
+    VerifyChannelSt(op_st);
+  }
+
+  template <typename F> boost::fibers::channel_op_status Add(F&& f) {
+    return input_.push(std::forward<F>(f));
   }
 
   void Shutdown();
