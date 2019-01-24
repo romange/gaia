@@ -10,7 +10,7 @@ namespace file {
 // Fiber-friendly file handler. Returns ReadonlyFile* instance that does not block the current
 // thread unlike the regular posix implementation. All the read opearations will run
 // in FiberQueueThreadPool.
-util::StatusObject<ReadonlyFile*> OpenFiberFile(
+util::StatusObject<ReadonlyFile*> OpenFiberReadFile(
     StringPiece name, util::FiberQueueThreadPool* tp,
     const ReadonlyFile::Options& opts = ReadonlyFile::Options()) MUST_USE_RESULT;
 

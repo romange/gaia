@@ -34,8 +34,9 @@ util::StatusObject<size_t> FiberReadFile::Read(size_t offset,
 
 }  // namespace
 
-util::StatusObject<ReadonlyFile*> OpenFiberFile(StringPiece name, util::FiberQueueThreadPool* tp,
-                                                const ReadonlyFile::Options& opts) {
+util::StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name,
+                                                    util::FiberQueueThreadPool* tp,
+                                                    const ReadonlyFile::Options& opts) {
   util::StatusObject<ReadonlyFile*> res = ReadonlyFile::Open(name, opts);
   if (!res.ok())
     return res;
