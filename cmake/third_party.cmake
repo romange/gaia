@@ -260,6 +260,12 @@ add_third_party(lz4
   CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=OFF"
 )
 
+add_third_party(crc32c
+  GIT_REPOSITORY https://github.com/google/crc32c.git
+  GIT_TAG 1.0.6
+  CMAKE_PASS_FLAGS "-DCRC32C_BUILD_TESTS=OFF -DCRC32C_BUILD_BENCHMARKS=OFF"
+)
+
 add_third_party(
   dconv
   GIT_REPOSITORY https://github.com/google/double-conversion.git

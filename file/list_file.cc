@@ -4,47 +4,33 @@
 
 #include "file/list_file.h"
 
-#include <zlib.h>
+#include <crc32c/crc32c.h>
 
-#include "file/filesource.h"
-#include "file/file_util.h"
 #include "base/fixed.h"
+#include "file/compressors.h"
+#include "file/file_util.h"
+#include "file/filesource.h"
 
-#include "base/varint.h"
-#include "base/crc32c.h"
 #include "base/coder.h"
+#include "base/varint.h"
 
-using strings::ByteRange;
 using strings::AsString;
+using strings::ByteRange;
 using strings::u8ptr;
 using util::Status;
 using util::StatusCode;
 
 namespace file {
 
-/*cmprss::Method ComprMethod(uint8 m) {
-  switch (m) {
-    case list_file::kCompressionZlib:
-      return cmprss::ZLIB_METHOD;
-    case list_file::kCompressionLZ4:
-      return cmprss::LZ4_METHOD;
-  }
-  LOG(ERROR) << "Unknown compression " << m;
-  return cmprss::UNKNOWN_METHOD;
-}
-*/
-
 namespace list_file {
-
 
 const char kMagicString[] = "LST1";
 
 class BlockHeader {
   uint8 buf_[kBlockHeaderSize];
-public:
-  BlockHeader(RecordType type) {
-    buf_[8] = type;
-  }
+
+ public:
+  BlockHeader(RecordType type) { buf_[8] = type; }
 
   void EnableCompression() { buf_[8] |= kCompressedMask; }
 
@@ -55,15 +41,14 @@ public:
   }
 };
 
-
 void BlockHeader::SetCrcAndLength(const uint8* ptr, size_t length) {
   coding::EncodeFixed32(length, buf_ + 4);
 
   // Compute the crc of the record type and the payload.
-  uint32 crc = crc32c::Value(buf_ + 8, 1);
+  uint32 crc = crc32c::Crc32c(buf_ + 8, 1);
   crc = crc32c::Extend(crc, ptr, length);
-  crc = crc32c::Mask(crc);                 // Adjust for storage
-  VLOG(2) << "EmitPhysicalRecord: type " << (buf_[8] & 0xF) <<  ", length: " << length
+  crc = list_file::Mask(crc);  // Adjust for storage
+  VLOG(2) << "EmitPhysicalRecord: type " << (buf_[8] & 0xF) << ", length: " << length
           << ", crc: " << crc << " compressed: " << (buf_[8] & kCompressedMask);
 
   coding::EncodeFixed32(crc, buf_);
@@ -85,16 +70,13 @@ constexpr unsigned kCompressReduction = 8;  // Currently we require 12.5% reduct
 class Varint32Encoder {
   uint8 buf_[Varint::kMax32];
   uint8 sz_ = 0;
-public:
-  Varint32Encoder(uint32 val = 0) {
-    encode(val);
-  }
+
+ public:
+  Varint32Encoder(uint32 val = 0) { encode(val); }
 
   StringPiece slice() const { return strings::FromBuf(buf_, sz_); }
   uint8 size() const { return sz_; }
-  void encode(uint32 val) {
-    sz_ = Varint::Encode32(buf_, val) - buf_;
-  }
+  void encode(uint32 val) { sz_ = Varint::Encode32(buf_, val) - buf_; }
   const uint8* data() const { return buf_; }
 };
 
@@ -103,7 +85,8 @@ class FileHeader {
   const std::map<string, string>& meta_;
 
   util::GrowableEncoder encoder_;
-public:
+
+ public:
   FileHeader(uint8 multiplier, const std::map<string, string>& meta) : meta_(meta) {
     memcpy(buf_, kMagicString, kMagicStringSize);
     buf_[kMagicStringSize] = multiplier;
@@ -129,7 +112,7 @@ public:
 
       uint8 meta_header[8];
       coding::EncodeFixed32(encoder_.size(), meta_header + 4);
-      uint32 crc = crc32c::Mask(crc32c::Value(encoder_.byteptr(), encoder_.size()));
+      uint32 crc = list_file::Mask(crc32c::Crc32c(encoder_.byteptr(), encoder_.size()));
       coding::EncodeFixed32(crc, meta_header);
 
       RETURN_IF_ERROR(sink->Append(ByteRange(meta_header, sizeof meta_header)));
@@ -139,77 +122,70 @@ public:
   }
 };
 
-}  // namespace
+class Lst1Impl : public ListWriter::WriterImpl {
+ public:
+  Lst1Impl(util::Sink* sink, const ListWriter::Options& opts);
+  ~Lst1Impl();
 
-ListWriter::ListWriter(StringPiece filename, const Options& options)
-    : options_(options) {
-  size_t header_offset = 0;
-  size_t file_offset = 0;
+  Status Init(const std::map<string, string>& meta) final;
+  Status AddRecord(StringPiece slice) final;
+  Status Flush() final;
 
-  if (options_.append) {
-    auto status_obj = ReadonlyFile::Open(filename);
-    if (status_obj.ok()) {
-      HeaderParser parser;
-      std::map<string, string> meta;
-      if (parser.Parse(status_obj.obj, &meta).ok()) {
-        options_.block_size_multiplier = parser.block_multiplier();
-        header_offset = parser.offset();
-        file_offset = status_obj.obj->Size();
-      }
-      status_obj.obj->Close();
-      delete status_obj.obj;
-    }
-  }
+ private:
+  util::Status EmitPhysicalRecord(list_file::RecordType type, const uint8* ptr, size_t length);
 
-  options_.append = header_offset > 0;
-  file::OpenOptions open_options;
-  open_options.append = options_.append;
-  WriteFile* file = file::Open(filename, open_options);
-  dest_.reset(new Sink(file, TAKE_OWNERSHIP));
+  uint32 block_leftover() const { return block_leftover_; }
 
-  Construct();
-  if (options_.append) {
-    CHECK_GE(file_offset, header_offset);
-    block_leftover_ = block_size_ - (file_offset - header_offset) % block_size_;
-  }
-}
+  void AddRecordToArray(StringPiece size_enc, StringPiece record);
+  util::Status FlushArray();
 
-ListWriter::ListWriter(util::Sink* dest, const Options& options)
-   : dest_(dest), options_(options) {
-  Construct();
-}
+  std::unique_ptr<util::Sink> dest_;
+  std::unique_ptr<uint8[]> array_store_;
+  std::unique_ptr<uint8[]> compress_buf_;
 
-void ListWriter::Construct() {
-  block_size_ = kBlockSizeFactor * options_.block_size_multiplier;
+  uint8 *array_next_ = nullptr, *array_end_ = nullptr;  // wraps array_store_
+  bool init_called_ = false;
+
+  uint32 array_records_ = 0;
+  uint32 block_offset_ = 0;  // Current offset in block
+
+  uint32 block_size_ = 0;
+  uint32 block_leftover_ = 0;
+  size_t compress_buf_size_ = 0;
+
+  CompressFunction compress_func_;
+};
+
+Lst1Impl::Lst1Impl(util::Sink* sink, const ListWriter::Options& opts)
+    : WriterImpl(opts), dest_(sink) {
+  block_size_ = kBlockSizeFactor * opts.block_size_multiplier;
   array_store_.reset(new uint8[block_size_]);
   block_leftover_ = block_size_;
 
-  if (options_.use_compression) {
-    CompressBoundFunction bound_f = GetCompressBound(options_.compress_method);
-    compress_func_ = GetCompress(options_.compress_method);
+  if (opts.use_compression) {
+    CompressBoundFunction bound_f = GetCompressBound(opts.compress_method);
+    compress_func_ = GetCompress(opts.compress_method);
     CHECK(bound_f && compress_func_);
     compress_buf_size_ = bound_f(block_size_);
 
-    compress_buf_.reset(new uint8[compress_buf_size_ + 1]); // +1 for compression method byte.
+    compress_buf_.reset(new uint8[compress_buf_size_ + 1]);  // +1 for compression method byte.
+  }
+
+  if (opts.append) {
+    block_leftover_ = block_size_ - (opts.internal_append_offset % block_size_);
   }
 }
 
-ListWriter::~ListWriter() {
+Lst1Impl::~Lst1Impl() {
   DCHECK_EQ(array_records_, 0) << "ListWriter::Flush() was not called!";
   CHECK(Flush().ok());
 }
 
-// Adds user provided meta information about the file. Must be called before Init.
-void ListWriter::AddMeta(StringPiece key, StringPiece value) {
-  CHECK(!init_called_);
-  meta_[AsString(key)] = AsString(value);
-}
-
-Status ListWriter::Init() {
+Status Lst1Impl::Init(const std::map<string, string>& meta) {
   if (!options_.append) {
     CHECK_GT(options_.block_size_multiplier, 0);
     CHECK(!init_called_);
-    FileHeader header(options_.block_size_multiplier, meta_);
+    FileHeader header(options_.block_size_multiplier, meta);
 
     RETURN_IF_ERROR(header.Write(dest_.get()));
     init_called_ = true;
@@ -217,15 +193,16 @@ Status ListWriter::Init() {
   return Status::OK;
 }
 
-inline void ListWriter::AddRecordToArray(StringPiece size_enc, StringPiece record) {
+inline void Lst1Impl::AddRecordToArray(StringPiece size_enc, StringPiece record) {
   memcpy(array_next_, size_enc.data(), size_enc.size());
   memcpy(array_next_ + size_enc.size(), record.data(), record.size());
   array_next_ += size_enc.size() + record.size();
   ++array_records_;
 }
 
-inline Status ListWriter::FlushArray() {
-  if (array_records_ == 0) return Status::OK;
+inline Status Lst1Impl::FlushArray() {
+  if (array_records_ == 0)
+    return Status::OK;
 
   Varint32Encoder enc(array_records_);
 
@@ -240,7 +217,7 @@ inline Status ListWriter::FlushArray() {
   return st;
 }
 
-Status ListWriter::AddRecord(StringPiece record) {
+Status Lst1Impl::AddRecord(StringPiece record) {
   CHECK_GT(block_size_, 0) << "ListWriter::Init was not called.";
 
   Varint32Encoder record_size_encoded(record.size());
@@ -300,13 +277,9 @@ Status ListWriter::AddRecord(StringPiece record) {
   return Status(StatusCode::INTERNAL_ERROR, "Should not reach here");
 }
 
-Status ListWriter::Flush() {
-  return FlushArray();
-}
+Status Lst1Impl::Flush() { return FlushArray(); }
 
-using strings::charptr;
-
-Status ListWriter::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t length) {
+Status Lst1Impl::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t length) {
   DCHECK_LE(kBlockHeaderSize + length, block_leftover());
 
   // Format the header
@@ -314,11 +287,11 @@ Status ListWriter::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t 
 
   if (options_.use_compression && length > 64) {
     size_t compressed_length = compress_buf_size_;
-    auto status = compress_func_(options_.compress_level, ptr, length,
-                                 compress_buf_.get() + 1, &compressed_length);
+    auto status = compress_func_(options_.compress_level, ptr, length, compress_buf_.get() + 1,
+                                 &compressed_length);
     if (status.ok()) {
       VLOG(1) << "Compressed record with size " << length << " to ratio "
-            << float(compressed_length) / length;
+              << float(compressed_length) / length;
       if (compressed_length < length - length / kCompressReduction) {
         block_header.EnableCompression();
 
@@ -339,6 +312,48 @@ Status ListWriter::EmitPhysicalRecord(RecordType type, const uint8* ptr, size_t 
   block_offset_ += (kBlockHeaderSize + length);
   block_leftover_ = block_size_ - block_offset_;
   return Status::OK;
+}
+}  // namespace
+
+ListWriter::ListWriter(StringPiece filename, const Options& options) {
+  Options opts = options;
+  size_t header_offset = 0;
+  size_t file_offset = 0;
+
+  if (options.append) {
+    auto status_obj = ReadonlyFile::Open(filename);
+    if (status_obj.ok()) {
+      HeaderParser parser;
+      std::map<string, string> meta;
+      if (parser.Parse(status_obj.obj, &meta).ok()) {
+        opts.block_size_multiplier = parser.block_multiplier();
+        header_offset = parser.offset();
+        file_offset = status_obj.obj->Size();
+
+        CHECK_GE(file_offset, header_offset);
+      }
+      status_obj.obj->Close();
+      delete status_obj.obj;
+    }
+  }
+
+  opts.append = header_offset > 0;
+  opts.internal_append_offset = file_offset - header_offset;
+  file::OpenOptions open_options;
+  open_options.append = opts.append;
+  WriteFile* file = file::Open(filename, open_options);
+
+  impl_.reset(new Lst1Impl(new Sink(file, TAKE_OWNERSHIP), opts));
+}
+
+ListWriter::ListWriter(util::Sink* dest, const Options& options) {
+  impl_.reset(new Lst1Impl(dest, options));
+}
+
+// Adds user provided meta information about the file. Must be called before Init.
+void ListWriter::AddMeta(StringPiece key, StringPiece value) {
+  CHECK(!impl_->init_called());
+  meta_[AsString(key)] = AsString(value);
 }
 
 }  // namespace file

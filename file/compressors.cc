@@ -126,6 +126,7 @@ UncompressFunction GetUncompress(CompressMethod m) {
     case CompressMethod::kCompressionLZ4:
       return UncompressZ4;
     break;
+    default:;
   }
   return nullptr;
 }
@@ -138,6 +139,7 @@ CompressFunction GetCompress(CompressMethod m) {
     case CompressMethod::kCompressionLZ4:
       return CompressLZ4;
     break;
+    default:;
   }
   return nullptr;
 }
