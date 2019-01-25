@@ -7,9 +7,8 @@ cxx_link(file_read base TRDP::folly dl)
 add_executable(boost_fibers boost_fibers.cc)
 cxx_link(boost_fibers fibers base dl ${Boost_LIBRARIES})
 
-
-add_executable(mr_demo_fibers mr_demo.cc)
-cxx_link(mr_demo_fibers fibers base file dl ${Boost_LIBRARIES})
+add_executable(mr_demo mr_demo.cc)
+cxx_link(mr_demo fiber_file base asio_fiber_lib)
 
 add_executable(asio_co asio_co.cc)
 cxx_link(asio_co fibers base absl_strings ${Boost_LIBRARIES})
