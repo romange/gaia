@@ -30,9 +30,7 @@ using fibers::channel_op_status;
 using namespace std::chrono_literals;
 using namespace util;
 
-typedef fibers::buffered_channel<strings::ByteRange> BufQueue;
-
-int queue_requests = 0;
+typedef std::function<void(StringPiece)> LineCb;
 
 class BufStore {
   typedef std::unique_ptr<uint8_t[]> ReadBuf;
@@ -124,6 +122,7 @@ class Mr {
 };
 
 thread_local std::unique_ptr<Mr::IoStruct> Mr::per_io_;
+typedef fibers::buffered_channel<strings::ByteRange> BufQueue;
 
 void Mr::OpenFile() {
   string file_name;
@@ -151,9 +150,8 @@ void Mr::OpenFile() {
   puller_fb.join();
 }
 
-inline void line_cb(StringPiece str) {}
-
-void ProcessRaw(BufQueue* q, std::function<void(strings::ByteRange)> deleter) {
+void ProcessRaw(BufQueue* q, LineCb line_cb,
+                std::function<void(strings::ByteRange)> deleter) {
   string line;
   while (true) {
     strings::ByteRange br;
@@ -189,12 +187,13 @@ void ProcessRaw(BufQueue* q, std::function<void(strings::ByteRange)> deleter) {
   }
 }
 
-util::Status ProcessInternal(file::ReadonlyFile* file) {
+util::Status ProcessInternal(file::ReadonlyFile* file, LineCb line_cb) {
   size_t offset = 0;
   BufStore store(kMaxActiveFibers, kReadSize);
-
   BufQueue q(32);
-  fibers::fiber fb(&ProcessRaw, &q, [&](strings::ByteRange br) {
+
+  fibers::fiber fb(&ProcessRaw, &q, line_cb,
+    [&](strings::ByteRange br) {
     strings::MutableByteRange mbr(const_cast<uint8_t*>(br.data()), kReadSize);
     store.Return(mbr);
   });
@@ -208,7 +207,7 @@ util::Status ProcessInternal(file::ReadonlyFile* file) {
       break;
     }
     size_t read_sz = read_res.obj;
-    LOG(INFO) << "Read at offset " << offset << "/" << read_sz;
+    VLOG(1) << "Read at offset " << offset << "/" << read_sz;
 
     offset += read_sz;
     size_t orig_size = cur_buf.size();
@@ -231,6 +230,7 @@ void Mr::Process() {
   IoStruct& io = *per_io_;
   std::string buf(1 << 16, '\0');
 
+  uint32_t lines = 0;
   while (true) {
     file::ReadonlyFile* tmp = nullptr;
     st = io.rd_queue.pop(tmp);
@@ -240,12 +240,13 @@ void Mr::Process() {
     LOG(INFO) << "Pulling file XXX";
 
     std::unique_ptr<file::ReadonlyFile> item(tmp);
-    auto status = ProcessInternal(tmp);
+    auto status = ProcessInternal(tmp, [&] (StringPiece str) { ++lines; });
     if (!status.ok()) {
       LOG(ERROR) << "Error reading file " << status.ToString();
       continue;
     }
   }
+  LOG(INFO) << "Counted " << lines << " lines";
 }
 
 // TODO: To implement IO push flow. i.e. instead of the reading loop will be blocked on IO latency,
