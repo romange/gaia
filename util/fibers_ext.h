@@ -34,7 +34,7 @@ namespace fibers_ext {
 // Wrap canonical pattern for condition_variable + bool flag
 class Done {
  public:
-  explicit Done(bool val = false) : ready_(val)  {}
+  explicit Done(bool val = false) : ready_(val) {}
   Done(const Done&) = delete;
 
   void operator=(const Done&) = delete;
@@ -72,8 +72,7 @@ class BlockingCounter {
  public:
   using mutex = ::boost::fibers::mutex;
 
-  explicit BlockingCounter(unsigned count) : count_(count) {
-  }
+  explicit BlockingCounter(unsigned count) : count_(count) {}
 
   // Producer side -> should decrement the counter.
   void Dec() {
@@ -95,11 +94,39 @@ class BlockingCounter {
     std::lock_guard<mutex> g(mutex_);
     count_ += delta;
   }
+
  private:
   unsigned count_;
 
   ::boost::fibers::condition_variable cond_;
   ::boost::fibers::mutex mutex_;
+};
+
+class Semaphore {
+ public:
+  Semaphore(uint32_t cnt) : count_(cnt) {}
+
+  void Wait(uint32_t nr = 1) {
+    std::unique_lock<::boost::fibers::mutex> lock(mutex_);
+    Wait(lock, nr);
+  }
+
+  void Signal(uint32_t nr = 1) {
+    std::unique_lock<::boost::fibers::mutex> lock(mutex_);
+    count_ += nr;
+    lock.unlock();
+
+    cond_.notify_all();
+  }
+
+  template<typename Lock> void Wait(Lock& l, uint32_t nr = 1) {
+    cond_.wait(l, [&] { return count_ >= nr; });
+    count_ -= nr;
+  }
+ private:
+  ::boost::fibers::condition_variable cond_;
+  ::boost::fibers::mutex mutex_;
+  uint32_t count_;
 };
 
 // For synchronizing fibers in single-threaded environment.
@@ -108,35 +135,36 @@ struct NoOpLock {
   void unlock() {}
 };
 
-template<typename Pred> void Await(::boost::fibers::condition_variable_any& cv, Pred&& pred) {
+template <typename Pred> void Await(::boost::fibers::condition_variable_any& cv, Pred&& pred) {
   NoOpLock lock;
   cv.wait(lock, std::forward<Pred>(pred));
 }
 
 // Single threaded synchronization primitive between fibers.
-// fibers::unbufferred_channel has bad design with respect to move semantics and
+// fibers::unbufferred_channel has problematic design? with respect to move semantics and
 // "try_push" method because it will move the value even if it was not pushed.
 // Therefore, for single producer, single consumer single threaded case we can use this
 // Cell class for emulating unbufferred_channel.
-template<typename T> class Cell {
+template <typename T> class Cell {
   std::experimental::optional<T> val_;
   ::boost::fibers::condition_variable_any cv_;
+
  public:
   bool IsEmpty() const { return !bool(val_); }
 
   // Might block the calling fiber.
   void Emplace(T&& val) {
-    fibers_ext::Await(cv_, [this] { return IsEmpty();});
+    fibers_ext::Await(cv_, [this] { return IsEmpty(); });
     val_.emplace(std::forward<T>(val));
     cv_.notify_one();
   }
 
   void WaitTillFull() {
-    fibers_ext::Await(cv_, [this] { return !IsEmpty();});
+    fibers_ext::Await(cv_, [this] { return !IsEmpty(); });
   }
 
   T& value() {
-    return *val_;   // optional stays engaged.
+    return *val_;  // optional stays engaged.
   }
 
   void Clear() {
