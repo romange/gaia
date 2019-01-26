@@ -27,7 +27,7 @@ constexpr uint32 kBlockHeaderSize = 4 + 4 + 1;
 
 struct Header {
   uint16_t multiplier = 1;
-  uint16_t str_count = 0;
+  uint16_t meta_count = 0;
 };
 
 util::Status ParseHeader(file::ReadonlyFile* f, Header* header);
