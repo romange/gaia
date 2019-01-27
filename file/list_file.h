@@ -51,7 +51,7 @@ class ListWriter {
 
   class WriterImpl {
    public:
-    explicit WriterImpl(const Options& opts) : options_(opts) {}
+    explicit WriterImpl(util::Sink* dest, const Options& opts) : dest_(dest), options_(opts) {}
 
     virtual ~WriterImpl() {}
 
@@ -67,6 +67,8 @@ class ListWriter {
     const Options& options() const { return options_; }
 
    protected:
+
+    std::unique_ptr<util::Sink> dest_;
     bool init_called_ = false;
     uint32 records_added_ = 0;
     uint64 bytes_added_ = 0, compression_savings_ = 0;

@@ -139,7 +139,6 @@ class Lst1Impl : public ListWriter::WriterImpl {
   void AddRecordToArray(StringPiece size_enc, StringPiece record);
   util::Status FlushArray();
 
-  std::unique_ptr<util::Sink> dest_;
   std::unique_ptr<uint8[]> array_store_;
   std::unique_ptr<uint8[]> compress_buf_;
 
@@ -157,7 +156,7 @@ class Lst1Impl : public ListWriter::WriterImpl {
 };
 
 Lst1Impl::Lst1Impl(util::Sink* sink, const ListWriter::Options& opts)
-    : WriterImpl(opts), dest_(sink) {
+    : WriterImpl(sink, opts) {
   block_size_ = kBlockSizeFactor * opts.block_size_multiplier;
   array_store_.reset(new uint8[block_size_]);
   block_leftover_ = block_size_;

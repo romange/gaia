@@ -468,8 +468,9 @@ TEST_F(LogTest, ErrorJoinsRecords) {
   Write(BigString("bar", block_size_));
   Write("correct");
   FlushWriter();
+
   // Wipe the middle block
-  for (int offset = block_size_; offset < 2*block_size_; offset++) {
+  for (size_t offset = block_size_; offset < 2*block_size_; offset++) {
     SetByte(offset, 'x');
   }
 

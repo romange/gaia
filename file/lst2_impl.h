@@ -4,8 +4,10 @@
 #pragma once
 
 #include "file/list_file.h"
+#include "file/list_file_format2.h"
 
 namespace file {
+namespace lst2 {
 
 class Lst2Impl : public ListWriter::WriterImpl {
  public:
@@ -22,7 +24,9 @@ class Lst2Impl : public ListWriter::WriterImpl {
   void AddRecordToArray(StringPiece size_enc, StringPiece record);
   util::Status FlushArray();
 
-  std::unique_ptr<util::Sink> dest_;
+  size_t block_size() const { return kBlockSizeFactor * options_.block_size_multiplier; }
+
+  
   std::unique_ptr<uint8[]> array_store_;
   std::unique_ptr<uint8[]> compress_buf_;
 
@@ -30,8 +34,8 @@ class Lst2Impl : public ListWriter::WriterImpl {
   bool init_called_ = false;
 
   uint32 array_records_ = 0;
-  uint32 block_offset_ = 0;  // Current offset in block
+  size_t block_offset_ = 0;  // Current offset in block
 };
 
+}  // namespace lst2
 }  // namespace file
-

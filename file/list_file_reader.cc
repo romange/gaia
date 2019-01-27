@@ -71,6 +71,8 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
       const uint8* aend = reinterpret_cast<const uint8*>(array_store_.end());
       const uint8* item_ptr = Varint::Parse32WithLimit(u8ptr(array_store_), aend,
                                                        &item_size);
+      DVLOG(2) << "Array record with size: " << item_size;
+
       const uint8* next_rec_ptr = item_ptr + item_size;
       if (item_ptr == nullptr || next_rec_ptr > aend) {
         ReportCorruption(array_store_.size(), "invalid array record");
