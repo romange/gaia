@@ -152,6 +152,7 @@ CompressBoundFunction GetCompressBound(list_file::CompressMethod m) {
     case CompressMethod::kCompressionLZ4:
       return BoundFunctionLZ4;
     break;
+    default:;
   }
   return nullptr;
 }

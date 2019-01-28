@@ -19,22 +19,24 @@ class Lst2Impl : public ListWriter::WriterImpl {
   util::Status Flush() final;
 
  private:
-  util::Status EmitPhysicalRecord(list_file::RecordType type, const uint8* ptr, size_t length);
+  util::Status EmitPhysicalRecord(strings::ByteRange header, strings::ByteRange record);
+  util::Status EmitSingleRecord(RecordType type, StringPiece record);
+  util::Status WriteFragmented(StringPiece record);
 
   void AddRecordToArray(StringPiece size_enc, StringPiece record);
   util::Status FlushArray();
 
-  size_t block_size() const { return kBlockSizeFactor * options_.block_size_multiplier; }
+  uint32_t block_size() const { return block_size_; }
 
-  
   std::unique_ptr<uint8[]> array_store_;
   std::unique_ptr<uint8[]> compress_buf_;
 
   uint8 *array_next_ = nullptr, *array_end_ = nullptr;  // wraps array_store_
   bool init_called_ = false;
 
-  uint32 array_records_ = 0;
-  size_t block_offset_ = 0;  // Current offset in block
+  uint32_t block_offset_ = 0;  // Current offset in block
+  uint32_t array_records_ = 0;
+  uint32_t block_size_ = 0;
 };
 
 }  // namespace lst2
