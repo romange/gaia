@@ -177,6 +177,19 @@ util::Status Lst2Impl::WriteFragmented(StringPiece record) {
   return Status::OK;
 }
 
+util::Status Lst2Impl::EmitSingleRecord(RecordType type, StringPiece record) {
+  RecordHeader rh;
+  uint8_t buf[RecordHeader::kMaxSize];
+
+  rh.flags = type;
+  rh.size = record.size();
+  rh.crc = crc32c::Crc32c(record.data(), rh.size);
+  uint8_t* next = rh.Write(buf);
+  uint32_t hs = next - buf;
+
+  return EmitPhysicalRecord(strings::ByteRange(buf, hs), strings::ToByteRange(record));
+}
+
 util::Status Lst2Impl::EmitPhysicalRecord(strings::ByteRange header, strings::ByteRange record) {
   DCHECK_LE(block_offset_ + header.size() + record.size(), block_size_);
 
