@@ -23,6 +23,7 @@ class ListWriter {
     list_file::CompressMethod compress_method = list_file::kCompressionLZ4;
     uint8 compress_level = 1;
     bool append = false;
+    bool v2 = false;
 
     Options() {}
 

@@ -98,6 +98,7 @@ protected:
     ListWriter::Options options;
     options.block_size_multiplier = 1;
     options.use_compression = false;
+    // options.v2 = true;
 
     SetupWriter(options);
   }

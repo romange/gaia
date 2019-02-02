@@ -10,6 +10,7 @@
 #include "file/compressors.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
+#include "file/lst2_impl.h"
 
 #include "base/coder.h"
 #include "base/varint.h"
@@ -346,7 +347,11 @@ ListWriter::ListWriter(StringPiece filename, const Options& options) {
 }
 
 ListWriter::ListWriter(util::Sink* dest, const Options& options) {
-  impl_.reset(new Lst1Impl(dest, options));
+  if (options.v2) {
+    impl_.reset(new lst2::Lst2Impl(dest, options));
+  } else {
+    impl_.reset(new Lst1Impl(dest, options));
+  }
 }
 
 // Adds user provided meta information about the file. Must be called before Init.

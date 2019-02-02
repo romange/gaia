@@ -49,7 +49,7 @@ Lst2Impl::Lst2Impl(util::Sink* sink, const ListWriter::Options& opts) : WriterIm
   block_size_ = kBlockSizeFactor * options_.block_size_multiplier;
   array_store_.reset(new uint8[block_size()]);
 
-  if (opts.compress_method != list_file::kCompressionNone) {
+  if (opts.use_compression && opts.compress_method != list_file::kCompressionNone) {
     CHECK_EQ(opts.compress_method, list_file::kCompressionLZ4);
     LOG(FATAL) << "TBD";
     // compress_buf_.reset(new uint8[compress_buf_size_ + 1]);  // +1 for compression method byte.
@@ -184,7 +184,7 @@ util::Status Lst2Impl::WriteFragmented(StringPiece record) {
   rh.size = RecordHeader::PayloadSize(block_left);
   rh.flags = t;
 
-  DCHECK_EQ(list_file::kCompressionNone, options_.compress_method);
+  DCHECK(!options_.use_compression || list_file::kCompressionNone == options_.compress_method);
 
   while (true) {
     rh.crc = crc32c::Crc32c(record.data(), rh.size);
