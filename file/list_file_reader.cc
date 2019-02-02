@@ -12,7 +12,7 @@
 #include "base/crc32c.h"
 #include "base/fixed.h"
 #include "file/compressors.h"
-
+#include "file/lst2_impl.h"
 #include "absl/strings/match.h"
 
 namespace file {
@@ -25,7 +25,6 @@ using strings::u8ptr;
 using util::Status;
 using util::StatusCode;
 using namespace ::util;
-using namespace list_file;
 
 namespace {
 
@@ -70,7 +69,7 @@ bool Lst1Impl::ReadHeader(std::map<std::string, std::string>* dest) {
   }
 
   wrapper_->file_offset_ = wrapper_->read_header_bytes = parser.offset();
-  wrapper_->block_size = parser.block_multiplier() * kBlockSizeFactor;
+  wrapper_->block_size = parser.block_multiplier() * list_file::kBlockSizeFactor;
 
   CHECK_GT(wrapper_->block_size, 0);
   wrapper_->backing_store_.reset(new uint8[wrapper_->block_size]);
@@ -86,6 +85,7 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
   *record = StringPiece();
   bool in_fragmented_record = false;
   StringPiece fragment;
+  using namespace list_file;
 
   while (true) {
     if (wrapper_->array_records > 0) {
@@ -190,6 +190,7 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
 }
 
 unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
+  using list_file::kBlockHeaderSize;
   while (true) {
     if (wrapper_->block_buffer_.size() <= kBlockHeaderSize) {
       if (!wrapper_->eof) {
@@ -225,7 +226,7 @@ unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
     uint32 length = coding::DecodeFixed32(header + 4);
     wrapper_->read_header_bytes += kBlockHeaderSize;
 
-    if (length == 0 && type == kZeroType) {
+    if (length == 0 && type == list_file::kZeroType) {
       size_t bs = wrapper_->block_buffer_.size();
       wrapper_->block_buffer_.clear();
       // Handle the case of when mistakenly written last kBlockHeaderSize bytes as empty record.
@@ -265,7 +266,7 @@ unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
     uint32 record_size = length + kBlockHeaderSize;
     wrapper_->block_buffer_.advance(record_size);
 
-    if (type & kCompressedMask) {
+    if (type & list_file::kCompressedMask) {
       if (!Uncompress(data_ptr, &length)) {
         wrapper_->ReportCorruption(record_size, "Uncompress failed.");
         return kBadRecord;
@@ -360,21 +361,30 @@ bool ListReader::ReadHeader() {
   if (wrapper_->eof)
     return false;
 
-  uint8 buf[kMagicStringSize];
-  const StringPiece kMagic(kMagicString, kMagicStringSize);
+  static_assert(list_file::kMagicStringSize == lst2::kMagicStringSize);
+
+  uint8 buf[list_file::kMagicStringSize];
+
   auto res = wrapper_->file->Read(0, strings::MutableByteRange(buf, sizeof(buf)));
   if (!res.ok()) {
     wrapper_->BadHeader(res.status);
     return false;
   }
 
-  if (strings::FromBuf(buf, sizeof(buf)) != kMagic) {
-    wrapper_->BadHeader(Status(StatusCode::PARSE_ERROR, "Invalid header"));
-    return false;
+  const StringPiece kLst1Magic(list_file::kMagicString, list_file::kMagicStringSize);
+  if (strings::FromBuf(buf, sizeof(buf)) == kLst1Magic) {
+    impl_.reset(new Lst1Impl(wrapper_.get()));
+    return impl_->ReadHeader(&meta_);
   }
 
-  impl_.reset(new Lst1Impl(wrapper_.get()));
-  return impl_->ReadHeader(&meta_);
+  const StringPiece kLst2Magic(lst2::kMagicString, lst2::kMagicStringSize);
+  if (strings::FromBuf(buf, sizeof(buf)) == kLst2Magic) {
+    impl_.reset(new lst2::ReaderImpl(wrapper_.get()));
+    return impl_->ReadHeader(&meta_);
+  }
+
+  wrapper_->BadHeader(Status(StatusCode::PARSE_ERROR, "Invalid header"));
+  return false;
 }
 
 bool ListReader::GetMetaData(std::map<std::string, std::string>* meta) {

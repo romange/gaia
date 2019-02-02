@@ -39,5 +39,17 @@ class Lst2Impl : public ListWriter::WriterImpl {
   uint32_t block_size_ = 0;
 };
 
+
+class ReaderImpl : public ListReader::FormatImpl {
+ public:
+  using FormatImpl::FormatImpl;
+
+  bool ReadHeader(std::map<std::string, std::string>* dest) final;
+
+  bool ReadRecord(StringPiece* record, std::string* scratch) final;
+
+ private:
+};
+
 }  // namespace lst2
 }  // namespace file

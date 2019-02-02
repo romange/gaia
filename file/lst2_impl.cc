@@ -131,8 +131,8 @@ Status Lst2Impl::AddRecord(StringPiece record) {
   auto wrapped_size = RecordHeader::WrappedSize(record.size());
 
   if (wrapped_size + RecordHeader::kArrayMargin <= block_left) {
-    array_next_ = array_store_.get() + RecordHeader::kMaxSize;
-    array_end_ = array_store_.get() + block_left;
+    array_next_ = array_store_.get();
+    array_end_ = array_store_.get() + block_left - RecordHeader::kMaxSize;
     array_next_ = Varint::Encode32(array_next_, record.size());
     memcpy(array_next_, record.data(), record.size());
     array_next_ += record.size();
@@ -145,6 +145,32 @@ Status Lst2Impl::AddRecord(StringPiece record) {
     return EmitSingleRecord(kFullType, record);
   }
   return WriteFragmented(record);
+}
+
+Status Lst2Impl::Flush() {
+  return FlushArray();
+}
+
+Status Lst2Impl::FlushArray() {
+  if (array_records_ == 0)
+    return Status::OK;
+
+  RecordHeader rh;
+  uint8_t buf[RecordHeader::kMaxSize];
+  rh.flags = kArrayType;
+  rh.arr_count = array_records_;
+  rh.size = array_end_ - array_store_.get();
+  rh.crc = crc32c::Crc32c(array_store_.get(), rh.size);
+
+  uint8_t* next = rh.Write(buf);
+  uint32_t hs = next - buf;
+  strings::ByteRange rec(array_store_.get(), rh.size);
+
+  // Flush the array.
+  Status st = EmitPhysicalRecord(strings::ByteRange(buf, hs), rec);
+  array_records_ = 0;
+
+  return st;
 }
 
 util::Status Lst2Impl::WriteFragmented(StringPiece record) {
@@ -206,6 +232,15 @@ util::Status Lst2Impl::EmitPhysicalRecord(strings::ByteRange header, strings::By
     block_offset_ = 0;
   }
   return Status::OK;
+}
+
+
+bool ReaderImpl::ReadHeader(std::map<std::string, std::string>* dest) {
+  return true;
+}
+
+bool ReaderImpl::ReadRecord(StringPiece* record, std::string* scratch) {
+  return true;
 }
 
 }  // namespace lst2
