@@ -30,7 +30,7 @@ struct Header {
   uint16_t meta_count = 0;
 };
 
-util::Status ParseHeader(file::ReadonlyFile* f, Header* header);
+// util::Status ParseHeader(file::ReadonlyFile* f, Header* header);
 
 enum RecordType : uint8_t {
   kZeroType = 0,  // Not used.
@@ -44,6 +44,7 @@ enum RecordType : uint8_t {
   kArrayType = 5,
 
   kMaxRecordVal = kArrayType,
+
   kRecordSize3BytesFlag = 0x08,
   kCompressedFlag = 0x10,
 };

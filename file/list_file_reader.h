@@ -54,54 +54,58 @@ class ListReader {
   // will notify reporter about the corruption.
   bool ReadRecord(StringPiece* record, std::string* scratch);
 
-  void Reset() { impl_->Reset(); }
+  void Reset() { wrapper_->Reset(); }
 
-  uint32_t read_header_bytes() const { return impl_->read_header_bytes; }
-  uint32_t read_data_bytes() const { return impl_->read_data_bytes; }
+  uint32_t read_header_bytes() const { return wrapper_->read_header_bytes; }
+  uint32_t read_data_bytes() const { return wrapper_->read_data_bytes; }
 
-  class ReaderImpl {
+  class ReaderWrapper {
    public:
-    ReaderImpl(ReadonlyFile* file, Ownership own, bool chksum, CorruptionReporter rp)
-        : file_(file), ownership_(own), checksum_(chksum), reporter_(rp) {}
+    ReaderWrapper(ReadonlyFile* fl, Ownership own, bool chksum, CorruptionReporter rp)
+        : file(fl), ownership(own), checksum(chksum), reporter_(rp) {}
 
-    virtual ~ReaderImpl();
-
-    virtual bool ReadHeader(std::map<std::string, std::string>* dest) = 0;
-    virtual bool ReadRecord(StringPiece* record, std::string* scratch) = 0;
-
-    bool eof() const { return eof_; }
-    uint32_t block_size() const { return block_size_; }
-
-    ReadonlyFile* file() { return file_; }
+    ~ReaderWrapper();
 
     size_t read_header_bytes = 0;  // how much headers bytes were read so far.
     size_t read_data_bytes = 0;    // how much data bytes were read so far.
 
     void Reset() {
-      block_size_ = file_offset_ = array_records_ = 0;
-      eof_ = false;
+      block_size = file_offset_ = array_records = 0;
+      eof = false;
     }
 
-   protected:
     void ReportCorruption(size_t bytes, const std::string& reason) {
       ReportDrop(bytes, util::Status(util::StatusCode::IO_ERROR, reason));
     }
 
     void ReportDrop(size_t bytes, const util::Status& reason);
 
-    ReadonlyFile* const file_;
-    size_t file_offset_ = 0;
+    ReadonlyFile* file;
+    Ownership ownership;
+    bool eof = false;  // Last Read() indicated EOF by returning < kBlockSize
+    const bool checksum = false;
+    uint32_t block_size = 0;
+    uint32_t array_records = 0;
 
-    Ownership ownership_;
-    bool eof_ = false;  // Last Read() indicated EOF by returning < kBlockSize
-    const bool checksum_ = false;
-    uint32_t block_size_ = 0;
-    uint32_t array_records_ = 0;
+    size_t file_offset_ = 0;
 
     CorruptionReporter const reporter_;
     std::unique_ptr<uint8[]> backing_store_;
     std::unique_ptr<uint8[]> uncompress_buf_;
     strings::ByteRange block_buffer_;
+
+  };
+
+  class FormatImpl {
+   public:
+    FormatImpl(ReaderWrapper* wrapper) : wrapper_(wrapper) {}
+    virtual ~FormatImpl() {}
+
+    virtual bool ReadHeader(std::map<std::string, std::string>* dest) = 0;
+    virtual bool ReadRecord(StringPiece* record, std::string* scratch) = 0;
+
+   protected:
+    ReaderWrapper* wrapper_;
   };
 
  private:
@@ -109,7 +113,8 @@ class ListReader {
 
   std::map<std::string, std::string> meta_;
 
-  std::unique_ptr<ReaderImpl> impl_;
+  std::unique_ptr<ReaderWrapper> wrapper_;
+  std::unique_ptr<FormatImpl> impl_;
 };
 
 template <typename T> void ReadProtoRecords(ReadonlyFile* file, std::function<void(T&&)> cb) {
