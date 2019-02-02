@@ -100,6 +100,7 @@ Status Lst2Impl::Init(const std::map<string, string>& meta) {
    Payload: (uint16_t item_sz[ArrayCount]) + ItemDataSize. // item_sz if item type is array.
             Another option: To store varint_payload_sz + varint_sz_arr + ItemDataSize
 */
+
 Status Lst2Impl::AddRecord(StringPiece record) {
   CHECK(init_called_) << "ListWriter::Init was not called.";
 

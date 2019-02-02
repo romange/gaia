@@ -19,25 +19,15 @@ namespace file {
 
 using namespace list_file;
 
-using absl::StrContains;
 using util::Status;
 using std::vector;
 using std::string;
 using strings::AsString;
 using strings::u8ptr;
 using testing::ElementsAre;
+using testing::HasSubstr;
 using testing::internal::CaptureStderr;
 using testing::internal::GetCapturedStderr;
-
-MATCHER_P(ErrorContains, expected,
-          std::string(negation ? "does not contain " : "contains ") + expected) {
-  if (arg.find(expected) != string::npos) {
-    return true;
-  }
-
-  // *result_listener << "\nDifference found: " << result;
-  return false;
-}
 
 // Construct a string of the specified length made out of the supplied
 // partial string.
@@ -197,15 +187,6 @@ protected:
     return report_.message_;
   }
 
-  // Returns OK iff recorded error message contains "msg"
-  std::string MatchError(const std::string& msg) const {
-    if (report_.message_.find(msg) == std::string::npos) {
-      return report_.message_;
-    } else {
-      return "OK";
-    }
-  }
-
 #if 0
   void WriteInitialOffsetLog() {
     for (int i = 0; i < 4; i++) {
@@ -361,20 +342,22 @@ TEST_F(LogTest, ReadError) {
   ASSERT_EQ("EOF", Read());
 
   ASSERT_GT(DroppedBytes(), 0);
-  ASSERT_TRUE(StrContains(ReportMessage(), "read error"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("read error"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
 TEST_F(LogTest, BadRecordType) {
   Write("foo");
   FlushWriter();
+
   // Type is stored in header[8]
   IncrementByte(8, 100);
   FixChecksum(0, 5);
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   ASSERT_EQ(5, DroppedBytes());
-  ASSERT_EQ("OK", MatchError("unknown record type"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("unknown record type"));
+
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -386,7 +369,7 @@ TEST_F(LogTest, TruncatedTrailingRecord) {
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   ASSERT_EQ(kBlockHeaderSize + 1, DroppedBytes());
-  ASSERT_EQ("OK", MatchError("truncated record at"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("truncated record at"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -397,7 +380,7 @@ TEST_F(LogTest, BadLength) {
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(kBlockHeaderSize + 4, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("bad record length"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("bad record length"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -408,7 +391,7 @@ TEST_F(LogTest, ChecksumMismatch) {
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(14, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("checksum mismatch"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("checksum mismatch"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -420,7 +403,7 @@ TEST_F(LogTest, UnexpectedMiddleType) {
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(5, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("missing start"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("missing start"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -432,7 +415,7 @@ TEST_F(LogTest, UnexpectedLastType) {
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(5, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("missing start"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("missing start"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -447,7 +430,7 @@ TEST_F(LogTest, UnexpectedFullType) {
   ASSERT_EQ("bar", Read());
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(5, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("partial record without end"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("partial record without end"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -462,7 +445,7 @@ TEST_F(LogTest, UnexpectedFirstType) {
   ASSERT_EQ(BigString("bar", 100000), Read());
   ASSERT_EQ("EOF", Read());
   EXPECT_EQ(5, DroppedBytes());
-  EXPECT_EQ("OK", MatchError("partial record without end"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("partial record without end"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
@@ -553,7 +536,7 @@ TEST_F(LogTest, EmptyFile) {
   dest_->contents() = "garbag";
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
-  EXPECT_THAT(ReportMessage(), ErrorContains("Invalid"));
+  EXPECT_THAT(ReportMessage(), HasSubstr("Invalid"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 
