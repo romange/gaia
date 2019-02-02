@@ -361,7 +361,7 @@ bool ListReader::ReadHeader() {
   if (wrapper_->eof)
     return false;
 
-  static_assert(list_file::kMagicStringSize == lst2::kMagicStringSize);
+  static_assert(list_file::kMagicStringSize == lst2::kMagicStringSize, "");
 
   uint8 buf[list_file::kMagicStringSize];
 
