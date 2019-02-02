@@ -1,7 +1,7 @@
-// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file. See the AUTHORS file for names of contributors.
-
+// Copyright 2019, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+// Based on LevelDB implementation.
 #include "file/list_file_reader.h"
 
 #include <cstdio>
@@ -9,57 +9,78 @@
 #include "base/flags.h"
 #include "base/varint.h"
 
-#include "base/fixed.h"
 #include "base/crc32c.h"
+#include "base/fixed.h"
 #include "file/compressors.h"
 
 #include "absl/strings/match.h"
 
 namespace file {
 
-using util::Status;
-using util::StatusCode;
 using file::ReadonlyFile;
 using std::string;
-using strings::u8ptr;
 using strings::AsString;
 using strings::FromBuf;
+using strings::u8ptr;
+using util::Status;
+using util::StatusCode;
 using namespace ::util;
 using namespace list_file;
 
-ListReader::ListReader(file::ReadonlyFile* file, Ownership ownership, bool checksum,
-                       CorruptionReporter reporter)
-  : file_(file), ownership_(ownership), reporter_(reporter),
-    checksum_(checksum) {
-}
+namespace {
+class Lst1Impl : public ListReader::ReaderImpl {
+ public:
+  using ReaderImpl::ReaderImpl;
 
-ListReader::ListReader(StringPiece filename, bool checksum, CorruptionReporter reporter)
-    : ownership_(TAKE_OWNERSHIP), reporter_(reporter), checksum_(checksum) {
-  auto res = ReadonlyFile::Open(filename);
-  CHECK(res.ok()) << res.status << ", file name: " << filename;
-  file_ = res.obj;
-  CHECK(file_) << filename;
-}
+  bool ReadHeader(std::map<std::string, std::string>* dest) final;
 
-ListReader::~ListReader() {
-  if (ownership_ == TAKE_OWNERSHIP) {
-    auto st = file_->Close();
-    if (!st.ok()) {
-      LOG(WARNING) << "Error closing file, status " << st;
-    }
-    delete file_;
+  bool ReadRecord(StringPiece* record, std::string* scratch) final;
+
+ private:
+  // Return type, or one of the preceding special values
+  unsigned int ReadPhysicalRecord(StringPiece* result);
+
+  // 'size' is size of the compressed blob.
+  // Returns true if succeeded. In that case uncompress_buf_ will contain the uncompressed data
+  // and size will be updated to the uncompressed size.
+  bool Uncompress(const uint8* data_ptr, uint32* size);
+
+  StringPiece array_store_;
+
+  // Extend record types with the following special values
+  enum {
+    kEof = list_file::kMaxRecordType + 1,
+    // Returned whenever we find an invalid physical record.
+    // Currently there are three situations in which this happens:
+    // * The record has an invalid CRC (ReadPhysicalRecord reports a drop)
+    // * The record is a 0-length record (No drop is reported)
+    // * The record is below constructor's initial_offset (No drop is reported)
+    kBadRecord = list_file::kMaxRecordType + 2
+  };
+};
+
+bool Lst1Impl::ReadHeader(std::map<std::string, std::string>* dest) {
+  list_file::HeaderParser parser;
+  Status status = parser.Parse(file_, dest);
+
+  if (!status.ok()) {
+    LOG(ERROR) << "Error reading header " << status;
+    ReportDrop(file_->Size(), status);
+    eof_ = true;
+    return false;
   }
-}
 
-bool ListReader::GetMetaData(std::map<std::string, std::string>* meta) {
-  if (!ReadHeader()) return false;
-  *meta = meta_;
+  file_offset_ = read_header_bytes = parser.offset();
+  block_size_ = parser.block_multiplier() * kBlockSizeFactor;
+
+  CHECK_GT(block_size_, 0);
+  backing_store_.reset(new uint8[block_size_]);
+  uncompress_buf_.reset(new uint8[block_size_]);
+
   return true;
 }
 
-bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
-  if (!ReadHeader()) return false;
-
+bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
   scratch->clear();
   *record = StringPiece();
   bool in_fragmented_record = false;
@@ -69,8 +90,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
     if (array_records_ > 0) {
       uint32 item_size = 0;
       const uint8* aend = reinterpret_cast<const uint8*>(array_store_.end());
-      const uint8* item_ptr = Varint::Parse32WithLimit(u8ptr(array_store_), aend,
-                                                       &item_size);
+      const uint8* item_ptr = Varint::Parse32WithLimit(u8ptr(array_store_), aend, &item_size);
       DVLOG(2) << "Array record with size: " << item_size;
 
       const uint8* next_rec_ptr = item_ptr + item_size;
@@ -78,10 +98,10 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
         ReportCorruption(array_store_.size(), "invalid array record");
         array_records_ = 0;
       } else {
-        read_header_bytes_ += item_ptr - u8ptr(array_store_);
+        read_header_bytes += item_ptr - u8ptr(array_store_);
         array_store_.remove_prefix(next_rec_ptr - u8ptr(array_store_));
         *record = StringPiece(strings::charptr(item_ptr), item_size);
-        read_data_bytes_ += item_size;
+        read_data_bytes += item_size;
         --array_records_;
         return true;
       }
@@ -109,8 +129,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
 
       case kMiddleType:
         if (!in_fragmented_record) {
-          ReportCorruption(fragment.size(),
-                           "missing start of fragmented record(1)");
+          ReportCorruption(fragment.size(), "missing start of fragmented record(1)");
         } else {
           scratch->append(fragment.data(), fragment.size());
         }
@@ -118,12 +137,11 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
 
       case kLastType:
         if (!in_fragmented_record) {
-          ReportCorruption(fragment.size(),
-                           "missing start of fragmented record(2)");
+          ReportCorruption(fragment.size(), "missing start of fragmented record(2)");
         } else {
           scratch->append(fragment.data(), fragment.size());
           *record = StringPiece(*scratch);
-          read_data_bytes_ += record->size();
+          read_data_bytes += record->size();
           // last_record_offset_ = prospective_record_offset;
           return true;
         }
@@ -133,18 +151,17 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
           ReportCorruption(scratch->size(), "partial record without end(4)");
         }
         uint32 array_records = 0;
-        const uint8* array_ptr = Varint::Parse32WithLimit(u8ptr(fragment),
-              u8ptr(fragment) + fragment.size(), &array_records);
+        const uint8* array_ptr = Varint::Parse32WithLimit(
+            u8ptr(fragment), u8ptr(fragment) + fragment.size(), &array_records);
         if (array_ptr == nullptr || array_records == 0) {
           ReportCorruption(fragment.size(), "invalid array record");
         } else {
-          read_header_bytes_ += array_ptr - u8ptr(fragment);
+          read_header_bytes += array_ptr - u8ptr(fragment);
           array_records_ = array_records;
           array_store_ = FromBuf(array_ptr, fragment.end() - strings::charptr(array_ptr));
           VLOG(2) << "Read array with count " << array_records;
         }
-      }
-      break;
+      } break;
       case kEof:
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "partial record without end(3)");
@@ -161,9 +178,7 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
       default: {
         char buf[40];
         snprintf(buf, sizeof(buf), "unknown record type %u", record_type);
-        ReportCorruption(
-            (fragment.size() + (in_fragmented_record ? scratch->size() : 0)),
-            buf);
+        ReportCorruption((fragment.size() + (in_fragmented_record ? scratch->size() : 0)), buf);
         in_fragmented_record = false;
         scratch->clear();
       }
@@ -172,8 +187,123 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
   return true;
 }
 
-static const uint8* DecodeString(const uint8* ptr, const uint8* end, string* dest) {
-  if (ptr == nullptr) return nullptr;
+unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
+  while (true) {
+    // Should be <= but due to bug in ListWriter we leave it as < until all the prod files are
+    // replaced.
+    if (block_buffer_.size() < kBlockHeaderSize) {
+      if (!eof_) {
+        size_t fsize = file_->Size();
+        auto res =
+            file_->Read(file_offset_, strings::MutableByteRange(backing_store_.get(), block_size_));
+        VLOG(2) << "read_size: " << res.obj << ", status: " << res.status;
+        if (!res.ok()) {
+          ReportDrop(res.obj, res.status);
+          eof_ = true;
+          return kEof;
+        }
+        block_buffer_.reset(backing_store_.get(), res.obj);
+        file_offset_ += block_buffer_.size();
+        if (file_offset_ >= fsize) {
+          eof_ = true;
+        }
+        continue;
+      } else if (block_buffer_.empty()) {
+        // End of file
+        return kEof;
+      } else {
+        size_t drop_size = block_buffer_.size();
+        block_buffer_.clear();
+        ReportCorruption(drop_size, "truncated record at end of file");
+        return kEof;
+      }
+    }
+
+    // Parse the header
+    const uint8* header = block_buffer_.data();
+    const uint8 type = header[8];
+    uint32 length = coding::DecodeFixed32(header + 4);
+    read_header_bytes += kBlockHeaderSize;
+
+    if (length == 0 && type == kZeroType) {
+      size_t bs = block_buffer_.size();
+      block_buffer_.clear();
+      // Handle the case of when mistakenly written last kBlockHeaderSize bytes as empty record.
+      if (bs != kBlockHeaderSize) {
+        LOG(ERROR) << "Bug reading list file " << bs;
+        return kBadRecord;
+      }
+      continue;
+    }
+
+    if (length + kBlockHeaderSize > block_buffer_.size()) {
+      VLOG(1) << "Invalid length " << length << " file offset " << file_offset_ << " block size "
+              << block_buffer_.size() << " type " << int(type);
+      size_t drop_size = block_buffer_.size();
+      block_buffer_.clear();
+      ReportCorruption(drop_size, "bad record length or truncated record at eof.");
+      return kBadRecord;
+    }
+
+    const uint8* data_ptr = header + kBlockHeaderSize;
+    // Check crc
+    if (checksum_) {
+      uint32_t expected_crc = crc32c::Unmask(coding::DecodeFixed32(header));
+      // compute crc of the record and the type.
+      uint32_t actual_crc = crc32c::Value(data_ptr - 1, 1 + length);
+      if (actual_crc != expected_crc) {
+        // Drop the rest of the buffer since "length" itself may have
+        // been corrupted and if we trust it, we could find some
+        // fragment of a real log record that just happens to look
+        // like a valid log record.
+        size_t drop_size = block_buffer_.size();
+        block_buffer_.clear();
+        ReportCorruption(drop_size, "checksum mismatch");
+        return kBadRecord;
+      }
+    }
+    uint32 record_size = length + kBlockHeaderSize;
+    block_buffer_.advance(record_size);
+
+    if (type & kCompressedMask) {
+      if (!Uncompress(data_ptr, &length)) {
+        ReportCorruption(record_size, "Uncompress failed.");
+        return kBadRecord;
+      }
+      data_ptr = uncompress_buf_.get();
+    }
+
+    *result = FromBuf(data_ptr, length);
+    return type & 0xF;
+  }
+}
+
+bool Lst1Impl::Uncompress(const uint8* data_ptr, uint32* size) {
+  uint8 method = *data_ptr++;
+  VLOG(2) << "Uncompress " << int(method) << " with size " << *size;
+
+  uint32 inp_sz = *size - 1;
+
+  UncompressFunction uncompr_func = GetUncompress(list_file::CompressMethod(method));
+
+  if (!uncompr_func) {
+    LOG(ERROR) << "Could not find uncompress method " << int(method);
+    return false;
+  }
+  size_t uncompress_size = block_size_;
+  Status status = uncompr_func(data_ptr, inp_sz, uncompress_buf_.get(), &uncompress_size);
+  if (!status.ok()) {
+    VLOG(1) << "Uncompress error: " << status;
+    return false;
+  }
+
+  *size = uncompress_size;
+  return true;
+}
+
+const uint8* DecodeString(const uint8* ptr, const uint8* end, string* dest) {
+  if (ptr == nullptr)
+    return nullptr;
   uint32 string_sz = 0;
   ptr = Varint::Parse32WithLimit(ptr, end, &string_sz);
   if (ptr == nullptr || ptr + string_sz > end)
@@ -183,8 +313,64 @@ static const uint8* DecodeString(const uint8* ptr, const uint8* end, string* des
   return ptr + string_sz;
 }
 
-Status list_file::HeaderParser::Parse(
-  file::ReadonlyFile* file, std::map<std::string, std::string>* meta) {
+}  // namespace
+
+ListReader::ReaderImpl::~ReaderImpl() {
+  if (ownership_ == TAKE_OWNERSHIP) {
+    auto st = file_->Close();
+    if (!st.ok()) {
+      LOG(WARNING) << "Error closing file, status " << st;
+    }
+    delete file_;
+  }
+}
+
+void ListReader::ReaderImpl::ReportDrop(size_t bytes, const Status& reason) {
+  LOG(ERROR) << "ReportDrop: " << bytes << " "
+             << " block buffer_size " << block_buffer_.size() << ", reason: " << reason;
+  if (reporter_ /*&& end_of_buffer_offset_ >= initial_offset_ + block_buffer_.size() + bytes*/) {
+    reporter_(bytes, reason);
+  }
+}
+
+ListReader::ListReader(file::ReadonlyFile* file, Ownership ownership, bool checksum,
+                       CorruptionReporter reporter)
+    : impl_(new Lst1Impl(file, ownership, checksum, reporter)) {}
+
+ListReader::ListReader(StringPiece filename, bool checksum, CorruptionReporter reporter) {
+  auto res = ReadonlyFile::Open(filename);
+  CHECK(res.ok()) << res.status << ", file name: " << filename;
+  CHECK(res.obj) << filename;
+  impl_.reset(new Lst1Impl(res.obj, TAKE_OWNERSHIP, checksum, reporter));
+}
+
+ListReader::~ListReader() {}
+
+bool ListReader::ReadHeader() {
+  if (impl_->block_size())
+    return true;
+  if (impl_->eof())
+    return false;
+  return impl_->ReadHeader(&meta_);
+}
+
+bool ListReader::GetMetaData(std::map<std::string, std::string>* meta) {
+  if (!ReadHeader())
+    return false;
+  *meta = meta_;
+  return true;
+}
+
+bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
+  if (!ReadHeader())
+    return false;
+
+  return impl_->ReadRecord(record, scratch);
+}
+
+
+Status list_file::HeaderParser::Parse(file::ReadonlyFile* file,
+                                      std::map<std::string, std::string>* meta) {
   uint8 buf[kListFileHeaderSize];
   auto res = file->Read(0, strings::MutableByteRange(buf, kListFileHeaderSize));
   if (!res.ok())
@@ -195,7 +381,7 @@ Status list_file::HeaderParser::Parse(
 
   if (res.obj != kListFileHeaderSize ||
       !absl::StartsWith(header, StringPiece(kMagicString, kMagicStringSize)) ||
-      buf[kMagicStringSize] == 0 || buf[kMagicStringSize] > 100 ) {
+      buf[kMagicStringSize] == 0 || buf[kMagicStringSize] > 100) {
     return Status(StatusCode::IO_ERROR, "Invalid header");
   }
 
@@ -239,158 +425,6 @@ Status list_file::HeaderParser::Parse(
   block_multiplier_ = block_factor;
 
   return Status::OK;
-}
-
-bool ListReader::ReadHeader() {
-  if (block_size_ != 0) return true;
-  if (eof_) return false;
-
-  list_file::HeaderParser parser;
-  Status status = parser.Parse(file_, &meta_);
-
-  if (!status.ok()) {
-    LOG(ERROR) << "Error reading header " << status;
-    ReportDrop(file_->Size(), status);
-    eof_ = true;
-    return false;
-  }
-
-  file_offset_ = read_header_bytes_ = parser.offset();
-  block_size_ = parser.block_multiplier() * kBlockSizeFactor;
-
-  CHECK_GT(block_size_, 0);
-  backing_store_.reset(new uint8[block_size_]);
-  uncompress_buf_.reset(new uint8[block_size_]);
-
-  return true;
-}
-
-void ListReader::ReportCorruption(size_t bytes, const string& reason) {
-  ReportDrop(bytes, Status(StatusCode::IO_ERROR, reason));
-}
-
-void ListReader::ReportDrop(size_t bytes, const Status& reason) {
-  LOG(ERROR) << "ReportDrop: " << bytes << " "
-             << " block buffer_size " << block_buffer_.size() << ", reason: " << reason;
-  if (reporter_ /*&& end_of_buffer_offset_ >= initial_offset_ + block_buffer_.size() + bytes*/) {
-    reporter_(bytes, reason);
-  }
-}
-
-using strings::charptr;
-
-unsigned int ListReader::ReadPhysicalRecord(StringPiece* result) {
-  while (true) {
-    // Should be <= but due to bug in ListWriter we leave it as < until all the prod files are
-    // replaced.
-    if (block_buffer_.size() < kBlockHeaderSize) {
-      if (!eof_) {
-        size_t fsize = file_->Size();
-        auto res = file_->Read(file_offset_,
-                               strings::MutableByteRange(backing_store_.get(), block_size_));
-        VLOG(2) << "read_size: " << res.obj << ", status: " << res.status;
-        if (!res.ok()) {
-          ReportDrop(res.obj, res.status);
-          eof_ = true;
-          return kEof;
-        }
-        block_buffer_.reset(backing_store_.get(), res.obj);
-        file_offset_ += block_buffer_.size();
-        if (file_offset_ >= fsize) {
-          eof_ = true;
-        }
-        continue;
-      } else if (block_buffer_.empty()) {
-        // End of file
-        return kEof;
-      } else {
-        size_t drop_size = block_buffer_.size();
-        block_buffer_.clear();
-        ReportCorruption(drop_size, "truncated record at end of file");
-        return kEof;
-      }
-    }
-
-    // Parse the header
-    const uint8* header = block_buffer_.data();
-    const uint8 type = header[8];
-    uint32 length = coding::DecodeFixed32(header + 4);
-    read_header_bytes_ += kBlockHeaderSize;
-
-    if (length == 0 && type == kZeroType) {
-      size_t bs = block_buffer_.size();
-      block_buffer_.clear();
-      // Handle the case of when mistakenly written last kBlockHeaderSize bytes as empty record.
-      if (bs != kBlockHeaderSize) {
-        LOG(ERROR) << "Bug reading list file " << bs;
-        return kBadRecord;
-      }
-      continue;
-    }
-
-    if (length + kBlockHeaderSize > block_buffer_.size()) {
-      VLOG(1) << "Invalid length " << length << " file offset " << file_offset_
-              << " block size " << block_buffer_.size() << " type " << int(type);
-      size_t drop_size = block_buffer_.size();
-      block_buffer_.clear();
-      ReportCorruption(drop_size, "bad record length or truncated record at eof.");
-      return kBadRecord;
-    }
-
-    const uint8* data_ptr = header + kBlockHeaderSize;
-    // Check crc
-    if (checksum_) {
-      uint32_t expected_crc = crc32c::Unmask(coding::DecodeFixed32(header));
-      // compute crc of the record and the type.
-      uint32_t actual_crc = crc32c::Value(data_ptr - 1, 1 + length);
-      if (actual_crc != expected_crc) {
-        // Drop the rest of the buffer since "length" itself may have
-        // been corrupted and if we trust it, we could find some
-        // fragment of a real log record that just happens to look
-        // like a valid log record.
-        size_t drop_size = block_buffer_.size();
-        block_buffer_.clear();
-        ReportCorruption(drop_size, "checksum mismatch");
-        return kBadRecord;
-      }
-    }
-    uint32 record_size = length + kBlockHeaderSize;
-    block_buffer_.advance(record_size);
-
-    if (type & kCompressedMask) {
-      if (!Uncompress(data_ptr, &length)) {
-        ReportCorruption(record_size, "Uncompress failed.");
-        return kBadRecord;
-      }
-      data_ptr = uncompress_buf_.get();
-    }
-
-    *result = FromBuf(data_ptr, length);
-    return type & 0xF;
-  }
-}
-
-bool ListReader::Uncompress(const uint8* data_ptr, uint32* size) {
-  uint8 method = *data_ptr++;
-  VLOG(2) << "Uncompress " << int(method) << " with size " << *size;
-
-  uint32 inp_sz = *size - 1;
-
-  UncompressFunction uncompr_func = GetUncompress(list_file::CompressMethod(method));
-
-  if (!uncompr_func) {
-    LOG(ERROR) << "Could not find uncompress method " << int(method);
-    return false;
-  }
-  size_t uncompress_size = block_size_;
-  Status status = uncompr_func(data_ptr, inp_sz, uncompress_buf_.get(), &uncompress_size);
-  if (!status.ok()) {
-    VLOG(1) << "Uncompress error: " << status;
-    return false;
-  }
-
-  *size = uncompress_size;
-  return true;
 }
 
 }  // namespace file

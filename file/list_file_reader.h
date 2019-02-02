@@ -7,7 +7,7 @@
 #include <map>
 
 #include "base/integral_types.h"
-#include "base/logging.h"   // For CHECK.
+#include "base/logging.h"  // For CHECK.
 #include "file/list_file_format.h"
 #include "strings/stringpiece.h"
 #include "util/status.h"
@@ -54,78 +54,62 @@ class ListReader {
   // will notify reporter about the corruption.
   bool ReadRecord(StringPiece* record, std::string* scratch);
 
-  // Returns the offset of the last record read by ReadRecord relative to list start position
-  // in the file.
-  // Undefined before the first call to ReadRecord.
-  // size_t LastRecordOffset() const { return last_record_offset_; }
+  void Reset() { impl_->Reset(); }
 
-  void Reset() {
-    block_size_ = file_offset_ = array_records_ = 0;
-    eof_ = false;
-  }
+  uint32_t read_header_bytes() const { return impl_->read_header_bytes; }
+  uint32_t read_data_bytes() const { return impl_->read_data_bytes; }
 
-  uint32 read_header_bytes() const { return read_header_bytes_; }
-  uint32 read_data_bytes() const { return read_data_bytes_; }
+  class ReaderImpl {
+   public:
+    ReaderImpl(ReadonlyFile* file, Ownership own, bool chksum, CorruptionReporter rp)
+        : file_(file), ownership_(own), checksum_(chksum), reporter_(rp) {}
+
+    virtual ~ReaderImpl();
+
+    virtual bool ReadHeader(std::map<std::string, std::string>* dest) = 0;
+    virtual bool ReadRecord(StringPiece* record, std::string* scratch) = 0;
+
+    bool eof() const { return eof_; }
+    uint32_t block_size() const { return block_size_; }
+
+    ReadonlyFile* file() { return file_; }
+
+    size_t read_header_bytes = 0;  // how much headers bytes were read so far.
+    size_t read_data_bytes = 0;    // how much data bytes were read so far.
+
+    void Reset() {
+      block_size_ = file_offset_ = array_records_ = 0;
+      eof_ = false;
+    }
+
+   protected:
+    void ReportCorruption(size_t bytes, const std::string& reason) {
+      ReportDrop(bytes, util::Status(util::StatusCode::IO_ERROR, reason));
+    }
+
+    void ReportDrop(size_t bytes, const util::Status& reason);
+
+    ReadonlyFile* const file_;
+    size_t file_offset_ = 0;
+
+    Ownership ownership_;
+    bool eof_ = false;  // Last Read() indicated EOF by returning < kBlockSize
+    const bool checksum_ = false;
+    uint32_t block_size_ = 0;
+    uint32_t array_records_ = 0;
+
+    CorruptionReporter const reporter_;
+    std::unique_ptr<uint8[]> backing_store_;
+    std::unique_ptr<uint8[]> uncompress_buf_;
+    strings::ByteRange block_buffer_;
+  };
 
  private:
   bool ReadHeader();
 
-  // 'size' is size of the compressed blob.
-  // Returns true if succeeded. In that case uncompress_buf_ will contain the uncompressed data
-  // and size will be updated to the uncompressed size.
-  bool Uncompress(const uint8* data_ptr, uint32* size);
-
-  ReadonlyFile* file_;
-  size_t file_offset_ = 0;
-  size_t read_header_bytes_ = 0;  // how much headers bytes were read so far.
-  size_t read_data_bytes_ = 0;    // how much data bytes were read so far.
-
-  Ownership ownership_;
-  CorruptionReporter const reporter_;
-  bool const checksum_;
-  std::unique_ptr<uint8[]> backing_store_;
-  std::unique_ptr<uint8[]> uncompress_buf_;
-  strings::ByteRange block_buffer_;
   std::map<std::string, std::string> meta_;
 
-  bool eof_ = false;  // Last Read() indicated EOF by returning < kBlockSize
-
-  // Offset of the last record returned by ReadRecord.
-  // size_t last_record_offset_;
-  // Offset of the first location past the end of buffer_.
-  // size_t end_of_buffer_offset_ = 0;
-
-  // Offset at which to start looking for the first record to return
-  // size_t const initial_offset_;
-  uint32 block_size_ = 0;
-  uint32 array_records_ = 0;
-  StringPiece array_store_;
-
-  // Extend record types with the following special values
-  enum {
-    kEof = list_file::kMaxRecordType + 1,
-    // Returned whenever we find an invalid physical record.
-    // Currently there are three situations in which this happens:
-    // * The record has an invalid CRC (ReadPhysicalRecord reports a drop)
-    // * The record is a 0-length record (No drop is reported)
-    // * The record is below constructor's initial_offset (No drop is reported)
-    kBadRecord = list_file::kMaxRecordType + 2
-  };
-
-  // Skips all blocks that are completely before "initial_offset_".
-  // util::Status SkipToInitialBlock();
-
-  // Return type, or one of the preceding special values
-  unsigned int ReadPhysicalRecord(StringPiece* result);
-
-  // Reports dropped bytes to the reporter.
-  // buffer_ must be updated to remove the dropped bytes prior to invocation.
-  void ReportCorruption(size_t bytes, const std::string& reason);
-  void ReportDrop(size_t bytes, const util::Status& reason);
-
-  // No copying allowed
-  ListReader(const ListReader&) = delete;
-  void operator=(const ListReader&) = delete;
+  std::unique_ptr<ReaderImpl> impl_;
 };
 
 template <typename T> void ReadProtoRecords(ReadonlyFile* file, std::function<void(T&&)> cb) {
