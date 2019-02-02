@@ -8,7 +8,6 @@
 
 #include <gmock/gmock.h>
 #include "base/gtest.h"
-// #include "base/random.h"
 
 #include "file/test_util.h"
 #include "file/file_util.h"
@@ -29,6 +28,16 @@ using strings::u8ptr;
 using testing::ElementsAre;
 using testing::internal::CaptureStderr;
 using testing::internal::GetCapturedStderr;
+
+MATCHER_P(ErrorContains, expected,
+          std::string(negation ? "does not contain " : "contains ") + expected) {
+  if (arg.find(expected) != string::npos) {
+    return true;
+  }
+
+  // *result_listener << "\nDifference found: " << result;
+  return false;
+}
 
 // Construct a string of the specified length made out of the supplied
 // partial string.
@@ -184,7 +193,7 @@ protected:
     return report_.dropped_bytes_;
   }
 
-  std::string ReportMessage() const {
+  const string& ReportMessage() const {
     return report_.message_;
   }
 
@@ -544,7 +553,7 @@ TEST_F(LogTest, EmptyFile) {
   dest_->contents() = "garbag";
   CaptureStderr();
   ASSERT_EQ("EOF", Read());
-  EXPECT_EQ("OK", MatchError("IO_ERROR"));
+  EXPECT_THAT(ReportMessage(), ErrorContains("Invalid"));
   EXPECT_FALSE(GetCapturedStderr().empty());
 }
 

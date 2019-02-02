@@ -65,9 +65,7 @@ bool Lst1Impl::ReadHeader(std::map<std::string, std::string>* dest) {
   Status status = parser.Parse(wrapper_->file, dest);
 
   if (!status.ok()) {
-    LOG(ERROR) << "Error reading header " << status;
-    wrapper_->ReportDrop(wrapper_->file->Size(), status);
-    wrapper_->eof = true;
+    wrapper_->BadHeader(status);
     return false;
   }
 
@@ -77,7 +75,9 @@ bool Lst1Impl::ReadHeader(std::map<std::string, std::string>* dest) {
   CHECK_GT(wrapper_->block_size, 0);
   wrapper_->backing_store_.reset(new uint8[wrapper_->block_size]);
   wrapper_->uncompress_buf_.reset(new uint8[wrapper_->block_size]);
-
+  if (wrapper_->file_offset_ >= wrapper_->file->Size()) {
+    wrapper_->eof = true;
+  }
   return true;
 }
 
@@ -179,7 +179,8 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
       default: {
         char buf[40];
         snprintf(buf, sizeof(buf), "unknown record type %u", record_type);
-        wrapper_->ReportCorruption((fragment.size() + (in_fragmented_record ? scratch->size() : 0)), buf);
+        wrapper_->ReportCorruption((fragment.size() + (in_fragmented_record ? scratch->size() : 0)),
+                                   buf);
         in_fragmented_record = false;
         scratch->clear();
       }
@@ -190,13 +191,11 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
 
 unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
   while (true) {
-    // Should be <= but due to bug in ListWriter we leave it as < until all the prod files are
-    // replaced.
-    if (wrapper_->block_buffer_.size() < kBlockHeaderSize) {
+    if (wrapper_->block_buffer_.size() <= kBlockHeaderSize) {
       if (!wrapper_->eof) {
         size_t fsize = wrapper_->file->Size();
-        auto res =
-            wrapper_->file->Read(wrapper_->file_offset_, strings::MutableByteRange(wrapper_->backing_store_.get(), wrapper_->block_size));
+        strings::MutableByteRange mbr(wrapper_->backing_store_.get(), wrapper_->block_size);
+        auto res = wrapper_->file->Read(wrapper_->file_offset_, mbr);
         VLOG(2) << "read_size: " << res.obj << ", status: " << res.status;
         if (!res.ok()) {
           wrapper_->ReportDrop(res.obj, res.status);
@@ -238,8 +237,8 @@ unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
     }
 
     if (length + kBlockHeaderSize > wrapper_->block_buffer_.size()) {
-      VLOG(1) << "Invalid length " << length << " file offset " << wrapper_->file_offset_ << " block size "
-              << wrapper_->block_buffer_.size() << " type " << int(type);
+      VLOG(1) << "Invalid length " << length << " file offset " << wrapper_->file_offset_
+              << " block size " << wrapper_->block_buffer_.size() << " type " << int(type);
       size_t drop_size = wrapper_->block_buffer_.size();
       wrapper_->block_buffer_.clear();
       wrapper_->ReportCorruption(drop_size, "bad record length or truncated record at eof.");
@@ -316,6 +315,8 @@ const uint8* DecodeString(const uint8* ptr, const uint8* end, string* dest) {
 
 }  // namespace
 
+ListReader::FormatImpl::~FormatImpl() {}
+
 ListReader::ReaderWrapper::~ReaderWrapper() {
   if (ownership == TAKE_OWNERSHIP) {
     auto st = file->Close();
@@ -324,6 +325,12 @@ ListReader::ReaderWrapper::~ReaderWrapper() {
     }
     delete file;
   }
+}
+
+void ListReader::ReaderWrapper::BadHeader(const Status& st) {
+  LOG(ERROR) << "Error reading header " << st;
+  ReportDrop(file->Size(), st);
+  eof = true;
 }
 
 void ListReader::ReaderWrapper::ReportDrop(size_t bytes, const Status& reason) {
@@ -336,26 +343,37 @@ void ListReader::ReaderWrapper::ReportDrop(size_t bytes, const Status& reason) {
 
 ListReader::ListReader(file::ReadonlyFile* file, Ownership ownership, bool checksum,
                        CorruptionReporter reporter)
-    : wrapper_(new ReaderWrapper(file, ownership, checksum, reporter)) {
-  impl_.reset(new Lst1Impl(wrapper_.get()));
-}
+    : wrapper_(new ReaderWrapper(file, ownership, checksum, reporter)) {}
 
 ListReader::ListReader(StringPiece filename, bool checksum, CorruptionReporter reporter) {
   auto res = ReadonlyFile::Open(filename);
   CHECK(res.ok()) << res.status << ", file name: " << filename;
   CHECK(res.obj) << filename;
   wrapper_.reset(new ReaderWrapper(res.obj, TAKE_OWNERSHIP, checksum, reporter));
-  impl_.reset(new Lst1Impl(wrapper_.get()));
 }
 
 ListReader::~ListReader() {}
 
 bool ListReader::ReadHeader() {
-  if (wrapper_->block_size)
+  if (impl_)
     return true;
   if (wrapper_->eof)
     return false;
 
+  uint8 buf[kMagicStringSize];
+  const StringPiece kMagic(kMagicString, kMagicStringSize);
+  auto res = wrapper_->file->Read(0, strings::MutableByteRange(buf, sizeof(buf)));
+  if (!res.ok()) {
+    wrapper_->BadHeader(res.status);
+    return false;
+  }
+
+  if (strings::FromBuf(buf, sizeof(buf)) != kMagic) {
+    wrapper_->BadHeader(Status(StatusCode::PARSE_ERROR, "Invalid header"));
+    return false;
+  }
+
+  impl_.reset(new Lst1Impl(wrapper_.get()));
   return impl_->ReadHeader(&meta_);
 }
 
@@ -373,25 +391,25 @@ bool ListReader::ReadRecord(StringPiece* record, std::string* scratch) {
   return impl_->ReadRecord(record, scratch);
 }
 
+void ListReader::Reset() {
+  impl_.reset();
+  wrapper_->Reset();
+}
 
 Status list_file::HeaderParser::Parse(file::ReadonlyFile* file,
                                       std::map<std::string, std::string>* meta) {
-  uint8 buf[kListFileHeaderSize];
-  auto res = file->Read(0, strings::MutableByteRange(buf, kListFileHeaderSize));
+  uint8 buf[2];
+  auto res = file->Read(kMagicStringSize, strings::MutableByteRange(buf, 2));
   if (!res.ok())
     return res.status;
 
   offset_ = kListFileHeaderSize;
-  StringPiece header = FromBuf(buf, kListFileHeaderSize);
-
-  if (res.obj != kListFileHeaderSize ||
-      !absl::StartsWith(header, StringPiece(kMagicString, kMagicStringSize)) ||
-      buf[kMagicStringSize] == 0 || buf[kMagicStringSize] > 100) {
+  if (buf[0] == 0 || buf[1] > 100) {
     return Status(StatusCode::IO_ERROR, "Invalid header");
   }
 
-  unsigned block_factor = buf[kMagicStringSize];
-  if (buf[kMagicStringSize + 1] == kMetaExtension) {
+  unsigned block_factor = buf[0];
+  if (buf[1] == kMetaExtension) {
     uint8 meta_header[8];
     auto res = file->Read(offset_, strings::MutableByteRange(meta_header, sizeof meta_header));
     if (!res.ok())

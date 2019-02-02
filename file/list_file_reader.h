@@ -54,7 +54,7 @@ class ListReader {
   // will notify reporter about the corruption.
   bool ReadRecord(StringPiece* record, std::string* scratch);
 
-  void Reset() { wrapper_->Reset(); }
+  void Reset();
 
   uint32_t read_header_bytes() const { return wrapper_->read_header_bytes; }
   uint32_t read_data_bytes() const { return wrapper_->read_data_bytes; }
@@ -79,6 +79,7 @@ class ListReader {
     }
 
     void ReportDrop(size_t bytes, const util::Status& reason);
+    void BadHeader(const util::Status& reason);
 
     ReadonlyFile* file;
     Ownership ownership;
@@ -99,7 +100,7 @@ class ListReader {
   class FormatImpl {
    public:
     FormatImpl(ReaderWrapper* wrapper) : wrapper_(wrapper) {}
-    virtual ~FormatImpl() {}
+    virtual ~FormatImpl();
 
     virtual bool ReadHeader(std::map<std::string, std::string>* dest) = 0;
     virtual bool ReadRecord(StringPiece* record, std::string* scratch) = 0;

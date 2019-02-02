@@ -26,7 +26,7 @@ class TempDirDeleter {
 
   string GetTempDir() {
     if (name_.empty()) {
-      name_ = base::GetTestTempDir();      
+      name_ = base::GetTestTempDir();
       CHECK(mkdir(name_.c_str(), 0777) == 0) << strerror(errno);
 
       // Stick a file in the directory that tells people what this is, in case
@@ -55,7 +55,7 @@ namespace file {
 StatusObject<size_t>
     ReadonlyStringFile::Read(size_t offset, const strings::MutableByteRange& range) {
   if (contents_.size() <= offset)
-    return Status(StatusCode::INTERNAL_ERROR);
+    return Status(StatusCode::RUNTIME_ERROR, "Beyond string size");
   size_t length = range.size();
 
   if (contents_.size() < range.size() + offset) {
