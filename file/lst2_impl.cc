@@ -100,7 +100,6 @@ Status Lst2Impl::Init(const std::map<string, string>& meta) {
    Payload: (uint16_t item_sz[ArrayCount]) + ItemDataSize. // item_sz if item type is array.
             Another option: To store varint_payload_sz + varint_sz_arr + ItemDataSize
 */
-
 Status Lst2Impl::AddRecord(StringPiece record) {
   CHECK(init_called_) << "ListWriter::Init was not called.";
 
@@ -163,9 +162,9 @@ util::Status Lst2Impl::WriteFragmented(StringPiece record) {
   while (true) {
     rh.crc = crc32c::Crc32c(record.data(), rh.size);
     uint8_t* next = rh.Write(buf);
-    uint32_t hs = next - buf;
-    strings::ByteRange br(strings::u8ptr(record.data()), rh.size);
-    RETURN_IF_ERROR(EmitPhysicalRecord(strings::ByteRange(buf, hs), br));
+    strings::ByteRange header(buf, next - buf);
+    strings::ByteRange payload(strings::u8ptr(record.data()), rh.size);
+    RETURN_IF_ERROR(EmitPhysicalRecord(header, payload));
     record.remove_prefix(rh.size);
     if (record.empty())
       break;

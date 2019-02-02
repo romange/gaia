@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include "file/list_file.h"
+#include "file/list_file_reader.h"
 
 #include <cstdio>
 
