@@ -49,6 +49,15 @@ class ReaderImpl : public ListReader::FormatImpl {
   bool ReadRecord(StringPiece* record, std::string* scratch) final;
 
  private:
+  enum {
+    kEof = kMaxRecordVal + 1,
+
+    // Returned whenever we find an invalid physical record.
+    // Currently there are these situations in which this happens:
+    // * The record has an invalid CRC (ReadPhysicalRecord reports a drop)
+    kBadRecord = kMaxRecordVal + 2
+  };
+  unsigned ReadPhysicalRecord(StringPiece* dest);
 };
 
 }  // namespace lst2

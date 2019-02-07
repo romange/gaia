@@ -105,6 +105,7 @@ class ListReader {
     std::unique_ptr<uint8[]> backing_store_;
     std::unique_ptr<uint8[]> uncompress_buf_;
     strings::ByteRange block_buffer_;
+    StringPiece array_store_;
 
     ReaderWrapper* wrapper_;
   };

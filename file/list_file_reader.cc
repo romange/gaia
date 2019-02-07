@@ -45,8 +45,6 @@ class Lst1Impl : public ListReader::FormatImpl {
   // and size will be updated to the uncompressed size.
   bool Uncompress(const uint8* data_ptr, uint32* size);
 
-  StringPiece array_store_;
-
   // Extend record types with the following special values
   enum {
     kEof = list_file::kMaxRecordType + 1,

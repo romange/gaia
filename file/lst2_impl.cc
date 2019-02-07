@@ -45,7 +45,7 @@ uint8_t* RecordHeader::Write(uint8_t* dest) const {
   return dest;
 }
 
-int RecordHeader::ParseMinimal(const uint8_t* src) {
+size_t RecordHeader::Parse(const uint8_t* src) {
   flags = src[0];
   const uint8_t* next = src + 1;
 
@@ -62,16 +62,11 @@ int RecordHeader::ParseMinimal(const uint8_t* src) {
   }
 
   if ((flags & kCompressedFlag) == 0) {
-    DCHECK_GE(next, src + kSingleSmallSize - 4);
-    if (next == src + kSingleSmallSize - 4) {
-      crc = LittleEndian::Load32(next);
-      return 0;
-    }
-    return next - (src + kSingleSmallSize - 4);
+    crc = LittleEndian::Load32(next);
+    next += sizeof(uint32_t);
   }
-  LOG(FATAL) << "TBD";
 
-  return next - (src + kSingleSmallSize);
+  return next - src;
 }
 
 Lst2Impl::Lst2Impl(util::Sink* sink, const ListWriter::Options& opts) : WriterImpl(sink, opts) {
@@ -176,9 +171,7 @@ Status Lst2Impl::AddRecord(StringPiece record) {
   return WriteFragmented(record);
 }
 
-Status Lst2Impl::Flush() {
-  return FlushArray();
-}
+Status Lst2Impl::Flush() { return FlushArray(); }
 
 Status Lst2Impl::FlushArray() {
   if (array_records_ == 0)
@@ -263,13 +256,11 @@ util::Status Lst2Impl::EmitPhysicalRecord(strings::ByteRange header, strings::By
   return Status::OK;
 }
 
-
 bool ReaderImpl::ReadHeader(std::map<std::string, std::string>* dest) {
   uint8_t buf[4];
   auto res = wrapper_->file->Read(kMagicStringSize, strings::MutableByteRange(buf, sizeof(buf)));
   if (!res.ok())
     return false;
-
 
   uint16_t multiplier = LittleEndian::Load16(buf);
   uint16_t num_pairs = LittleEndian::Load16(buf + 2);
@@ -293,14 +284,72 @@ bool ReaderImpl::ReadHeader(std::map<std::string, std::string>* dest) {
       return false;
     if (!ReadRecord(&sval, &val))
       return false;
-    dest->emplace(strings::AsString(skey), strings::AsString(sval));
+    dest->emplace(string(skey), string(sval));
   }
 
+  // We allocate more to allow simpler parsing.
+  backing_store_.reset(new uint8_t[wrapper_->block_size + 8]);
   return true;
 }
 
 bool ReaderImpl::ReadRecord(StringPiece* record, std::string* scratch) {
+  bool in_fragmented_record = false;
+  scratch->clear();
+
+  while (true) {
+    if (!array_store_.empty()) {
+      uint32_t len;
+      const uint8_t* start = strings::u8ptr(array_store_.data());
+      const uint8_t* next = Varint::Parse32Inline(start, &len);
+      size_t s = next - start + len;
+      if (s > array_store_.size()) {
+        wrapper_->ReportCorruption(array_store_.size(), "Invalid array record");
+        array_store_ = StringPiece();
+        continue;
+      }
+
+      *record = StringPiece(strings::charptr(next), len);
+      array_store_.remove_prefix(s);
+      return true;
+    }
+
+    if (block_buffer_.size() >= RecordHeader::kSingleSmallSize) {
+      StringPiece cur_rec;
+      unsigned type = ReadPhysicalRecord(&cur_rec);
+      switch (type) {
+        case kFullType:
+          if (in_fragmented_record) {
+            wrapper_->ReportCorruption(scratch->size(), "partial record without end(1)");
+          } else {
+            *record = cur_rec;
+            return true;
+          }
+        /* code */
+        break;
+
+        default:
+        break;
+      }
+    }
+  }
   return true;
+}
+
+unsigned ReaderImpl::ReadPhysicalRecord(StringPiece* dest) {
+  RecordHeader rh;
+  size_t parsed = rh.Parse(block_buffer_.data());
+  if (parsed + rh.size > block_buffer_.size()) {
+    wrapper_->ReportCorruption(block_buffer_.size(), "Bad record size");
+    block_buffer_.clear();
+    return kBadRecord;
+  }
+
+  block_buffer_.advance(parsed);
+  DCHECK_EQ(0, rh.flags & kCompressedFlag);
+  *dest = StringPiece(strings::charptr(block_buffer_.data()), rh.size);
+  block_buffer_.remove_prefix(rh.size);
+
+  return rh.flags & kTypeMask;
 }
 
 }  // namespace lst2

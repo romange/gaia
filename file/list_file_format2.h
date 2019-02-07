@@ -56,12 +56,10 @@ class RecordHeader {
 
   uint8_t* Write(uint8_t* dest) const;
 
-  // src must point to kSingleSmallSize bytes of data.
-  // size, flags, recordsize are fully parsed.
-  // Returns (positive) number of bytes required to finish parsing or negative if some bytes
-  // belong to the payload.
-  // After this we need to fetch 'size' + {the returned value} to finish reading the record.
-  int ParseMinimal(const uint8_t* src);
+  // src must point to at serialized record header with enough buffer memory to hold kMaxSize.
+  // We guarantee this by reserving more memory than needed thus protecting against corruptions.
+  // Returns number of bytes parsed.
+  size_t Parse(const uint8_t* src);
 
   // Size including the header for the single record.
   static uint32_t WrappedSize(uint32_t ps) { return kSingleSmallSize + (ps > kuint16max) + ps; }
