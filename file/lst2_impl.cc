@@ -236,6 +236,37 @@ util::Status Lst2Impl::EmitPhysicalRecord(strings::ByteRange header, strings::By
 
 
 bool ReaderImpl::ReadHeader(std::map<std::string, std::string>* dest) {
+  uint8_t buf[4];
+  auto res = wrapper_->file->Read(kMagicStringSize, strings::MutableByteRange(buf, sizeof(buf)));
+  if (!res.ok())
+    return false;
+
+
+  uint16_t multiplier = LittleEndian::Load16(buf);
+  uint16_t num_pairs = LittleEndian::Load16(buf + 2);
+
+  if (multiplier == 0 || multiplier >= 256 || (num_pairs % 2) != 0) {
+    return false;
+  }
+  wrapper_->block_size = multiplier * kBlockSizeFactor;
+  wrapper_->file_offset_ = kListFileHeaderSize;
+
+  if (kListFileHeaderSize >= wrapper_->file->Size()) {
+    wrapper_->eof = true;
+  }
+
+  string key, val;
+
+  for (unsigned i = 0; i < num_pairs; ++i) {
+    StringPiece skey, sval;
+
+    if (!ReadRecord(&skey, &key))
+      return false;
+    if (!ReadRecord(&sval, &val))
+      return false;
+    dest->emplace(strings::AsString(skey), strings::AsString(sval));
+  }
+
   return true;
 }
 

@@ -363,7 +363,7 @@ bool ListReader::ReadHeader() {
 
   static_assert(list_file::kMagicStringSize == lst2::kMagicStringSize, "");
 
-  uint8 buf[list_file::kMagicStringSize];
+  uint8 buf[list_file::kMagicStringSize] = {0};
 
   auto res = wrapper_->file->Read(0, strings::MutableByteRange(buf, sizeof(buf)));
   if (!res.ok()) {
@@ -371,14 +371,15 @@ bool ListReader::ReadHeader() {
     return false;
   }
 
+  const auto read_buf = strings::FromBuf(buf, sizeof(buf));
   const StringPiece kLst1Magic(list_file::kMagicString, list_file::kMagicStringSize);
-  if (strings::FromBuf(buf, sizeof(buf)) == kLst1Magic) {
+  if (read_buf == kLst1Magic) {
     impl_.reset(new Lst1Impl(wrapper_.get()));
     return impl_->ReadHeader(&meta_);
   }
 
   const StringPiece kLst2Magic(lst2::kMagicString, lst2::kMagicStringSize);
-  if (strings::FromBuf(buf, sizeof(buf)) == kLst2Magic) {
+  if (read_buf == kLst2Magic) {
     impl_.reset(new lst2::ReaderImpl(wrapper_.get()));
     return impl_->ReadHeader(&meta_);
   }
