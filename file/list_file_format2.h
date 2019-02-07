@@ -19,19 +19,6 @@ constexpr uint32_t kBlockSizeFactor = 65536;
 
 extern const char kMagicString[];
 
-// Header is checksum (4 bytes), record length (Fixed32), type (1 byte) and
-// optional "record specific header".
-// kBlockHeaderSize summarizes lengths of checksum, the length and the type
-// The type is an enum RecordType masked with kXXMask values (currently just kCompressedMask).
-// constexpr uint32 kBlockHeaderSize = 4 + 4 + 1;
-
-struct Header {
-  uint8_t multiplier = 1;  // Block can be 64KB - 16MB.
-  uint16_t meta_count = 0;
-};
-
-// util::Status ParseHeader(file::ReadonlyFile* f, Header* header);
-
 enum RecordType : uint8_t {
   kZeroType = 0,  // Not used.
 
@@ -65,10 +52,16 @@ class RecordHeader {
 
   constexpr static uint32_t kMaxSize = 1 + 2 + 3 + 4;      // Non-compressed large array record.
   constexpr static uint32_t kSingleSmallSize = 1 + 2 + 4;  // Single small record.
-  // constexpr static uint32_t kMinArraySize = 1 + 2 + 2 + 4;  // Minimal Array Record.
   constexpr static uint32_t kArrayMargin = 12;
 
   uint8_t* Write(uint8_t* dest) const;
+
+  // src must point to kSingleSmallSize bytes of data.
+  // size, flags, recordsize are fully parsed.
+  // Returns (positive) number of bytes required to finish parsing or negative if some bytes
+  // belong to the payload.
+  // After this we need to fetch 'size' + {the returned value} to finish reading the record.
+  int ParseMinimal(const uint8_t* src);
 
   // Size including the header for the single record.
   static uint32_t WrappedSize(uint32_t ps) { return kSingleSmallSize + (ps > kuint16max) + ps; }

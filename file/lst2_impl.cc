@@ -22,6 +22,7 @@ namespace lst2 {
 
 constexpr char kMagicString[] = "LST2";
 static_assert(kMagicStringSize == sizeof(kMagicString), "");
+constexpr uint8_t kTypeMask = 7;
 
 /* Block - divides files into equal parts of size BlockSize. Each Block size can be
    in range :64k-16MB.
@@ -42,6 +43,35 @@ uint8_t* RecordHeader::Write(uint8_t* dest) const {
   dest += sizeof(uint32_t);
 
   return dest;
+}
+
+int RecordHeader::ParseMinimal(const uint8_t* src) {
+  flags = src[0];
+  const uint8_t* next = src + 1;
+
+  if ((flags & kTypeMask) == kArrayType) {
+    arr_count = LittleEndian::Load16(next);
+    next += sizeof(uint16_t);
+  }
+  size = LittleEndian::Load16(next);
+  next += sizeof(uint16_t);
+
+  if (flags & kRecordSize3BytesFlag) {
+    size |= (uint32_t(next[0]) << 16);
+    ++next;
+  }
+
+  if ((flags & kCompressedFlag) == 0) {
+    DCHECK_GE(next, src + kSingleSmallSize - 4);
+    if (next == src + kSingleSmallSize - 4) {
+      crc = LittleEndian::Load32(next);
+      return 0;
+    }
+    return next - (src + kSingleSmallSize - 4);
+  }
+  LOG(FATAL) << "TBD";
+
+  return next - (src + kSingleSmallSize);
 }
 
 Lst2Impl::Lst2Impl(util::Sink* sink, const ListWriter::Options& opts) : WriterImpl(sink, opts) {
@@ -100,7 +130,6 @@ Status Lst2Impl::Init(const std::map<string, string>& meta) {
    Payload: (uint16_t item_sz[ArrayCount]) + ItemDataSize. // item_sz if item type is array.
             Another option: To store varint_payload_sz + varint_sz_arr + ItemDataSize
 */
-
 Status Lst2Impl::AddRecord(StringPiece record) {
   CHECK(init_called_) << "ListWriter::Init was not called.";
 
@@ -249,7 +278,7 @@ bool ReaderImpl::ReadHeader(std::map<std::string, std::string>* dest) {
     return false;
   }
   wrapper_->block_size = multiplier * kBlockSizeFactor;
-  wrapper_->file_offset_ = kListFileHeaderSize;
+  file_offset_ = kListFileHeaderSize;
 
   if (kListFileHeaderSize >= wrapper_->file->Size()) {
     wrapper_->eof = true;

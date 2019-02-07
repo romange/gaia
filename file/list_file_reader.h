@@ -70,7 +70,7 @@ class ListReader {
     size_t read_data_bytes = 0;    // how much data bytes were read so far.
 
     void Reset() {
-      block_size = file_offset_ = array_records = 0;
+      block_size = 0;
       eof = false;
     }
 
@@ -86,15 +86,8 @@ class ListReader {
     bool eof = false;  // Last Read() indicated EOF by returning < kBlockSize
     const bool checksum = false;
     uint32_t block_size = 0;
-    uint32_t array_records = 0;
-
-    size_t file_offset_ = 0;
 
     CorruptionReporter const reporter_;
-    std::unique_ptr<uint8[]> backing_store_;
-    std::unique_ptr<uint8[]> uncompress_buf_;
-    strings::ByteRange block_buffer_;
-
   };
 
   class FormatImpl {
@@ -106,6 +99,13 @@ class ListReader {
     virtual bool ReadRecord(StringPiece* record, std::string* scratch) = 0;
 
    protected:
+    size_t file_offset_ = 0;
+    uint32_t array_records_ = 0;
+
+    std::unique_ptr<uint8[]> backing_store_;
+    std::unique_ptr<uint8[]> uncompress_buf_;
+    strings::ByteRange block_buffer_;
+
     ReaderWrapper* wrapper_;
   };
 

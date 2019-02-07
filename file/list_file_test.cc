@@ -17,6 +17,8 @@
 
 namespace file {
 
+DEFINE_bool(v2, false, "");
+
 using namespace list_file;
 
 using util::Status;
@@ -98,7 +100,7 @@ protected:
     ListWriter::Options options;
     options.block_size_multiplier = 1;
     options.use_compression = false;
-    // options.v2 = true;
+    options.v2 = FLAGS_v2;
 
     SetupWriter(options);
   }

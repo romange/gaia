@@ -68,13 +68,13 @@ bool Lst1Impl::ReadHeader(std::map<std::string, std::string>* dest) {
     return false;
   }
 
-  wrapper_->file_offset_ = wrapper_->read_header_bytes = parser.offset();
+  file_offset_ = wrapper_->read_header_bytes = parser.offset();
   wrapper_->block_size = parser.block_multiplier() * list_file::kBlockSizeFactor;
 
   CHECK_GT(wrapper_->block_size, 0);
-  wrapper_->backing_store_.reset(new uint8[wrapper_->block_size]);
-  wrapper_->uncompress_buf_.reset(new uint8[wrapper_->block_size]);
-  if (wrapper_->file_offset_ >= wrapper_->file->Size()) {
+  backing_store_.reset(new uint8[wrapper_->block_size]);
+  uncompress_buf_.reset(new uint8[wrapper_->block_size]);
+  if (file_offset_ >= wrapper_->file->Size()) {
     wrapper_->eof = true;
   }
   return true;
@@ -88,7 +88,7 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
   using namespace list_file;
 
   while (true) {
-    if (wrapper_->array_records > 0) {
+    if (array_records_ > 0) {
       uint32 item_size = 0;
       const uint8* aend = reinterpret_cast<const uint8*>(array_store_.end());
       const uint8* item_ptr = Varint::Parse32WithLimit(u8ptr(array_store_), aend, &item_size);
@@ -97,13 +97,13 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
       const uint8* next_rec_ptr = item_ptr + item_size;
       if (item_ptr == nullptr || next_rec_ptr > aend) {
         wrapper_->ReportCorruption(array_store_.size(), "invalid array record");
-        wrapper_->array_records = 0;
+        array_records_ = 0;
       } else {
         wrapper_->read_header_bytes += item_ptr - u8ptr(array_store_);
         array_store_.remove_prefix(next_rec_ptr - u8ptr(array_store_));
         *record = StringPiece(strings::charptr(item_ptr), item_size);
         wrapper_->read_data_bytes += item_size;
-        --wrapper_->array_records;
+        --array_records_;
         return true;
       }
     }
@@ -158,7 +158,7 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
           wrapper_->ReportCorruption(fragment.size(), "invalid array record");
         } else {
           wrapper_->read_header_bytes += array_ptr - u8ptr(fragment);
-          wrapper_->array_records = array_records;
+          array_records_ = array_records;
           array_store_ = FromBuf(array_ptr, fragment.end() - strings::charptr(array_ptr));
           VLOG(2) << "Read array with count " << array_records;
         }
@@ -192,43 +192,43 @@ bool Lst1Impl::ReadRecord(StringPiece* record, std::string* scratch) {
 unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
   using list_file::kBlockHeaderSize;
   while (true) {
-    if (wrapper_->block_buffer_.size() <= kBlockHeaderSize) {
+    if (block_buffer_.size() <= kBlockHeaderSize) {
       if (!wrapper_->eof) {
         size_t fsize = wrapper_->file->Size();
-        strings::MutableByteRange mbr(wrapper_->backing_store_.get(), wrapper_->block_size);
-        auto res = wrapper_->file->Read(wrapper_->file_offset_, mbr);
+        strings::MutableByteRange mbr(backing_store_.get(), wrapper_->block_size);
+        auto res = wrapper_->file->Read(file_offset_, mbr);
         VLOG(2) << "read_size: " << res.obj << ", status: " << res.status;
         if (!res.ok()) {
           wrapper_->ReportDrop(res.obj, res.status);
           wrapper_->eof = true;
           return kEof;
         }
-        wrapper_->block_buffer_.reset(wrapper_->backing_store_.get(), res.obj);
-        wrapper_->file_offset_ += wrapper_->block_buffer_.size();
-        if (wrapper_->file_offset_ >= fsize) {
+        block_buffer_.reset(backing_store_.get(), res.obj);
+        file_offset_ += block_buffer_.size();
+        if (file_offset_ >= fsize) {
           wrapper_->eof = true;
         }
         continue;
-      } else if (wrapper_->block_buffer_.empty()) {
+      } else if (block_buffer_.empty()) {
         // End of file
         return kEof;
       } else {
-        size_t drop_size = wrapper_->block_buffer_.size();
-        wrapper_->block_buffer_.clear();
+        size_t drop_size = block_buffer_.size();
+        block_buffer_.clear();
         wrapper_->ReportCorruption(drop_size, "truncated record at end of file");
         return kEof;
       }
     }
 
     // Parse the header
-    const uint8* header = wrapper_->block_buffer_.data();
+    const uint8* header = block_buffer_.data();
     const uint8 type = header[8];
     uint32 length = coding::DecodeFixed32(header + 4);
     wrapper_->read_header_bytes += kBlockHeaderSize;
 
     if (length == 0 && type == list_file::kZeroType) {
-      size_t bs = wrapper_->block_buffer_.size();
-      wrapper_->block_buffer_.clear();
+      size_t bs = block_buffer_.size();
+      block_buffer_.clear();
       // Handle the case of when mistakenly written last kBlockHeaderSize bytes as empty record.
       if (bs != kBlockHeaderSize) {
         LOG(ERROR) << "Bug reading list file " << bs;
@@ -237,11 +237,11 @@ unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
       continue;
     }
 
-    if (length + kBlockHeaderSize > wrapper_->block_buffer_.size()) {
-      VLOG(1) << "Invalid length " << length << " file offset " << wrapper_->file_offset_
-              << " block size " << wrapper_->block_buffer_.size() << " type " << int(type);
-      size_t drop_size = wrapper_->block_buffer_.size();
-      wrapper_->block_buffer_.clear();
+    if (length + kBlockHeaderSize > block_buffer_.size()) {
+      VLOG(1) << "Invalid length " << length << " file offset " << file_offset_
+              << " block size " << block_buffer_.size() << " type " << int(type);
+      size_t drop_size = block_buffer_.size();
+      block_buffer_.clear();
       wrapper_->ReportCorruption(drop_size, "bad record length or truncated record at eof.");
       return kBadRecord;
     }
@@ -257,21 +257,21 @@ unsigned int Lst1Impl::ReadPhysicalRecord(StringPiece* result) {
         // been corrupted and if we trust it, we could find some
         // fragment of a real log record that just happens to look
         // like a valid log record.
-        size_t drop_size = wrapper_->block_buffer_.size();
-        wrapper_->block_buffer_.clear();
+        size_t drop_size = block_buffer_.size();
+        block_buffer_.clear();
         wrapper_->ReportCorruption(drop_size, "checksum mismatch");
         return kBadRecord;
       }
     }
     uint32 record_size = length + kBlockHeaderSize;
-    wrapper_->block_buffer_.advance(record_size);
+    block_buffer_.advance(record_size);
 
     if (type & list_file::kCompressedMask) {
       if (!Uncompress(data_ptr, &length)) {
         wrapper_->ReportCorruption(record_size, "Uncompress failed.");
         return kBadRecord;
       }
-      data_ptr = wrapper_->uncompress_buf_.get();
+      data_ptr = uncompress_buf_.get();
     }
 
     *result = FromBuf(data_ptr, length);
@@ -292,7 +292,7 @@ bool Lst1Impl::Uncompress(const uint8* data_ptr, uint32* size) {
     return false;
   }
   size_t uncompress_size = wrapper_->block_size;
-  Status status = uncompr_func(data_ptr, inp_sz, wrapper_->uncompress_buf_.get(), &uncompress_size);
+  Status status = uncompr_func(data_ptr, inp_sz, uncompress_buf_.get(), &uncompress_size);
   if (!status.ok()) {
     VLOG(1) << "Uncompress error: " << status;
     return false;
@@ -335,8 +335,7 @@ void ListReader::ReaderWrapper::BadHeader(const Status& st) {
 }
 
 void ListReader::ReaderWrapper::ReportDrop(size_t bytes, const Status& reason) {
-  LOG(ERROR) << "ReportDrop: " << bytes << " "
-             << " block buffer_size " << block_buffer_.size() << ", reason: " << reason;
+  LOG(ERROR) << "ReportDrop: " << bytes << " " << ", reason: " << reason;
   if (reporter_ /*&& end_of_buffer_offset_ >= initial_offset_ + block_buffer_.size() + bytes*/) {
     reporter_(bytes, reason);
   }
