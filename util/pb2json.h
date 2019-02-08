@@ -8,6 +8,8 @@
 
 #include <google/protobuf/message.h>
 
+#include "util/status.h"
+
 namespace util {
 
 struct Pb2JsonOptions {
@@ -24,5 +26,8 @@ struct Pb2JsonOptions {
 
 std::string Pb2Json(const ::google::protobuf::Message& msg,
                     const Pb2JsonOptions& options = Pb2JsonOptions());
+
+Status Json2Pb(std::string json, ::google::protobuf::Message* msg,
+               bool skip_unknown_fields = true);
 
 }  // namespace util

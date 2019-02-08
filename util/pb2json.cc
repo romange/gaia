@@ -3,12 +3,14 @@
 //
 #include "util/pb2json.h"
 
-#include "base/logging.h"
-#include "absl/strings/str_cat.h"
-
-#include <google/protobuf/repeated_field.h>
 #include <google/protobuf/reflection.h>
+#include <google/protobuf/repeated_field.h>
+#include <rapidjson/error/en.h>
+#include <rapidjson/reader.h>
 #include <rapidjson/writer.h>
+
+#include "absl/strings/str_cat.h"
+#include "base/logging.h"
 
 using std::string;
 namespace gpb = ::google::protobuf;
@@ -18,8 +20,8 @@ namespace util {
 namespace {
 
 typedef gpb::FieldDescriptor FD;
-using RapidWriter = rj::Writer<rj::StringBuffer, rj::UTF8<>, rj::UTF8<>,
-                               rj::CrtAllocator, rj::kWriteNanAndInfFlag>;
+using RapidWriter =
+    rj::Writer<rj::StringBuffer, rj::UTF8<>, rj::UTF8<>, rj::CrtAllocator, rj::kWriteNanAndInfFlag>;
 
 void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
                 const gpb::FieldDescriptor* fd, const gpb::Reflection* refl, RapidWriter* res);
@@ -33,8 +35,8 @@ void Pb2JsonInternal(const ::google::protobuf::Message& msg, const Pb2JsonOption
   res->StartObject();
   for (int i = 0; i < descr->field_count(); ++i) {
     const gpb::FieldDescriptor* fd = descr->field(i);
-    bool is_set = (fd->is_repeated() && refl->FieldSize(msg, fd) > 0) ||
-      fd->is_required() || (fd->is_optional() && refl->HasField(msg, fd));
+    bool is_set = (fd->is_repeated() && refl->FieldSize(msg, fd) > 0) || fd->is_required() ||
+                  (fd->is_optional() && refl->HasField(msg, fd));
     if (!is_set)
       continue;
 
@@ -56,31 +58,29 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
   switch (fd->cpp_type()) {
     case FD::CPPTYPE_INT32:
       res->Int(refl->GetInt32(msg, fd));
-    break;
+      break;
     case FD::CPPTYPE_UINT32:
       res->Uint(refl->GetUInt32(msg, fd));
-    break;
+      break;
     case FD::CPPTYPE_INT64:
       res->Int64(refl->GetInt64(msg, fd));
-    break;
+      break;
     case FD::CPPTYPE_UINT64:
       res->Uint64(refl->GetUInt64(msg, fd));
-    break;
+      break;
     case FD::CPPTYPE_FLOAT: {
       absl::AlphaNum al(refl->GetFloat(msg, fd));
       res->RawValue(al.data(), al.size(), rj::kNumberType);
-    }
-    break;
+    } break;
     case FD::CPPTYPE_DOUBLE:
       res->Double(refl->GetDouble(msg, fd));
-    break;
+      break;
     case FD::CPPTYPE_STRING: {
       string scratch;
       const string& value = refl->GetStringReference(msg, fd, &scratch);
       res->String(value.c_str(), value.size());
       // absl::StrAppend(res, "\"", strings::JsonEscape(value), "\"");
-    }
-    break;
+    } break;
     case FD::CPPTYPE_BOOL: {
       bool b = refl->GetBool(msg, fd);
       // Unfortunate hack in our company code.
@@ -89,8 +89,7 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
       } else {
         res->Bool(b);
       }
-    }
-    break;
+    } break;
 
     case FD::CPPTYPE_ENUM:
       if (options.enum_as_ints) {
@@ -99,19 +98,18 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
         const auto& tmp = refl->GetEnum(msg, fd)->name();
         res->String(tmp.c_str(), tmp.size());
       }
-    break;
+      break;
     case FD::CPPTYPE_MESSAGE:
       Pb2JsonInternal(refl->GetMessage(msg, fd), options, res);
-    break;
+      break;
     default:
       LOG(FATAL) << "Not supported field " << fd->cpp_type_name();
   }
 }
 
-template<FD::CppType> struct FD_Traits;
+template <FD::CppType> struct FD_Traits;
 #define DECLARE_FD_TRAITS(CPP_TYPE, src_type) \
-    template<> struct FD_Traits<gpb::FieldDescriptor::CPP_TYPE> { \
-      typedef src_type type; }
+  template <> struct FD_Traits<gpb::FieldDescriptor::CPP_TYPE> { typedef src_type type; }
 
 DECLARE_FD_TRAITS(CPPTYPE_BOOL, bool);
 DECLARE_FD_TRAITS(CPPTYPE_INT32, gpb::int32);
@@ -122,9 +120,9 @@ DECLARE_FD_TRAITS(CPPTYPE_DOUBLE, double);
 DECLARE_FD_TRAITS(CPPTYPE_FLOAT, float);
 DECLARE_FD_TRAITS(CPPTYPE_STRING, std::string);
 
-template<FD::CppType t, typename Cb>
-void UnwindArr(const gpb::Message& msg, const gpb::FieldDescriptor* fd,
-               const gpb::Reflection* refl, Cb cb) {
+template <FD::CppType t, typename Cb>
+void UnwindArr(const gpb::Message& msg, const gpb::FieldDescriptor* fd, const gpb::Reflection* refl,
+               Cb cb) {
   using CppType = typename FD_Traits<t>::type;
   const auto& arr = refl->GetRepeatedFieldRef<CppType>(msg, fd);
   std::for_each(std::begin(arr), std::end(arr), cb);
@@ -135,31 +133,30 @@ void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
   res->StartArray();
   switch (fd->cpp_type()) {
     case FD::CPPTYPE_INT32:
-      UnwindArr<FD::CPPTYPE_INT32>(msg, fd, refl, [res](auto val) {res->Int(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_INT32>(msg, fd, refl, [res](auto val) { res->Int(val); });
+      break;
     case FD::CPPTYPE_UINT32:
-      UnwindArr<FD::CPPTYPE_UINT32>(msg, fd, refl, [res](auto val) {res->Uint(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_UINT32>(msg, fd, refl, [res](auto val) { res->Uint(val); });
+      break;
     case FD::CPPTYPE_INT64:
-      UnwindArr<FD::CPPTYPE_INT64>(msg, fd, refl, [res](auto val) {res->Int64(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_INT64>(msg, fd, refl, [res](auto val) { res->Int64(val); });
+      break;
     case FD::CPPTYPE_UINT64:
-      UnwindArr<FD::CPPTYPE_UINT64>(msg, fd, refl, [res](auto val) {res->Uint64(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_UINT64>(msg, fd, refl, [res](auto val) { res->Uint64(val); });
+      break;
     case FD::CPPTYPE_FLOAT:
-      UnwindArr<FD::CPPTYPE_FLOAT>(msg, fd, refl, [res](auto val) {res->Double(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_FLOAT>(msg, fd, refl, [res](auto val) { res->Double(val); });
+      break;
     case FD::CPPTYPE_DOUBLE:
-      UnwindArr<FD::CPPTYPE_DOUBLE>(msg, fd, refl, [res](auto val) {res->Double(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_DOUBLE>(msg, fd, refl, [res](auto val) { res->Double(val); });
+      break;
     case FD::CPPTYPE_STRING:
-      UnwindArr<FD::CPPTYPE_STRING>(msg, fd, refl,
-                                    [res](const string& val) {
-                                      res->String(val.c_str(), val.size());});
-    break;
+      UnwindArr<FD::CPPTYPE_STRING>(
+          msg, fd, refl, [res](const string& val) { res->String(val.c_str(), val.size()); });
+      break;
     case FD::CPPTYPE_BOOL:
-      UnwindArr<FD::CPPTYPE_BOOL>(msg, fd, refl, [res](auto val) {res->Bool(val);});
-    break;
+      UnwindArr<FD::CPPTYPE_BOOL>(msg, fd, refl, [res](auto val) { res->Bool(val); });
+      break;
 
     case FD::CPPTYPE_ENUM: {
       int sz = refl->FieldSize(msg, fd);
@@ -168,16 +165,14 @@ void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
         const string& name = edescr->name();
         res->String(name.c_str(), name.size());
       }
-    }
-    break;
+    } break;
     case FD::CPPTYPE_MESSAGE: {
       const auto& arr = refl->GetRepeatedFieldRef<gpb::Message>(msg, fd);
       std::unique_ptr<gpb::Message> scratch_space(arr.NewMessage());
       for (int i = 0; i < arr.size(); ++i) {
         Pb2JsonInternal(arr.Get(i, scratch_space.get()), options, res);
       }
-    }
-    break;
+    } break;
     default:
       LOG(FATAL) << "Not supported field " << fd->cpp_type_name();
   }
@@ -195,5 +190,19 @@ std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions
   return string(sb.GetString(), sb.GetSize());
 }
 
+Status Json2Pb(std::string json, ::google::protobuf::Message* msg,
+               bool skip_unknown_fields) {
+  rj::Reader reader;
+
+  rj::BaseReaderHandler<> h;
+  rj::InsituStringStream stream(&json.front());
+
+  rj::ParseResult pr = reader.Parse<rj::kParseInsituFlag | rj::kParseValidateEncodingFlag>(stream, h);
+  if (pr.IsError()) {
+    Status st(StatusCode::PARSE_ERROR, rj::GetParseError_En(pr.Code()));
+    return st;
+  }
+  return Status::OK;
+}
 
 }  // namespace util

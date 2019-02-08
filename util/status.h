@@ -88,7 +88,7 @@ class Status {
   static const Status OK;
   static const Status CANCELLED;
 
-  friend std::ostream& operator<<(std::ostream& o, const util::Status& status);
+  friend std::ostream& operator<<(std::ostream& o, const Status& status);
  private:
 
   static Status ByCode(StatusCode::Code code) { return Status(code); }
