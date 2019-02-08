@@ -106,4 +106,52 @@ TEST_F(Pb2JsonTest, Options) {
   EXPECT_EQ(R"({"bval":1})", res);
 }
 
+#if TBD
+TEST_F(Pb2JsonTest, ParseBasic) {
+  Person person;
+  auto status = Json2Pb(R"({"name": "Roman", "id": 5, "account": {"bank_name": "Leumi"}})",
+                        &person);
+  ASSERT_TRUE(status.ok());
+  EXPECT_EQ(R"(name: "Roman" id: 5 account { bank_name: "Leumi" })", person.ShortDebugString());
+}
+
+TEST_F(Pb2JsonTest, ParseExt) {
+  Person person;
+  auto status = Json2Pb(kExpected, &person);
+  ASSERT_TRUE(status.ok()) << status;
+  EXPECT_EQ(R"(name: "" id: 0 phone { number: "1" type: HOME } phone { number: "2" type: WORK } )"
+            R"(tag: "good" tag: "young")",
+            person.ShortDebugString());
+}
+
+TEST_F(Pb2JsonTest, ParseUnicode) {
+  Person person;
+  auto status = Json2Pb(R"({"name": "Rom\u0061n",})", &person, false);
+  ASSERT_TRUE(status.ok());
+  EXPECT_EQ("Roman", person.name());
+}
+
+TEST_F(Pb2JsonTest, ParseBool) {
+  JsonParse jparse;
+  auto status = Json2Pb(R"({"bval": true,})", &jparse, false);
+  ASSERT_TRUE(status.ok());
+  EXPECT_EQ(true, jparse.bval());
+
+  status = Json2Pb(R"({"bval": false,})", &jparse, false);
+  ASSERT_TRUE(status.ok());
+  EXPECT_FALSE(jparse.bval());
+
+  status = Json2Pb(R"({"bval": 1,})", &jparse, false);
+  ASSERT_TRUE(status.ok());
+  EXPECT_TRUE(jparse.bval());
+
+  status = Json2Pb(R"({"bval": 0,})", &jparse, false);
+  ASSERT_TRUE(status.ok());
+  EXPECT_FALSE(jparse.bval());
+
+  status = Json2Pb(R"({"bval": 2,})", &jparse, false);
+  ASSERT_FALSE(status.ok());
+}
+#endif
+
 }  // namespace util
