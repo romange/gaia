@@ -3,18 +3,74 @@
 //
 #include "util/pb2json.h"
 
-#include "util/plang/addressbook.pb.h"
-#include "base/gtest.h"
+#include <gmock/gmock.h>
+#include <google/protobuf/text_format.h>
+#include <google/protobuf/util/message_differencer.h>
+
 #include "absl/strings/str_cat.h"
+#include "base/gtest.h"
+#include "util/plang/addressbook.pb.h"
+
+namespace tutorial {
+
+// To print nice Protobufs.
+void PrintTo(const Person& src, std::ostream* os) { *os << src.DebugString(); }
+
+}  // namespace tutorial
 
 namespace util {
 
 using namespace tutorial;
 using namespace std;
 using namespace google::protobuf;
+namespace gpb = ::google::protobuf;
+
+MATCHER(StatusOk, string(negation ? "is not" : "is") + " ok\n") {
+  if (arg.ok())
+    return true;
+
+  *result_listener << "Actual status: " << arg.ToString();
+  return false;
+}
+
+// Matches fields specified in str to msg. Ignores other fields in msg.
+// Outputs the differences into `diff` in human-readable-format.
+// Returns true if no differences were found, false otherwise.
+bool ProtoMatchToHelper(const ::google::protobuf::Message& msg, const std::string& str,
+                        std::string* diff);
+
+MATCHER_P(ProtoMatchTo, expected,
+          std::string(negation ? "is not" : "is") + " equal to:\n" + expected) {
+  std::string diff;
+  bool res = ProtoMatchToHelper(arg, expected, &diff);
+  if (!res)
+    *result_listener << "\nDifference found: " << diff;
+  return res;
+}
+
+bool ProtoMatchToHelper(const gpb::Message& src, const std::string& str, string* diff) {
+  using namespace gpb::util;
+
+  std::unique_ptr<gpb::Message> tmp(src.New());
+  gpb::TextFormat::Parser parser;
+  parser.AllowPartialMessage(true);
+  bool parsed = parser.ParseFromString(str, tmp.get());
+  if (!parsed) {
+    *diff = absl::StrCat("Invalid string for message ", src.GetTypeName(), ":\n", str);
+
+    return false;
+  }
+
+  MessageDifferencer differ;
+  differ.ReportDifferencesToString(diff);
+  differ.set_scope(MessageDifferencer::PARTIAL);
+  differ.set_message_field_comparison(MessageDifferencer::EQUIVALENT);
+
+  return differ.Compare(*tmp, src);
+}
 
 class Pb2JsonTest : public testing::Test {
-protected:
+ protected:
 };
 
 TEST_F(Pb2JsonTest, Basic) {
@@ -109,10 +165,12 @@ TEST_F(Pb2JsonTest, Options) {
 #if TBD
 TEST_F(Pb2JsonTest, ParseBasic) {
   Person person;
-  auto status = Json2Pb(R"({"name": "Roman", "id": 5, "account": {"bank_name": "Leumi"}})",
-                        &person);
-  ASSERT_TRUE(status.ok());
-  EXPECT_EQ(R"(name: "Roman" id: 5 account { bank_name: "Leumi" })", person.ShortDebugString());
+  auto status =
+      Json2Pb(R"({"name": "Roman", "id": 5, "account": {"bank_name": "Leumi"}})", &person);
+  ASSERT_THAT(status, StatusOk());
+  ASSERT_THAT(person, ProtoMatchTo(R"(
+    name: "Roman" id: 5 account { bank_name: "Leumi" }
+  )"));
 }
 
 TEST_F(Pb2JsonTest, ParseExt) {

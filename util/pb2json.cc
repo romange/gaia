@@ -190,14 +190,40 @@ std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions
   return string(sb.GetString(), sb.GetSize());
 }
 
-Status Json2Pb(std::string json, ::google::protobuf::Message* msg,
-               bool skip_unknown_fields) {
+class PbHandler : public rj::BaseReaderHandler<rj::UTF8<>, PbHandler> {
+ public:
+  PbHandler(::google::protobuf::Message* msg) : msg_(msg), refl_(msg->GetReflection()) {}
+
+  bool Key(const Ch* str, size_t len, bool copy) {
+    tmp_.assign(str, len);
+    field_ = msg_->GetDescriptor()->FindFieldByName(tmp_);
+    LOG(INFO) << "Key: " << str << ", len: " << len << ", copy: " << copy << ", field "
+              << (field_ != nullptr);
+    return true;
+  }
+
+  bool String(const Ch* str, size_t len, bool) {
+    if (!field_)
+      return false;
+    refl_->SetString(msg_,  field_, string(str, len));
+    field_ = nullptr;
+    return true;
+  }
+ private:
+  const gpb::FieldDescriptor* field_ = nullptr;
+  string tmp_;
+  gpb::Message* msg_;
+  const gpb::Reflection* refl_;
+};
+
+Status Json2Pb(std::string json, ::google::protobuf::Message* msg, bool skip_unknown_fields) {
   rj::Reader reader;
 
-  rj::BaseReaderHandler<> h;
+  PbHandler h(msg);
   rj::InsituStringStream stream(&json.front());
 
-  rj::ParseResult pr = reader.Parse<rj::kParseInsituFlag | rj::kParseValidateEncodingFlag>(stream, h);
+  rj::ParseResult pr =
+      reader.Parse<rj::kParseInsituFlag | rj::kParseValidateEncodingFlag>(stream, h);
   if (pr.IsError()) {
     Status st(StatusCode::PARSE_ERROR, rj::GetParseError_En(pr.Code()));
     return st;
