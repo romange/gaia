@@ -13,8 +13,7 @@
 namespace util {
 
 struct Pb2JsonOptions {
-  typedef std::function<std::string(const ::google::protobuf::FieldDescriptor& fd)>
-      FieldNameCb;
+  typedef std::function<std::string(const ::google::protobuf::FieldDescriptor& fd)> FieldNameCb;
 
   typedef std::function<bool(const ::google::protobuf::FieldDescriptor& fd)> BoolAsIntegerPred;
 
@@ -27,7 +26,17 @@ struct Pb2JsonOptions {
 std::string Pb2Json(const ::google::protobuf::Message& msg,
                     const Pb2JsonOptions& options = Pb2JsonOptions());
 
-Status Json2Pb(std::string json, ::google::protobuf::Message* msg,
-               bool skip_unknown_fields = true);
+struct Json2PbOptions {
+  bool skip_unknown_fields;
+
+  Json2PbOptions(bool sk = true) : skip_unknown_fields(sk) {}
+};
+
+Status Json2Pb(std::string json, ::google::protobuf::Message* msg, const Json2PbOptions& options);
+
+inline Status Json2Pb(std::string json, ::google::protobuf::Message* msg,
+                      bool skip_unknown_fields = true) {
+  return Json2Pb(std::move(json), msg, Json2PbOptions(skip_unknown_fields));
+}
 
 }  // namespace util

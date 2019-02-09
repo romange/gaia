@@ -171,11 +171,15 @@ void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
 }
 
 class PbHandler {
+  const Json2PbOptions& opts_;
+
  public:
   string err_msg;
   using Ch = char;
 
-  PbHandler(::google::protobuf::Message* msg) { stack_.emplace_back(msg->GetReflection(), msg); }
+  PbHandler(const Json2PbOptions& opts, ::google::protobuf::Message* msg) : opts_(opts) {
+    stack_.emplace_back(msg->GetReflection(), msg);
+  }
 
   bool Key(const Ch* str, size_t len, bool copy);
 
@@ -183,12 +187,7 @@ class PbHandler {
 
   bool StartObject();
 
-  bool EndObject(size_t member_count) {
-    DVLOG(2) << "EndObject " << member_count;
-    stack_.pop_back();
-    field_ = nullptr;
-    return true;
-  }
+  bool EndObject(size_t member_count);
 
   bool Null();
   bool Bool(bool b);
@@ -197,13 +196,20 @@ class PbHandler {
   bool Int64(int64_t i);
   bool Uint64(uint64_t i);
   bool Double(double d);
+
   /// enabled via kParseNumbersAsStringsFlag, string is not null-terminated (use length)
-  bool RawNumber(const Ch* str, size_t length, bool copy);
+  bool RawNumber(const Ch* str, size_t length, bool copy) { return false; }
 
   bool StartArray();
   bool EndArray(size_t elementCount);
 
  private:
+  bool IntRepeated(int i);
+  bool UintRepeated(unsigned i);
+  bool Int64Repeated(int64_t i);
+  bool UInt64Repeated(uint64_t i);
+  bool DoubleRepeated(double d);
+
   using FD = gpb::FieldDescriptor;
   template <typename T> using MRFR = gpb::MutableRepeatedFieldRef<T>;
 
@@ -218,6 +224,10 @@ class PbHandler {
     absl::optional<std::pair<const FD*, ArrRef>> arr_ref;
 
     Object(const gpb::Reflection* r, gpb::Message* m) : refl(r), msg(m) {}
+
+    template <FD::CppType t> auto& GetArray() {
+      return absl::get<MRFR<pb::FD_Traits_t<t>>>(arr_ref->second);
+    }
   };
 
   template <FD::CppType t> static auto MakeArr(const FD* f, const Object& o) {
@@ -227,16 +237,24 @@ class PbHandler {
   absl::InlinedVector<Object, 16> stack_;
   const gpb::FieldDescriptor* field_ = nullptr;
   string key_name_;
+
+  unsigned disabled_level_ = 0;
 };
 
 bool PbHandler::Key(const Ch* str, size_t len, bool copy) {
-  DCHECK(!stack_.empty());
+  if (disabled_level_ > 1) {
+    return true;
+  }
 
   key_name_.assign(str, len);
-  const auto& msg = *stack_.back().msg;
+
+  DCHECK(!stack_.empty());
+  auto& obj = stack_.back();
+
+  const auto& msg = *obj.msg;
   field_ = msg.GetDescriptor()->FindFieldByName(key_name_);
 
-  return field_ != nullptr;  // TODO: handle skip_unknown_fields.
+  return field_ != nullptr || opts_.skip_unknown_fields;
 }
 
 bool PbHandler::String(const Ch* str, size_t len, bool) {
@@ -246,12 +264,12 @@ bool PbHandler::String(const Ch* str, size_t len, bool) {
   const string str_val(str, len);
 
   if (obj.arr_ref) {
-    absl::get<MRFR<string>>(obj.arr_ref->second).Add(str_val);
+    obj.GetArray<FD::CPPTYPE_STRING>().Add(str_val);
     return true;
   }
 
   if (!field_)
-    return false;
+    return opts_.skip_unknown_fields;
 
   switch (field_->cpp_type()) {
     case FD::CPPTYPE_STRING:
@@ -287,8 +305,10 @@ bool PbHandler::StartObject() {
     return true;
   }
 
-  if (!field_)
-    return true;
+  if (!field_) {
+    ++disabled_level_;
+    return disabled_level_ == 1 || opts_.skip_unknown_fields;
+  }
 
   if (field_->cpp_type() != gpb::FieldDescriptor::CPPTYPE_MESSAGE) {
     err_msg = absl::StrCat("Error in StartObject, type ", field_->cpp_type_name());
@@ -297,6 +317,19 @@ bool PbHandler::StartObject() {
 
   gpb::Message* child = obj.refl->MutableMessage(obj.msg, field_);
   stack_.emplace_back(child->GetReflection(), child);
+  return true;
+}
+
+bool PbHandler::EndObject(size_t member_count) {
+  if (disabled_level_ > 1) {
+    --disabled_level_;
+    DCHECK(field_ == nullptr);
+    return true;
+  }
+
+  DVLOG(2) << "EndObject " << member_count;
+  stack_.pop_back();
+  field_ = nullptr;
   return true;
 }
 
@@ -321,11 +354,12 @@ bool PbHandler::Bool(bool b) {
       err_msg = absl::StrCat("Expected msg type but found ", field->cpp_type_name());
       return false;
     }
-    absl::get<MRFR<bool>>(obj.arr_ref->second).Add(b);
+    obj.GetArray<FD::CPPTYPE_BOOL>().Add(b);
     return true;
   }
+
   if (!field_)
-    return true;
+    return opts_.skip_unknown_fields;
 
   if (field_->cpp_type() != FD::CPPTYPE_BOOL) {
     err_msg = absl::StrCat("Expected BOOL, found ", field_->cpp_type_name());
@@ -338,31 +372,65 @@ bool PbHandler::Bool(bool b) {
 }
 
 bool PbHandler::Int(int i) {
+  auto& obj = stack_.back();
+
+  if (obj.arr_ref) {
+    return IntRepeated(i);
+  }
+
   if (!field_) {
-    return false;
+    return opts_.skip_unknown_fields;
   }
 
   using namespace pb;
-  auto& obj = stack_.back();
-
   switch (field_->cpp_type()) {
     CASE(CPPTYPE_INT32);
     CASE(CPPTYPE_INT64);
     CASE(CPPTYPE_FLOAT);
     CASE(CPPTYPE_DOUBLE);
     default:
+      err_msg = absl::StrCat("Unexpected int type ", field_->cpp_type_name());
       return false;
   }
   return true;
 }
 
+bool PbHandler::IntRepeated(int i) {
+  auto& obj = stack_.back();
+
+  const FD* field = obj.arr_ref->first;
+  switch (field->cpp_type()) {
+    case FD::CPPTYPE_INT32:
+      obj.GetArray<FD::CPPTYPE_INT32>().Add(i);
+      break;
+    case FD::CPPTYPE_INT64:
+      obj.GetArray<FD::CPPTYPE_INT64>().Add(i);
+      break;
+    case FD::CPPTYPE_FLOAT:
+      obj.GetArray<FD::CPPTYPE_FLOAT>().Add(i);
+      break;
+    case FD::CPPTYPE_DOUBLE:
+      obj.GetArray<FD::CPPTYPE_DOUBLE>().Add(i);
+      break;
+    default:
+      err_msg = absl::StrCat("Unexpected int type ", field_->cpp_type_name());
+      return false;
+  }
+
+  return true;
+}
+
 bool PbHandler::Uint(unsigned i) {
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    return UintRepeated(i);
+  }
+
   if (!field_) {
-    return false;
+    return opts_.skip_unknown_fields;
   }
 
   using namespace pb;
-  auto& obj = stack_.back();
   switch (field_->cpp_type()) {
     CASE(CPPTYPE_INT32);
     CASE(CPPTYPE_UINT32);
@@ -371,11 +439,11 @@ bool PbHandler::Uint(unsigned i) {
     CASE(CPPTYPE_FLOAT);
     CASE(CPPTYPE_DOUBLE);
     case FD::CPPTYPE_BOOL:
-        if (i > 1) {
-          err_msg = absl::StrCat("Invalid bool value ", i);
-          return false;
-        }
-        SetField<FD::CPPTYPE_BOOL>(obj.refl, field_, i != 0, obj.msg);
+      if (i > 1) {
+        err_msg = absl::StrCat("Invalid bool value ", i);
+        return false;
+      }
+      SetField<FD::CPPTYPE_BOOL>(obj.refl, field_, i != 0, obj.msg);
       break;
     default:
       err_msg = absl::StrCat("Unexpected Uint type ", field_->cpp_type_name());
@@ -385,12 +453,16 @@ bool PbHandler::Uint(unsigned i) {
 }
 
 bool PbHandler::Int64(int64_t i) {
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    return Int64Repeated(i);
+  }
+
   if (!field_) {
-    return false;
+    return opts_.skip_unknown_fields;
   }
 
   using namespace pb;
-  auto& obj = stack_.back();
 
   switch (field_->cpp_type()) {
     CASE(CPPTYPE_INT64);
@@ -403,12 +475,16 @@ bool PbHandler::Int64(int64_t i) {
 }
 
 bool PbHandler::Uint64(uint64_t i) {
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    return UInt64Repeated(i);
+  }
+
   if (!field_) {
-    return false;
+    return opts_.skip_unknown_fields;
   }
 
   using namespace pb;
-  auto& obj = stack_.back();
   switch (field_->cpp_type()) {
     CASE(CPPTYPE_UINT64);
     CASE(CPPTYPE_FLOAT);
@@ -421,12 +497,16 @@ bool PbHandler::Uint64(uint64_t i) {
 }
 
 bool PbHandler::Double(double i) {
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    return DoubleRepeated(i);
+  }
+
   if (!field_) {
-    return false;
+    return opts_.skip_unknown_fields;
   }
 
   using namespace pb;
-  auto& obj = stack_.back();
 
   switch (field_->cpp_type()) {
     CASE(CPPTYPE_FLOAT);
@@ -440,11 +520,118 @@ bool PbHandler::Double(double i) {
 
 #undef CASE
 
-/// enabled via kParseNumbersAsStringsFlag, string is not null-terminated (use length)
-bool PbHandler::RawNumber(const Ch* str, size_t length, bool copy) { return false; }
+bool PbHandler::UintRepeated(unsigned i) {
+  auto& obj = stack_.back();
+
+  const FD* field = obj.arr_ref->first;
+
+  switch (field->cpp_type()) {
+    case FD::CPPTYPE_INT32:
+      obj.GetArray<FD::CPPTYPE_INT32>().Add(i);
+      break;
+    case FD::CPPTYPE_UINT32:
+      obj.GetArray<FD::CPPTYPE_UINT32>().Add(i);
+      break;
+    case FD::CPPTYPE_INT64:
+      obj.GetArray<FD::CPPTYPE_INT64>().Add(i);
+      break;
+    case FD::CPPTYPE_UINT64:
+      obj.GetArray<FD::CPPTYPE_UINT64>().Add(i);
+      break;
+    case FD::CPPTYPE_FLOAT:
+      obj.GetArray<FD::CPPTYPE_FLOAT>().Add(i);
+      break;
+    case FD::CPPTYPE_DOUBLE:
+      obj.GetArray<FD::CPPTYPE_DOUBLE>().Add(i);
+      break;
+    case FD::CPPTYPE_BOOL:
+      if (i > 1) {
+        err_msg = absl::StrCat("Invalid bool value ", i);
+        return false;
+      }
+      obj.GetArray<FD::CPPTYPE_BOOL>().Add(i != 0);
+      break;
+    default:
+      err_msg = absl::StrCat("Unexpected uint type ", field_->cpp_type_name());
+      return false;
+  }
+
+  return true;
+}
+
+bool PbHandler::Int64Repeated(int64_t i) {
+  auto& obj = stack_.back();
+
+  const FD* field = obj.arr_ref->first;
+
+  switch (field->cpp_type()) {
+    case FD::CPPTYPE_INT64:
+      obj.GetArray<FD::CPPTYPE_INT64>().Add(i);
+      break;
+    case FD::CPPTYPE_FLOAT:
+      obj.GetArray<FD::CPPTYPE_FLOAT>().Add(i);
+      break;
+    case FD::CPPTYPE_DOUBLE:
+      obj.GetArray<FD::CPPTYPE_DOUBLE>().Add(i);
+      break;
+    default:
+      err_msg = absl::StrCat("Unexpected uint type ", field_->cpp_type_name());
+      return false;
+  }
+
+  return true;
+}
+
+bool PbHandler::UInt64Repeated(uint64_t i) {
+  auto& obj = stack_.back();
+
+  const FD* field = obj.arr_ref->first;
+
+  switch (field->cpp_type()) {
+    case FD::CPPTYPE_UINT64:
+      obj.GetArray<FD::CPPTYPE_UINT64>().Add(i);
+      break;
+    case FD::CPPTYPE_FLOAT:
+      obj.GetArray<FD::CPPTYPE_FLOAT>().Add(i);
+      break;
+    case FD::CPPTYPE_DOUBLE:
+      obj.GetArray<FD::CPPTYPE_DOUBLE>().Add(i);
+      break;
+    default:
+      err_msg = absl::StrCat("Unexpected uint type ", field_->cpp_type_name());
+      return false;
+  }
+
+  return true;
+}
+
+bool PbHandler::DoubleRepeated(double d) {
+  auto& obj = stack_.back();
+
+  const FD* field = obj.arr_ref->first;
+
+  switch (field->cpp_type()) {
+    case FD::CPPTYPE_FLOAT:
+      obj.GetArray<FD::CPPTYPE_FLOAT>().Add(d);
+      break;
+    case FD::CPPTYPE_DOUBLE:
+      obj.GetArray<FD::CPPTYPE_DOUBLE>().Add(d);
+      break;
+    default:
+      err_msg = absl::StrCat("Unexpected double type ", field_->cpp_type_name());
+      return false;
+  }
+
+  return true;
+}
 
 bool PbHandler::StartArray() {
-  if (!field_ || !field_->is_repeated()) {
+  if (!field_) {
+    ++disabled_level_;
+    return opts_.skip_unknown_fields;
+  }
+
+  if (!field_->is_repeated()) {
     err_msg = absl::StrCat("Bad array ", key_name_);
     return false;
   }
@@ -477,10 +664,15 @@ bool PbHandler::StartArray() {
 
 bool PbHandler::EndArray(size_t elementCount) {
   auto& obj = stack_.back();
-  DCHECK(obj.arr_ref);
-  obj.arr_ref.reset();
-  field_ = nullptr;
 
+  if (disabled_level_ > 1) {
+    DCHECK(!obj.arr_ref && field_ == nullptr);
+    --disabled_level_;
+  } else {
+    DCHECK(obj.arr_ref);
+    obj.arr_ref.reset();
+    field_ = nullptr;
+  }
   return true;
 }
 
@@ -495,10 +687,10 @@ std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions
   return string(sb.GetString(), sb.GetSize());
 }
 
-Status Json2Pb(std::string json, ::google::protobuf::Message* msg, bool skip_unknown_fields) {
+Status Json2Pb(std::string json, ::google::protobuf::Message* msg, const Json2PbOptions& opts) {
   rj::Reader reader;
 
-  PbHandler h(msg);
+  PbHandler h(opts, msg);
   rj::InsituStringStream stream(&json.front());
 
   rj::ParseResult pr = reader.Parse<rj::kParseInsituFlag | rj::kParseTrailingCommasFlag>(stream, h);

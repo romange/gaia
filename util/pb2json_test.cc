@@ -206,5 +206,23 @@ TEST_F(Pb2JsonTest, ParseBool) {
   ASSERT_THAT(status, testing::Not(StatusOk()));
 }
 
+TEST_F(Pb2JsonTest, ParseRepeated) {
+  AddressBook book;
+  auto status = Json2Pb(R"({"ts": [5, 6, -7, -80000000], "person" :
+       [{"name": "foo", "id": 1}, {"name": "bar", "id": 2},] } )", &book);
+  ASSERT_THAT(status, StatusOk());
+  ASSERT_THAT(book, ProtoMatchTo(R"(
+      ts: 5 ts: 6 ts: -7 ts: -80000000 person: { name: "foo" id: 1 }
+      person: { name: "bar" id: 2 }
+  )"));
+}
+
+TEST_F(Pb2JsonTest, Unknown) {
+  JsonParse parse;
+  Json2PbOptions opts(true);
+
+  auto status = Json2Pb(R"( {"foo" : 1 })", &parse);
+  ASSERT_THAT(status, StatusOk());
+}
 
 }  // namespace util
