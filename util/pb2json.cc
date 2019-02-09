@@ -84,7 +84,6 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
       string scratch;
       const string& value = refl->GetStringReference(msg, fd, &scratch);
       res->String(value.c_str(), value.size());
-      // absl::StrAppend(res, "\"", strings::JsonEscape(value), "\"");
     } break;
     case FD::CPPTYPE_BOOL: {
       bool b = refl->GetBool(msg, fd);
@@ -112,23 +111,10 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
   }
 }
 
-template <FD::CppType> struct FD_Traits;
-#define DECLARE_FD_TRAITS(CPP_TYPE, src_type) \
-  template <> struct FD_Traits<gpb::FieldDescriptor::CPP_TYPE> { typedef src_type type; }
-
-DECLARE_FD_TRAITS(CPPTYPE_BOOL, bool);
-DECLARE_FD_TRAITS(CPPTYPE_INT32, gpb::int32);
-DECLARE_FD_TRAITS(CPPTYPE_UINT32, gpb::uint32);
-DECLARE_FD_TRAITS(CPPTYPE_INT64, gpb::int64);
-DECLARE_FD_TRAITS(CPPTYPE_UINT64, gpb::uint64);
-DECLARE_FD_TRAITS(CPPTYPE_DOUBLE, double);
-DECLARE_FD_TRAITS(CPPTYPE_FLOAT, float);
-DECLARE_FD_TRAITS(CPPTYPE_STRING, std::string);
-
 template <FD::CppType t, typename Cb>
 void UnwindArr(const gpb::Message& msg, const gpb::FieldDescriptor* fd, const gpb::Reflection* refl,
                Cb cb) {
-  using CppType = typename FD_Traits<t>::type;
+  using CppType = typename pb::FD_Traits_t<t>;
   const auto& arr = refl->GetRepeatedFieldRef<CppType>(msg, fd);
   std::for_each(std::begin(arr), std::end(arr), cb);
 }
@@ -221,8 +207,9 @@ class PbHandler {
   using FD = gpb::FieldDescriptor;
   template <typename T> using MRFR = gpb::MutableRepeatedFieldRef<T>;
 
-  using ArrRef = absl::variant<MRFR<uint32_t>, MRFR<int32_t>, MRFR<uint64_t>, MRFR<int64_t>,
-                               MRFR<float>, MRFR<double>, MRFR<string>, MRFR<gpb::Message>>;
+  using ArrRef =
+      absl::variant<MRFR<bool>, MRFR<uint32_t>, MRFR<int32_t>, MRFR<uint64_t>, MRFR<int64_t>,
+                    MRFR<float>, MRFR<double>, MRFR<string>, MRFR<gpb::Message>>;
 
   struct Object {
     const gpb::Reflection* refl;
@@ -233,7 +220,7 @@ class PbHandler {
     Object(const gpb::Reflection* r, gpb::Message* m) : refl(r), msg(m) {}
   };
 
-  template<FD::CppType t> static auto MakeArr(const FD* f, const Object& o) {
+  template <FD::CppType t> static auto MakeArr(const FD* f, const Object& o) {
     return std::pair<const FD*, ArrRef>{f, pb::GetMutableArray<t>(o.refl, f, o.msg)};
   }
 
@@ -253,17 +240,34 @@ bool PbHandler::Key(const Ch* str, size_t len, bool copy) {
 }
 
 bool PbHandler::String(const Ch* str, size_t len, bool) {
-  if (!field_)
-    return false;
   DCHECK(!stack_.empty());
   auto& obj = stack_.back();
 
+  const string str_val(str, len);
+
   if (obj.arr_ref) {
-    absl::get<MRFR<string>>(obj.arr_ref->second).Add(string(str, len));
-  } else {
-    obj.refl->SetString(obj.msg, field_, string(str, len));
-    field_ = nullptr;
+    absl::get<MRFR<string>>(obj.arr_ref->second).Add(str_val);
+    return true;
   }
+
+  if (!field_)
+    return false;
+
+  switch (field_->cpp_type()) {
+    case FD::CPPTYPE_STRING:
+      obj.refl->SetString(obj.msg, field_, str_val);
+      break;
+    case FD::CPPTYPE_ENUM: {
+      const gpb::EnumValueDescriptor* ev = field_->enum_type()->FindValueByName(str_val);
+      if (!ev)
+        return false;
+      obj.refl->SetEnum(obj.msg, field_, ev);
+    } break;
+
+    default:
+      return false;
+  }
+  field_ = nullptr;
 
   return true;
 }
@@ -304,12 +308,34 @@ bool PbHandler::Null() {
   return true;
 }
 
-#define CASE(Type)                                \
-  case FD::Type:                                  \
+#define CASE(Type)                                    \
+  case FD::Type:                                      \
     SetField<FD::Type>(obj.refl, field_, i, obj.msg); \
     break
 
-bool PbHandler::Bool(bool b) { return true; }
+bool PbHandler::Bool(bool b) {
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    const FD* field = obj.arr_ref->first;
+    if (field->cpp_type() != FD::CPPTYPE_BOOL) {
+      err_msg = absl::StrCat("Expected msg type but found ", field->cpp_type_name());
+      return false;
+    }
+    absl::get<MRFR<bool>>(obj.arr_ref->second).Add(b);
+    return true;
+  }
+  if (!field_)
+    return true;
+
+  if (field_->cpp_type() != FD::CPPTYPE_BOOL) {
+    err_msg = absl::StrCat("Expected BOOL, found ", field_->cpp_type_name());
+    return false;
+  }
+
+  pb::SetField<FD::CPPTYPE_BOOL>(obj.refl, field_, b, obj.msg);
+
+  return true;
+}
 
 bool PbHandler::Int(int i) {
   if (!field_) {
@@ -344,7 +370,15 @@ bool PbHandler::Uint(unsigned i) {
     CASE(CPPTYPE_UINT64);
     CASE(CPPTYPE_FLOAT);
     CASE(CPPTYPE_DOUBLE);
+    case FD::CPPTYPE_BOOL:
+        if (i > 1) {
+          err_msg = absl::StrCat("Invalid bool value ", i);
+          return false;
+        }
+        SetField<FD::CPPTYPE_BOOL>(obj.refl, field_, i != 0, obj.msg);
+      break;
     default:
+      err_msg = absl::StrCat("Unexpected Uint type ", field_->cpp_type_name());
       return false;
   }
   return true;
@@ -380,6 +414,7 @@ bool PbHandler::Uint64(uint64_t i) {
     CASE(CPPTYPE_FLOAT);
     CASE(CPPTYPE_DOUBLE);
     default:
+      err_msg = absl::StrCat("Unexpected Uint64 type ", field_->cpp_type_name());
       return false;
   }
   return true;
@@ -397,6 +432,7 @@ bool PbHandler::Double(double i) {
     CASE(CPPTYPE_FLOAT);
     CASE(CPPTYPE_DOUBLE);
     default:
+      err_msg = absl::StrCat("Unexpected Double type ", field_->cpp_type_name());
       return false;
   }
   return true;
@@ -405,7 +441,7 @@ bool PbHandler::Double(double i) {
 #undef CASE
 
 /// enabled via kParseNumbersAsStringsFlag, string is not null-terminated (use length)
-bool PbHandler::RawNumber(const Ch* str, size_t length, bool copy) { return true; }
+bool PbHandler::RawNumber(const Ch* str, size_t length, bool copy) { return false; }
 
 bool PbHandler::StartArray() {
   if (!field_ || !field_->is_repeated()) {
@@ -416,9 +452,8 @@ bool PbHandler::StartArray() {
   auto& obj = stack_.back();
   DCHECK(!obj.arr_ref);
 
-
-#define CASE(Type)                                                                 \
-  case FD::Type:                                                                   \
+#define CASE(Type)                                       \
+  case FD::Type:                                         \
     obj.arr_ref.emplace(MakeArr<FD::Type>(field_, obj)); \
     break
 
@@ -444,6 +479,7 @@ bool PbHandler::EndArray(size_t elementCount) {
   auto& obj = stack_.back();
   DCHECK(obj.arr_ref);
   obj.arr_ref.reset();
+  field_ = nullptr;
 
   return true;
 }
@@ -465,8 +501,7 @@ Status Json2Pb(std::string json, ::google::protobuf::Message* msg, bool skip_unk
   PbHandler h(msg);
   rj::InsituStringStream stream(&json.front());
 
-  rj::ParseResult pr =
-      reader.Parse<rj::kParseInsituFlag | rj::kParseValidateEncodingFlag>(stream, h);
+  rj::ParseResult pr = reader.Parse<rj::kParseInsituFlag | rj::kParseTrailingCommasFlag>(stream, h);
   if (pr.IsError()) {
     Status st(StatusCode::PARSE_ERROR,
               absl::StrCat(rj::GetParseError_En(pr.Code()), "/", h.err_msg));

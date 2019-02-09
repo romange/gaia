@@ -17,6 +17,7 @@ template <FD::CppType t> struct FD_Traits;
 #define DECLARE_FD_TRAITS(CPP_TYPE, src_type) \
   template <> struct FD_Traits<FD::CPP_TYPE> { typedef src_type type; }
 
+DECLARE_FD_TRAITS(CPPTYPE_BOOL, bool);
 DECLARE_FD_TRAITS(CPPTYPE_INT32, int32_t);
 DECLARE_FD_TRAITS(CPPTYPE_UINT32, uint32_t);
 DECLARE_FD_TRAITS(CPPTYPE_INT64, int64_t);
@@ -44,18 +45,19 @@ FD_Traits_t<t> GetField(const ::google::protobuf::Reflection* refl, const FD* fi
                         const Msg* msg);
 
 #define DEFINE_MODIFIER(CPP_TYPE, Name)                                                        \
-  template <>                                                                                  \
+  template <> inline                                                                                 \
   FD_Traits_t<FD::CPP_TYPE> GetField<FD::CPP_TYPE>(const ::google::protobuf::Reflection* refl, \
                                                    const FD* field, const Msg* msg) {          \
     return refl->Get##Name(*msg, field);                                                       \
   }                                                                                            \
                                                                                                \
-  template <>                                                                                  \
+  template <>  inline                                                                           \
   void SetField<FD::CPP_TYPE>(const ::google::protobuf::Reflection* refl, const FD* field,     \
                               const FD_Traits_t<FD::CPP_TYPE>& val, Msg* msg) {                \
     refl->Set##Name(msg, field, val);                                                         \
   }
 
+DEFINE_MODIFIER(CPPTYPE_BOOL, Bool);
 DEFINE_MODIFIER(CPPTYPE_INT32, Int32);
 DEFINE_MODIFIER(CPPTYPE_UINT32, UInt32);
 DEFINE_MODIFIER(CPPTYPE_INT64, Int64);
