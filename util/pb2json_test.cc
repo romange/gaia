@@ -26,11 +26,7 @@ using namespace google::protobuf;
 namespace gpb = ::google::protobuf;
 
 MATCHER(StatusOk, string(negation ? "is not" : "is") + " ok\n") {
-  if (arg.ok())
-    return true;
-
-  *result_listener << "Actual status: " << arg.ToString();
-  return false;
+  return arg.ok();
 }
 
 // Matches fields specified in str to msg. Ignores other fields in msg.
@@ -162,7 +158,6 @@ TEST_F(Pb2JsonTest, Options) {
   EXPECT_EQ(R"({"bval":1})", res);
 }
 
-#if TBD
 TEST_F(Pb2JsonTest, ParseBasic) {
   Person person;
   auto status =
@@ -172,6 +167,8 @@ TEST_F(Pb2JsonTest, ParseBasic) {
     name: "Roman" id: 5 account { bank_name: "Leumi" }
   )"));
 }
+
+#if TBD
 
 TEST_F(Pb2JsonTest, ParseExt) {
   Person person;

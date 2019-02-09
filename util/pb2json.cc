@@ -9,8 +9,13 @@
 #include <rapidjson/reader.h>
 #include <rapidjson/writer.h>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
+
 #include "base/logging.h"
+#include "util/pb/refl.h"
 
 using std::string;
 namespace gpb = ::google::protobuf;
@@ -179,6 +184,270 @@ void PrintRepeated(const gpb::Message& msg, const Pb2JsonOptions& options,
   res->EndArray();
 }
 
+class PbHandler {
+ public:
+  string err_msg;
+  using Ch = char;
+
+  PbHandler(::google::protobuf::Message* msg) { stack_.emplace_back(msg->GetReflection(), msg); }
+
+  bool Key(const Ch* str, size_t len, bool copy);
+
+  bool String(const Ch* str, size_t len, bool);
+
+  bool StartObject();
+
+  bool EndObject(size_t member_count) {
+    DVLOG(2) << "EndObject " << member_count;
+    stack_.pop_back();
+    field_ = nullptr;
+    return true;
+  }
+
+  bool Null();
+  bool Bool(bool b);
+  bool Int(int i);
+  bool Uint(unsigned i);
+  bool Int64(int64_t i);
+  bool Uint64(uint64_t i);
+  bool Double(double d);
+  /// enabled via kParseNumbersAsStringsFlag, string is not null-terminated (use length)
+  bool RawNumber(const Ch* str, size_t length, bool copy);
+
+  bool StartArray();
+  bool EndArray(size_t elementCount);
+
+ private:
+  using FD = gpb::FieldDescriptor;
+  template <typename T> using MRFR = gpb::MutableRepeatedFieldRef<T>;
+
+  using ArrRef = absl::variant<MRFR<uint32_t>, MRFR<int32_t>, MRFR<uint64_t>, MRFR<int64_t>,
+                               MRFR<float>, MRFR<double>, MRFR<string>, MRFR<gpb::Message>>;
+
+  struct Object {
+    const gpb::Reflection* refl;
+    gpb::Message* msg;
+
+    absl::optional<std::pair<const FD*, ArrRef>> arr_ref;
+
+    Object(const gpb::Reflection* r, gpb::Message* m) : refl(r), msg(m) {}
+  };
+
+  template<FD::CppType t> static auto MakeArr(const FD* f, const Object& o) {
+    return std::pair<const FD*, ArrRef>{f, pb::GetMutableArray<t>(o.refl, f, o.msg)};
+  }
+
+  absl::InlinedVector<Object, 16> stack_;
+  const gpb::FieldDescriptor* field_ = nullptr;
+  string key_name_;
+};
+
+bool PbHandler::Key(const Ch* str, size_t len, bool copy) {
+  DCHECK(!stack_.empty());
+
+  key_name_.assign(str, len);
+  const auto& msg = *stack_.back().msg;
+  field_ = msg.GetDescriptor()->FindFieldByName(key_name_);
+
+  return field_ != nullptr;  // TODO: handle skip_unknown_fields.
+}
+
+bool PbHandler::String(const Ch* str, size_t len, bool) {
+  if (!field_)
+    return false;
+  DCHECK(!stack_.empty());
+  auto& obj = stack_.back();
+
+  if (obj.arr_ref) {
+    absl::get<MRFR<string>>(obj.arr_ref->second).Add(string(str, len));
+  } else {
+    obj.refl->SetString(obj.msg, field_, string(str, len));
+    field_ = nullptr;
+  }
+
+  return true;
+}
+
+bool PbHandler::StartObject() {
+  DCHECK(!stack_.empty());
+
+  auto& obj = stack_.back();
+  if (obj.arr_ref) {
+    const FD* field = obj.arr_ref->first;
+    if (field->cpp_type() != FD::CPPTYPE_MESSAGE) {
+      err_msg = absl::StrCat("Expected msg type but found ", field->cpp_type_name());
+      return false;
+    }
+    gpb::Message* child = obj.refl->AddMessage(obj.msg, field);
+    stack_.emplace_back(child->GetReflection(), child);
+    return true;
+  }
+
+  if (!field_)
+    return true;
+
+  if (field_->cpp_type() != gpb::FieldDescriptor::CPPTYPE_MESSAGE) {
+    err_msg = absl::StrCat("Error in StartObject, type ", field_->cpp_type_name());
+    return false;
+  }
+
+  gpb::Message* child = obj.refl->MutableMessage(obj.msg, field_);
+  stack_.emplace_back(child->GetReflection(), child);
+  return true;
+}
+
+bool PbHandler::Null() {
+  auto& obj = stack_.back();
+  if (field_ && !obj.arr_ref) {
+    obj.refl->ClearField(obj.msg, field_);
+  }
+  return true;
+}
+
+#define CASE(Type)                                \
+  case FD::Type:                                  \
+    SetField<FD::Type>(obj.refl, field_, i, obj.msg); \
+    break
+
+bool PbHandler::Bool(bool b) { return true; }
+
+bool PbHandler::Int(int i) {
+  if (!field_) {
+    return false;
+  }
+
+  using namespace pb;
+  auto& obj = stack_.back();
+
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_INT32);
+    CASE(CPPTYPE_INT64);
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_DOUBLE);
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool PbHandler::Uint(unsigned i) {
+  if (!field_) {
+    return false;
+  }
+
+  using namespace pb;
+  auto& obj = stack_.back();
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_INT32);
+    CASE(CPPTYPE_UINT32);
+    CASE(CPPTYPE_INT64);
+    CASE(CPPTYPE_UINT64);
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_DOUBLE);
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool PbHandler::Int64(int64_t i) {
+  if (!field_) {
+    return false;
+  }
+
+  using namespace pb;
+  auto& obj = stack_.back();
+
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_INT64);
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_DOUBLE);
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool PbHandler::Uint64(uint64_t i) {
+  if (!field_) {
+    return false;
+  }
+
+  using namespace pb;
+  auto& obj = stack_.back();
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_UINT64);
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_DOUBLE);
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool PbHandler::Double(double i) {
+  if (!field_) {
+    return false;
+  }
+
+  using namespace pb;
+  auto& obj = stack_.back();
+
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_DOUBLE);
+    default:
+      return false;
+  }
+  return true;
+}
+
+#undef CASE
+
+/// enabled via kParseNumbersAsStringsFlag, string is not null-terminated (use length)
+bool PbHandler::RawNumber(const Ch* str, size_t length, bool copy) { return true; }
+
+bool PbHandler::StartArray() {
+  if (!field_ || !field_->is_repeated()) {
+    err_msg = absl::StrCat("Bad array ", key_name_);
+    return false;
+  }
+  using FD = gpb::FieldDescriptor;
+  auto& obj = stack_.back();
+  DCHECK(!obj.arr_ref);
+
+
+#define CASE(Type)                                                                 \
+  case FD::Type:                                                                   \
+    obj.arr_ref.emplace(MakeArr<FD::Type>(field_, obj)); \
+    break
+
+  switch (field_->cpp_type()) {
+    CASE(CPPTYPE_UINT32);
+    CASE(CPPTYPE_INT32);
+    CASE(CPPTYPE_UINT64);
+    CASE(CPPTYPE_INT64);
+    CASE(CPPTYPE_DOUBLE);
+    CASE(CPPTYPE_FLOAT);
+    CASE(CPPTYPE_STRING);
+    CASE(CPPTYPE_MESSAGE);
+
+    default:
+      err_msg = absl::StrCat("Unknown array type ", field_->cpp_type_name());
+      return false;
+  }
+#undef CASE
+  return true;
+}
+
+bool PbHandler::EndArray(size_t elementCount) {
+  auto& obj = stack_.back();
+  DCHECK(obj.arr_ref);
+  obj.arr_ref.reset();
+
+  return true;
+}
+
 }  // namespace
 
 std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions& options) {
@@ -190,32 +459,6 @@ std::string Pb2Json(const ::google::protobuf::Message& msg, const Pb2JsonOptions
   return string(sb.GetString(), sb.GetSize());
 }
 
-class PbHandler : public rj::BaseReaderHandler<rj::UTF8<>, PbHandler> {
- public:
-  PbHandler(::google::protobuf::Message* msg) : msg_(msg), refl_(msg->GetReflection()) {}
-
-  bool Key(const Ch* str, size_t len, bool copy) {
-    tmp_.assign(str, len);
-    field_ = msg_->GetDescriptor()->FindFieldByName(tmp_);
-    LOG(INFO) << "Key: " << str << ", len: " << len << ", copy: " << copy << ", field "
-              << (field_ != nullptr);
-    return true;
-  }
-
-  bool String(const Ch* str, size_t len, bool) {
-    if (!field_)
-      return false;
-    refl_->SetString(msg_,  field_, string(str, len));
-    field_ = nullptr;
-    return true;
-  }
- private:
-  const gpb::FieldDescriptor* field_ = nullptr;
-  string tmp_;
-  gpb::Message* msg_;
-  const gpb::Reflection* refl_;
-};
-
 Status Json2Pb(std::string json, ::google::protobuf::Message* msg, bool skip_unknown_fields) {
   rj::Reader reader;
 
@@ -225,7 +468,8 @@ Status Json2Pb(std::string json, ::google::protobuf::Message* msg, bool skip_unk
   rj::ParseResult pr =
       reader.Parse<rj::kParseInsituFlag | rj::kParseValidateEncodingFlag>(stream, h);
   if (pr.IsError()) {
-    Status st(StatusCode::PARSE_ERROR, rj::GetParseError_En(pr.Code()));
+    Status st(StatusCode::PARSE_ERROR,
+              absl::StrCat(rj::GetParseError_En(pr.Code()), "/", h.err_msg));
     return st;
   }
   return Status::OK;
