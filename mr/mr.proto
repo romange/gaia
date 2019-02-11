@@ -1,0 +1,53 @@
+// Copyright 2019, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+syntax = "proto2";
+
+package mr3;
+
+message WireFormat {
+  enum Type {
+    JSON = 1;  // Do we need it? TXT might cover json use-case.
+    LST = 2;
+    TXT = 3;
+  }
+}
+
+message Input {
+  required string name = 1;
+
+  required WireFormat format = 2;
+
+  message FileSpec {
+    required string url_glob = 1;
+    optional string metadata = 2;
+    optional string profile_name = 3;
+  };
+
+  repeated FileSpec file = 4;
+}
+
+message Sharding {
+
+}
+
+message Output {
+  required string name = 1;
+  required WireFormat format = 2;
+
+  enum Compress {
+    NONE = 0;
+    GZIP = 1;
+  }
+
+  optional Compress compress = 3;
+  optional Sharding sharding = 4;
+}
+
+message Operator {
+  // TODO: For joiner it's multiple inputs.
+  required string input_name = 1;  // corresponds to the name in Input.name.
+  optional string func = 2;
+
+  required Output output = 3;
+}

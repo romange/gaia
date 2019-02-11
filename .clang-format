@@ -3,10 +3,12 @@
 BasedOnStyle: Google
 IndentWidth: 2
 ColumnLimit: 100
-# ---
+---
 Language: Cpp
 AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: false
-# ---
+---
+Language: Proto
+BasedOnStyle: Google
