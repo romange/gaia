@@ -11,7 +11,6 @@ namespace util {
 // This thread pool has a global fiber-friendly queue for incoming tasks.
 class FiberQueueThreadPool {
  public:
-  // I must use folly::Function because std & boost functions do not wrap MoveableOnly lambdas.
   typedef std::function<void()> Func;
 
   explicit FiberQueueThreadPool(unsigned num_threads, unsigned queue_size = 128);

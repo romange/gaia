@@ -25,9 +25,7 @@ using namespace std;
 using namespace google::protobuf;
 namespace gpb = ::google::protobuf;
 
-MATCHER(StatusOk, string(negation ? "is not" : "is") + " ok\n") {
-  return arg.ok();
-}
+MATCHER(StatusOk, string(negation ? "is not" : "is") + " ok\n") { return arg.ok(); }
 
 // Matches fields specified in str to msg. Ignores other fields in msg.
 // Outputs the differences into `diff` in human-readable-format.
@@ -174,7 +172,7 @@ TEST_F(Pb2JsonTest, ParseExt) {
   ASSERT_THAT(status, StatusOk());
   ASSERT_THAT(person, ProtoMatchTo(R"(
   name: "" id: 0 phone { number: "1" type: HOME } phone { number: "2" type: WORK } )"
-            R"(tag: "good" tag: "young")"));
+                                   R"(tag: "good" tag: "young")"));
 }
 
 TEST_F(Pb2JsonTest, ParseUnicode) {
@@ -209,7 +207,8 @@ TEST_F(Pb2JsonTest, ParseBool) {
 TEST_F(Pb2JsonTest, ParseRepeated) {
   AddressBook book;
   auto status = Json2Pb(R"({"ts": [5, 6, -7, -80000000], "person" :
-       [{"name": "foo", "id": 1}, {"name": "bar", "id": 2},] } )", &book);
+       [{"name": "foo", "id": 1}, {"name": "bar", "id": 2},] } )",
+                        &book);
   ASSERT_THAT(status, StatusOk());
   ASSERT_THAT(book, ProtoMatchTo(R"(
       ts: 5 ts: 6 ts: -7 ts: -80000000 person: { name: "foo" id: 1 }
@@ -223,6 +222,11 @@ TEST_F(Pb2JsonTest, Unknown) {
 
   auto status = Json2Pb(R"( {"foo" : 1 })", &parse);
   ASSERT_THAT(status, StatusOk());
+
+  Person person;
+  status = Json2Pb(R"( {"foo" : { "bar": 1, "k" : { "id" : 1} , "id" : 2}, "id": 3} )", &person);
+  ASSERT_THAT(status, StatusOk());
+  EXPECT_EQ(3, person.id());
 }
 
 }  // namespace util
