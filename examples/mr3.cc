@@ -14,6 +14,7 @@ namespace mr3 {
 
 class OutputBase {
   pb::Output output_;
+
  public:
 };
 
@@ -23,25 +24,49 @@ template <typename T> class Output : public OutputBase {
   Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
 };
 
-class Pipeline {
- public:
-  Pipeline& ReadText(const string& name, const string& glob);
+template <typename T> class Stream {
+  Output<T> out_;
 
-  template <typename T> Output<T>& Write(const string& name);
+ public:
+  Output<T>& Write(const string& name) { return out_; }
 };
 
-}  // namespace mr3
+using StringStream = Stream<std::string>;
 
+class Pipeline {
+ public:
+  StringStream& ReadText(const string& name, const string& glob);
+
+ private:
+  std::vector<std::unique_ptr<StringStream>> streams_;
+};
+
+StringStream& Pipeline::ReadText(const string& name, const string& glob) {
+  streams_.emplace_back(new StringStream());
+  return *streams_.back();
+}
+
+template <typename T> Output<T>& Output<T>::WithSharding(std::function<string(const T&)> cb) {
+  return *this;
+}
+
+template <typename T>
+Output<T>& Output<T>::AndCompress(pb::Output::CompressType ct, unsigned level) {
+  return *this;
+}
+
+}  // namespace mr3
 
 using namespace mr3;
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
 
   Pipeline p;
-  p.ReadText("inp1", "*.csv.gz").Write<string>("outp1").AndCompress(pb::Output::GZIP).WithSharding(
-    [] (const string& str) {
-      return "shardname";
-    });
+  
+  p.ReadText("inp1", "*.csv.gz")
+      .Write("outp1")
+      .AndCompress(pb::Output::GZIP)
+      .WithSharding([](const string& str) { return "shardname"; });
 
   return 0;
 }
