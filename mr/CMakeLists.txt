@@ -1,1 +1,1 @@
-cxx_proto_lib(mr)
+cxx_proto_lib(mr3)

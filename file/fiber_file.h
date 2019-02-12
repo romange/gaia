@@ -15,9 +15,13 @@ util::StatusObject<ReadonlyFile*> OpenFiberReadFile(
     const ReadonlyFile::Options& opts = ReadonlyFile::Options()) MUST_USE_RESULT;
 
 
+struct FiberWriteOptions : public OpenOptions {
+
+};
+
 WriteFile* OpenFiberWriteFile(
     StringPiece name, util::FiberQueueThreadPool* tp,
-    const OpenOptions& opts = OpenOptions()) MUST_USE_RESULT;
+    const FiberWriteOptions& opts = FiberWriteOptions()) MUST_USE_RESULT;
 
 
 }  // namespace file

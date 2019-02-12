@@ -164,10 +164,11 @@ add_third_party(
 add_third_party(
   gperf
   GIT_REPOSITORY https://github.com/gperftools/gperftools.git
-  GIT_TAG e9ab4c53041ac62feefbbb076d326e9a77dd1567
+  GIT_TAG 9e5b1628737c67b4587f937164572774592978c4
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
                     --enable-libunwind "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"
+                    --disable-deprecated-pprof --enable-aggressive-decommit-by-default
                     --prefix=${THIRD_PARTY_LIB_DIR}/gperf
   LIB libtcmalloc_and_profiler.so
 )

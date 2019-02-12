@@ -82,7 +82,7 @@ StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name, util::FiberQueue
 }
 
 WriteFile* OpenFiberWriteFile(StringPiece name, util::FiberQueueThreadPool* tp,
-                              const OpenOptions& opts) {
+                              const FiberWriteOptions& opts) {
   WriteFile* wf = Open(name, opts);
   if (!wf)
     return nullptr;
