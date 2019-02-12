@@ -3,7 +3,7 @@
 //
 syntax = "proto2";
 
-package mr3;
+package mr3.pb;
 
 message WireFormat {
   enum Type {
@@ -35,9 +35,14 @@ message Output {
   required string name = 1;
   required WireFormat format = 2;
 
-  enum Compress {
+  enum CompressType {
     NONE = 0;
     GZIP = 1;
+  }
+
+  message Compress {
+    required CompressType type = 1;
+    optional int32 level = 2;
   }
 
   optional Compress compress = 3;
