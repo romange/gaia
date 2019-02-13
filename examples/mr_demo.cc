@@ -98,7 +98,7 @@ class Mr {
 
  public:
   explicit Mr(IoContextPool* pool)
-      : fq_pool_(new util::FiberQueueThreadPool(0)), inc_queue_(2), pool_(pool) {
+      : fq_pool_(new util::FiberQueueThreadPool()), inc_queue_(2), pool_(pool) {
     pool->AwaitOnAll([this](IoContext&) {
       per_io_.reset(new IoStruct);
       per_io_->read_fb = fibers::fiber(&Mr::OpenFile, this);

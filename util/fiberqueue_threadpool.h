@@ -13,7 +13,7 @@ class FiberQueueThreadPool {
  public:
   typedef std::function<void()> Func;
 
-  explicit FiberQueueThreadPool(unsigned num_threads, unsigned queue_size = 128);
+  explicit FiberQueueThreadPool(unsigned num_threads = 0, unsigned queue_size = 128);
   ~FiberQueueThreadPool();
 
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
