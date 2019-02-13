@@ -180,9 +180,7 @@ void WriteStringToFileOrDie(StringPiece contents, StringPiece name) {
   CHECK(fclose(file) == 0) << "fclose(" << name << "): " << strerror(errno);
 }
 
-bool CreateDir(StringPiece name, int mode) {
-  return mkdir(name.data(), mode) == 0;
-}
+bool CreateDir(StringPiece name, int mode) { return mkdir(name.data(), mode) == 0; }
 
 bool RecursivelyCreateDir(StringPiece path, int mode) {
   if (CreateDir(path, mode))
@@ -336,10 +334,10 @@ vector<string> ExpandFiles(StringPiece path) {
 }
 
 // Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
-Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res) {
+Status StatFilesSafe(StringPiece path, std::vector<StatShort>* res) {
   CHECK_NOTNULL(res);
   glob_t glob_result;
-  int rv = glob(path.data(), 0, errfunc, &glob_result);
+  int rv = glob(path.data(), GLOB_TILDE_CHECK, errfunc, &glob_result);
   if (rv && rv != GLOB_NOMATCH) {
     return Status(StatusCode::IO_ERROR, strerror(rv));
   }
@@ -347,8 +345,9 @@ Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res) {
   struct stat statbuf;
   for (size_t i = 0; i < glob_result.gl_pathc; i++) {
     if (stat(glob_result.gl_pathv[i], &statbuf) == 0) {
-      file::StatShort sshort{glob_result.gl_pathv[i], statbuf.st_mtime, statbuf.st_size};
-      res->push_back(sshort);
+      StatShort sshort{glob_result.gl_pathv[i], statbuf.st_mtime, statbuf.st_size,
+                        statbuf.st_mode};
+      res->emplace_back(std::move(sshort));
     } else {
       LOG(WARNING) << "Bad stat for " << glob_result.gl_pathv[i];
     }
@@ -357,8 +356,8 @@ Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res) {
   return Status::OK;
 }
 
-std::vector<file::StatShort> StatFiles(StringPiece path) {
-  std::vector<file::StatShort> res;
+std::vector<StatShort> StatFiles(StringPiece path) {
+  std::vector<StatShort> res;
   Status rv = StatFilesSafe(path, &res);
   CHECK(rv.ok()) << rv;
   return res;

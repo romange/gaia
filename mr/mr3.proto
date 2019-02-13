@@ -22,7 +22,6 @@ message Input {
   message FileSpec {
     required string url_glob = 1;
     optional string metadata = 2;
-    optional string profile_name = 3;
   };
 
   repeated FileSpec file_spec = 4;
@@ -51,7 +50,7 @@ message Output {
 }
 
 
-// Can be mapper or joiner. 
+// Can be mapper or joiner.
 message Operator {
   repeated string input_name = 1;  // corresponds to the name in Input.name.
   optional string func = 2;

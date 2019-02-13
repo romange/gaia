@@ -9,6 +9,13 @@
 
 namespace file_util {
 
+struct StatShort {
+  std::string name;
+  time_t last_modified;
+  off_t size;
+  mode_t st_mode;
+};
+
 using file::WriteFile;
 
 // Join two path components, adding a slash if necessary.  If basename is an
@@ -55,8 +62,8 @@ int64_t LocalFileSize(StringPiece path);  // In bytes.
 std::vector<std::string> ExpandFiles(StringPiece path);
 
 // Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
-std::vector<file::StatShort> StatFiles(StringPiece path);
-util::Status StatFilesSafe(StringPiece path, std::vector<file::StatShort>* res);
+std::vector<StatShort> StatFiles(StringPiece path);
+util::Status StatFilesSafe(StringPiece path, std::vector<StatShort>* res);
 
 // Creates 'file.gz', compresses file, once successful, deletes it. fails on any error.
 void CompressToGzip(StringPiece file, uint8_t compress_level = 2);

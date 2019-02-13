@@ -93,13 +93,6 @@ bool Delete(StringPiece name);
 
 bool Exists(StringPiece name);
 
-struct StatShort {
-  std::string name;
-  time_t last_modified;
-  off_t size;
-};
-
-
 } // namespace file
 
 namespace std {
