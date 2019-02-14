@@ -7,10 +7,11 @@
 #include <thread>
 #include <vector>
 
+#include <absl/types/optional.h>
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/fiber/fiber.hpp>
-#include <absl/types/optional.h>
 
+#include "base/type_traits.h"
 #include "util/asio/io_context.h"
 #include "util/fibers_ext.h"
 
@@ -18,6 +19,10 @@ namespace util {
 
 /// A pool of io_context objects.
 class IoContextPool {
+  template <typename Func, typename... Args>
+  using AcceptArgsCheck =
+      typename std::enable_if<base::is_invocable<Func, Args...>::value, int>::type;
+
  public:
   using io_context = ::boost::asio::io_context;
 
@@ -49,17 +54,40 @@ class IoContextPool {
   // Runs func in all IO threads asynchronously. The task must be CPU-only non IO-blocking code
   // because it runs directly in IO-fiber. MapTask runs asynchronously and will exit before
   // the task finishes. The 'func' must accept context as its argument.
-  template <typename Func> void AsyncOnAll(Func&& func) {
+  template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
       context.Async([&context, func = std::forward<Func>(func)]() mutable { func(context); });
     }
   }
 
-  template <typename Func> void AwaitOnAll(Func&& func) {
+  // Similar but Func accept the id (unsigned) of IoContext in the pool and IoContext&.
+  template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
+  void AsyncOnAll(Func&& func) {
+    for (unsigned i = 0; i < size(); ++i) {
+      IoContext& context = context_arr_[i];
+      context.Async([&context, i, func = std::forward<Func>(func)]() mutable { func(i, context); });
+    }
+  }
+
+   // Blocks until all the asynchronous calls to func return.
+  template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
       func(context);
+      bc.Dec();
+    };
+    AsyncOnAll(std::move(cb));
+    bc.Wait();
+  }
+
+  // Blocks until all the asynchronous calls to func return. Func receives both the index and
+  // IoContext&.
+  template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
+  void AwaitOnAll(Func&& func) {
+    fibers_ext::BlockingCounter bc(size());
+    auto cb = [&bc, func = std::forward<Func>(func)](unsigned index, IoContext& context) {
+      func(index, context);
       bc.Dec();
     };
     AsyncOnAll(std::move(cb));

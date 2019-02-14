@@ -1,3 +1,7 @@
+// Copyright 2019, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+
 #ifndef BEERI_BASE_TYPE_TRAITS_H_
 #define BEERI_BASE_TYPE_TRAITS_H_
 
@@ -18,6 +22,12 @@ struct voider {
 template <typename... Ts>
 using void_t = typename voider<Ts...>::type;
 
+#if __cpp_lib_invoke >= 201411
+  using std::invoke;
+  using std::is_invocable;
+  using std::is_invocable_r;
+#else
+
 // Bringing is_invokable from c++17.
 template <typename F, typename... Args>
 struct is_invocable : std::is_constructible<std::function<void(Args...)>,
@@ -27,6 +37,15 @@ template <typename R, typename F, typename... Args>
 struct is_invocable_r : std::is_constructible<std::function<R(Args...)>,
                                               std::reference_wrapper<std::remove_reference_t<F>>> {
 };
+
+
+template <typename F, typename... Args> constexpr auto invoke(F&& f, Args&&... args) noexcept(
+    noexcept(static_cast<F&&>(f)(static_cast<Args&&>(args)...)))
+    -> decltype(static_cast<F&&>(f)(static_cast<Args&&>(args)...)) {
+  return static_cast<F&&>(f)(static_cast<Args&&>(args)...);
+}
+
+#endif
 
 // based on https://functionalcpp.wordpress.com/2013/08/05/function-traits/
 template <typename F> struct DecayedTupleFromParams;
@@ -110,5 +129,6 @@ struct DecayedTupleFromParams : public DecayedTupleFromParams<decltype(&C::opera
       return Internal<T>(0);                                      \
     }                                                             \
   }
+
 
 #endif  // BEERI_BASE_TYPE_TRAITS_H_

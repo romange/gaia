@@ -41,11 +41,16 @@ using util::Status;
 Status Pipeline::Run() { return Status::OK; }
 
 class Executor {
+  using StringQueue = ::boost::fibers::buffered_channel<string>;
+
   struct PerIoStruct {
     fibers::fiber process_fd;
+    StringQueue record_q;
+
+    PerIoStruct() : record_q(32) {}
   };
 
-  using StringQueue = ::boost::fibers::buffered_channel<string>;
+
 
  public:
   Executor(util::IoContextPool* pool)
@@ -70,7 +75,7 @@ void Executor::Run(const InputBase* input, const StringStream& ss) {
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  pool_->AwaitOnAll([this, input](IoContext&) {
+  pool_->AwaitOnAll([this, input](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct);
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
@@ -96,17 +101,17 @@ void Executor::ProcessFiles(pb::WireFormat::Type tp) {
       break;
 
     CHECK(st == channel_op_status::success);
-    CONSOLE_INFO << file_name;
     auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
     if (!res.ok()) {
-      LOG(INFO) << "Skipping " << file_name << " with " << res.status;
+      LOG(DFATAL) << "Skipping " << file_name << " with " << res.status;
       continue;
     }
     LOG(INFO) << "Processing file " << file_name;
+    std::unique_ptr<file::ReadonlyFile> read_file(res.obj);
 
     switch (tp) {
       case pb::WireFormat::TXT:
-        ProcessText(res.obj);
+        ProcessText(read_file.get());
         break;
 
       default:
@@ -123,6 +128,8 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   string scratch;
 
   while (lr.Next(&result, &scratch)) {
+    channel_op_status st = per_io_->record_q.push(string(result));
+    CHECK_EQ(channel_op_status::success, st);
   }
 }
 
