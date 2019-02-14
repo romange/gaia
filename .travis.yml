@@ -3,6 +3,9 @@ dist: xenial
 language: cpp
 os: linux
 
+env:
+  - LSAN_OPTIONS=suppressions=$HOME/supress.txt
+
 cache:
   directories:
   - /opt/boost_1_69_0
@@ -15,8 +18,16 @@ matrix:
   include:
     - compiler: gcc
       env:
-        - COMPILER=g++-5 LSAN_OPTIONS=suppressions=$HOME/supress.txt
-
+        - COMPILER=g++-5
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-7
+      env:
+        - COMPILER=g++-7
 
 before_install:
   # Fix for Ubuntu Xenial apt-daily.service triggering
