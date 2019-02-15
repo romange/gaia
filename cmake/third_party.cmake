@@ -163,8 +163,7 @@ add_third_party(
 
 add_third_party(
   gperf
-  GIT_REPOSITORY https://github.com/gperftools/gperftools.git
-  GIT_TAG 9e5b1628737c67b4587f937164572774592978c4
+  GIT_REPOSITORY https://github.com/romange/gperftools
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
                     --enable-libunwind "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"
