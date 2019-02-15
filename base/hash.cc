@@ -10,7 +10,6 @@
 #include <xxhash.h>
 
 namespace {
-constexpr uint64_t k2 = 0x9ae16a3b2f90404fULL;
 
 // Magic numbers for 32-bit hashing.  Copied from Murmur3.
 constexpr uint32_t c1 = 0xcc9e2d51;
@@ -34,21 +33,11 @@ inline uint32_t rotl32(uint32_t x, int8_t r) {
     return (x << r) | (x >> (32 - r));
 }
 
-inline uint32_t Mur(uint32_t a, uint32_t h) {
-  // Helper from Murmur3 for combining two 32-bit values.
-  a *= c1;
-  a = rotr32(a, 17);
-  a *= c2;
-  h ^= a;
-  h = rotr32(h, 19);
-  return h * 5 + 0xe6546b64;
-}
-
-
 }  // namespace
 
 
 namespace base {
+
 uint32_t MurmurHash3_x86_32(const uint8_t* data, uint32_t len, uint32_t seed) {
   const uint32_t nblocks = len / 4;
 

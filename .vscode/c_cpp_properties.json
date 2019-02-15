@@ -19,6 +19,7 @@
         "${workspaceFolder}/third_party/libs/gperf/include",
         "${workspaceFolder}/third_party/libs/rapidjson/include",
         "${workspaceFolder}/third_party/libs/crc32c/include",
+        "${workspaceFolder}/third_party/libs/xxhash/include",
         "${workspaceFolder}/third_party/libs/lz4/include",
         "${workspaceFolder}",
         "${workspaceFolder}/genfiles",
