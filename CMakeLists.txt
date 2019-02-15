@@ -42,7 +42,8 @@ set(GOLD_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (NOT ONLY_THIRD_PARTY)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-missing-field-initializers")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare -Wno-missing-field-initializers \
+                       -Wno-shadow-uncaptured-local -Wno-tautological-type-limit-compare")
   add_subdirectory(abseil-cpp)
   set(CMAKE_CXX_FLAGS "${GOLD_CXX_FLAGS}")
 
