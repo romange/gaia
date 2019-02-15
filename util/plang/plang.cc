@@ -329,7 +329,7 @@ void BinOp::eval(const gpb::Message& msg, ExprValueCb cb) const {
                };
     break;
     case LE:
-        local_cb = [this, &res, &msg](const ExprValue& val_left) {
+        local_cb = [&](const ExprValue& val_left) {
                right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
                             if (val_left.Less(val_right) || val_left.Equal(val_right))
                               res = true;
@@ -339,7 +339,7 @@ void BinOp::eval(const gpb::Message& msg, ExprValueCb cb) const {
                };
         break;
     case NOT:
-         local_cb = [this, &res, &msg](const ExprValue& val_left) {
+         local_cb = [&](const ExprValue& val_left) {
               CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
               if (!val_left.val.bool_val) {
                 res = true;

@@ -11,10 +11,6 @@
 
 namespace {
 
-// Magic numbers for 32-bit hashing.  Copied from Murmur3.
-constexpr uint32_t c1 = 0xcc9e2d51;
-constexpr uint32_t c2 = 0x1b873593;
-
 inline uint32_t fmix(uint32_t h) {
     h ^= h >> 16;
     h *= 0x85ebca6b;
@@ -23,10 +19,6 @@ inline uint32_t fmix(uint32_t h) {
     h ^= h >> 16;
 
     return h;
-}
-
-inline uint32_t rotr32(uint32_t val, int shift) {
-  return (val >> shift) | (val << (32 - shift));
 }
 
 inline uint32_t rotl32(uint32_t x, int8_t r) {

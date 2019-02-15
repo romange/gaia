@@ -1,6 +1,12 @@
 %{
 #include "util/plang/plang_scanner.h"
 #undef YY_DECL
+
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wnull-conversion"
+#endif
+
+
 // ORI: YY_DECL allows us to choose the name we want for the lex function,
 //      and also to change the parameters to those that the parser will send
 //      (currently I am not using these in lexer code, but this may change
