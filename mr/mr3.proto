@@ -27,10 +27,6 @@ message Input {
   repeated FileSpec file_spec = 4;
 }
 
-message Sharding {
-
-}
-
 message Output {
   required string name = 1;
   required WireFormat format = 2;
@@ -46,7 +42,13 @@ message Output {
   }
 
   optional Compress compress = 3;
-  optional Sharding sharding = 4;
+
+  enum ShardType {
+    MODN = 0;
+    USER_DEFINED = 1;
+  }
+  required ShardType shard_type = 4;
+  // optional uint32 modn = 5;
 }
 
 

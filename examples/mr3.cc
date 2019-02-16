@@ -44,24 +44,28 @@ class Executor {
   using StringQueue = ::boost::fibers::buffered_channel<string>;
 
   struct PerIoStruct {
-    fibers::fiber process_fd;
+    unsigned index;
+    fibers::fiber process_fd, map_fd;
     StringQueue record_q;
 
-    PerIoStruct() : record_q(32) {}
+    PerIoStruct(unsigned i) : index(i), record_q(32) {}
+
+    ~PerIoStruct();
   };
 
-
-
  public:
-  Executor(util::IoContextPool* pool)
-      : pool_(pool), file_name_q_(16), fq_pool_(new util::FiberQueueThreadPool()) {}
+  Executor(const std::string& root_dir, util::IoContextPool* pool)
+      : root_dir_(root_dir), pool_(pool), file_name_q_(16),
+        fq_pool_(new util::FiberQueueThreadPool()) {}
 
+  void Init();
   void Run(const InputBase* input, const StringStream& ss);
 
  private:
   void ProcessFiles(pb::WireFormat::Type tp);
   void ProcessText(file::ReadonlyFile* fd);
 
+  std::string root_dir_;
   util::IoContextPool* pool_;
   StringQueue file_name_q_;
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
@@ -70,13 +74,25 @@ class Executor {
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 
+Executor::PerIoStruct::~PerIoStruct() {
+  DCHECK(record_q.is_closed());
+
+  if (process_fd.joinable())
+    process_fd.join();
+  if (map_fd.joinable()) {
+    map_fd.join();
+  }
+}
+
+void Executor::Init() {}
+
 void Executor::Run(const InputBase* input, const StringStream& ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
   pool_->AwaitOnAll([this, input](unsigned index, IoContext&) {
-    per_io_.reset(new PerIoStruct);
+    per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
   });
@@ -92,7 +108,7 @@ void Executor::Run(const InputBase* input, const StringStream& ss) {
   }
 }
 
-void Executor::ProcessFiles(pb::WireFormat::Type tp) {
+void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
   string file_name;
 
   while (true) {
@@ -109,13 +125,13 @@ void Executor::ProcessFiles(pb::WireFormat::Type tp) {
     LOG(INFO) << "Processing file " << file_name;
     std::unique_ptr<file::ReadonlyFile> read_file(res.obj);
 
-    switch (tp) {
+    switch (input_type) {
       case pb::WireFormat::TXT:
         ProcessText(read_file.get());
         break;
 
       default:
-        LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(tp);
+        LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(input_type);
         break;
     }
   }

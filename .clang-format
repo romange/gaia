@@ -9,6 +9,7 @@ AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ---
 Language: Proto
 BasedOnStyle: Google
