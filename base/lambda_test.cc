@@ -19,7 +19,7 @@ void operator delete(void* p, size_t sz) {
 	free(p);
 }
 
-void operator delete(void* p) {
+void operator delete(void* p) noexcept {
 	free(p);
 }
 
@@ -27,6 +27,8 @@ namespace base {
 
 class LambdaTest : public testing::Test {
 };
+
+#pragma clang diagnostic ignored "-Wunused-lambda-capture"
 
 TEST_F(LambdaTest, Cb) {
 	std::array<int, 1024> arr;
