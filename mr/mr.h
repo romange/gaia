@@ -11,25 +11,7 @@
 namespace mr3 {
 
 class StreamBase;
-
-class OutputBase {
- public:
-  pb::Output* mutable_msg() { return out_; }
-  const pb::Output& msg() const { return *out_; }
-
- protected:
-  pb::Output* out_;
-
-  OutputBase(pb::Output* out) : out_(out) {}
-
-  void SetCompress(pb::Output::CompressType ct, unsigned level) {
-    auto* co = out_->mutable_compress();
-    co->set_type(ct);
-    if (level) {
-      co->set_level(level);
-    }
-  }
-};
+class ExecutionOutputContext;
 
 class InputBase {
  public:
@@ -49,6 +31,43 @@ class InputBase {
   pb::Input input_;
 };
 
+class OutputBase {
+  friend class ExecutionOutputContext;
+
+ public:
+  pb::Output* mutable_msg() { return out_; }
+  const pb::Output& msg() const { return *out_; }
+
+  virtual ~OutputBase() {}
+
+ protected:
+  pb::Output* out_;
+
+  OutputBase(pb::Output* out) : out_(out) {}
+
+  void SetCompress(pb::Output::CompressType ct, unsigned level) {
+    auto* co = out_->mutable_compress();
+    co->set_type(ct);
+    if (level) {
+      co->set_level(level);
+    }
+  }
+
+  struct RecordResult {
+    std::string out;
+    std::string file_key;
+  };
+
+  virtual void WriteInternal(const std::string& record, RecordResult* res) = 0;
+};
+
+class ExecutionOutputContext {
+ public:
+  explicit ExecutionOutputContext(OutputBase* ob);
+
+  void WriteRecord(const std::string& record);
+};
+
 template <typename T> class Output : public OutputBase {
   friend class StreamBase;
 
@@ -60,7 +79,7 @@ template <typename T> class Output : public OutputBase {
   Output(Output&&) noexcept = default;
 
   template <typename U> Output& WithSharding(U&& func) {
-    static_assert(base::is_invocable_r<std::string, U, const T&>::value);
+    static_assert(base::is_invocable_r<std::string, U, const T&>::value, "");
     shard_op_ = std::forward<U>(func);
     mutable_msg()->set_shard_type(pb::Output::USER_DEFINED);
 
@@ -79,15 +98,21 @@ template <typename T> class Output : public OutputBase {
 
  private:
   Output(pb::Output* out) : OutputBase(out) {}
+
+  void WriteInternal(const std::string& record, RecordResult* res) final;
+
 };  // namespace mr3
 
 class StreamBase {
  protected:
   pb::Operator op_;
 
-  template <typename T> Output<T> WriteInternal(const std::string& name) {
-    op_.mutable_output()->set_name(name);
-    return Output<T>(op_.mutable_output());
+  template <typename T>
+  Output<T> WriteInternal(const std::string& name, pb::WireFormat::Type type) {
+    auto* out = op_.mutable_output();
+    out->set_name(name);
+    out->mutable_format()->set_type(type);
+    return Output<T>(out);
   }
 };
 
@@ -97,10 +122,12 @@ template <typename T> class Stream : public StreamBase {
  public:
   Stream(const std::string& input_name) { op_.add_input_name(input_name); }
 
-  Output<T>& Write(const std::string& name) {
-    out_ = WriteInternal<T>(name);
+  Output<T>& Write(const std::string& name, pb::WireFormat::Type type) {
+    out_ = WriteInternal<T>(name, type);
     return out_;
   }
+
+  Output<T>& output() { return out_; }
 };
 
 using StringStream = Stream<std::string>;
@@ -111,7 +138,7 @@ class Pipeline {
 
   util::Status Run();
 
-  const InputBase& input(const std::string& name) const ;
+  const InputBase& input(const std::string& name) const;
 
  private:
   std::vector<std::unique_ptr<InputBase>> inputs_;
@@ -122,6 +149,13 @@ template <typename T>
 Output<T>& Output<T>::AndCompress(pb::Output::CompressType ct, unsigned level) {
   SetCompress(ct, level);
   return *this;
+}
+
+template <typename T>
+void Output<T>::WriteInternal(const std::string& record, RecordResult* res) {
+  res->out = record;
+  if (shard_op_)
+    res->file_key = shard_op_(record);
 }
 
 }  // namespace mr3

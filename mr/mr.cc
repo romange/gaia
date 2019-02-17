@@ -17,4 +17,8 @@ const InputBase& Pipeline::input(const std::string& name) const {
   return *inputs_.front();
 }
 
+ExecutionOutputContext::ExecutionOutputContext(OutputBase* ob) {}
+
+void ExecutionOutputContext::WriteRecord(const std::string& record) {}
+
 }  // namespace mr3

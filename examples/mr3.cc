@@ -59,11 +59,12 @@ class Executor {
         fq_pool_(new util::FiberQueueThreadPool()) {}
 
   void Init();
-  void Run(const InputBase* input, const StringStream& ss);
+  void Run(const InputBase* input, StringStream* ss);
 
  private:
   void ProcessFiles(pb::WireFormat::Type tp);
   void ProcessText(file::ReadonlyFile* fd);
+  void MapFiber(ExecutionOutputContext* out_cntx);
 
   std::string root_dir_;
   util::IoContextPool* pool_;
@@ -84,19 +85,20 @@ Executor::PerIoStruct::~PerIoStruct() {
   }
 }
 
-void Executor::Init() {
-  CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644));
-}
+void Executor::Init() { CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644)); }
 
-void Executor::Run(const InputBase* input, const StringStream& ss) {
+void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  pool_->AwaitOnAll([this, input](unsigned index, IoContext&) {
+  ExecutionOutputContext out_cntx(&ss->output());
+
+  pool_->AwaitOnAll([this, input, &out_cntx](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, &out_cntx);
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {
@@ -137,6 +139,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
         break;
     }
   }
+  per_io_->record_q.close();
 }
 
 void Executor::ProcessText(file::ReadonlyFile* fd) {
@@ -148,6 +151,19 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   while (lr.Next(&result, &scratch)) {
     channel_op_status st = per_io_->record_q.push(string(result));
     CHECK_EQ(channel_op_status::success, st);
+  }
+}
+
+void Executor::MapFiber(ExecutionOutputContext* out_cntx) {
+  auto& record_q = per_io_->record_q;
+  string record;
+  while (true) {
+    channel_op_status st = record_q.pop(record);
+    if (st == channel_op_status::closed)
+      break;
+
+    CHECK(st == channel_op_status::success);
+    out_cntx->WriteRecord(record);
   }
 }
 
@@ -170,11 +186,11 @@ int main(int argc, char** argv) {
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", FLAGS_input);
-  ss.Write("outp1").AndCompress(pb::Output::GZIP).WithSharding([](const string& str) {
-    return "shardname";
-  });
+  ss.Write("outp1", pb::WireFormat::TXT)
+      .AndCompress(pb::Output::GZIP)
+      .WithSharding([](const string& str) { return "shardname"; });
 
-  executor.Run(&p.input("inp1"), ss);
+  executor.Run(&p.input("inp1"), &ss);
 
   return 0;
 }
