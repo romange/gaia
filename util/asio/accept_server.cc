@@ -89,6 +89,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
         CHECK(!handler);
         if (ec == asio::error::try_again)
           continue;
+        LOG_IF(INFO, ec != std::errc::operation_canceled) << "Stopped with error " << ec.message();
         break;  // TODO: To refine it.
       } else {
         CHECK_NOTNULL(handler);
