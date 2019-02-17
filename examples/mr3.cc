@@ -84,7 +84,9 @@ Executor::PerIoStruct::~PerIoStruct() {
   }
 }
 
-void Executor::Init() {}
+void Executor::Init() {
+  CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644));
+}
 
 void Executor::Run(const InputBase* input, const StringStream& ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
@@ -162,11 +164,17 @@ int main(int argc, char** argv) {
   IoContextPool pool;
   Pipeline p;
 
+  pool.Run();
+
+  Executor executor("/tmp/mr3", &pool);
+
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", FLAGS_input);
   ss.Write("outp1").AndCompress(pb::Output::GZIP).WithSharding([](const string& str) {
     return "shardname";
   });
+
+  executor.Run(&p.input("inp1"), ss);
 
   return 0;
 }

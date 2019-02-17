@@ -111,7 +111,7 @@ class Pipeline {
 
   util::Status Run();
 
-  const InputBase& input(const std::string& name);
+  const InputBase& input(const std::string& name) const ;
 
  private:
   std::vector<std::unique_ptr<InputBase>> inputs_;
