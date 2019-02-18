@@ -85,7 +85,9 @@ Executor::PerIoStruct::~PerIoStruct() {
   }
 }
 
-void Executor::Init() { CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644)); }
+void Executor::Init() {
+  CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644));
+}
 
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);

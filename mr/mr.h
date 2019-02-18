@@ -66,6 +66,9 @@ class ExecutionOutputContext {
   explicit ExecutionOutputContext(OutputBase* ob);
 
   void WriteRecord(const std::string& record);
+
+private:
+  OutputBase* ob_;
 };
 
 template <typename T> class Output : public OutputBase {
