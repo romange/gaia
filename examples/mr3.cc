@@ -48,7 +48,9 @@ class Executor {
     fibers::fiber process_fd, map_fd;
     StringQueue record_q;
 
-    PerIoStruct(unsigned i) : index(i), record_q(32) {}
+    google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
+
+    PerIoStruct(unsigned i);
 
     ~PerIoStruct();
   };
@@ -64,7 +66,7 @@ class Executor {
  private:
   void ProcessFiles(pb::WireFormat::Type tp);
   void ProcessText(file::ReadonlyFile* fd);
-  void MapFiber(ExecutionOutputContext* out_cntx);
+  void MapFiber(StreamBase* sb, ExecutionOutputContext* out_cntx);
 
   std::string root_dir_;
   util::IoContextPool* pool_;
@@ -74,6 +76,10 @@ class Executor {
 };
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
+
+Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {
+  custom_shard_files_.set_empty_key(StringPiece());
+}
 
 Executor::PerIoStruct::~PerIoStruct() {
   DCHECK(record_q.is_closed());
@@ -85,22 +91,20 @@ Executor::PerIoStruct::~PerIoStruct() {
   }
 }
 
-void Executor::Init() {
-  CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644));
-}
+void Executor::Init() { CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644)); }
 
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  ExecutionOutputContext out_cntx(&ss->output());
+  ExecutionOutputContext out_cntx(root_dir_, &ss->output());
 
-  pool_->AwaitOnAll([this, input, &out_cntx](unsigned index, IoContext&) {
+  pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, &out_cntx);
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this,  ss, &out_cntx);
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {
@@ -156,7 +160,7 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   }
 }
 
-void Executor::MapFiber(ExecutionOutputContext* out_cntx) {
+void Executor::MapFiber(StreamBase* sb, ExecutionOutputContext* out_cntx) {
   auto& record_q = per_io_->record_q;
   string record;
   while (true) {
@@ -165,7 +169,18 @@ void Executor::MapFiber(ExecutionOutputContext* out_cntx) {
       break;
 
     CHECK(st == channel_op_status::success);
-    out_cntx->WriteRecord(record);
+
+    // record is a binary input.
+    // TODO: to implement binary to type to binary flow:
+    // out_cntx-Deserialize<T>(record) -> T -> UDF(T) -> (Shard, U) -> Serialize(U)->string.
+    // TODO: we should hold local map for sharded files.
+    // if a new shard is needed, locks and accesses a central repository.
+    // each sharded file is fiber-safe file.
+
+    // We should have here Shard/string(out_record).
+
+    // sb->
+    // out_cntx->WriteRecord(std::move(record));
   }
 }
 

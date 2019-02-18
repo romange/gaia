@@ -2,10 +2,15 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#pragma once
+
 #include <functional>
 
 #include "base/type_traits.h"
+#include "file/file.h"
 #include "mr/mr3.pb.h"
+
+#include "strings/unique_strings.h"
 #include "util/status.h"
 
 namespace mr3 {
@@ -53,22 +58,27 @@ class OutputBase {
     }
   }
 
-  struct RecordResult {
+  /*struct RecordResult {
     std::string out;
     std::string file_key;
   };
 
-  virtual void WriteInternal(const std::string& record, RecordResult* res) = 0;
+  virtual void WriteInternal(std::string&& record, RecordResult* res) = 0;*/
 };
 
 class ExecutionOutputContext {
  public:
-  explicit ExecutionOutputContext(OutputBase* ob);
+  explicit ExecutionOutputContext(const std::string& root_dir, OutputBase* ob);
 
-  void WriteRecord(const std::string& record);
+  void WriteRecord(std::string&& record);
 
-private:
+  OutputBase* output() { return ob_; }
+
+ private:
+  const std::string root_dir_;
   OutputBase* ob_;
+
+  StringPieceDenseMap<file::WriteFile*> files_;
 };
 
 template <typename T> class Output : public OutputBase {
@@ -99,14 +109,30 @@ template <typename T> class Output : public OutputBase {
     return *this;
   }
 
+  std::string Shard(const T& t) { return shard_op_ ? shard_op_(t) : std::string{}; }
+
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 
-  void WriteInternal(const std::string& record, RecordResult* res) final;
+  // void WriteInternal(std::string&& record, RecordResult* res) final;
+};
 
-};  // namespace mr3
+struct ShardId {
+  std::string key;
+};
+
+class DoContext {
+ public:
+  virtual ~DoContext() {}
+
+  virtual void Write(const ShardId& shard_id, const std::string& record) = 0;
+};
 
 class StreamBase {
+ public:
+  virtual ~StreamBase() {}
+  virtual void Do(std::string&& record, DoContext* context) = 0;
+
  protected:
   pb::Operator op_;
 
@@ -131,6 +157,9 @@ template <typename T> class Stream : public StreamBase {
   }
 
   Output<T>& output() { return out_; }
+
+ protected:
+  void Do(std::string&& record, DoContext* context);
 };
 
 using StringStream = Stream<std::string>;
@@ -154,11 +183,18 @@ Output<T>& Output<T>::AndCompress(pb::Output::CompressType ct, unsigned level) {
   return *this;
 }
 
-template <typename T>
-void Output<T>::WriteInternal(const std::string& record, RecordResult* res) {
-  res->out = record;
+/*
+template <typename T> void Output<T>::WriteInternal(std::string&& record, RecordResult* res) {
+  res->out = std::move(record);
   if (shard_op_)
     res->file_key = shard_op_(record);
+}
+*/
+
+template <typename T> void Stream<T>::Do(std::string&& record, DoContext* context) {
+  ShardId shard_id;
+  shard_id.key = out_.Shard(record);
+  context->Write(shard_id, record);
 }
 
 }  // namespace mr3
