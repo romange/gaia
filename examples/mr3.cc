@@ -40,6 +40,41 @@ using util::Status;
 
 Status Pipeline::Run() { return Status::OK; }
 
+class MyDoContext : public DoContext {
+ public:
+  MyDoContext(const std::string& root_dir, const pb::Output& out);
+
+  void Write(const ShardId& shard_id, const std::string& record) final;
+
+ private:
+  const std::string root_dir_;
+  UniqueStrings str_db_;
+
+  google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
+  fibers::mutex mu_;
+};
+
+MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out) : root_dir_(root_dir) {
+  custom_shard_files_.set_empty_key(StringPiece{});
+  CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
+}
+
+// TODO: To make MyDoContext thread local
+void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
+  std::lock_guard<fibers::mutex> lg(mu_);
+
+  CHECK(absl::holds_alternative<string>(shard_id));
+
+  const string& shard_name = absl::get<string>(shard_id);
+
+  auto it = custom_shard_files_.find(shard_name);
+  if (it == custom_shard_files_.end()) {
+    LOG(FATAL) << "TBD";
+  }
+  file::WriteFile* fl = it->second;
+  CHECK_STATUS(fl->Write(record));
+}
+
 class Executor {
   using StringQueue = ::boost::fibers::buffered_channel<string>;
 
@@ -47,8 +82,6 @@ class Executor {
     unsigned index;
     fibers::fiber process_fd, map_fd;
     StringQueue record_q;
-
-    google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
 
     PerIoStruct(unsigned i);
 
@@ -66,7 +99,7 @@ class Executor {
  private:
   void ProcessFiles(pb::WireFormat::Type tp);
   void ProcessText(file::ReadonlyFile* fd);
-  void MapFiber(StreamBase* sb, ExecutionOutputContext* out_cntx);
+  void MapFiber(StreamBase* sb, DoContext* cntx);
 
   std::string root_dir_;
   util::IoContextPool* pool_;
@@ -78,7 +111,6 @@ class Executor {
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 
 Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {
-  custom_shard_files_.set_empty_key(StringPiece());
 }
 
 Executor::PerIoStruct::~PerIoStruct() {
@@ -98,13 +130,13 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  ExecutionOutputContext out_cntx(root_dir_, &ss->output());
+  MyDoContext out_cntx(root_dir_, ss->output().msg());
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this,  ss, &out_cntx);
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, &out_cntx);
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {
@@ -160,7 +192,7 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   }
 }
 
-void Executor::MapFiber(StreamBase* sb, ExecutionOutputContext* out_cntx) {
+void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
   auto& record_q = per_io_->record_q;
   string record;
   while (true) {
@@ -178,9 +210,7 @@ void Executor::MapFiber(StreamBase* sb, ExecutionOutputContext* out_cntx) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-
-    // sb->
-    // out_cntx->WriteRecord(std::move(record));
+    sb->Do(std::move(record), cntx);
   }
 }
 

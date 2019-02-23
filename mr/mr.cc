@@ -17,6 +17,7 @@ const InputBase& Pipeline::input(const std::string& name) const {
   return *inputs_.front();
 }
 
+/*
 ExecutionOutputContext::ExecutionOutputContext(const std::string& root_dir, OutputBase* ob)
     : root_dir_(root_dir), ob_(ob) {
   files_.set_empty_key(StringPiece());
@@ -26,7 +27,7 @@ ExecutionOutputContext::ExecutionOutputContext(const std::string& root_dir, Outp
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
 
-/*void ExecutionOutputContext::WriteRecord(std::string&& record) {
+void ExecutionOutputContext::WriteRecord(std::string&& record) {
   OutputBase::RecordResult rec_result;
 
   ob_->WriteInternal(std::move(record), &rec_result);

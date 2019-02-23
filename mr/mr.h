@@ -6,6 +6,7 @@
 
 #include <functional>
 
+#include "absl/types/variant.h"
 #include "base/type_traits.h"
 #include "file/file.h"
 #include "mr/mr3.pb.h"
@@ -36,6 +37,8 @@ class InputBase {
   pb::Input input_;
 };
 
+using ShardId = absl::variant<uint32_t, std::string>;
+
 class OutputBase {
   friend class ExecutionOutputContext;
 
@@ -58,19 +61,15 @@ class OutputBase {
     }
   }
 
-  /*struct RecordResult {
-    std::string out;
-    std::string file_key;
-  };
 
-  virtual void WriteInternal(std::string&& record, RecordResult* res) = 0;*/
 };
 
+/*
 class ExecutionOutputContext {
  public:
   explicit ExecutionOutputContext(const std::string& root_dir, OutputBase* ob);
 
-  void WriteRecord(std::string&& record);
+  void Process(std::string&& record);
 
   OutputBase* output() { return ob_; }
 
@@ -80,6 +79,7 @@ class ExecutionOutputContext {
 
   StringPieceDenseMap<file::WriteFile*> files_;
 };
+*/
 
 template <typename T> class Output : public OutputBase {
   friend class StreamBase;
@@ -109,7 +109,13 @@ template <typename T> class Output : public OutputBase {
     return *this;
   }
 
-  std::string Shard(const T& t) { return shard_op_ ? shard_op_(t) : std::string{}; }
+  ShardId Shard(const T& t) {
+    if (shard_op_)
+      return shard_op_(t);
+
+    // TODO: Hasher<T>(t) & msg().modn();
+    return ShardId{0};
+  }
 
  private:
   Output(pb::Output* out) : OutputBase(out) {}
@@ -117,9 +123,6 @@ template <typename T> class Output : public OutputBase {
   // void WriteInternal(std::string&& record, RecordResult* res) final;
 };
 
-struct ShardId {
-  std::string key;
-};
 
 class DoContext {
  public:
@@ -192,8 +195,9 @@ template <typename T> void Output<T>::WriteInternal(std::string&& record, Record
 */
 
 template <typename T> void Stream<T>::Do(std::string&& record, DoContext* context) {
+  // TODO: to parse from record to T and apply UDF here.
   ShardId shard_id;
-  shard_id.key = out_.Shard(record);
+  shard_id = out_.Shard(record);
   context->Write(shard_id, record);
 }
 
