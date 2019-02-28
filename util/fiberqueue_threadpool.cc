@@ -45,7 +45,7 @@ void FiberQueueThreadPool::WorkerFunction() {
     fibers::channel_op_status st = input_.pop(f);
     if (st == fibers::channel_op_status::closed)
       break;
-    CHECK(st == fibers::channel_op_status::success) << int(st);
+    CHECK_EQ(fibers::channel_op_status::success, st) << int(st);
     try {
       f();
     } catch(std::exception& e) {
@@ -56,7 +56,7 @@ void FiberQueueThreadPool::WorkerFunction() {
 }
 
 void FiberQueueThreadPool::VerifyChannelSt(boost::fibers::channel_op_status st) {
-  CHECK(st == fibers::channel_op_status::success);
+  CHECK_EQ(fibers::channel_op_status::success, st);
 }
 
 }  // namespace util

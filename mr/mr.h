@@ -126,7 +126,7 @@ template <typename T> class Output : public OutputBase {
 
 class DoContext {
  public:
-  virtual ~DoContext() {}
+  virtual ~DoContext();
 
   virtual void Write(const ShardId& shard_id, const std::string& record) = 0;
 };

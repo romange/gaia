@@ -21,5 +21,5 @@ add_executable(mr_demo mr_demo.cc)
 cxx_link(mr_demo fiber_file base asio_fiber_lib)
 
 add_executable(mr3 mr3.cc)
-cxx_link(mr3 fiber_file asio_fiber_lib mr3_lib)
+cxx_link(mr3 fiber_file asio_fiber_lib mr3_lib absl_hash absl_str_format)
 

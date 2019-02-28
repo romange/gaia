@@ -4,6 +4,8 @@
 
 #include <boost/fiber/buffered_channel.hpp>
 
+#include "absl/strings/str_format.h"
+
 #include "base/init.h"
 #include "base/logging.h"
 
@@ -43,6 +45,7 @@ Status Pipeline::Run() { return Status::OK; }
 class MyDoContext : public DoContext {
  public:
   MyDoContext(const std::string& root_dir, const pb::Output& out);
+  ~MyDoContext();
 
   void Write(const ShardId& shard_id, const std::string& record) final;
 
@@ -75,6 +78,13 @@ void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
   CHECK_STATUS(fl->Write(record));
 }
 
+MyDoContext::~MyDoContext() {
+  for (auto& k_v :custom_shard_files_) {
+    CHECK(k_v.second->Close());
+  }
+}
+
+
 class Executor {
   using StringQueue = ::boost::fibers::buffered_channel<string>;
 
@@ -85,16 +95,18 @@ class Executor {
 
     PerIoStruct(unsigned i);
 
-    ~PerIoStruct();
+    void Shutdown();
   };
 
  public:
   Executor(const std::string& root_dir, util::IoContextPool* pool)
       : root_dir_(root_dir), pool_(pool), file_name_q_(16),
         fq_pool_(new util::FiberQueueThreadPool()) {}
+  ~Executor();
 
   void Init();
   void Run(const InputBase* input, StringStream* ss);
+  void Shutdown();
 
  private:
   void ProcessFiles(pb::WireFormat::Type tp);
@@ -106,6 +118,7 @@ class Executor {
   StringQueue file_name_q_;
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
   std::unique_ptr<util::FiberQueueThreadPool> fq_pool_;
+  std::unique_ptr<MyDoContext> my_context_;
 };
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
@@ -113,15 +126,30 @@ thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {
 }
 
-Executor::PerIoStruct::~PerIoStruct() {
-  DCHECK(record_q.is_closed());
-
+void Executor::PerIoStruct::Shutdown() {
   if (process_fd.joinable())
     process_fd.join();
+
+  DCHECK(record_q.is_closed());
+
   if (map_fd.joinable()) {
     map_fd.join();
   }
 }
+
+Executor::~Executor() {
+  VLOG(1) << "Executor::~Executor";
+}
+
+void Executor::Shutdown() {
+  file_name_q_.close();
+
+  pool_->AwaitOnAll([&](IoContext&) {
+    per_io_->Shutdown();
+  });
+  VLOG(1) << "Executor::Shutdown";
+}
+
 
 void Executor::Init() { CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644)); }
 
@@ -130,13 +158,13 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  MyDoContext out_cntx(root_dir_, ss->output().msg());
+  my_context_.reset(new MyDoContext(root_dir_, ss->output().msg()));
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, &out_cntx);
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, my_context_.get());
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {
@@ -158,7 +186,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
     if (st == channel_op_status::closed)
       break;
 
-    CHECK(st == channel_op_status::success);
+    CHECK_EQ(channel_op_status::success, st);
     auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
     if (!res.ok()) {
       LOG(DFATAL) << "Skipping " << file_name << " with " << res.status;
@@ -177,6 +205,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
         break;
     }
   }
+  VLOG(1) << "ProcessFiles closing";
   per_io_->record_q.close();
 }
 
@@ -219,12 +248,16 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
 using namespace mr3;
 using namespace util;
 
+string ShardNameFunc(const std::string& line) {
+  return absl::StrFormat("shard-%04d", base::Fingerprint32(line) % 10);
+}
+
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
 
   CHECK(!FLAGS_input.empty());
 
-  IoContextPool pool;
+  IoContextPool pool(1);
   Pipeline p;
 
   pool.Run();
@@ -235,9 +268,10 @@ int main(int argc, char** argv) {
   StringStream& ss = p.ReadText("inp1", FLAGS_input);
   ss.Write("outp1", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP)
-      .WithSharding([](const string& str) { return "shardname"; });
+      .WithSharding(ShardNameFunc);
 
   executor.Run(&p.input("inp1"), &ss);
+  executor.Shutdown();
 
   return 0;
 }

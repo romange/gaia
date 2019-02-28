@@ -37,4 +37,6 @@ void ExecutionOutputContext::WriteRecord(std::string&& record) {
 }
 */
 
+DoContext::~DoContext() {}
+
 }  // namespace mr3
