@@ -44,7 +44,8 @@ Status Pipeline::Run() { return Status::OK; }
 
 class MyDoContext : public DoContext {
  public:
-  MyDoContext(const std::string& root_dir, const pb::Output& out);
+  MyDoContext(const std::string& root_dir, const pb::Output& out,
+              util::FiberQueueThreadPool* fq);
   ~MyDoContext();
 
   void Write(const ShardId& shard_id, const std::string& record) final;
@@ -55,9 +56,11 @@ class MyDoContext : public DoContext {
 
   google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
   fibers::mutex mu_;
+  util::FiberQueueThreadPool* fq_;
 };
 
-MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out) : root_dir_(root_dir) {
+MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
+                         util::FiberQueueThreadPool* fq) : root_dir_(root_dir), fq_(fq) {
   custom_shard_files_.set_empty_key(StringPiece{});
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
@@ -72,6 +75,10 @@ void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
 
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
+    string file_name = absl::StrFormat("%s.txt", shard_name);
+    string fn = file_util::JoinPath(root_dir_, file_name);
+    it->second = file::OpenFiberWriteFile(fn, fq_);
+
     LOG(FATAL) << "TBD";
   }
   file::WriteFile* fl = it->second;
@@ -158,7 +165,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  my_context_.reset(new MyDoContext(root_dir_, ss->output().msg()));
+  my_context_.reset(new MyDoContext(root_dir_, ss->output().msg(), fq_pool_.get()));
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
