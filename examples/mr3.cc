@@ -4,7 +4,7 @@
 
 #include <boost/fiber/buffered_channel.hpp>
 
-#include "absl/strings/str_format.h"
+#include "absl/strings/str_cat.h"
 
 #include "base/init.h"
 #include "base/logging.h"
@@ -75,13 +75,16 @@ void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
 
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
-    string file_name = absl::StrFormat("%s.txt", shard_name);
-    string fn = file_util::JoinPath(root_dir_, file_name);
-    it->second = file::OpenFiberWriteFile(fn, fq_);
+    StringPiece key = str_db_.Get(shard_name);
 
-    LOG(FATAL) << "TBD";
+    string file_name = absl::StrCat(shard_name, ".txt");
+    string fn = file_util::JoinPath(root_dir_, file_name);
+    auto res = custom_shard_files_.emplace(key, file::OpenFiberWriteFile(fn, fq_));
+    CHECK(res.second && res.first->second);
+    it = res.first;
   }
   file::WriteFile* fl = it->second;
+  CHECK(fl);
   CHECK_STATUS(fl->Write(record));
 }
 
@@ -158,7 +161,9 @@ void Executor::Shutdown() {
 }
 
 
-void Executor::Init() { CHECK(file_util::RecursivelyCreateDir(root_dir_, 0644)); }
+void Executor::Init() {
+  file_util::RecursivelyCreateDir(root_dir_, 0750);
+}
 
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
@@ -204,7 +209,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
 
     switch (input_type) {
       case pb::WireFormat::TXT:
-        ProcessText(read_file.get());
+        ProcessText(read_file.release());
         break;
 
       default:
@@ -256,7 +261,9 @@ using namespace mr3;
 using namespace util;
 
 string ShardNameFunc(const std::string& line) {
-  return absl::StrFormat("shard-%04d", base::Fingerprint32(line) % 10);
+  char buf[32];
+  snprintf(buf, sizeof buf, "shard-%04d", base::Fingerprint32(line) % 10);
+  return buf;
 }
 
 int main(int argc, char** argv) {
@@ -270,6 +277,7 @@ int main(int argc, char** argv) {
   pool.Run();
 
   Executor executor("/tmp/mr3", &pool);
+  executor.Init();
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", FLAGS_input);
