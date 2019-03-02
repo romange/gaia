@@ -21,7 +21,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
 #include <memory>
 
 #include "base/logging.h"

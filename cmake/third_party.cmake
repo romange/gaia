@@ -94,7 +94,7 @@ function(add_third_party name)
         -DCMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=${INSTALL_ROOT}
         -DCMAKE_BUILD_TYPE:STRING=Release
         -DBUILD_TESTING=OFF
-        -DCMAKE_C_FLAGS:STRING=-O3 -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
+        "-DCMAKE_C_FLAGS:STRING=-O3" -DCMAKE_CXX_FLAGS=${THIRD_PARTY_CXX_FLAGS}
         -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_ROOT}
         ${piped_CMAKE_ARGS}
     ${parsed_UNPARSED_ARGUMENTS}
@@ -361,6 +361,9 @@ add_third_party(s2geometry
   LIB "libs2.so"
 )
 
+add_third_party(z
+  GIT_REPOSITORY https://github.com/madler/zlib
+)
 
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}

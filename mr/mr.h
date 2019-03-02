@@ -128,7 +128,7 @@ class DoContext {
  public:
   virtual ~DoContext();
 
-  virtual void Write(const ShardId& shard_id, const std::string& record) = 0;
+  virtual void Write(const ShardId& shard_id, std::string&& record) = 0;
 };
 
 class StreamBase {
@@ -198,7 +198,7 @@ template <typename T> void Stream<T>::Do(std::string&& record, DoContext* contex
   // TODO: to parse from record to T and apply UDF here.
   ShardId shard_id;
   shard_id = out_.Shard(record);
-  context->Write(shard_id, record);
+  context->Write(shard_id, std::move(record));
 }
 
 }  // namespace mr3

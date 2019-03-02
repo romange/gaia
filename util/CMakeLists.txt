@@ -5,12 +5,12 @@ cxx_link(status base status_proto)
 
 add_library(util zlib_source.cc bzip_source.cc
             sinksource.cc zstd_sinksource.cc)
+cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 TRDP::z)
 
 add_library(pb2json pb2json.cc)
 cxx_link(pb2json strings status TRDP::protobuf absl_variant)
 add_dependencies(pb2json rapidjson_project)
 
-cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
 
 add_library(threads sp_task_pool.cc)
 cxx_link(threads base)

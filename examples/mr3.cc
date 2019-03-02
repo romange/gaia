@@ -9,13 +9,19 @@
 #include "base/init.h"
 #include "base/logging.h"
 
+
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "mr/mr.h"
 
+#include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
+#include "util/http/http_conn_handler.h"
+
 #include "util/status.h"
+#include "util/zlib_source.h"
+
 
 using namespace std;
 using namespace boost;
@@ -24,6 +30,7 @@ using namespace util;
 using fibers::channel_op_status;
 
 DEFINE_string(input, "", "");
+DEFINE_int32(http_port, 8080, "Port number.");
 
 namespace mr3 {
 
@@ -48,7 +55,7 @@ class MyDoContext : public DoContext {
               util::FiberQueueThreadPool* fq);
   ~MyDoContext();
 
-  void Write(const ShardId& shard_id, const std::string& record) final;
+  void Write(const ShardId& shard_id, std::string&& record) final;
 
  private:
   const std::string root_dir_;
@@ -66,7 +73,7 @@ MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
 }
 
 // TODO: To make MyDoContext thread local
-void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
+void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
   std::lock_guard<fibers::mutex> lg(mu_);
 
   CHECK(absl::holds_alternative<string>(shard_id));
@@ -85,6 +92,7 @@ void MyDoContext::Write(const ShardId& shard_id, const std::string& record) {
   }
   file::WriteFile* fl = it->second;
   CHECK(fl);
+  record.append("\n");
   CHECK_STATUS(fl->Write(record));
 }
 
@@ -152,6 +160,7 @@ Executor::~Executor() {
 }
 
 void Executor::Shutdown() {
+  VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
 
   pool_->AwaitOnAll([&](IoContext&) {
@@ -199,6 +208,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
+    // auto res = file::ReadonlyFile::Open(file_name);
     auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
     if (!res.ok()) {
       LOG(DFATAL) << "Skipping " << file_name << " with " << res.status;
@@ -222,15 +232,27 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
 }
 
 void Executor::ProcessText(file::ReadonlyFile* fd) {
-  util::Source* src = file::Source::Uncompressed(fd);
-  file::LineReader lr(src, TAKE_OWNERSHIP);
+  //std::unique_ptr<util::Source> first(new file::Source(fd));
+  // std::unique_ptr<util::Source> src(new util::ZlibSource(first.release()));
+  std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[64000]);
+  strings::MutableByteRange mbr(buf.get(), 64000);
+
+  while (true) {
+    auto res = src->Read(mbr);
+    CHECK_STATUS(res.status);
+    if (res.obj < mbr.size())
+      break;
+  }
+
+  /* file::LineReader lr(src, TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
 
   while (lr.Next(&result, &scratch)) {
     channel_op_status st = per_io_->record_q.push(string(result));
     CHECK_EQ(channel_op_status::success, st);
-  }
+  }*/
 }
 
 void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
@@ -272,9 +294,36 @@ int main(int argc, char** argv) {
   CHECK(!FLAGS_input.empty());
 
   IoContextPool pool(1);
-  Pipeline p;
-
   pool.Run();
+
+  /*std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
+  util::http::Listener<> http_listener;
+  uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
+  LOG(INFO) << "Started http server on port " << port;
+  server->Run();
+*/
+
+#if 1
+  util::FiberQueueThreadPool fq_pool;
+  auto res_fd = file::OpenFiberReadFile(FLAGS_input, &fq_pool);
+  // auto res_fd = file::ReadonlyFile::Open(FLAGS_input);
+  CHECK_STATUS(res_fd.status);
+  // std::unique_ptr<util::Source> src(new file::Source(res_fd.obj));
+  std::unique_ptr<util::Source> src(file::Source::Uncompressed(res_fd.obj));
+
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[64000]);
+  strings::MutableByteRange mbr(buf.get(), 64000);
+
+  while (true) {
+    auto res = src->Read(mbr);
+    CHECK_STATUS(res.status);
+    if (res.obj < mbr.size())
+      break;
+  }
+  return 0;
+#endif
+
+  Pipeline p;
 
   Executor executor("/tmp/mr3", &pool);
   executor.Init();

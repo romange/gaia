@@ -15,6 +15,17 @@ inline Status ToStatus(int err, StringPiece msg) {
                 StrCat("ZLib error ", err, ": ",  msg));
 }
 
+static inline int internalInflateInit2(ZlibSource::Format format,
+    z_stream* zcontext) {
+  int windowBitsFormat = 0;
+  switch (format) {
+    case ZlibSource::GZIP: windowBitsFormat = 16; break;
+    case ZlibSource::AUTO: windowBitsFormat = 32; break;
+    case ZlibSource::ZLIB: windowBitsFormat = 0; break;
+  }
+  return inflateInit2(zcontext, /* windowBits */15 | windowBitsFormat);
+}
+
 bool ZlibSource::IsZlibSource(Source* source) {
   std::array<unsigned char, 2> buf;
   auto res = source->Read(strings::MutableByteRange(buf));
@@ -38,24 +49,15 @@ ZlibSource::ZlibSource(
   zcontext_.avail_in = 0;
   zcontext_.total_in = 0;
   zcontext_.msg = NULL;
+
+  int zerror = internalInflateInit2(format_, &zcontext_);
+  CHECK_EQ(Z_OK, zerror);
 }
 
 ZlibSource::~ZlibSource() {
   inflateEnd(&zcontext_);
   delete sub_stream_;
 }
-
-static inline int internalInflateInit2(ZlibSource::Format format,
-    z_stream* zcontext) {
-  int windowBitsFormat = 0;
-  switch (format) {
-    case ZlibSource::GZIP: windowBitsFormat = 16; break;
-    case ZlibSource::AUTO: windowBitsFormat = 32; break;
-    case ZlibSource::ZLIB: windowBitsFormat = 0; break;
-  }
-  return inflateInit2(zcontext, /* windowBits */15 | windowBitsFormat);
-}
-
 
 StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& range) {
   std::array<unsigned char, 1024> buf;
@@ -69,18 +71,10 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
 
     if (res.obj == 0)
       break;
-
-    bool first_time = zcontext_.next_in == nullptr;
     zcontext_.next_in = buf.begin();
     zcontext_.avail_in = res.obj;
-    if (first_time) {
-      int zerror = internalInflateInit2(format_, &zcontext_);
-      if (zerror != Z_OK) {
-        return ToStatus(zerror, zcontext_.msg);
-      }
-    }
+    
     int zerror = inflate(&zcontext_, Z_NO_FLUSH);
-
     if (zerror != Z_OK && zerror != Z_STREAM_END) {
       return ToStatus(zerror, zcontext_.msg);
     }

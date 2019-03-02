@@ -16,7 +16,7 @@ namespace file {
 util::Status StatusFileError();
 
 // ReadonlyFile objects are created via ReadonlyFile::Open() factory function
-// and are destroyed via "obj->Close(); delete obj" sequence.
+// and are destroyed via "obj->Close(); delete obj;" sequence.
 //
 class ReadonlyFile {
  protected:
