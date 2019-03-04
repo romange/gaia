@@ -20,7 +20,6 @@ class IoContext;
 class AcceptServer {
  public:
   typedef ::boost::asio::io_context io_context;
-  typedef ::boost::fibers::condition_variable condition_variable;
 
   explicit AcceptServer(IoContextPool* pool);
   ~AcceptServer();

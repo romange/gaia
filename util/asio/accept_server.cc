@@ -66,7 +66,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
 
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
 
-  fibers::condition_variable clist_empty_cnd;
+  fibers_ext::condition_variable_any clist_empty_cnd;
   system::error_code ec;
   util::ConnectionHandler* handler = nullptr;
 

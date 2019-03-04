@@ -4,10 +4,7 @@
 
 #include "util/asio/io_context_pool.h"
 
-#include <condition_variable>
-
 #include <boost/asio/steady_timer.hpp>
-#include <boost/fiber/condition_variable.hpp>
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/scheduler.hpp>
 

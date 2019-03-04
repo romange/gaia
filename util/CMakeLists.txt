@@ -11,6 +11,8 @@ add_library(pb2json pb2json.cc)
 cxx_link(pb2json strings status TRDP::protobuf absl_variant)
 add_dependencies(pb2json rapidjson_project)
 
+add_library(fibers_ext fibers_ext.cc)
+cxx_link(fibers_ext base Boost::fiber)
 
 add_library(threads sp_task_pool.cc)
 cxx_link(threads base)

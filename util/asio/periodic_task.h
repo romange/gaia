@@ -129,7 +129,7 @@ class PeriodicWorkerTask {
   std::atomic_bool is_running_{false};
 
   ::boost::fibers::mutex m_;
-  ::boost::fibers::condition_variable   cond_;
+  fibers_ext::condition_variable_any cond_;
   PeriodicTask pt_;
   Options opts_;
 
