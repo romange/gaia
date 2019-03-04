@@ -13,8 +13,7 @@
 
 using namespace boost;
 using namespace boost::asio;
-using fibers::condition_variable;
-using fibers::fiber;
+
 using namespace std;
 
 DEFINE_VARZ(VarzCount, connections);

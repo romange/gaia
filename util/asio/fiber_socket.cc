@@ -16,7 +16,7 @@ using namespace std::chrono_literals;
 
 struct FiberSyncSocket::ClientData {
   ::boost::fibers::fiber worker;
-  ::boost::fibers::condition_variable cv_st, worker_cv;
+  fibers_ext::condition_variable_any cv_st, worker_cv;
   IoContext* io_cntx;
 
   fibers::mutex connect_mu;

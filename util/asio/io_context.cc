@@ -3,7 +3,6 @@
 //
 
 #include <boost/asio/steady_timer.hpp>
-#include <boost/fiber/condition_variable.hpp>
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/operations.hpp>
 #include <boost/fiber/scheduler.hpp>
@@ -33,6 +32,9 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   //]
   ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
   fibers::mutex mtx_;
+
+  // it's single threaded and so https://github.com/boostorg/fiber/issues/194 is unlikely to affect
+  // here.
   fibers::condition_variable cnd_;
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
