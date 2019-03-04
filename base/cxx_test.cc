@@ -71,6 +71,22 @@ TEST_F(CxxTest, LoopSwitch) {
   }
 }
 
+template<typename T> void DummyFunc(T&& t) {
+  T tmp = std::forward<T>(t);
+  (void)tmp;
+}
+
+TEST_F(CxxTest, MoveRef) {
+  DummyFunc("foo");
+  const string bar = "bar";
+  DummyFunc(bar);
+  EXPECT_EQ("bar", bar);
+
+  string beh = "beh";
+  DummyFunc(std::move(beh));
+  EXPECT_TRUE(beh.empty());
+}
+
 TEST_F(CxxTest, SequenceOrder) {
   A().Next(A("First")).Next(A("Second"));
   (A(), A("First")), A("Second");
