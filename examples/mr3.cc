@@ -234,27 +234,26 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
 }
 
 void Executor::ProcessText(file::ReadonlyFile* fd) {
-  //std::unique_ptr<util::Source> first(new file::Source(fd));
-  // std::unique_ptr<util::Source> src(new util::ZlibSource(first.release()));
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
-  std::unique_ptr<uint8_t[]> buf(new uint8_t[64000]);
-  strings::MutableByteRange mbr(buf.get(), 64000);
+  /*constexpr size_t kBufSize = 1 << 15;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  strings::MutableByteRange mbr(buf.get(), kBufSize);
 
   while (true) {
     auto res = src->Read(mbr);
     CHECK_STATUS(res.status);
     if (res.obj < mbr.size())
       break;
-  }
+  }*/
 
-  /* file::LineReader lr(src, TAKE_OWNERSHIP);
+  file::LineReader lr(src.release(), TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
 
   while (lr.Next(&result, &scratch)) {
     channel_op_status st = per_io_->record_q.push(string(result));
     CHECK_EQ(channel_op_status::success, st);
-  }*/
+  }
 }
 
 void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
@@ -295,35 +294,14 @@ int main(int argc, char** argv) {
 
   CHECK(!FLAGS_input.empty());
 
-  IoContextPool pool(1);
+  IoContextPool pool;
   pool.Run();
 
-  /*std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
+  std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
   util::http::Listener<> http_listener;
   uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
   LOG(INFO) << "Started http server on port " << port;
   server->Run();
-*/
-
-#if 0
-  util::FiberQueueThreadPool fq_pool;
-  auto res_fd = file::OpenFiberReadFile(FLAGS_input, &fq_pool);
-  // auto res_fd = file::ReadonlyFile::Open(FLAGS_input);
-  CHECK_STATUS(res_fd.status);
-  // std::unique_ptr<util::Source> src(new file::Source(res_fd.obj));
-  std::unique_ptr<util::Source> src(file::Source::Uncompressed(res_fd.obj));
-
-  std::unique_ptr<uint8_t[]> buf(new uint8_t[64000]);
-  strings::MutableByteRange mbr(buf.get(), 64000);
-
-  while (true) {
-    auto res = src->Read(mbr);
-    CHECK_STATUS(res.status);
-    if (res.obj < mbr.size())
-      break;
-  }
-  return 0;
-#endif
 
   Pipeline p;
 
