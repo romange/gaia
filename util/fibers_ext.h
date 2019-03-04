@@ -10,30 +10,16 @@
 
 namespace std {
 
-inline ostream& operator<<(ostream& o, const ::boost::fibers::channel_op_status op) {
-  using ::boost::fibers::channel_op_status;
-  if (op == channel_op_status::success) {
-    o << "success";
-  } else if (op == channel_op_status::closed) {
-    o << "closed";
-  } else if (op == channel_op_status::full) {
-    o << "full";
-  } else if (op == channel_op_status::empty) {
-    o << "empty";
-  } else if (op == channel_op_status::timeout) {
-    o << "timeout";
-  }
-  return o;
-}
+ostream& operator<<(ostream& o, const ::boost::fibers::channel_op_status op);
 
 }  // namespace std
 
 namespace util {
 namespace fibers_ext {
 
-// Boost.Fibers has a data race bug, sees https://github.com/boostorg/fiber/issues/194
+// Boost.Fibers has a data race bug, see https://github.com/boostorg/fiber/issues/194
 // Until it's fixed we must reimplement condition_variable_any ourselves and also
-// prohibit in our codebase from using it.
+// prohibit in our codebase from using Fibers version.
 class condition_variable_any {
  private:
   typedef ::boost::fibers::context::wait_queue_t wait_queue_t;
@@ -237,8 +223,6 @@ template <typename LockType> void condition_variable_any::wait(LockType& lt) {
   } catch (...) {
     std::terminate();
   }
-  // post-conditions
-  BOOST_ASSERT(!active_ctx->wait_is_linked());
 }
 
 template <typename LockType, typename Clock, typename Duration>
