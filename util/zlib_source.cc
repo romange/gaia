@@ -60,7 +60,7 @@ ZlibSource::~ZlibSource() {
 }
 
 StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& range) {
-  std::array<unsigned char, 1024> buf;
+  std::array<unsigned char, 4096> buf;
 
   zcontext_.next_out = range.begin();
   zcontext_.avail_out = range.size();
@@ -78,13 +78,12 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
     if (zerror != Z_OK && zerror != Z_STREAM_END) {
       return ToStatus(zerror, zcontext_.msg);
     }
-
-    if (zcontext_.avail_in > 0) {
-      CHECK_EQ(0, zcontext_.avail_out);
-
-      sub_stream_->Prepend(strings::ByteRange(zcontext_.next_in, zcontext_.avail_in));
-    }
   } while (zcontext_.next_out != range.end());
+
+  if (zcontext_.avail_in > 0) {
+    CHECK_EQ(0, zcontext_.avail_out);
+    sub_stream_->Prepend(strings::ByteRange(zcontext_.next_in, zcontext_.avail_in));
+  }
 
   return zcontext_.next_out - range.begin();
 }

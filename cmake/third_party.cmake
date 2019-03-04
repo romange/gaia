@@ -363,6 +363,8 @@ add_third_party(s2geometry
 
 add_third_party(z
   GIT_REPOSITORY https://github.com/madler/zlib
+  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=-g -O3"
+                    <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/z
 )
 
 set_property(TARGET TRDP::glog APPEND PROPERTY

@@ -9,7 +9,6 @@
 #include "base/init.h"
 #include "base/logging.h"
 
-
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
@@ -21,7 +20,6 @@
 
 #include "util/status.h"
 #include "util/zlib_source.h"
-
 
 using namespace std;
 using namespace boost;
@@ -102,7 +100,6 @@ MyDoContext::~MyDoContext() {
   }
 }
 
-
 class Executor {
   using StringQueue = ::boost::fibers::buffered_channel<string>;
 
@@ -180,11 +177,16 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   LOG(INFO) << "Running on input " << input->msg().name();
 
   my_context_.reset(new MyDoContext(root_dir_, ss->output().msg(), fq_pool_.get()));
+  fibers::protected_fixedsize_stack fss(1 << 16);
+
+  using sa_traits = fibers::protected_fixedsize_stack::traits_type;
+  LOG(INFO) << "fss traits: " << sa_traits::default_size() << "/" << sa_traits::is_unbounded()
+            << "/" << sa_traits::page_size();
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-    per_io_->process_fd =
-        fibers::fiber(&Executor::ProcessFiles, this, input->msg().format().type());
+    per_io_->process_fd = fibers::fiber(std::allocator_arg, std::move(fss), &Executor::ProcessFiles,
+                                        this, input->msg().format().type());
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, my_context_.get());
   });
 
@@ -303,7 +305,7 @@ int main(int argc, char** argv) {
   server->Run();
 */
 
-#if 1
+#if 0
   util::FiberQueueThreadPool fq_pool;
   auto res_fd = file::OpenFiberReadFile(FLAGS_input, &fq_pool);
   // auto res_fd = file::ReadonlyFile::Open(FLAGS_input);

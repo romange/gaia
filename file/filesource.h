@@ -17,7 +17,7 @@ class WriteFile;
 
 class Source : public util::Source {
  public:
-  // file must be open for reading.
+  // File must be open for reading. Source takes ownership over it.
   Source(ReadonlyFile* file);
   ~Source();
 
@@ -28,7 +28,7 @@ class Source : public util::Source {
  private:
   util::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) override;
 
-  ReadonlyFile* file_;
+  std::unique_ptr<ReadonlyFile> file_;
   uint64 offset_ = 0;
 };
 

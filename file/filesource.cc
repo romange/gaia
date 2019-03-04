@@ -14,7 +14,6 @@
 
 namespace file {
 
-// using absl::SkipAs;
 using util::Status;
 using util::StatusObject;
 using namespace std;
@@ -25,16 +24,15 @@ Source::Source(ReadonlyFile* file)
 
 Source::~Source() {
   CHECK(file_->Close().ok());
-  delete file_;
 }
 
 util::StatusObject<size_t> Source::ReadInternal(const strings::MutableByteRange& range) {
   auto res = file_->Read(offset_, range);
-  if (!res.ok())
-    return res.status;
-  offset_ += res.obj;
+  if (res.ok()) {
+    offset_ += res.obj;
+  }
 
-  return res.obj;
+  return res;
 }
 
 
