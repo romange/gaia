@@ -15,7 +15,7 @@
 #include "strings/strcat.h"
 #include "util/spawn.h"
 #include "util/http/http_conn_handler.h"
-#include "util/fibers_ext.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 namespace http {

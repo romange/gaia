@@ -10,7 +10,7 @@
 #include <boost/asio/signal_set.hpp>
 
 #include "util/asio/connection_handler.h"
-#include "util/fibers_ext.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 

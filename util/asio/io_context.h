@@ -7,7 +7,7 @@
 #include <boost/asio/io_context.hpp>
 #include <thread>
 
-#include "util/fibers_ext.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 

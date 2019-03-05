@@ -4,7 +4,7 @@
 #pragma once
 
 #include <boost/fiber/buffered_channel.hpp>
-#include "util/fibers_ext.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 

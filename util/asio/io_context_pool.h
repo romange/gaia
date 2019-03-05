@@ -13,7 +13,7 @@
 
 #include "base/type_traits.h"
 #include "util/asio/io_context.h"
-#include "util/fibers_ext.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 
