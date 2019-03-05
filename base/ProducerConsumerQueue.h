@@ -143,6 +143,7 @@ template <typename T> class ProducerConsumerQueue {
     return ret;
   }
 
+  size_t capacity() const { return size_; }
  private:
   void destroy() {
     if (std::is_trivially_destructible<T>::value)
