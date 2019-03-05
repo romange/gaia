@@ -32,11 +32,14 @@ template <typename T> class SimpleChannel {
   // It's responsibility of the caller to wait for the consumers to empty the remaining items
   // and stop using the channel.
   void StartClosing();
+
  private:
   folly::ProducerConsumerQueue<T> q_;
-  wait_queue_type                                     waiting_producers_;
-  wait_queue_type                                     waiting_consumers_;
 };
+
+template <typename T>
+template <typename... Args>
+void SimpleChannel<T>::Push(Args&&... recordArgs) {}
 
 }  // namespace fibers_ext
 }  // namespace util

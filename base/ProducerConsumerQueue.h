@@ -22,7 +22,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdlib>
+#include <memory>
 #include <type_traits>
 #include <utility>
 

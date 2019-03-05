@@ -1,2 +1,4 @@
 add_library(fibers_ext fibers_ext.cc fiberqueue_threadpool.cc)
 cxx_link(fibers_ext base Boost::fiber)
+
+cxx_test(fibers_ext_test fibers_ext LABELS CI)
