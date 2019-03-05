@@ -16,14 +16,13 @@
 
 // @author Bo Hu (bhu@fb.com)
 // @author Jordan DeLong (delong.j@fb.com)
-
-#ifndef PRODUCER_CONSUMER_QUEUE_H_
-#define PRODUCER_CONSUMER_QUEUE_H_
+// Cosmetics changes - by Roman Gershman romange@gmail.com
+//
+#pragma once
 
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -33,54 +32,36 @@ namespace folly {
  * ProducerConsumerQueue is a one producer and one consumer queue
  * without locks.
  */
-template<class T>
-struct ProducerConsumerQueue {
+template <typename T> class ProducerConsumerQueue {
+ public:
   typedef T value_type;
+  typedef ::std::allocator<T> allocator_type;
 
   // size must be >= 2.
   //
   // Also, note that the number of usable slots in the queue at any
   // given time is actually (size-1), so if you start with an empty queue,
   // isFull() will return true after size-1 insertions.
-  explicit ProducerConsumerQueue(uint32_t size)
-    : size_(size)
-    , records_(static_cast<T*>(std::malloc(sizeof(T) * size)))
-    , readIndex_(0)
-    , writeIndex_(0)
-  {
-    assert(size >= 2);
-    if (!records_) {
-      throw std::bad_alloc();
-    }
-  }
+  explicit ProducerConsumerQueue(uint32_t size);
 
   ~ProducerConsumerQueue() {
     // We need to destruct anything that may still exist in our queue.
     // (No real synchronization needed at destructor time: only one
     // thread can be doing this.)
-    if (!std::is_trivially_destructible<T>::value) {
-      int read = readIndex_;
-      int end = writeIndex_;
-      while (read != end) {
-        records_[read].~T();
-        if (++read == size_) {
-          read = 0;
-        }
-      }
-    }
+    destroy();
 
-    std::free(records_);
+    alloc_.deallocate(records_, size_);
   }
 
-  template<class ...Args>
-  bool write(Args&&... recordArgs) {
+  template <class... Args> bool write(Args&&... recordArgs) {
     auto const currentWrite = writeIndex_.load(std::memory_order_relaxed);
     auto nextRecord = currentWrite + 1;
     if (nextRecord == size_) {
       nextRecord = 0;
     }
     if (nextRecord != readIndex_.load(std::memory_order_acquire)) {
-      new (&records_[currentWrite]) T(std::forward<Args>(recordArgs)...);
+      std::allocator_traits<allocator_type>::construct(alloc_, &records_[currentWrite],
+                                                       std::forward<Args>(recordArgs)...);
       writeIndex_.store(nextRecord, std::memory_order_release);
       return true;
     }
@@ -102,7 +83,7 @@ struct ProducerConsumerQueue {
       nextRecord = 0;
     }
     record = std::move(records_[currentRead]);
-    records_[currentRead].~T();
+    std::allocator_traits<allocator_type>::destroy(alloc_, &records_[currentRead]);
     readIndex_.store(nextRecord, std::memory_order_release);
     return true;
   }
@@ -127,13 +108,13 @@ struct ProducerConsumerQueue {
     if (nextRecord == size_) {
       nextRecord = 0;
     }
-    records_[currentRead].~T();
+    std::allocator_traits<allocator_type>::destroy(alloc_, &records_[currentRead]);
     readIndex_.store(nextRecord, std::memory_order_release);
   }
 
   bool isEmpty() const {
-   return readIndex_.load(std::memory_order_consume) ==
-         writeIndex_.load(std::memory_order_consume);
+    return readIndex_.load(std::memory_order_consume) ==
+           writeIndex_.load(std::memory_order_consume);
   }
 
   bool isFull() const {
@@ -154,15 +135,30 @@ struct ProducerConsumerQueue {
   //   be removing items concurrently).
   // * It is undefined to call this from any other thread.
   size_t sizeGuess() const {
-    int ret = writeIndex_.load(std::memory_order_consume) -
-              readIndex_.load(std::memory_order_consume);
+    int ret =
+        writeIndex_.load(std::memory_order_consume) - readIndex_.load(std::memory_order_consume);
     if (ret < 0) {
       ret += size_;
     }
     return ret;
   }
 
-private:
+ private:
+  void destroy() {
+    if (std::is_trivially_destructible<T>::value)
+      return;
+    int read = readIndex_;
+    int end = writeIndex_;
+
+    while (read != end) {
+      std::allocator_traits<allocator_type>::destroy(alloc_, &records_[read]);
+      if (++read == size_) {
+        read = 0;
+      }
+    }
+  }
+
+  allocator_type alloc_;
   const uint32_t size_;
   T* const records_;
 
@@ -173,6 +169,10 @@ private:
   ProducerConsumerQueue& operator=(const ProducerConsumerQueue&) = delete;
 };
 
+template <typename T>
+ProducerConsumerQueue<T>::ProducerConsumerQueue(uint32_t size)
+    : size_(size), records_(alloc_.allocate(size)), readIndex_(0), writeIndex_(0) {
+  assert(size >= 2);
 }
 
-#endif
+}  // namespace folly
