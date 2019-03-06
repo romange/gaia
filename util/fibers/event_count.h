@@ -26,6 +26,10 @@ class EventCount {
     uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
 
     if (UNLIKELY(prev & kWaiterMask)) {
+      // lk forces waiting threads to be before of the critical section in EventCount::wait or
+      // suspended inside wait.
+      // If they are suspended then notify_one will resume one thread, otherwise they will
+      // check the epoch and skip waiting due to unsynced epoch number.
       spinlock_lock_t lk{splk_};
       cnd_.notify_one();
       return true;
@@ -33,7 +37,20 @@ class EventCount {
     return false;
   }
 
-  bool notifyAll() noexcept { return doNotify(INT_MAX); };
+  bool notifyAll() noexcept {
+    uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
+
+    if (UNLIKELY(prev & kWaiterMask)) {
+      // lk forces waiting threads to be before of the critical section in EventCount::wait or
+      // suspended inside wait.
+      // If they are suspended then notify_one will resume one thread, otherwise they will
+      // check the epoch and skip waiting due to unsynced epoch number.
+      spinlock_lock_t lk{splk_};
+      cnd_.notify_all();
+      return true;
+    }
+    return false;
+  };
 
   Key prepareWait() noexcept {
     uint64_t prev = val_.fetch_add(kAddWaiter, std::memory_order_acq_rel);
@@ -82,14 +99,14 @@ class EventCount {
   static constexpr uint64_t kWaiterMask = kAddEpoch - 1;
 };
 
+// Atomically checks for epoch
+// and waits on cond_var.
 inline void EventCount::wait(Key key) noexcept {
+  spinlock_lock_t lk{splk_};
   while ((val_.load(std::memory_order_acquire) >> kEpochShift) == key.epoch) {
-    spinlock_lock_t lk{splk_};
-
-    if (val_.load(std::memory_order_acquire) == key.epoch) {
-      cnd_.wait(lk);
-    }
+    cnd_.wait(lk);
   }
+  lk.unlock();
 
   // memory_order_relaxed would suffice for correctness, but the faster
   // #waiters gets to 0, the less likely it is that we'll do spurious wakeups
