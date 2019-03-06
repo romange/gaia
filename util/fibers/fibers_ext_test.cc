@@ -16,7 +16,16 @@ class FibersTest : public testing::Test {
   }
 };
 
-TEST_F(FibersTest, Basic) {
+TEST_F(FibersTest, SimpleChannel) {
+  SimpleChannel<int> channel(10);
+  ASSERT_TRUE(channel.TryPush(2));
+  channel.Push(4);
+
+  int val = 0;
+  ASSERT_TRUE(channel.Pop(val));
+  EXPECT_EQ(2, val);
+  ASSERT_TRUE(channel.Pop(val));
+  EXPECT_EQ(4, val);
 }
 
 }  // namespace fibers_ext

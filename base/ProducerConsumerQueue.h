@@ -148,8 +148,8 @@ template <typename T> class ProducerConsumerQueue {
   void destroy() {
     if (std::is_trivially_destructible<T>::value)
       return;
-    int read = readIndex_;
-    int end = writeIndex_;
+    uint32_t read = readIndex_;
+    uint32_t end = writeIndex_;
 
     while (read != end) {
       std::allocator_traits<allocator_type>::destroy(alloc_, &records_[read]);
@@ -163,8 +163,8 @@ template <typename T> class ProducerConsumerQueue {
   const uint32_t size_;
   T* const records_;
 
-  std::atomic<int> readIndex_;
-  std::atomic<int> writeIndex_;
+  std::atomic<uint32_t> readIndex_;
+  std::atomic<uint32_t> writeIndex_;
 
   ProducerConsumerQueue(const ProducerConsumerQueue&) = delete;
   ProducerConsumerQueue& operator=(const ProducerConsumerQueue&) = delete;
