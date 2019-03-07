@@ -53,7 +53,7 @@ template <typename T> class ProducerConsumerQueue {
     alloc_.deallocate(records_, size_);
   }
 
-  template <class... Args> bool write(Args&&... recordArgs) {
+  template <class... Args> bool write(Args&&... recordArgs) noexcept {
     auto const currentWrite = writeIndex_.load(std::memory_order_relaxed);
     auto nextRecord = currentWrite + 1;
     if (nextRecord == size_) {
@@ -71,7 +71,7 @@ template <typename T> class ProducerConsumerQueue {
   }
 
   // move (or copy) the value at the front of the queue to given variable
-  bool read(T& record) {
+  bool read(T& record) noexcept {
     auto const currentRead = readIndex_.load(std::memory_order_relaxed);
     if (currentRead == writeIndex_.load(std::memory_order_acquire)) {
       // queue is empty
@@ -112,12 +112,12 @@ template <typename T> class ProducerConsumerQueue {
     readIndex_.store(nextRecord, std::memory_order_release);
   }
 
-  bool isEmpty() const {
+  bool isEmpty() const noexcept {
     return readIndex_.load(std::memory_order_consume) ==
            writeIndex_.load(std::memory_order_consume);
   }
 
-  bool isFull() const {
+  bool isFull() const noexcept {
     auto nextRecord = writeIndex_.load(std::memory_order_consume) + 1;
     if (nextRecord == size_) {
       nextRecord = 0;
@@ -134,7 +134,7 @@ template <typename T> class ProducerConsumerQueue {
   // * If called by producer, then true size may be less (because consumer may
   //   be removing items concurrently).
   // * It is undefined to call this from any other thread.
-  size_t sizeGuess() const {
+  size_t sizeGuess() const noexcept {
     int ret =
         writeIndex_.load(std::memory_order_consume) - readIndex_.load(std::memory_order_consume);
     if (ret < 0) {
@@ -144,6 +144,7 @@ template <typename T> class ProducerConsumerQueue {
   }
 
   size_t capacity() const { return size_; }
+
  private:
   void destroy() {
     if (std::is_trivially_destructible<T>::value)

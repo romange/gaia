@@ -5,6 +5,7 @@
 
 #include <boost/fiber/context.hpp>
 
+#include "util/fibers/event_count.h"
 #include "util/fibers/fibers_ext.h"
 
 namespace util {
@@ -24,7 +25,7 @@ template <typename T> class SimpleChannel {
  public:
   SimpleChannel(size_t n) : q_(n) {}
 
-  template <typename... Args> void Push(Args&&... recordArgs);
+  template <typename... Args> void Push(Args&&... recordArgs) noexcept;
 
   // Blocking call. Returns false if channel is closed, true otherwise with the popped value.
   bool Pop(T& dest);
@@ -38,39 +39,66 @@ template <typename T> class SimpleChannel {
   void StartClosing();
 
   // Non blocking
-  template <typename... Args> bool TryPush(Args&&... args) {
-    return q_.write(std::forward<Args>(args)...);
+  template <typename... Args> bool TryPush(Args&&... args) noexcept {
+    if (q_.write(std::forward<Args>(args)...)) {
+      pop_ec_.notify();
+      return true;
+    }
+    return false;
   }
 
-  bool TryPop(T& val) { return q_.read(val); }
+  bool TryPop(T& val) {
+    if (q_.read(val)) {
+      push_ec_.notify();
+      return true;
+    }
+    return false;
+  }
 
  private:
   folly::ProducerConsumerQueue<T> q_;
-  std::atomic<int> pop_pending_{0};
-
-  mutex_t mu_;
-  condition_variable_any cnd_;
+  std::atomic_bool is_closing_{false};
+  EventCount push_ec_, pop_ec_;
 };
 
-template <typename T> template <typename... Args> void SimpleChannel<T>::Push(Args&&... args) {
+template <typename T>
+template <typename... Args>
+void SimpleChannel<T>::Push(Args&&... args) noexcept {
   if (TryPush(std::forward<Args>(args)...)) {  // fast path.
-    // TODO: to notify blocked poppers.
     return;
   }
-  std::unique_lock<mutex_t> lk(mu_);
-  while (!TryPush(std::forward<Args>(args)...)) {
-    cnd_.wait(lk);
+
+  while(true) {
+    EventCount::Key key = push_ec_.prepareWait();
+    if (TryPush(std::forward<Args>(args)...)) {
+      break;
+    }
+    push_ec_.wait(key.epoch());
   }
-  /*bool wake = rue
-  if (pop_waiting_) {
-    cnd_.
-  }*/
 }
 
 template <typename T> bool SimpleChannel<T>::Pop(T& dest) {
   if (TryPop(dest))
     return true;
 
+  while(true)  {
+    EventCount::Key key = pop_ec_.prepareWait();
+    if (TryPop(dest)) {
+      return true;
+    }
+
+    if (is_closing_.load(std::memory_order_acquire)) {
+      return false;
+    }
+
+    pop_ec_.wait(key.epoch());
+  }
+}
+
+template <typename T> void SimpleChannel<T>::StartClosing() {
+  // Full barrier, StartClosing performance not important.
+  is_closing_.store(std::memory_order_seq_cst);
+  pop_ec_.notifyAll();
 }
 
 }  // namespace fibers_ext
