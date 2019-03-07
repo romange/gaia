@@ -97,7 +97,7 @@ template <typename T> bool SimpleChannel<T>::Pop(T& dest) {
 
 template <typename T> void SimpleChannel<T>::StartClosing() {
   // Full barrier, StartClosing performance not important.
-  is_closing_.store(std::memory_order_seq_cst);
+  is_closing_.store(true, std::memory_order_seq_cst);
   pop_ec_.notifyAll();
 }
 

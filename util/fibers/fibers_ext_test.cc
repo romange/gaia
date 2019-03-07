@@ -29,6 +29,19 @@ TEST_F(FibersTest, SimpleChannel) {
   EXPECT_EQ(2, val);
   ASSERT_TRUE(channel.Pop(val));
   EXPECT_EQ(4, val);
+
+  fibers::fiber fb(fibers::launch::post, [&] {
+    EXPECT_TRUE(channel.Pop(val));
+  });
+  channel.Push(7);
+  fb.join();
+  EXPECT_EQ(7, val);
+
+  fb = fibers::fiber(fibers::launch::post, [&] {
+    EXPECT_FALSE(channel.Pop(val));
+  });
+  channel.StartClosing();
+  fb.join();
 }
 
 TEST_F(FibersTest, EventCount) {
@@ -64,7 +77,7 @@ TEST_F(FibersTest, SpuriousNotify) {
   val = 1;
   ASSERT_TRUE(ec.notify());
   t1.join();
-  
+
   ASSERT_FALSE(ec.notify());
 }
 
