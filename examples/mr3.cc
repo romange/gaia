@@ -265,6 +265,7 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
     // We should have here Shard/string(out_record).
     // sb->Do(std::move(record), cntx);
   }
+  VLOG(1) << "MapFiber finished";
 }
 
 }  // namespace mr3

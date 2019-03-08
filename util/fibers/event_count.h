@@ -4,8 +4,10 @@
 // Based on the design of folly event_count which in turn based on
 // Dmitry Vyukov's propasal at
 // https://software.intel.com/en-us/forums/intel-threading-building-blocks/topic/299245
+#pragma once
+
 #include "base/macros.h"
-#include "util/fibers/fibers_ext.h"
+#include "util/fibers/condition_variable.h"
 
 namespace util {
 namespace fibers_ext {
@@ -63,15 +65,12 @@ class EventCount {
  private:
   friend class Key;
 
-  bool doNotify(int n) noexcept;
-
   EventCount(const EventCount&) = delete;
   EventCount(EventCount&&) = delete;
   EventCount& operator=(const EventCount&) = delete;
   EventCount& operator=(EventCount&&) = delete;
 
   // This requires 64-bit
-  static_assert(sizeof(int) == 4, "bad platform");
   static_assert(sizeof(uint32_t) == 4, "bad platform");
   static_assert(sizeof(uint64_t) == 8, "bad platform");
 
