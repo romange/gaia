@@ -13,10 +13,6 @@
 #include "base/logging.h"
 #include "base/walltime.h"
 
-#if (__GNUC__ > 4)
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include "util/asio/accept_server.h"
 #include "util/asio/asio_utils.h"
 #include "util/asio/yield.h"

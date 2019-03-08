@@ -170,8 +170,7 @@ using StringStream = Stream<std::string>;
 class Pipeline {
  public:
   StringStream& ReadText(const std::string& name, const std::string& glob);
-
-  util::Status Run();
+  StringStream& ReadText(const std::string& name, const std::vector<std::string>& globs);
 
   const InputBase& input(const std::string& name) const;
 

@@ -16,6 +16,7 @@
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
+#include "util/fibers/simple_channel.h"
 #include "util/http/http_conn_handler.h"
 
 #include "util/status.h"
@@ -27,25 +28,11 @@ using namespace util;
 
 using fibers::channel_op_status;
 
-DEFINE_string(input, "", "");
-DEFINE_int32(http_port, 8080, "Port number.");
+DEFINE_uint32(http_port, 8080, "Port number.");
+DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 
 namespace mr3 {
 
-StringStream& Pipeline::ReadText(const string& name, const string& glob) {
-  std::unique_ptr<InputBase> ib(new InputBase(name, pb::WireFormat::TXT));
-  ib->mutable_msg()->add_file_spec()->set_url_glob(glob);
-  inputs_.emplace_back(std::move(ib));
-
-  streams_.emplace_back(new StringStream(name));
-  auto& ptr = streams_.back();
-
-  return *ptr;
-}
-
-using util::Status;
-
-Status Pipeline::Run() { return Status::OK; }
 
 class MyDoContext : public DoContext {
  public:
@@ -101,7 +88,8 @@ MyDoContext::~MyDoContext() {
 }
 
 class Executor {
-  using StringQueue = ::boost::fibers::buffered_channel<string>;
+  using StringQueue = fibers_ext::SimpleChannel<string>;
+  using FileNameQueue = ::boost::fibers::buffered_channel<string>;
 
   struct PerIoStruct {
     unsigned index;
@@ -130,7 +118,7 @@ class Executor {
 
   std::string root_dir_;
   util::IoContextPool* pool_;
-  StringQueue file_name_q_;
+  FileNameQueue file_name_q_;
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
   std::unique_ptr<util::FiberQueueThreadPool> fq_pool_;
   std::unique_ptr<MyDoContext> my_context_;
@@ -145,8 +133,6 @@ void Executor::PerIoStruct::Shutdown() {
   if (process_fd.joinable())
     process_fd.join();
 
-  DCHECK(record_q.is_closed());
-
   if (map_fd.joinable()) {
     map_fd.join();
   }
@@ -154,6 +140,7 @@ void Executor::PerIoStruct::Shutdown() {
 
 Executor::~Executor() {
   VLOG(1) << "Executor::~Executor";
+  CHECK(file_name_q_.is_closed());
 }
 
 void Executor::Shutdown() {
@@ -163,6 +150,8 @@ void Executor::Shutdown() {
   pool_->AwaitOnAll([&](IoContext&) {
     per_io_->Shutdown();
   });
+
+  fq_pool_->Shutdown();
   VLOG(1) << "Executor::Shutdown";
 }
 
@@ -202,6 +191,8 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 }
 
 void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
+  // DCHECK(cntx.InContextThread());
+
   string file_name;
 
   while (true) {
@@ -228,9 +219,10 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
         LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(input_type);
         break;
     }
+    this_fiber::yield();
   }
   VLOG(1) << "ProcessFiles closing";
-  per_io_->record_q.close();
+  per_io_->record_q.StartClosing();
 }
 
 void Executor::ProcessText(file::ReadonlyFile* fd) {
@@ -251,8 +243,7 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   string scratch;
 
   while (lr.Next(&result, &scratch)) {
-    channel_op_status st = per_io_->record_q.push(string(result));
-    CHECK_EQ(channel_op_status::success, st);
+    per_io_->record_q.Push(string(result));
   }
 }
 
@@ -260,11 +251,9 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
   auto& record_q = per_io_->record_q;
   string record;
   while (true) {
-    channel_op_status st = record_q.pop(record);
-    if (st == channel_op_status::closed)
+    bool is_open = record_q.Pop(record);
+    if (!is_open)
       break;
-
-    CHECK(st == channel_op_status::success);
 
     // record is a binary input.
     // TODO: to implement binary to type to binary flow:
@@ -274,7 +263,7 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-    sb->Do(std::move(record), cntx);
+    // sb->Do(std::move(record), cntx);
   }
 }
 
@@ -292,9 +281,13 @@ string ShardNameFunc(const std::string& line) {
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
 
-  CHECK(!FLAGS_input.empty());
+  std::vector<string> inputs;
+  for (int i = 1; i < argc; ++i) {
+    inputs.push_back(argv[i]);
+  }
+  CHECK(!inputs.empty());
 
-  IoContextPool pool;
+  IoContextPool pool(FLAGS_mr_threads);
   pool.Run();
 
   std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
@@ -309,7 +302,7 @@ int main(int argc, char** argv) {
   executor.Init();
 
   // TODO: Should return Input<string> or something which can apply an operator.
-  StringStream& ss = p.ReadText("inp1", FLAGS_input);
+  StringStream& ss = p.ReadText("inp1", inputs);
   ss.Write("outp1", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP)
       .WithSharding(ShardNameFunc);
