@@ -56,25 +56,22 @@ void condition_variable_any::notify_one() noexcept {
 
 void condition_variable_any::notify_all() noexcept {
   auto* active_ctx = fibers::context::active();
-  wait_queue_t tmp;
 
   // get all context' from wait-queue
   spinlock_lock_t lk{wait_queue_splk_};
-
-  // notify all context'
-  while (!wait_queue_.empty()) {
-    fibers::context* ctx = &wait_queue_.front();
-    wait_queue_.pop_front();
-
-    if (should_switch(ctx, reinterpret_cast<std::intptr_t>(this))) {
-      tmp.push_back(*ctx);
-    }
-  }
+  wait_queue_t tmp;
+  tmp.swap(wait_queue_);
   lk.unlock();
 
-  for (auto& ctx : tmp) {
-    // notify context
-    active_ctx->schedule(&ctx);
+  // notify all context'
+  while (!tmp.empty()) {
+    fibers::context* ctx = &tmp.front();
+    tmp.pop_front();
+
+    if (should_switch(ctx, reinterpret_cast<std::intptr_t>(this))) {
+      // notify context
+      active_ctx->schedule(ctx);
+    }
   }
 }
 

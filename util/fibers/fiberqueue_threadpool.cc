@@ -26,12 +26,16 @@ FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_
 }
 
 FiberQueueThreadPool::~FiberQueueThreadPool() {
+  VLOG(1) << "FiberQueueThreadPool::~FiberQueueThreadPool";
+
   if (!input_.is_closed()) {
     Shutdown();
   }
 }
 
 void FiberQueueThreadPool::Shutdown() {
+  VLOG(1) << "FiberQueueThreadPool::ShutdownStart";
+
   input_.close();
   for (auto& w : workers_) {
     pthread_join(w, nullptr);

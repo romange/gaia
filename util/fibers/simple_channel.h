@@ -12,10 +12,13 @@ namespace util {
 namespace fibers_ext {
 
 /*
-  This is single producer/single consumer thread-safe channel.
+  This is single producer - single consumer thread-safe channel.
   It's fiber friendly, which means, multiple fibers at each end-point can use the channel:
   K fibers from producer thread can push and N fibers from consumer thread can pull the records.
   It has blocking interface that suspends blocked fibers upon empty/full conditions.
+  It also can be used for single-thread/multiple-fibers scenario.
+  This class designed to be pretty efficient by reducing the contention on its synchronization
+  primitives to minimum.
 */
 template <typename T> class SimpleChannel {
   typedef ::boost::fibers::context::wait_queue_t wait_queue_t;
@@ -58,6 +61,8 @@ template <typename T> class SimpleChannel {
  private:
   folly::ProducerConsumerQueue<T> q_;
   std::atomic_bool is_closing_{false};
+
+  // Event counts provide almost negligible contention during fast-path (a single atomic add).
   EventCount push_ec_, pop_ec_;
 };
 
@@ -96,7 +101,7 @@ template <typename T> bool SimpleChannel<T>::Pop(T& dest) {
 }
 
 template <typename T> void SimpleChannel<T>::StartClosing() {
-  // Full barrier, StartClosing performance not important.
+  // Full barrier, StartClosing performance does not matter.
   is_closing_.store(true, std::memory_order_seq_cst);
   pop_ec_.notifyAll();
 }
