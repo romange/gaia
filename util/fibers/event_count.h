@@ -140,7 +140,7 @@ template <typename Condition> void EventCount::await(Condition condition) {
       break;
     }
     wait(key.epoch());
-}
+  }
 }
 
 }  // namespace fibers_ext

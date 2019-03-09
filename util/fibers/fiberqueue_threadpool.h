@@ -3,7 +3,8 @@
 //
 #pragma once
 
-#include <boost/fiber/buffered_channel.hpp>
+// #include <boost/fiber/buffered_channel.hpp>
+#include "base/mpmc_bounded_queue.h"
 #include "util/fibers/fibers_ext.h"
 
 namespace util {
@@ -31,8 +32,13 @@ class FiberQueueThreadPool {
     return std::move(mover).get();
   }
 
-  template <typename F> boost::fibers::channel_op_status Add(F&& f) {
-    return input_.push(std::forward<F>(f));
+  template <typename F> void Add(F&& f) {
+    push_ec_.await([&]() {
+      if (!q_.try_enqueue(std::forward<F>(f)))
+        return false;
+      pull_ec_.notify();
+      return true;
+    });
   }
 
   void Shutdown();
@@ -41,7 +47,11 @@ class FiberQueueThreadPool {
   void WorkerFunction();
 
   std::vector<pthread_t> workers_;
-  boost::fibers::buffered_channel<Func> input_;
+
+  base::mpmc_bounded_queue<Func> q_;
+  EventCount push_ec_, pull_ec_;
+  std::atomic_bool is_closed_{false};
+  // boost::fibers::buffered_channel<Func> input_;
 };
 
 }  // namespace fibers_ext

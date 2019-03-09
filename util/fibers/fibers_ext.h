@@ -22,27 +22,37 @@ namespace fibers_ext {
 
 // Wrap canonical pattern for condition_variable + bool flag
 class Done {
+  using mutex_t = ::boost::fibers::mutex;
+
  public:
   explicit Done(bool val = false) : ready_(val) {}
+
+  ~Done() {}
   Done(const Done&) = delete;
 
   void operator=(const Done&) = delete;
 
   void Wait() {
-    ec_.await([this] { return ready_.load(std::memory_order_acquire); });
+    std::unique_lock<mutex_t> lk(mu_);
+    cnd_.wait(lk, [this] { return ready_; });
   }
 
   void Notify();
 
   void Reset() {
-    ready_.store(false, std::memory_order_release);
+    std::lock_guard<mutex_t> lk(mu_);
+    ready_ = false;
   }
 
-  bool IsReady() const { return ready_.load(std::memory_order_acquire); }
+  bool IsReady() const {
+    std::lock_guard<mutex_t> lk(mu_);
+    return ready_;
+  }
 
  private:
-  EventCount ec_;
-  std::atomic_bool ready_;
+  condition_variable_any cnd_;
+  mutable mutex_t mu_;
+  bool ready_;
 };
 
 class BlockingCounter {
@@ -143,13 +153,16 @@ template <typename T> class Cell {
   }
 };
 
-
+// notify_one/all guarantee to unwake already waiting thread.
+// Therefore, to provide a consistent behavior on the wait side we should
+// update ready_ under mutex_.
+// Moreover, cnd_.notify() must be called under mutex because, otherwise the execution
+// could switch back to Wait() after we update ready_, exit Done::Wait() and destroy the object.
+// After this, return to resume in this function and segfault.
 inline void Done::Notify() {
-  // notify_one/all guarantee to unwake already waiting thread.
-  // Therefore, to provide a consistent behavior on the wait side we should
-  // update ready_ under mutex_.
-  ready_.store(true, std::memory_order_release);
-  ec_.notify();
+  std::lock_guard<mutex_t> lk(mu_);
+  ready_ = true;
+  cnd_.notify_one();
 }
 
 inline void BlockingCounter::Dec() {

@@ -12,7 +12,7 @@ using namespace boost;
 using namespace std;
 
 FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_size)
-    : input_(queue_size) {
+    : q_(queue_size) {
   if (num_threads == 0) {
     num_threads = std::thread::hardware_concurrency();
   }
@@ -36,21 +36,36 @@ FiberQueueThreadPool::~FiberQueueThreadPool() {
 void FiberQueueThreadPool::Shutdown() {
   VLOG(1) << "FiberQueueThreadPool::ShutdownStart";
 
-  input_.close();
+  is_closed_.store(true, std::memory_order_seq_cst);
+  pull_ec_.notifyAll();
   for (auto& w : workers_) {
     pthread_join(w, nullptr);
   }
+  Func f;
+  CHECK(!q_.try_dequeue(f));
   workers_.clear();
 }
 
-
 void FiberQueueThreadPool::WorkerFunction() {
-  while (true) {
-    Func f;
-    fibers::channel_op_status st = input_.pop(f);
-    if (st == fibers::channel_op_status::closed)
-      break;
+  bool is_closed = false;
+  Func f;
 
+  auto cb = [&]() {
+    if (q_.try_dequeue(f)) {
+      return true;
+    }
+    if (is_closed_.load(std::memory_order_acquire)) {
+      is_closed = true;
+      return true;
+    }
+    return false;
+  };
+
+  while (true) {
+    pull_ec_.await(cb);
+
+    if (is_closed)
+      break;
     try {
       f();
     } catch (std::exception& e) {

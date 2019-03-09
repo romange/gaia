@@ -2,7 +2,9 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "base/gtest.h"
+#include "base/mpmc_bounded_queue.h"
 #include "base/walltime.h"
+
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/fibers/simple_channel.h"
 
@@ -85,6 +87,42 @@ TEST_F(FibersTest, FQTP) {
       return i;
     }));
   }
+}
+
+TEST_F(FibersTest, SimpleChannelDone) {
+  SimpleChannel<std::function<void()>> s(2);
+  std::thread t([&] {
+    while (true) {
+      std::function<void()> f;
+      if (!s.Pop(f))
+        break;
+      f();
+    }
+  });
+
+  for (unsigned i = 0; i < 100; ++i) {
+    Done done;
+    s.Push([&] { done.Notify();});
+    done.Wait();
+  }
+  s.StartClosing();
+  t.join();
+}
+
+
+TEST_F(FibersTest, MPMC_BoundedQ) {
+  base::mpmc_bounded_queue<int> q(2);
+  ASSERT_TRUE(q.try_enqueue(5));
+  const int val = 6;
+  ASSERT_TRUE(q.try_enqueue(val));
+  ASSERT_FALSE(q.try_enqueue(val));
+
+  int tmp = 0;
+  ASSERT_TRUE(q.try_dequeue(tmp));
+  EXPECT_EQ(5, tmp);
+  ASSERT_TRUE(q.try_dequeue(tmp));
+  EXPECT_EQ(6, tmp);
+  ASSERT_FALSE(q.try_dequeue(tmp));
 }
 
 }  // namespace fibers_ext
