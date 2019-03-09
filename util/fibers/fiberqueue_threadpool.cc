@@ -7,7 +7,7 @@
 #include "base/pthread_utils.h"
 
 namespace util {
-
+namespace fibers_ext {
 using namespace boost;
 using namespace std;
 
@@ -28,7 +28,7 @@ FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_
 FiberQueueThreadPool::~FiberQueueThreadPool() {
   VLOG(1) << "FiberQueueThreadPool::~FiberQueueThreadPool";
 
-  if (!input_.is_closed()) {
+  if (!workers_.empty()) {
     Shutdown();
   }
 }
@@ -40,6 +40,7 @@ void FiberQueueThreadPool::Shutdown() {
   for (auto& w : workers_) {
     pthread_join(w, nullptr);
   }
+  workers_.clear();
 }
 
 
@@ -49,19 +50,15 @@ void FiberQueueThreadPool::WorkerFunction() {
     fibers::channel_op_status st = input_.pop(f);
     if (st == fibers::channel_op_status::closed)
       break;
-    CHECK_EQ(fibers::channel_op_status::success, st) << int(st);
+
     try {
       f();
-    } catch(std::exception& e) {
+    } catch (std::exception& e) {
       // std::exception_ptr p = std::current_exception();
       LOG(FATAL) << "Exception " << e.what();
     }
   }
 }
 
-void FiberQueueThreadPool::VerifyChannelSt(boost::fibers::channel_op_status st) {
-  CHECK_EQ(fibers::channel_op_status::success, st);
-}
-
+}  // namespace fibers_ext
 }  // namespace util
-

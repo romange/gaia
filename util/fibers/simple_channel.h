@@ -1,6 +1,8 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#pragma once
+
 #include "base/ProducerConsumerQueue.h"
 
 #include <boost/fiber/context.hpp>
@@ -23,7 +25,6 @@ namespace fibers_ext {
 template <typename T> class SimpleChannel {
   typedef ::boost::fibers::context::wait_queue_t wait_queue_t;
   using spinlock_lock_t = ::boost::fibers::detail::spinlock_lock;
-  using mutex_t = ::boost::fibers::mutex;
 
  public:
   SimpleChannel(size_t n) : q_(n) {}

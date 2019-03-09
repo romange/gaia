@@ -7,6 +7,7 @@
 #include "util/fibers/fibers_ext.h"
 
 namespace util {
+namespace fibers_ext {
 
 // This thread pool has a global fiber-friendly queue for incoming tasks.
 class FiberQueueThreadPool {
@@ -21,19 +22,13 @@ class FiberQueueThreadPool {
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
 
-    auto op_st = Add([&, f = std::forward<Func>(f)]() mutable {
+    Add([&, f = std::forward<Func>(f)]() mutable {
       mover.Apply(f);
       done.Notify();
     });
-    VerifyChannelSt(op_st);
 
     done.Wait();
     return std::move(mover).get();
-  }
-
-  template <typename Func> void Async(Func&& f) {
-    auto op_st = Add(std::forward<Func>(f));
-    VerifyChannelSt(op_st);
   }
 
   template <typename F> boost::fibers::channel_op_status Add(F&& f) {
@@ -43,12 +38,11 @@ class FiberQueueThreadPool {
   void Shutdown();
 
  private:
-  static void VerifyChannelSt(boost::fibers::channel_op_status st);
-
   void WorkerFunction();
 
   std::vector<pthread_t> workers_;
   boost::fibers::buffered_channel<Func> input_;
 };
 
+}  // namespace fibers_ext
 }  // namespace util

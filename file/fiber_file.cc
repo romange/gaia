@@ -12,7 +12,8 @@ namespace {
 
 class FiberReadFile final : public ReadonlyFile {
  public:
-  FiberReadFile(ReadonlyFile* next, util::FiberQueueThreadPool* tp) : next_(next), tp_(tp) {}
+  FiberReadFile(ReadonlyFile* next, util::fibers_ext::FiberQueueThreadPool* tp)
+      : next_(next), tp_(tp) {}
 
   // Reads upto length bytes and updates the result to point to the data.
   // May use buffer for storing data. In case, EOF reached sets result.size() < length but still
@@ -26,12 +27,12 @@ class FiberReadFile final : public ReadonlyFile {
 
  private:
   std::unique_ptr<ReadonlyFile> next_;
-  util::FiberQueueThreadPool* tp_;
+  util::fibers_ext::FiberQueueThreadPool* tp_;
 };
 
 class WriteFileImpl : public WriteFile {
  public:
-  WriteFileImpl(WriteFile* real, util::FiberQueueThreadPool* tp)
+  WriteFileImpl(WriteFile* real, util::fibers_ext::FiberQueueThreadPool* tp)
       : WriteFile(real->create_file_name()), real_(real), tp_(tp) {}
 
   bool Open() final;
@@ -45,7 +46,7 @@ class WriteFileImpl : public WriteFile {
 
   WriteFile* real_;
 
-  util::FiberQueueThreadPool* tp_;
+  util::fibers_ext::FiberQueueThreadPool* tp_;
 };
 
 StatusObject<size_t> FiberReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
@@ -73,7 +74,8 @@ Status WriteFileImpl::Write(const uint8* buffer, uint64 length) {
 
 }  // namespace
 
-StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name, util::FiberQueueThreadPool* tp,
+StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name,
+                                              util::fibers_ext::FiberQueueThreadPool* tp,
                                               const ReadonlyFile::Options& opts) {
   StatusObject<ReadonlyFile*> res = ReadonlyFile::Open(name, opts);
   if (!res.ok())
@@ -81,7 +83,7 @@ StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name, util::FiberQueue
   return new FiberReadFile(res.obj, tp);
 }
 
-WriteFile* OpenFiberWriteFile(StringPiece name, util::FiberQueueThreadPool* tp,
+WriteFile* OpenFiberWriteFile(StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
                               const FiberWriteOptions& opts) {
   WriteFile* wf = Open(name, opts);
   if (!wf)

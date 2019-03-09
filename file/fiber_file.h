@@ -11,7 +11,7 @@ namespace file {
 // thread unlike the regular posix implementation. All the read opearations will run
 // in FiberQueueThreadPool.
 util::StatusObject<ReadonlyFile*> OpenFiberReadFile(
-    StringPiece name, util::FiberQueueThreadPool* tp,
+    StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
     const ReadonlyFile::Options& opts = ReadonlyFile::Options()) MUST_USE_RESULT;
 
 
@@ -20,7 +20,7 @@ struct FiberWriteOptions : public OpenOptions {
 };
 
 WriteFile* OpenFiberWriteFile(
-    StringPiece name, util::FiberQueueThreadPool* tp,
+    StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
     const FiberWriteOptions& opts = FiberWriteOptions()) MUST_USE_RESULT;
 
 

@@ -37,7 +37,7 @@ namespace mr3 {
 class MyDoContext : public DoContext {
  public:
   MyDoContext(const std::string& root_dir, const pb::Output& out,
-              util::FiberQueueThreadPool* fq);
+              fibers_ext::FiberQueueThreadPool* fq);
   ~MyDoContext();
 
   void Write(const ShardId& shard_id, std::string&& record) final;
@@ -48,11 +48,11 @@ class MyDoContext : public DoContext {
 
   google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
   fibers::mutex mu_;
-  util::FiberQueueThreadPool* fq_;
+  fibers_ext::FiberQueueThreadPool* fq_;
 };
 
 MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
-                         util::FiberQueueThreadPool* fq) : root_dir_(root_dir), fq_(fq) {
+                         fibers_ext::FiberQueueThreadPool* fq) : root_dir_(root_dir), fq_(fq) {
   custom_shard_files_.set_empty_key(StringPiece{});
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
@@ -104,7 +104,7 @@ class Executor {
  public:
   Executor(const std::string& root_dir, util::IoContextPool* pool)
       : root_dir_(root_dir), pool_(pool), file_name_q_(16),
-        fq_pool_(new util::FiberQueueThreadPool()) {}
+        fq_pool_(new fibers_ext::FiberQueueThreadPool()) {}
   ~Executor();
 
   void Init();
@@ -120,7 +120,7 @@ class Executor {
   util::IoContextPool* pool_;
   FileNameQueue file_name_q_;
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
-  std::unique_ptr<util::FiberQueueThreadPool> fq_pool_;
+  std::unique_ptr<fibers_ext::FiberQueueThreadPool> fq_pool_;
   std::unique_ptr<MyDoContext> my_context_;
 };
 

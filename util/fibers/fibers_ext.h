@@ -38,7 +38,7 @@ class Done {
     ready_.store(false, std::memory_order_release);
   }
 
-  bool IsReady() const { return ready_; }
+  bool IsReady() const { return ready_.load(std::memory_order_acquire); }
 
  private:
   EventCount ec_;
