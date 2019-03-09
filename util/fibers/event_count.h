@@ -18,6 +18,10 @@ namespace fibers_ext {
 // spurious waits on the consumer side.
 class EventCount {
   using spinlock_lock_t = ::boost::fibers::detail::spinlock_lock;
+  using wait_queue_t = ::boost::fibers::context::wait_queue_t;
+
+  ::boost::fibers::detail::spinlock wait_queue_splk_{};
+  wait_queue_t wait_queue_{};
 
  public:
   EventCount() noexcept : val_(0) {}
@@ -65,6 +69,12 @@ class EventCount {
  private:
   friend class Key;
 
+  static bool should_switch(::boost::fibers::context* ctx, std::intptr_t expected) {
+    return ctx->twstatus.compare_exchange_strong(expected, static_cast<std::intptr_t>(-1),
+                                                 std::memory_order_acq_rel) ||
+           expected == 0;
+  }
+
   EventCount(const EventCount&) = delete;
   EventCount(EventCount&&) = delete;
   EventCount& operator=(const EventCount&) = delete;
@@ -78,9 +88,6 @@ class EventCount {
   // waiter count in the least significant 32 bits.
   std::atomic<uint64_t> val_;
 
-  ::boost::fibers::detail::spinlock splk_;
-  condition_variable_any cnd_;
-
   static constexpr uint64_t kAddWaiter = uint64_t(1);
 
   static constexpr size_t kEpochShift = 32;
@@ -92,18 +99,27 @@ inline bool EventCount::notify() noexcept {
   uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
 
   if (UNLIKELY(prev & kWaiterMask)) {
+    auto* active_ctx = ::boost::fibers::context::active();
+
     /*
     lk makes sure that when a waiting thread is entered the critical section in
     EventCount::wait, it atomically checks val_ when entering the WAIT state.
     We need it in order to make sure that cnd_.notify() is not called before the waiting
     thread enters WAIT state and thus the notification is missed.
-    We could save this spinlock if we allow futex-like semantics in condition_variable_any
-    or just implement what we need directly with fibers::context and its waitlist.
-    See also https://software.intel.com/en-us/forums/intel-threading-building-blocks/topic/299245
-    For more digging.
     */
-    spinlock_lock_t lk{splk_};
-    cnd_.notify_one();
+    spinlock_lock_t lk{wait_queue_splk_};
+    while (!wait_queue_.empty()) {
+      auto* ctx = &wait_queue_.front();
+      wait_queue_.pop_front();
+
+      if (should_switch(ctx, reinterpret_cast<std::intptr_t>(this))) {
+        // notify context
+        lk.unlock();
+        active_ctx->schedule(ctx);
+        break;
+      }
+    }
+
     return true;
   }
   return false;
@@ -113,18 +129,43 @@ inline bool EventCount::notifyAll() noexcept {
   uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
 
   if (UNLIKELY(prev & kWaiterMask)) {
-    spinlock_lock_t lk{splk_};
-    cnd_.notify_all();
-    return true;
+    auto* active_ctx = ::boost::fibers::context::active();
+
+    spinlock_lock_t lk{wait_queue_splk_};
+    wait_queue_t tmp;
+    tmp.swap(wait_queue_);
+    lk.unlock();
+
+    while (!tmp.empty()) {
+      ::boost::fibers::context* ctx = &tmp.front();
+      tmp.pop_front();
+
+      if (should_switch(ctx, reinterpret_cast<std::intptr_t>(this))) {
+        // notify context
+        active_ctx->schedule(ctx);
+      }
+    }
   }
+
   return false;
 };
 
 // Atomically checks for epoch and waits on cond_var.
 inline void EventCount::wait(uint32_t epoch) noexcept {
-  spinlock_lock_t lk{splk_};
-  while ((val_.load(std::memory_order_acquire) >> kEpochShift) == epoch) {
-    cnd_.wait(lk);
+  if ((val_.load(std::memory_order_acquire) >> kEpochShift) != epoch)
+    return;
+
+  auto* active_ctx = ::boost::fibers::context::active();
+
+  spinlock_lock_t lk{wait_queue_splk_};
+  if ((val_.load(std::memory_order_acquire) >> kEpochShift) == epoch) {
+    // atomically call lt.unlock() and block on *this
+    // store this fiber in waiting-queue
+    active_ctx->wait_link(wait_queue_);
+    active_ctx->twstatus.store(static_cast<std::intptr_t>(0), std::memory_order_release);
+
+    // suspend this fiber
+    active_ctx->suspend(lk);
   }
 }
 

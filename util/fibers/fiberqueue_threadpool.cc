@@ -52,8 +52,10 @@ void FiberQueueThreadPool::WorkerFunction() {
 
   auto cb = [&]() {
     if (q_.try_dequeue(f)) {
+      push_ec_.notify();
       return true;
     }
+
     if (is_closed_.load(std::memory_order_acquire)) {
       is_closed = true;
       return true;

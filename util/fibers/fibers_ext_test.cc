@@ -70,7 +70,8 @@ TEST_F(FibersTest, SpuriousNotify) {
   auto check_positive = [&val]() -> bool { return val > 0; };
   std::thread t1([check_positive, &ec]() { ec.await(check_positive); });
 
-  SleepForMilliseconds(1);
+  while (!ec.notify())
+    SleepForMilliseconds(1);
   val = 1;
   ASSERT_TRUE(ec.notify());
   t1.join();

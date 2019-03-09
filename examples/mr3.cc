@@ -130,7 +130,7 @@ class Executor {
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 
-Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {}
+Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(128) {}
 
 void Executor::PerIoStruct::Shutdown() {
   process_done.Wait();
