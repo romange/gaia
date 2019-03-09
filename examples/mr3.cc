@@ -33,7 +33,6 @@ DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 
 namespace mr3 {
 
-
 class MyDoContext : public DoContext {
  public:
   MyDoContext(const std::string& root_dir, const pb::Output& out,
@@ -52,7 +51,8 @@ class MyDoContext : public DoContext {
 };
 
 MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
-                         fibers_ext::FiberQueueThreadPool* fq) : root_dir_(root_dir), fq_(fq) {
+                         fibers_ext::FiberQueueThreadPool* fq)
+    : root_dir_(root_dir), fq_(fq) {
   custom_shard_files_.set_empty_key(StringPiece{});
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
@@ -82,7 +82,7 @@ void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
 }
 
 MyDoContext::~MyDoContext() {
-  for (auto& k_v :custom_shard_files_) {
+  for (auto& k_v : custom_shard_files_) {
     CHECK(k_v.second->Close());
   }
 }
@@ -93,8 +93,9 @@ class Executor {
 
   struct PerIoStruct {
     unsigned index;
-    fibers::fiber process_fd, map_fd;
+    fibers::fiber map_fd;
     StringQueue record_q;
+    fibers_ext::Done process_done;
 
     PerIoStruct(unsigned i);
 
@@ -112,8 +113,11 @@ class Executor {
   void Shutdown();
 
  private:
-  void ProcessFiles(pb::WireFormat::Type tp);
-  void ProcessText(file::ReadonlyFile* fd);
+   // External, disk thread that reads files from disk and pumps data into record_q.
+   // One per IO thread.
+  void ProcessFiles(pb::WireFormat::Type tp, PerIoStruct* record);
+  void ProcessText(file::ReadonlyFile* fd, PerIoStruct* record);
+
   void MapFiber(StreamBase* sb, DoContext* cntx);
 
   std::string root_dir_;
@@ -126,12 +130,10 @@ class Executor {
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 
-Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {
-}
+Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(32) {}
 
 void Executor::PerIoStruct::Shutdown() {
-  if (process_fd.joinable())
-    process_fd.join();
+  process_done.Wait();
 
   if (map_fd.joinable()) {
     map_fd.join();
@@ -147,18 +149,13 @@ void Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
 
-  pool_->AwaitOnAll([&](IoContext&) {
-    per_io_->Shutdown();
-  });
+  pool_->AwaitOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   fq_pool_->Shutdown();
   VLOG(1) << "Executor::Shutdown";
 }
 
-
-void Executor::Init() {
-  file_util::RecursivelyCreateDir(root_dir_, 0750);
-}
+void Executor::Init() { file_util::RecursivelyCreateDir(root_dir_, 0750); }
 
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
@@ -166,7 +163,6 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   LOG(INFO) << "Running on input " << input->msg().name();
 
   my_context_.reset(new MyDoContext(root_dir_, ss->output().msg(), fq_pool_.get()));
-  fibers::protected_fixedsize_stack fss(1 << 16);
 
   using sa_traits = fibers::protected_fixedsize_stack::traits_type;
   LOG(INFO) << "fss traits: " << sa_traits::default_size() << "/" << sa_traits::is_unbounded()
@@ -174,8 +170,8 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-    per_io_->process_fd = fibers::fiber(std::allocator_arg, std::move(fss), &Executor::ProcessFiles,
-                                        this, input->msg().format().type());
+    std::thread{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
+        .detach();
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, my_context_.get());
   });
 
@@ -190,9 +186,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   }
 }
 
-void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
-  // DCHECK(cntx.InContextThread());
-
+void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
   string file_name;
 
   while (true) {
@@ -201,8 +195,8 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    // auto res = file::ReadonlyFile::Open(file_name);
-    auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
+    auto res = file::ReadonlyFile::Open(file_name);
+    // auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
     if (!res.ok()) {
       LOG(DFATAL) << "Skipping " << file_name << " with " << res.status;
       continue;
@@ -212,20 +206,20 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
 
     switch (input_type) {
       case pb::WireFormat::TXT:
-        ProcessText(read_file.release());
+        ProcessText(read_file.release(), rec);
         break;
 
       default:
         LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(input_type);
         break;
     }
-    this_fiber::yield();
   }
   VLOG(1) << "ProcessFiles closing";
-  per_io_->record_q.StartClosing();
+  rec->record_q.StartClosing();
+  rec->process_done.Notify();
 }
 
-void Executor::ProcessText(file::ReadonlyFile* fd) {
+void Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
   /*constexpr size_t kBufSize = 1 << 15;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
@@ -243,13 +237,14 @@ void Executor::ProcessText(file::ReadonlyFile* fd) {
   string scratch;
 
   while (lr.Next(&result, &scratch)) {
-    per_io_->record_q.Push(string(result));
+    record->record_q.Push(string(result));
   }
 }
 
 void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
   auto& record_q = per_io_->record_q;
   string record;
+  unsigned record_num = 0;
   while (true) {
     bool is_open = record_q.Pop(record);
     if (!is_open)
@@ -264,6 +259,9 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
 
     // We should have here Shard/string(out_record).
     // sb->Do(std::move(record), cntx);
+    if (++record_num % 100 == 0) {
+      this_fiber::yield();
+    }
   }
   VLOG(1) << "MapFiber finished";
 }
@@ -304,12 +302,12 @@ int main(int argc, char** argv) {
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", inputs);
-  ss.Write("outp1", pb::WireFormat::TXT)
-      .AndCompress(pb::Output::GZIP)
-      .WithSharding(ShardNameFunc);
+  ss.Write("outp1", pb::WireFormat::TXT).AndCompress(pb::Output::GZIP).WithSharding(ShardNameFunc);
 
   executor.Run(&p.input("inp1"), &ss);
   executor.Shutdown();
+
+  server->Stop(true);
 
   return 0;
 }
