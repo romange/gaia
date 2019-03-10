@@ -116,7 +116,7 @@ class Executor {
    // External, disk thread that reads files from disk and pumps data into record_q.
    // One per IO thread.
   void ProcessFiles(pb::WireFormat::Type tp, PerIoStruct* record);
-  void ProcessText(file::ReadonlyFile* fd, PerIoStruct* record);
+  uint64_t ProcessText(file::ReadonlyFile* fd, PerIoStruct* record);
 
   void MapFiber(StreamBase* sb, DoContext* cntx);
 
@@ -188,7 +188,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 
 void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
   string file_name;
-
+  uint64_t cnt = 0;
   while (true) {
     channel_op_status st = file_name_q_.pop(file_name);
     if (st == channel_op_status::closed)
@@ -206,7 +206,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
 
     switch (input_type) {
       case pb::WireFormat::TXT:
-        ProcessText(read_file.release(), rec);
+        cnt += ProcessText(read_file.release(), rec);
         break;
 
       default:
@@ -214,12 +214,12 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
         break;
     }
   }
-  VLOG(1) << "ProcessFiles closing";
+  VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
   rec->record_q.StartClosing();
   rec->process_done.Notify();
 }
 
-void Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {
+uint64_t Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
   /*constexpr size_t kBufSize = 1 << 15;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
@@ -235,16 +235,19 @@ void Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
-
+  uint64_t cnt = 0;
   while (lr.Next(&result, &scratch)) {
-    record->record_q.Push(string(result));
+    string tmp{result};
+    ++cnt;
+    record->record_q.Push(std::move(tmp));
   }
+  return cnt;
 }
 
 void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
   auto& record_q = per_io_->record_q;
   string record;
-  unsigned record_num = 0;
+  uint64_t record_num = 0;
   while (true) {
     bool is_open = record_q.Pop(record);
     if (!is_open)
@@ -259,11 +262,11 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
 
     // We should have here Shard/string(out_record).
     // sb->Do(std::move(record), cntx);
-    if (++record_num % 100 == 0) {
+    if (++record_num % 1000 == 0) {
       this_fiber::yield();
     }
   }
-  VLOG(1) << "MapFiber finished";
+  VLOG(1) << "MapFiber finished " << record_num;
 }
 
 }  // namespace mr3

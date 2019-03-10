@@ -45,21 +45,31 @@ template <typename T> class SimpleChannel {
   // Non blocking
   template <typename... Args> bool TryPush(Args&&... args) noexcept {
     if (q_.write(std::forward<Args>(args)...)) {
-      pop_ec_.notify();
+      if (++quiet_pushes_ > q_.capacity() / 3) {
+        pop_ec_.notify();
+        quiet_pushes_ = 0;
+      }
       return true;
     }
+    pop_ec_.notify();
+    quiet_pushes_ = 0;
     return false;
   }
 
   bool TryPop(T& val) {
     if (q_.read(val)) {
-      push_ec_.notify();
       return true;
     }
+    push_ec_.notify();
     return false;
   }
 
+  void WakeConsumer() {
+    pop_ec_.notify();
+  }
+
  private:
+  unsigned quiet_pushes_ = 0;
   folly::ProducerConsumerQueue<T> q_;
   std::atomic_bool is_closing_{false};
 
