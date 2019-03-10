@@ -32,12 +32,15 @@ class FiberQueueThreadPool {
   }
 
   template <typename F> void Add(F&& f) {
-    push_ec_.await([&]() {
-      if (!q_.try_enqueue(std::forward<F>(f)))
-        return false;
-      pull_ec_.notify();
-      return true;
-    });
+    while (true) {
+      EventCount::Key key = push_ec_.prepareWait();
+      if (q_.try_enqueue(std::forward<F>(f))) {
+        pull_ec_.notify();
+        break;
+      }
+
+      push_ec_.wait(key.epoch());
+    }
   }
 
   void Shutdown();
@@ -46,7 +49,6 @@ class FiberQueueThreadPool {
   void WorkerFunction();
 
   std::vector<pthread_t> workers_;
-
   base::mpmc_bounded_queue<Func> q_;
   EventCount push_ec_, pull_ec_;
   std::atomic_bool is_closed_{false};

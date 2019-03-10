@@ -130,7 +130,7 @@ class Executor {
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
 
-Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(128) {}
+Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
 
 void Executor::PerIoStruct::Shutdown() {
   process_done.Wait();
@@ -170,7 +170,9 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-    std::thread{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
+    /*std::thread{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
+        .detach();*/
+    fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
         .detach();
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, my_context_.get());
   });
@@ -195,8 +197,8 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    auto res = file::ReadonlyFile::Open(file_name);
-    // auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
+    // auto res = file::ReadonlyFile::Open(file_name);
+    auto res = file::OpenFiberReadFile(file_name, fq_pool_.get());
     if (!res.ok()) {
       LOG(DFATAL) << "Skipping " << file_name << " with " << res.status;
       continue;
@@ -217,6 +219,7 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
   rec->record_q.StartClosing();
   rec->process_done.Notify();
+  // VLOG(1) << "T1/T2: " << rec->record_q.t1 << "/" << rec->record_q.t2;
 }
 
 uint64_t Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {

@@ -103,6 +103,8 @@ template <typename T> class mpmc_bounded_queue {
     return true;
   }
 
+  size_t capacity() const { return buffer_mask_ + 1;}
+
  private:
   struct cell_t {
     std::atomic<size_t> sequence_;

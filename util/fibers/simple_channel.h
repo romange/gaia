@@ -64,12 +64,9 @@ template <typename T> class SimpleChannel {
     return false;
   }
 
-  void WakeConsumer() {
-    pop_ec_.notify();
-  }
-
  private:
   unsigned quiet_pushes_ = 0;
+
   folly::ProducerConsumerQueue<T> q_;
   std::atomic_bool is_closing_{false};
 
@@ -80,11 +77,7 @@ template <typename T> class SimpleChannel {
 template <typename T>
 template <typename... Args>
 void SimpleChannel<T>::Push(Args&&... args) noexcept {
-  if (TryPush(std::forward<Args>(args)...)) {  // fast path.
-    return;
-  }
-
-  while(true) {
+  while (true) {
     EventCount::Key key = push_ec_.prepareWait();
     if (TryPush(std::forward<Args>(args)...)) {
       break;
@@ -97,7 +90,7 @@ template <typename T> bool SimpleChannel<T>::Pop(T& dest) {
   if (TryPop(dest))
     return true;
 
-  while(true)  {
+  while (true) {
     EventCount::Key key = pop_ec_.prepareWait();
     if (TryPop(dest)) {
       return true;
