@@ -38,6 +38,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   fibers::condition_variable cnd_;
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
+  bool in_run_one_ = false;
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
@@ -113,6 +114,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       suspend_timer_.expires_at(abs_time);
       suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
     }
+    CHECK(!in_run_one_) << "Deadlock detected";
 
     // We do not need a mutex here.
     cnd_.notify_one();
@@ -159,11 +161,14 @@ void AsioScheduler::MainLoop() {
       // run one handler inside io_context
       // if no handler available, blocks this thread
       DVLOG(2) << "MainLoop::RunOne";
+      in_run_one_ = true;
       if (!io_cntx->run_one()) {
         break;
       }
+      in_run_one_ = false;
     }
   }
+  in_run_one_ = false;
   VLOG(1) << "MainLoop exited";
 }
 
