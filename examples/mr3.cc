@@ -148,8 +148,9 @@ Executor::~Executor() {
 void Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
-
-  pool_->AwaitOnAll([&](IoContext&) { per_io_->Shutdown(); });
+ 
+  // Use AwaitFiberOnAll because we block in the function.
+  pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   fq_pool_->Shutdown();
   VLOG(1) << "Executor::Shutdown";
@@ -168,6 +169,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   LOG(INFO) << "fss traits: " << sa_traits::default_size() << "/" << sa_traits::is_unbounded()
             << "/" << sa_traits::page_size();
 
+  // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     /*std::thread{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
