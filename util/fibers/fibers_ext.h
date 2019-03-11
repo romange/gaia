@@ -32,27 +32,24 @@ class Done {
 
   void operator=(const Done&) = delete;
 
+  // Wait on the ready_ flag.
   void Wait() {
-    std::unique_lock<mutex_t> lk(mu_);
-    cnd_.wait(lk, [this] { return ready_; });
+    ec_.await([this] { return ready_.load(std::memory_order_acquire); });
   }
 
   void Notify();
 
   void Reset() {
-    std::lock_guard<mutex_t> lk(mu_);
     ready_ = false;
   }
 
   bool IsReady() const {
-    std::lock_guard<mutex_t> lk(mu_);
-    return ready_;
+    return ready_.load(std::memory_order_acquire);
   }
 
  private:
-  condition_variable_any cnd_;
-  mutable mutex_t mu_;
-  bool ready_;
+  EventCount ec_;
+  std::atomic_bool ready_;
 };
 
 class BlockingCounter {
@@ -65,20 +62,16 @@ class BlockingCounter {
   void Dec();
 
   void Wait() {
-    std::unique_lock<::boost::fibers::mutex> lock(mutex_);
-    cond_.wait(lock, [this] { return count_ == 0; });
+    ec_.await([this] { return count_.load(std::memory_order_acquire) == 0; });
   }
 
   void Add(unsigned delta) {
-    std::lock_guard<mutex> g(mutex_);
-    count_ += delta;
+    count_.fetch_add(delta, std::memory_order_acq_rel);
   }
 
  private:
-  unsigned count_;
-
-  condition_variable_any cond_;
-  ::boost::fibers::mutex mutex_;
+  std::atomic_long count_;
+  EventCount ec_;
 };
 
 class Semaphore {
@@ -153,26 +146,16 @@ template <typename T> class Cell {
   }
 };
 
-// notify_one/all guarantee to unwake already waiting thread.
-// Therefore, to provide a consistent behavior on the wait side we should
-// update ready_ under mutex_.
-// Moreover, cnd_.notify() must be called under mutex because, otherwise the execution
-// could switch back to Wait() after we update ready_, exit Done::Wait() and destroy the object.
-// After this, return to resume in this function and segfault.
+// We use EventCount to wake threads without blocking.
 inline void Done::Notify() {
-  std::lock_guard<mutex_t> lk(mu_);
-  ready_ = true;
-  cnd_.notify_one();
+  ready_.store(true, std::memory_order_release);
+  ec_.notify();
 }
 
 inline void BlockingCounter::Dec() {
-  if (0 == count_)  // should not happen
-    return;
-
-  std::lock_guard<mutex> g(mutex_);
-  --count_;
-  if (count_ == 0)
-    cond_.notify_one();
+  auto prev = count_.fetch_sub(1, std::memory_order_acq_rel);
+  if (prev == 1)
+    ec_.notify();
 }
 
 }  // namespace fibers_ext

@@ -59,12 +59,11 @@ MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
 
 // TODO: To make MyDoContext thread local
 void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
-  std::lock_guard<fibers::mutex> lg(mu_);
-
   CHECK(absl::holds_alternative<string>(shard_id));
 
   const string& shard_name = absl::get<string>(shard_id);
 
+  std::unique_lock<fibers::mutex> lk(mu_);
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
     StringPiece key = str_db_.Get(shard_name);
@@ -76,6 +75,8 @@ void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
     it = res.first;
   }
   file::WriteFile* fl = it->second;
+  lk.unlock();
+
   CHECK(fl);
   record.append("\n");
   CHECK_STATUS(fl->Write(record));
@@ -148,12 +149,12 @@ Executor::~Executor() {
 void Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
- 
+
   // Use AwaitFiberOnAll because we block in the function.
   pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   fq_pool_->Shutdown();
-  VLOG(1) << "Executor::Shutdown";
+  VLOG(1) << "Executor::Shutdown::End";
 }
 
 void Executor::Init() { file_util::RecursivelyCreateDir(root_dir_, 0750); }
@@ -316,6 +317,7 @@ int main(int argc, char** argv) {
   executor.Shutdown();
 
   server->Stop(true);
+  pool.Stop();
 
   return 0;
 }

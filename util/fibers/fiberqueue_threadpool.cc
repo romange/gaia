@@ -75,6 +75,7 @@ void FiberQueueThreadPool::WorkerFunction() {
       LOG(FATAL) << "Exception " << e.what();
     }
   }
+  VLOG(1) << "FiberQueueThreadPool::Exit";
 }
 
 }  // namespace fibers_ext

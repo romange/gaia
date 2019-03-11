@@ -14,8 +14,10 @@ namespace fibers_ext {
 
 // This class is all about reducing the contention on the producer side (notifications).
 // We want notifications to be as light as possible, while waits are less important
-// since they on the path of being suspended anyway. However, we want to reduce number of
+// since they on the path of being suspended anyway. However, we also want to reduce number of
 // spurious waits on the consumer side.
+// This class has another wonderful property: notification thread does not need to lock mutex,
+// which means it can be used from the io_context (ring0) fiber.
 class EventCount {
   using spinlock_lock_t = ::boost::fibers::detail::spinlock_lock;
   using wait_queue_t = ::boost::fibers::context::wait_queue_t;
