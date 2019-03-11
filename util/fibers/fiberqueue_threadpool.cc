@@ -34,8 +34,6 @@ FiberQueueThreadPool::~FiberQueueThreadPool() {
 }
 
 void FiberQueueThreadPool::Shutdown() {
-  VLOG(1) << "FiberQueueThreadPool::ShutdownStart";
-
   is_closed_.store(true, std::memory_order_seq_cst);
   pull_ec_.notifyAll();
   for (auto& w : workers_) {
@@ -44,6 +42,7 @@ void FiberQueueThreadPool::Shutdown() {
   Func f;
   CHECK(!q_.try_dequeue(f));
   workers_.clear();
+  VLOG(1) << "FiberQueueThreadPool::ShutdownEnd";
 }
 
 void FiberQueueThreadPool::WorkerFunction() {

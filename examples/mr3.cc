@@ -86,6 +86,7 @@ MyDoContext::~MyDoContext() {
   for (auto& k_v : custom_shard_files_) {
     CHECK(k_v.second->Close());
   }
+  VLOG(1) << "~MyDoContextEnd";
 }
 
 class Executor {
@@ -153,6 +154,7 @@ void Executor::Shutdown() {
   // Use AwaitFiberOnAll because we block in the function.
   pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
+  my_context_.reset();  // must be closed before fq_pool_ shutdown.
   fq_pool_->Shutdown();
   VLOG(1) << "Executor::Shutdown::End";
 }
@@ -267,7 +269,7 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-    // sb->Do(std::move(record), cntx);
+    sb->Do(std::move(record), cntx);
     if (++record_num % 1000 == 0) {
       this_fiber::yield();
     }
