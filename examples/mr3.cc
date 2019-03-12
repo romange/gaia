@@ -33,38 +33,62 @@ DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 
 namespace mr3 {
 
+class GlobalDestFileManager {
+  const std::string root_dir_;
+  fibers_ext::FiberQueueThreadPool* fq_;
+  google::dense_hash_map<StringPiece, ::file::WriteFile*> dest_files_;
+  UniqueStrings str_db_;
+  fibers::mutex mu_;
+
+  using Result = std::pair<StringPiece, ::file::WriteFile*>;
+
+ public:
+  GlobalDestFileManager(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq)
+      : root_dir_(root_dir), fq_(fq) {
+    dest_files_.set_empty_key(StringPiece());
+  }
+
+  Result Get(StringPiece key) {
+    std::lock_guard<fibers::mutex> lk(mu_);
+    auto it = dest_files_.find(key);
+    if (it == dest_files_.end()) {
+      string file_name = absl::StrCat(key, ".txt");
+      key = str_db_.Get(key);
+      string fn = file_util::JoinPath(root_dir_, file_name);
+      auto res = dest_files_.emplace(key, file::OpenFiberWriteFile(fn, fq_));
+      CHECK(res.second && res.first->second);
+      it = res.first;
+    }
+
+    return Result(it->first, it->second);
+  }
+};
+
 class MyDoContext : public DoContext {
  public:
-  MyDoContext(const std::string& root_dir, const pb::Output& out,
-              fibers_ext::FiberQueueThreadPool* fq);
+  MyDoContext(const pb::Output& out, GlobalDestFileManager* mgr);
   ~MyDoContext();
 
   void Write(const ShardId& shard_id, std::string&& record) final;
 
  private:
-  const std::string root_dir_;
-  UniqueStrings str_db_;
-
   struct Dest {
     file::WriteFile* wr;
     std::string buffer;
 
     static constexpr size_t kFlushLimit = 1 << 16;
+    void operator=(const Dest&) = delete;
 
-    Dest(const std::string& nm, fibers_ext::FiberQueueThreadPool* fq) {
-      wr = file::OpenFiberWriteFile(nm, fq);
-      CHECK(wr);
-    }
+    explicit Dest(file::WriteFile* wf) : wr(wf) {}
+    Dest(const Dest&) = delete;
 
     ~Dest() {
       if (!buffer.empty()) {
         CHECK_STATUS(wr->Write(buffer));
-        CHECK(wr->Close());
       }
     }
 
     void Write(StringPiece src) {
-
       buffer.append(src.data(), src.size());
       if (buffer.size() >= kFlushLimit) {
         CHECK_STATUS(wr->Write(buffer));
@@ -73,40 +97,30 @@ class MyDoContext : public DoContext {
     }
   };
 
-
   google::dense_hash_map<StringPiece, Dest*> custom_shard_files_;
-  fibers::mutex mu_;
-  fibers_ext::FiberQueueThreadPool* fq_;
+
+  GlobalDestFileManager* mgr_;
 };
 
-MyDoContext::MyDoContext(const std::string& root_dir, const pb::Output& out,
-                         fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), fq_(fq) {
+MyDoContext::MyDoContext(const pb::Output& out, GlobalDestFileManager* mgr) : mgr_(mgr) {
   custom_shard_files_.set_empty_key(StringPiece{});
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
 
-// TODO: To make MyDoContext thread local
 void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
   CHECK(absl::holds_alternative<string>(shard_id));
 
   const string& shard_name = absl::get<string>(shard_id);
 
-  std::unique_lock<fibers::mutex> lk(mu_);
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
-    StringPiece key = str_db_.Get(shard_name);
+    auto res = mgr_->Get(shard_name);
 
-    string file_name = absl::StrCat(shard_name, ".txt");
-    string fn = file_util::JoinPath(root_dir_, file_name);
-    auto res = custom_shard_files_.emplace(key, new Dest(fn, fq_));
-    CHECK(res.second && res.first->second);
-    it = res.first;
+    it = custom_shard_files_.emplace(res.first, new Dest{res.second}).first;
   }
   Dest* dest = it->second;
-  dest->Write(record);  // TODO: make it thread-local with shared file handlers.
+  dest->Write(record);
   dest->Write("\n");
-  lk.unlock();
 }
 
 MyDoContext::~MyDoContext() {
@@ -125,6 +139,7 @@ class Executor {
     fibers::fiber map_fd;
     StringQueue record_q;
     fibers_ext::Done process_done;
+    std::unique_ptr<MyDoContext> do_context;
 
     PerIoStruct(unsigned i);
 
@@ -142,19 +157,19 @@ class Executor {
   void Shutdown();
 
  private:
-   // External, disk thread that reads files from disk and pumps data into record_q.
-   // One per IO thread.
+  // External, disk thread that reads files from disk and pumps data into record_q.
+  // One per IO thread.
   void ProcessFiles(pb::WireFormat::Type tp, PerIoStruct* record);
   uint64_t ProcessText(file::ReadonlyFile* fd, PerIoStruct* record);
 
-  void MapFiber(StreamBase* sb, DoContext* cntx);
+  void MapFiber(StreamBase* sb);
 
   std::string root_dir_;
   util::IoContextPool* pool_;
   FileNameQueue file_name_q_;
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
   std::unique_ptr<fibers_ext::FiberQueueThreadPool> fq_pool_;
-  std::unique_ptr<MyDoContext> my_context_;
+  std::unique_ptr<GlobalDestFileManager> dest_mgr_;
 };
 
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
@@ -167,6 +182,7 @@ void Executor::PerIoStruct::Shutdown() {
   if (map_fd.joinable()) {
     map_fd.join();
   }
+  do_context.reset();  // must be closed before fq_pool_ shutdown.
 }
 
 Executor::~Executor() {
@@ -180,8 +196,8 @@ void Executor::Shutdown() {
 
   // Use AwaitFiberOnAll because we block in the function.
   pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
+  dest_mgr_.reset();
 
-  my_context_.reset();  // must be closed before fq_pool_ shutdown.
   fq_pool_->Shutdown();
   VLOG(1) << "Executor::Shutdown::End";
 }
@@ -193,7 +209,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input->msg().has_format());
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  my_context_.reset(new MyDoContext(root_dir_, ss->output().msg(), fq_pool_.get()));
+  dest_mgr_.reset(new GlobalDestFileManager(root_dir_, fq_pool_.get()));
 
   using sa_traits = fibers::protected_fixedsize_stack::traits_type;
   LOG(INFO) << "fss traits: " << sa_traits::default_size() << "/" << sa_traits::is_unbounded()
@@ -206,7 +222,8 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
         .detach();*/
     fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type(), per_io_.get()}
         .detach();
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss, my_context_.get());
+    per_io_->do_context.reset(new MyDoContext(ss->output().msg(), dest_mgr_.get()));
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss);
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {
@@ -280,7 +297,7 @@ uint64_t Executor::ProcessText(file::ReadonlyFile* fd, PerIoStruct* record) {
   return cnt;
 }
 
-void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
+void Executor::MapFiber(StreamBase* sb) {
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;
@@ -297,7 +314,7 @@ void Executor::MapFiber(StreamBase* sb, DoContext* cntx) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-    sb->Do(std::move(record), cntx);
+    sb->Do(std::move(record), per_io_->do_context.get());
     if (++record_num % 1000 == 0) {
       this_fiber::yield();
     }
