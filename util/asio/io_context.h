@@ -47,11 +47,13 @@ template <typename Func> void Async(::boost::asio::io_context& cntx, Func&& f) {
 // the calling fiber. `f` should not block because it runs directly from IO loop.
 template <typename Func>
 auto Await(::boost::asio::io_context& cntx, Func&& f) -> decltype(f()) {
+  // See Done class for more extensive documentation.
   fibers_ext::Done done;
   using ResultType = decltype(f());
   detail::ResultMover<ResultType> mover;
 
-  Async(cntx, [&, f = std::forward<Func>(f)]() mutable {
+  // Store done-ptr by value to increase the refcount while lambda is running.
+  Async(cntx, [&, f = std::forward<Func>(f), done]() mutable {
     mover.Apply(f);
     done.Notify();
   });

@@ -99,7 +99,7 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   }
 
   fibers_ext::Done done;
-  std::thread([=, &done] {
+  std::thread([=] () mutable {
     StringResponse response;
 
     HandleCpuProfile(enable, &response);

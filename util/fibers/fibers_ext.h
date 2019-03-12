@@ -21,35 +21,69 @@ namespace util {
 namespace fibers_ext {
 
 // Wrap canonical pattern for condition_variable + bool flag
+// We can not synchronize threads with a condition-like variable on a stack.
+// The reason is that it's possible that the main (waiting) thread will pass "Wait()" call
+// and continue by destructing "done" variable while the background thread
+// is still accessing "done". It's possible to fix it only with usage of mutex but we want to
+// refrain from using mutex to allow non-blocking call to Notify(). Thus Done becomes
+// io_context friendly. Therefore we must use heap based,
+// reference counted Done object.
 class Done {
-  using mutex_t = ::boost::fibers::mutex;
+  class Impl {
+   public:
+    Impl() : ready_(false) {}
+    Impl(const Impl&) = delete;
+    void operator=(const Impl&) = delete;
+
+    friend void intrusive_ptr_add_ref(Impl* done) noexcept {
+      done->use_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    friend void intrusive_ptr_release(Impl* done) noexcept {
+      if (1 == done->use_count_.fetch_sub(1, std::memory_order_release)) {
+        // We want to synchronize on all changes to ctx performed in other threads.
+        // ctx is not atomic but we know that whatever was being written - has been written
+        // in other threads and no references to ctx exist anymore.
+        // Therefore acquiring fence is enough to synchronize.
+        // "acquire" requires a release opearation to mark the end of the memory changes we wish
+        // to acquire, and "fetch_sub(std::memory_order_release)" provides this marker.
+        // To summarize: fetch_sub(release) and fence(acquire) needed to order and synchronize
+        // on changes on ctx in most performant way.
+        // See: https://stackoverflow.com/q/27751025/
+        std::atomic_thread_fence(std::memory_order_acquire);
+        delete done;
+      }
+    }
+
+    void Wait() {
+      ec_.await([this] { return ready_.load(std::memory_order_acquire); });
+    }
+
+    // We use EventCount to wake threads without blocking.
+    void Notify() {
+      ready_.store(true, std::memory_order_release);
+      ec_.notify();
+    }
+
+    void Reset() { ready_ = false; }
+
+    bool IsReady() const { return ready_.load(std::memory_order_acquire); }
+
+   private:
+    EventCount ec_;
+    std::atomic<std::uint32_t> use_count_{0};
+    std::atomic_bool ready_;
+  };
+  using ptr_t = ::boost::intrusive_ptr<Impl>;
 
  public:
-  explicit Done(bool val = false) : ready_(val) {}
-
+  Done() : impl_(new Impl) {}
   ~Done() {}
-  Done(const Done&) = delete;
 
-  void operator=(const Done&) = delete;
-
-  // Wait on the ready_ flag.
-  void Wait() {
-    ec_.await([this] { return ready_.load(std::memory_order_acquire); });
-  }
-
-  void Notify();
-
-  void Reset() {
-    ready_ = false;
-  }
-
-  bool IsReady() const {
-    return ready_.load(std::memory_order_acquire);
-  }
-
+  void Notify() { impl_->Notify(); }
+  void Wait() { impl_->Wait(); }
  private:
-  EventCount ec_;
-  std::atomic_bool ready_;
+  ptr_t impl_;
 };
 
 class BlockingCounter {
@@ -65,9 +99,7 @@ class BlockingCounter {
     ec_.await([this] { return count_.load(std::memory_order_acquire) == 0; });
   }
 
-  void Add(unsigned delta) {
-    count_.fetch_add(delta, std::memory_order_acq_rel);
-  }
+  void Add(unsigned delta) { count_.fetch_add(delta, std::memory_order_acq_rel); }
 
  private:
   std::atomic_long count_;
@@ -145,12 +177,6 @@ template <typename T> class Cell {
     cv_.notify_one();
   }
 };
-
-// We use EventCount to wake threads without blocking.
-inline void Done::Notify() {
-  ready_.store(true, std::memory_order_release);
-  ec_.notify();
-}
 
 inline void BlockingCounter::Dec() {
   auto prev = count_.fetch_sub(1, std::memory_order_acq_rel);

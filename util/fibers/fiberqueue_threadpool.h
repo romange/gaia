@@ -18,11 +18,11 @@ class FiberQueueThreadPool {
   ~FiberQueueThreadPool();
 
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
-    fibers_ext::Done done;
+    Done done;
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
 
-    Add([&, f = std::forward<Func>(f)]() mutable {
+    Add([&, f = std::forward<Func>(f), done]() mutable {
       mover.Apply(f);
       done.Notify();
     });

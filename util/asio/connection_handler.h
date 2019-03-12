@@ -61,6 +61,15 @@ class ConnectionHandler {
 
   friend void intrusive_ptr_release(ConnectionHandler* ctx) noexcept {
     if (1 == ctx->use_count_.fetch_sub(1, std::memory_order_release)) {
+      // We want to synchronize on all changes to ctx performed in other threads.
+      // ctx is not atomic but we know that whatever was being written - has been written
+      // in other threads and no references to ctx exist anymore.
+      // Therefore acquiring fence is enough to synchronize.
+      // "acquire" requires a release opearation to mark the end of the memory changes we wish
+      // to acquire, and "fetch_sub(std::memory_order_release)" provides this marker.
+      // To summarize: fetch_sub(release) and fence(acquire) needed to order and synchronize
+      // on changes on ctx in most performant way.
+      // See: https://stackoverflow.com/q/27751025/
       std::atomic_thread_fence(std::memory_order_acquire);
       delete ctx;
     }

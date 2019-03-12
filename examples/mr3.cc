@@ -223,7 +223,8 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type, PerIoStruct* rec) {
   }
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
   rec->record_q.StartClosing();
-  rec->process_done.Notify();
+  fibers_ext::Done local{rec->process_done};
+  local.Notify();
   // VLOG(1) << "T1/T2: " << rec->record_q.t1 << "/" << rec->record_q.t2;
 }
 
