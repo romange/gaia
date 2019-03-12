@@ -45,7 +45,36 @@ class MyDoContext : public DoContext {
   const std::string root_dir_;
   UniqueStrings str_db_;
 
-  google::dense_hash_map<StringPiece, file::WriteFile*> custom_shard_files_;
+  struct Dest {
+    file::WriteFile* wr;
+    std::string buffer;
+
+    static constexpr size_t kFlushLimit = 1 << 16;
+
+    Dest(const std::string& nm, fibers_ext::FiberQueueThreadPool* fq) {
+      wr = file::OpenFiberWriteFile(nm, fq);
+      CHECK(wr);
+    }
+
+    ~Dest() {
+      if (!buffer.empty()) {
+        CHECK_STATUS(wr->Write(buffer));
+        CHECK(wr->Close());
+      }
+    }
+
+    void Write(StringPiece src) {
+
+      buffer.append(src.data(), src.size());
+      if (buffer.size() >= kFlushLimit) {
+        CHECK_STATUS(wr->Write(buffer));
+        buffer.clear();
+      }
+    }
+  };
+
+
+  google::dense_hash_map<StringPiece, Dest*> custom_shard_files_;
   fibers::mutex mu_;
   fibers_ext::FiberQueueThreadPool* fq_;
 };
@@ -70,21 +99,19 @@ void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
 
     string file_name = absl::StrCat(shard_name, ".txt");
     string fn = file_util::JoinPath(root_dir_, file_name);
-    auto res = custom_shard_files_.emplace(key, file::OpenFiberWriteFile(fn, fq_));
+    auto res = custom_shard_files_.emplace(key, new Dest(fn, fq_));
     CHECK(res.second && res.first->second);
     it = res.first;
   }
-  file::WriteFile* fl = it->second;
+  Dest* dest = it->second;
+  dest->Write(record);  // TODO: make it thread-local with shared file handlers.
+  dest->Write("\n");
   lk.unlock();
-
-  CHECK(fl);
-  record.append("\n");
-  CHECK_STATUS(fl->Write(record));
 }
 
 MyDoContext::~MyDoContext() {
   for (auto& k_v : custom_shard_files_) {
-    CHECK(k_v.second->Close());
+    delete k_v.second;
   }
   VLOG(1) << "~MyDoContextEnd";
 }
@@ -107,7 +134,7 @@ class Executor {
  public:
   Executor(const std::string& root_dir, util::IoContextPool* pool)
       : root_dir_(root_dir), pool_(pool), file_name_q_(16),
-        fq_pool_(new fibers_ext::FiberQueueThreadPool()) {}
+        fq_pool_(new fibers_ext::FiberQueueThreadPool(0, 128)) {}
   ~Executor();
 
   void Init();
