@@ -31,26 +31,79 @@ class FiberQueueThreadPool {
     return std::move(mover).get();
   }
 
+  template <typename Func> auto Await(size_t worker_index, Func&& f) -> decltype(f()) {
+    Done done;
+    using ResultType = decltype(f());
+    detail::ResultMover<ResultType> mover;
+
+    Add(worker_index, [&, f = std::forward<Func>(f), done]() mutable {
+      mover.Apply(f);
+      done.Notify();
+    });
+
+    done.Wait();
+    return std::move(mover).get();
+  }
+
   template <typename F> void Add(F&& f) {
+    size_t start = next_index_.fetch_add(1, std::memory_order_relaxed) % worker_size_;
+    Worker& main_w = workers_[start];
     while (true) {
-      EventCount::Key key = push_ec_.prepareWait();
-      if (q_.try_enqueue(std::forward<F>(f))) {
-        pull_ec_.notify();
+      EventCount::Key key = main_w.push_ec.prepareWait();
+      if (AddAnyWorker(start, std::forward<F>(f))) {
         break;
       }
 
-      push_ec_.wait(key.epoch());
+      main_w.push_ec.wait(key.epoch());
+    }
+  }
+
+  // Runs f on a worker pinned by "index". index does not have to be in range.
+  template <typename F> void Add(size_t index, F&& f) {
+    size_t start = index % worker_size_;
+    Worker& main_w = workers_[start];
+    while (true) {
+      EventCount::Key key = main_w.push_ec.prepareWait();
+      if (main_w.q->try_enqueue(std::forward<F>(f))) {
+        main_w.pull_ec.notify();
+        return;
+      }
+
+      main_w.push_ec.wait(key.epoch());
     }
   }
 
   void Shutdown();
 
  private:
-  void WorkerFunction();
+  size_t wrapped_idx(size_t i) { return i < worker_size_ ? i : i - worker_size_; }
 
-  std::vector<pthread_t> workers_;
-  base::mpmc_bounded_queue<Func> q_;
-  EventCount push_ec_, pull_ec_;
+  template <typename F> bool AddAnyWorker(size_t start, F&& f) {
+    for (size_t i = 0; i < worker_size_; ++i) {
+      auto& w = workers_[wrapped_idx(start + i)];
+      if (w.q->try_enqueue(std::forward<F>(f))) {
+        w.pull_ec.notify();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void WorkerFunction(unsigned index);
+
+  using FuncQ = base::mpmc_bounded_queue<Func>;
+
+  struct Worker {
+    pthread_t tid;
+    std::unique_ptr<FuncQ> q;
+    EventCount push_ec, pull_ec;
+  };
+
+  std::unique_ptr<Worker[]> workers_;
+  size_t worker_size_;
+  // base::mpmc_bounded_queue<Func> q_;
+
+  std::atomic_uint32_t next_index_{0};
   std::atomic_bool is_closed_{false};
 };
 

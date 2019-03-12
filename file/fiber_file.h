@@ -16,7 +16,7 @@ util::StatusObject<ReadonlyFile*> OpenFiberReadFile(
 
 
 struct FiberWriteOptions : public OpenOptions {
-
+   bool consistent_thread = true;   // whether to send the write request to the same pool-thread.
 };
 
 WriteFile* OpenFiberWriteFile(

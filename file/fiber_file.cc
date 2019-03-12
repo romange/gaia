@@ -3,6 +3,7 @@
 //
 #include "file/fiber_file.h"
 
+#include "base/hash.h"
 #include "base/logging.h"
 
 namespace file {
@@ -32,8 +33,8 @@ class FiberReadFile final : public ReadonlyFile {
 
 class WriteFileImpl : public WriteFile {
  public:
-  WriteFileImpl(WriteFile* real, util::fibers_ext::FiberQueueThreadPool* tp)
-      : WriteFile(real->create_file_name()), real_(real), tp_(tp) {}
+  WriteFileImpl(WriteFile* real, ssize_t hash, util::fibers_ext::FiberQueueThreadPool* tp)
+      : WriteFile(real->create_file_name()), real_(real), tp_(tp), hash_(hash) {}
 
   bool Open() final;
 
@@ -47,6 +48,7 @@ class WriteFileImpl : public WriteFile {
   WriteFile* real_;
 
   util::fibers_ext::FiberQueueThreadPool* tp_;
+  ssize_t hash_;
 };
 
 StatusObject<size_t> FiberReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
@@ -69,7 +71,11 @@ bool WriteFileImpl::Close() {
 }
 
 Status WriteFileImpl::Write(const uint8* buffer, uint64 length) {
-  return tp_->Await([&] { return real_->Write(buffer, length); });
+  auto cb = [&] { return real_->Write(buffer, length); };
+  if (hash_ < 0)
+    return tp_->Await(std::move(cb));
+  else
+    return tp_->Await(hash_, std::move(cb));
 }
 
 }  // namespace
@@ -88,7 +94,10 @@ WriteFile* OpenFiberWriteFile(StringPiece name, util::fibers_ext::FiberQueueThre
   WriteFile* wf = Open(name, opts);
   if (!wf)
     return nullptr;
-  return new WriteFileImpl(wf, tp);
+  ssize_t hash = -1;
+  if (opts.consistent_thread)
+    hash = base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(name.data()), name.size(), 1);
+  return new WriteFileImpl(wf, hash, tp);
 }
 
 }  // namespace file

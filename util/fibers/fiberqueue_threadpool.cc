@@ -11,47 +11,55 @@ namespace fibers_ext {
 using namespace boost;
 using namespace std;
 
-FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_size)
-    : q_(queue_size) {
+FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_size) {
   if (num_threads == 0) {
     num_threads = std::thread::hardware_concurrency();
   }
+  worker_size_ = num_threads;
+  workers_.reset(new Worker[num_threads]);
 
   for (unsigned i = 0; i < num_threads; ++i) {
     string name = absl::StrCat("sq_threadpool", i);
 
-    auto fn = std::bind(&FiberQueueThreadPool::WorkerFunction, this);
-    workers_.emplace_back(base::StartThread(name.c_str(), fn));
+    auto fn = std::bind(&FiberQueueThreadPool::WorkerFunction, this, i);
+    workers_[i].q.reset(new FuncQ(queue_size));
+    workers_[i].tid = base::StartThread(name.c_str(), fn);
   }
 }
 
 FiberQueueThreadPool::~FiberQueueThreadPool() {
   VLOG(1) << "FiberQueueThreadPool::~FiberQueueThreadPool";
 
-  if (!workers_.empty()) {
-    Shutdown();
-  }
+  Shutdown();
 }
 
 void FiberQueueThreadPool::Shutdown() {
+  if (!workers_)
+    return;
+
   is_closed_.store(true, std::memory_order_seq_cst);
-  pull_ec_.notifyAll();
-  for (auto& w : workers_) {
-    pthread_join(w, nullptr);
+  for (size_t i = 0; i < worker_size_; ++i) {
+    workers_[i].pull_ec.notifyAll();
   }
   Func f;
-  CHECK(!q_.try_dequeue(f));
-  workers_.clear();
+
+  for (size_t i = 0; i < worker_size_; ++i) {
+    auto& w = workers_[i];
+    pthread_join(w.tid, nullptr);
+    CHECK(!w.q->try_dequeue(f));
+  }
+
+  workers_.reset();
   VLOG(1) << "FiberQueueThreadPool::ShutdownEnd";
 }
 
-void FiberQueueThreadPool::WorkerFunction() {
+void FiberQueueThreadPool::WorkerFunction(unsigned index) {
   bool is_closed = false;
   Func f;
-
+  Worker& me = workers_[index];
   auto cb = [&]() {
-    if (q_.try_dequeue(f)) {
-      push_ec_.notify();
+    if (me.q->try_dequeue(f)) {
+      me.push_ec.notify();
       return true;
     }
 
@@ -63,7 +71,7 @@ void FiberQueueThreadPool::WorkerFunction() {
   };
 
   while (true) {
-    pull_ec_.await(cb);
+    me.pull_ec.await(cb);
 
     if (is_closed)
       break;

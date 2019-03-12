@@ -88,11 +88,13 @@ class MyDoContext : public DoContext {
       }
     }
 
-    void Write(StringPiece src) {
-      buffer.append(src.data(), src.size());
-      if (buffer.size() >= kFlushLimit) {
-        CHECK_STATUS(wr->Write(buffer));
-        buffer.clear();
+    void Write(std::initializer_list<StringPiece> src) {
+      for (auto v : src) {
+        buffer.append(v.data(), v.size());
+        if (buffer.size() >= kFlushLimit) {
+          CHECK_STATUS(wr->Write(buffer));
+          buffer.clear();
+        }
       }
     }
   };
@@ -119,8 +121,7 @@ void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
     it = custom_shard_files_.emplace(res.first, new Dest{res.second}).first;
   }
   Dest* dest = it->second;
-  dest->Write(record);
-  dest->Write("\n");
+  dest->Write({record, "\n"});
 }
 
 MyDoContext::~MyDoContext() {
