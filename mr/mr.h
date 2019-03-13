@@ -17,6 +17,14 @@
 namespace mr3 {
 
 class StreamBase;
+template <typename OutT> class Stream;
+
+
+template<typename Record> struct RecordTraits {
+  static std::string Serialize(Record&& r) {
+    return std::string(std::move(r));
+  }
+};
 
 class InputBase {
  public:
@@ -57,13 +65,10 @@ class OutputBase {
       co->set_level(level);
     }
   }
-
-
 };
 
-
 template <typename T> class Output : public OutputBase {
-  friend class StreamBase;
+  friend class Stream<T>;
 
   std::function<std::string(const T&)> shard_op_;
 
@@ -100,10 +105,7 @@ template <typename T> class Output : public OutputBase {
 
  private:
   Output(pb::Output* out) : OutputBase(out) {}
-
-  // void WriteInternal(std::string&& record, RecordResult* res) final;
 };
-
 
 class DoContext {
  public:
@@ -117,33 +119,47 @@ class StreamBase {
   virtual ~StreamBase() {}
   virtual void Do(std::string&& record, DoContext* context) = 0;
 
+  virtual util::Status InitializationStatus() const { return util::Status::OK; }
  protected:
   pb::Operator op_;
 
-  template <typename T>
-  Output<T> WriteInternal(const std::string& name, pb::WireFormat::Type type) {
+  void SetOutput(const std::string& name, pb::WireFormat::Type type) {
     auto* out = op_.mutable_output();
     out->set_name(name);
     out->mutable_format()->set_type(type);
-    return Output<T>(out);
   }
 };
 
-template <typename T> class Stream : public StreamBase {
-  Output<T> out_;
+// Currently the input type is hard-coded - string.
+template <typename OutT> class Stream : public StreamBase {
+  Output<OutT> out_;
 
  public:
+  using InputType = std::string;
+  using OutputType = OutT;
+
   Stream(const std::string& input_name) { op_.add_input_name(input_name); }
 
-  Output<T>& Write(const std::string& name, pb::WireFormat::Type type) {
-    out_ = WriteInternal<T>(name, type);
+  Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
+    SetOutput(name, type);
+    out_ = Output<OutputType>(op_.mutable_output());
     return out_;
   }
 
-  Output<T>& output() { return out_; }
+  Output<OutputType>& output() { return out_; }
+
+  template<typename Func> Stream& Apply(Func&& f) {
+    static_assert(base::is_invocable_r<OutputType, Func, InputType&&>::value, "");
+    do_fn_ = std::forward<Func>(f);
+  }
+
+  util::Status InitializationStatus() const override;
 
  protected:
   void Do(std::string&& record, DoContext* context);
+
+ private:
+  std::function<OutputType(InputType&&)> do_fn_;
 };
 
 using StringStream = Stream<std::string>;
@@ -160,25 +176,36 @@ class Pipeline {
   std::vector<std::unique_ptr<StringStream>> streams_;
 };
 
-template <typename T>
-Output<T>& Output<T>::AndCompress(pb::Output::CompressType ct, unsigned level) {
+template <typename OutT>
+Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
   SetCompress(ct, level);
   return *this;
 }
 
-/*
-template <typename T> void Output<T>::WriteInternal(std::string&& record, RecordResult* res) {
-  res->out = std::move(record);
-  if (shard_op_)
-    res->file_key = shard_op_(record);
+template <typename OutT> util::Status Stream<OutT>::InitializationStatus() const {
+  if (!std::is_same<OutputType, InputType>::value) {
+    if (!do_fn_)
+      return util::Status("Apply function is not set");
+  }
+  return util::Status::OK;
 }
-*/
 
-template <typename T> void Stream<T>::Do(std::string&& record, DoContext* context) {
-  // TODO: to parse from record to T and apply UDF here.
+
+template <typename OutT> void Stream<OutT>::Do(std::string&& record, DoContext* context) {
+  // TODO: to parse from record to InputType.
   ShardId shard_id;
-  shard_id = out_.Shard(record);
-  context->Write(shard_id, std::move(record));
+
+  OutputType val;
+  if (do_fn_) {
+    val = do_fn_(std::move(record));
+  } else {
+    val = std::move(record);
+  }
+
+  shard_id = out_.Shard(val);
+  RecordTraits<OutputType> rt;
+  std::string dest = rt.Serialize(std::move(val));
+  context->Write(shard_id, std::move(dest));
 }
 
 }  // namespace mr3

@@ -25,13 +25,6 @@ using namespace util;
 DEFINE_uint32(http_port, 8080, "Port number.");
 DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 
-namespace mr3 {
-
-
-
-
-}  // namespace mr3
-
 using namespace mr3;
 using namespace util;
 

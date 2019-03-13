@@ -145,6 +145,8 @@ void Executor::Init() { file_util::RecursivelyCreateDir(root_dir_, 0750); }
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
+  CHECK_STATUS(ss->InitializationStatus());
+
   LOG(INFO) << "Running on input " << input->msg().name();
 
   dest_mgr_.reset(new GlobalDestFileManager(root_dir_, fq_pool_.get()));
