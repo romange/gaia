@@ -17,7 +17,6 @@
 namespace mr3 {
 
 class StreamBase;
-class ExecutionOutputContext;
 
 class InputBase {
  public:
@@ -40,8 +39,6 @@ class InputBase {
 using ShardId = absl::variant<uint32_t, std::string>;
 
 class OutputBase {
-  friend class ExecutionOutputContext;
-
  public:
   pb::Output* mutable_msg() { return out_; }
   const pb::Output& msg() const { return *out_; }
@@ -64,22 +61,6 @@ class OutputBase {
 
 };
 
-/*
-class ExecutionOutputContext {
- public:
-  explicit ExecutionOutputContext(const std::string& root_dir, OutputBase* ob);
-
-  void Process(std::string&& record);
-
-  OutputBase* output() { return ob_; }
-
- private:
-  const std::string root_dir_;
-  OutputBase* ob_;
-
-  StringPieceDenseMap<file::WriteFile*> files_;
-};
-*/
 
 template <typename T> class Output : public OutputBase {
   friend class StreamBase;

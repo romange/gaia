@@ -71,7 +71,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DGOOGLE_PROTOBUF_NO_RTTI")
 # Need -fPIC in order to link against shared libraries. For example when creating python modules.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
 
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -g -flto -O3")
+# -flto
+set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -g -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -gdwarf-4")
 
 IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
