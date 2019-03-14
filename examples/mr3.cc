@@ -24,6 +24,7 @@ using namespace util;
 
 DEFINE_uint32(http_port, 8080, "Port number.");
 DEFINE_uint32(mr_threads, 0, "Number of mr threads");
+DEFINE_uint32(compress, false, "");
 
 using namespace mr3;
 using namespace util;
@@ -59,12 +60,14 @@ int main(int argc, char** argv) {
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", inputs);
+  auto& outp =
   ss/*.Apply([](std::string&& inp, DoContext<std::string>* context) {
       context->Write(inp.substr(0, 5));
     })*/
-      .Write("outp1", pb::WireFormat::TXT)
-      .AndCompress(pb::Output::GZIP)
-      .WithSharding(ShardNameFunc);
+      .Write("outp1", pb::WireFormat::TXT).WithSharding(ShardNameFunc);
+  if (FLAGS_compress) {
+    outp.AndCompress(pb::Output::GZIP);
+  }
 
   executor.Run(&p.input("inp1"), &ss);
   executor.Shutdown();
