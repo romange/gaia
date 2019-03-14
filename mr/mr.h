@@ -175,6 +175,7 @@ template <typename OutT> class Stream : public StreamBase {
     static_assert(base::is_invocable_r<void, Func, InputType&&, DoContext<OutputType>*>::value,
                   "");
     do_fn_ = std::forward<Func>(f);
+    return *this;
   }
 
   util::Status InitializationStatus() const override;
