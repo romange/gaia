@@ -35,6 +35,6 @@ StringStream& Pipeline::ReadText(const string& name, const std::vector<std::stri
   return *ptr;
 }
 
-DoContext::~DoContext() {}
+RawContext::~RawContext() {}
 
 }  // namespace mr3

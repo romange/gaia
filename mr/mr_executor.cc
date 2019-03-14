@@ -35,7 +35,7 @@ auto GlobalDestFileManager::Get(StringPiece key) -> Result {
   return Result(it->first, it->second);
 }
 
-struct MyDoContext::Dest {
+struct ExecutorContext::Dest {
   file::WriteFile* wr;
   std::string buffer;
 
@@ -50,13 +50,13 @@ struct MyDoContext::Dest {
   void Write(std::initializer_list<StringPiece> src);
 };
 
-MyDoContext::Dest::~Dest() {
+ExecutorContext::Dest::~Dest() {
   if (!buffer.empty()) {
     CHECK_STATUS(wr->Write(buffer));
   }
 }
 
-void MyDoContext::Dest::Write(std::initializer_list<StringPiece> src) {
+void ExecutorContext::Dest::Write(std::initializer_list<StringPiece> src) {
   for (auto v : src) {
     buffer.append(v.data(), v.size());
   }
@@ -66,12 +66,12 @@ void MyDoContext::Dest::Write(std::initializer_list<StringPiece> src) {
   }
 }
 
-MyDoContext::MyDoContext(const pb::Output& out, GlobalDestFileManager* mgr) : mgr_(mgr) {
+ExecutorContext::ExecutorContext(const pb::Output& out, GlobalDestFileManager* mgr) : mgr_(mgr) {
   custom_shard_files_.set_empty_key(StringPiece{});
   CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
 
-void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
+void ExecutorContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   CHECK(absl::holds_alternative<string>(shard_id));
 
   const string& shard_name = absl::get<string>(shard_id);
@@ -86,18 +86,18 @@ void MyDoContext::Write(const ShardId& shard_id, std::string&& record) {
   dest->Write({record, "\n"});
 }
 
-MyDoContext::~MyDoContext() {
+ExecutorContext::~ExecutorContext() {
   for (auto& k_v : custom_shard_files_) {
     delete k_v.second;
   }
-  VLOG(1) << "~MyDoContextEnd";
+  VLOG(1) << "~ExecutorContextEnd";
 }
 
 struct Executor::PerIoStruct {
   unsigned index;
   fibers::fiber map_fd, process_fd;
   StringQueue record_q;
-  std::unique_ptr<MyDoContext> do_context;
+  std::unique_ptr<ExecutorContext> do_context;
 
   PerIoStruct(unsigned i);
 
@@ -156,7 +156,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type()};
-    per_io_->do_context.reset(new MyDoContext(ss->output().msg(), dest_mgr_.get()));
+    per_io_->do_context.reset(new ExecutorContext(ss->output().msg(), dest_mgr_.get()));
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss);
   });
 

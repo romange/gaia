@@ -33,14 +33,15 @@ class GlobalDestFileManager {
   Result Get(StringPiece key);
 };
 
-class MyDoContext : public DoContext {
+// ThreadLocal context
+class ExecutorContext : public RawContext {
  public:
-  MyDoContext(const pb::Output& out, GlobalDestFileManager* mgr);
-  ~MyDoContext();
-
-  void Write(const ShardId& shard_id, std::string&& record) final;
+  ExecutorContext(const pb::Output& out, GlobalDestFileManager* mgr);
+  ~ExecutorContext();
 
  private:
+  void WriteInternal(const ShardId& shard_id, std::string&& record) final;
+
   struct Dest;
 
   google::dense_hash_map<StringPiece, Dest*> custom_shard_files_;

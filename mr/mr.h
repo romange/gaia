@@ -18,14 +18,9 @@ namespace mr3 {
 
 class StreamBase;
 template <typename OutT> class Stream;
+template <typename T> class DoContext;
 
-
-template<typename Record> struct RecordTraits {
-  static std::string Serialize(Record&& r) {
-    return std::string(std::move(r));
-  }
-};
-
+// Planning interfaces.
 class InputBase {
  public:
   InputBase(const InputBase&) = delete;
@@ -107,19 +102,46 @@ template <typename T> class Output : public OutputBase {
   Output(pb::Output* out) : OutputBase(out) {}
 };
 
-class DoContext {
- public:
-  virtual ~DoContext();
+// User facing interfaces
+template <typename Record> struct RecordTraits {
+  static std::string Serialize(Record&& r) { return std::string(std::move(r)); }
+};
 
-  virtual void Write(const ShardId& shard_id, std::string&& record) = 0;
+class RawContext {
+  template <typename T> friend class DoContext;
+ public:
+  virtual ~RawContext();
+
+ protected:
+  virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
+};
+
+
+// Right now this class is not thread-local and is access by all threads concurrently
+// i.e. all its method must be thread-safe.
+template <typename T> class DoContext {
+  Output<T>* out_;
+  RawContext* context_;
+  RecordTraits<T> rt_;
+
+  friend class Stream<T>;
+
+  DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
+ public:
+  void Write(T&& t) {
+    ShardId shard_id = out_->Shard(t);
+    std::string dest = rt_.Serialize(std::move(t));
+    context_->WriteInternal(shard_id, std::move(dest));
+  }
 };
 
 class StreamBase {
  public:
   virtual ~StreamBase() {}
-  virtual void Do(std::string&& record, DoContext* context) = 0;
+  virtual void Do(std::string&& record, RawContext* context) = 0;
 
   virtual util::Status InitializationStatus() const { return util::Status::OK; }
+
  protected:
   pb::Operator op_;
 
@@ -137,6 +159,7 @@ template <typename OutT> class Stream : public StreamBase {
  public:
   using InputType = std::string;
   using OutputType = OutT;
+  using ContextType = DoContext<OutT>;
 
   Stream(const std::string& input_name) { op_.add_input_name(input_name); }
 
@@ -148,18 +171,22 @@ template <typename OutT> class Stream : public StreamBase {
 
   Output<OutputType>& output() { return out_; }
 
-  template<typename Func> Stream& Apply(Func&& f) {
-    static_assert(base::is_invocable_r<OutputType, Func, InputType&&>::value, "");
+  template <typename Func> Stream& Apply(Func&& f) {
+    static_assert(base::is_invocable_r<void, Func, InputType&&, DoContext<OutputType>*>::value,
+                  "");
     do_fn_ = std::forward<Func>(f);
   }
 
   util::Status InitializationStatus() const override;
 
  protected:
-  void Do(std::string&& record, DoContext* context);
+  // This function is access from all executor threads.
+  // TODO: instead of the executor calling this function directly, we must create a factory function
+  // creating "Do(std::string&& record, RawContext* context)" per each thread.
+  void Do(std::string&& record, RawContext* context);
 
  private:
-  std::function<OutputType(InputType&&)> do_fn_;
+  std::function<void(InputType&&, DoContext<OutputType>* context)> do_fn_;
 };
 
 using StringStream = Stream<std::string>;
@@ -190,22 +217,15 @@ template <typename OutT> util::Status Stream<OutT>::InitializationStatus() const
   return util::Status::OK;
 }
 
+template <typename OutT> void Stream<OutT>::Do(std::string&& record, RawContext* context) {
+  // TODO: right now wrapper is globally access, i.e. must be thread-safe.
+  DoContext<OutT> wrapper(&out_, context);
 
-template <typename OutT> void Stream<OutT>::Do(std::string&& record, DoContext* context) {
-  // TODO: to parse from record to InputType.
-  ShardId shard_id;
-
-  OutputType val;
   if (do_fn_) {
-    val = do_fn_(std::move(record));
+    do_fn_(std::move(record), &wrapper);
   } else {
-    val = std::move(record);
+    wrapper.Write(std::move(record));
   }
-
-  shard_id = out_.Shard(val);
-  RecordTraits<OutputType> rt;
-  std::string dest = rt.Serialize(std::move(val));
-  context->Write(shard_id, std::move(dest));
 }
 
 }  // namespace mr3
