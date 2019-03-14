@@ -16,7 +16,7 @@ class GzipFile : public WriteFile {
   GzipFile(StringPiece file_name, unsigned level);
 public:
   static GzipFile* Create(StringPiece file_name, unsigned level = 2) {
-    return new GzipFile(file_name, level);
+    return new GzipFile(file_name, std::max(1u, level));
   }
 
   bool Open() override;

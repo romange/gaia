@@ -38,7 +38,7 @@ message Output {
 
   message Compress {
     required CompressType type = 1;
-    optional int32 level = 2;
+    optional int32 level = 2 [default = 1];
   }
 
   optional Compress compress = 3;

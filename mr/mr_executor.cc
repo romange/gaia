@@ -10,6 +10,7 @@
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
+#include "file/gzip_file.h"
 
 #include "util/fibers/fibers_ext.h"
 
@@ -20,14 +21,56 @@ using namespace util;
 
 using fibers::channel_op_status;
 
+static string FileName(StringPiece base, const pb::Output& out) {
+  CHECK_EQ(out.format().type(), pb::WireFormat::TXT);
+  string res(base);
+  absl::StrAppend(&res, ".txt");
+  if (out.has_compress()) {
+    if (out.compress().type() == pb::Output::GZIP) {
+      absl::StrAppend(&res, ".gz");
+    } else {
+      LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
+    }
+  }
+  return res;
+}
+
+static file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
+                                   fibers_ext::FiberQueueThreadPool* fq) {
+  std::function<file::WriteFile*()> cb;
+  if (out.has_compress()) {
+    if (out.compress().type() == pb::Output::GZIP) {
+      file::WriteFile* gzres{file::GzipFile::Create(path, out.compress().level())};
+      cb = [gzres] {
+        CHECK(gzres->Open());
+        return gzres;
+      };
+    } else {
+      LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
+    }
+  } else {
+    cb = [&] { return file::Open(path); };
+  }
+  file::WriteFile* res = fq->Await(std::move(cb));
+  CHECK(res);
+  return res;
+}
+
+GlobalDestFileManager::GlobalDestFileManager(const std::string& root_dir, const pb::Output& out,
+                                             fibers_ext::FiberQueueThreadPool* fq)
+    : root_dir_(root_dir), out_(out), fq_(fq) {
+  dest_files_.set_empty_key(StringPiece());
+  CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
+}
+
 auto GlobalDestFileManager::Get(StringPiece key) -> Result {
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(key);
   if (it == dest_files_.end()) {
-    string file_name = absl::StrCat(key, ".txt");
+    string file_name = FileName(key, out_);
     key = str_db_.Get(key);
-    string fn = file_util::JoinPath(root_dir_, file_name);
-    auto res = dest_files_.emplace(key, file::OpenFiberWriteFile(fn, fq_));
+    string full_path = file_util::JoinPath(root_dir_, file_name);
+    auto res = dest_files_.emplace(key, CreateFile(full_path, out_, fq_));
     CHECK(res.second && res.first->second);
     it = res.first;
   }
@@ -35,40 +78,52 @@ auto GlobalDestFileManager::Get(StringPiece key) -> Result {
   return Result(it->first, it->second);
 }
 
-struct ExecutorContext::Dest {
-  file::WriteFile* wr;
-  std::string buffer;
-
-  static constexpr size_t kFlushLimit = 1 << 16;
-  void operator=(const Dest&) = delete;
-
-  explicit Dest(file::WriteFile* wf) : wr(wf) {}
-  Dest(const Dest&) = delete;
-
-  ~Dest();
-
-  void Write(std::initializer_list<StringPiece> src);
-};
-
-ExecutorContext::Dest::~Dest() {
-  if (!buffer.empty()) {
-    CHECK_STATUS(wr->Write(buffer));
+GlobalDestFileManager::~GlobalDestFileManager() {
+  for (auto& k_v : dest_files_) {
+    CHECK(k_v.second->Close());
   }
 }
 
-void ExecutorContext::Dest::Write(std::initializer_list<StringPiece> src) {
+struct ExecutorContext::BufferedWriter {
+  file::WriteFile* wr;
+  std::string buffer;
+  unsigned index;
+
+  static constexpr size_t kFlushLimit = 1 << 16;
+  void operator=(const BufferedWriter&) = delete;
+
+  explicit BufferedWriter(file::WriteFile* wf, unsigned i) : wr(wf), index(i) {}
+  BufferedWriter(const BufferedWriter&) = delete;
+
+  void Flush(fibers_ext::FiberQueueThreadPool* fq) {
+    if (buffer.empty())
+      return;
+    auto status = fq->Await(index, [b = std::move(buffer), wr = this->wr] { return wr->Write(b); });
+    CHECK_STATUS(status);
+  }
+
+  ~BufferedWriter();
+
+  void Write(std::initializer_list<StringPiece> src, fibers_ext::FiberQueueThreadPool* fq);
+};
+
+ExecutorContext::BufferedWriter::~BufferedWriter() { CHECK(buffer.empty()); }
+
+void ExecutorContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
+                                            fibers_ext::FiberQueueThreadPool* fq) {
   for (auto v : src) {
     buffer.append(v.data(), v.size());
   }
   if (buffer.size() >= kFlushLimit) {
-    CHECK_STATUS(wr->Write(buffer));
-    buffer.clear();
+    fq->Add(index, [b = std::move(buffer), wr = this->wr] {
+      auto status = wr->Write(b);
+      CHECK_STATUS(status);
+    });
   }
 }
 
-ExecutorContext::ExecutorContext(const pb::Output& out, GlobalDestFileManager* mgr) : mgr_(mgr) {
+ExecutorContext::ExecutorContext(GlobalDestFileManager* mgr) : mgr_(mgr) {
   custom_shard_files_.set_empty_key(StringPiece{});
-  CHECK(out.has_shard_type() && out.shard_type() == pb::Output::USER_DEFINED);
 }
 
 void ExecutorContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
@@ -79,11 +134,19 @@ void ExecutorContext::WriteInternal(const ShardId& shard_id, std::string&& recor
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
     auto res = mgr_->Get(shard_name);
+    StringPiece key = res.first;
 
-    it = custom_shard_files_.emplace(res.first, new Dest{res.second}).first;
+    unsigned index =
+        base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
+    it = custom_shard_files_.emplace(res.first, new BufferedWriter{res.second, index}).first;
   }
-  Dest* dest = it->second;
-  dest->Write({record, "\n"});
+  it->second->Write({record, "\n"}, mgr_->pool());
+}
+
+void ExecutorContext::Flush() {
+  for (auto& k_v : custom_shard_files_) {
+    k_v.second->Flush(mgr_->pool());
+  }
 }
 
 ExecutorContext::~ExecutorContext() {
@@ -106,9 +169,7 @@ struct Executor::PerIoStruct {
 
 Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
 
-
 thread_local std::unique_ptr<Executor::PerIoStruct> Executor::per_io_;
-
 
 void Executor::PerIoStruct::Shutdown() {
   process_fd.join();
@@ -116,7 +177,7 @@ void Executor::PerIoStruct::Shutdown() {
   if (map_fd.joinable()) {
     map_fd.join();
   }
-  do_context.reset();  // must be closed before fq_pool_ shutdown.
+  do_context->Flush();
 }
 
 Executor::Executor(const std::string& root_dir, util::IoContextPool* pool)
@@ -149,14 +210,14 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  dest_mgr_.reset(new GlobalDestFileManager(root_dir_, fq_pool_.get()));
+  dest_mgr_.reset(new GlobalDestFileManager(root_dir_, ss->output().msg(), fq_pool_.get()));
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->process_fd =
         fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type()};
-    per_io_->do_context.reset(new ExecutorContext(ss->output().msg(), dest_mgr_.get()));
+    per_io_->do_context.reset(new ExecutorContext(dest_mgr_.get()));
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss);
   });
 

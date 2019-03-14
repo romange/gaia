@@ -17,34 +17,38 @@ namespace mr3 {
 
 class GlobalDestFileManager {
   const std::string root_dir_;
+  const pb::Output& out_;
+
   util::fibers_ext::FiberQueueThreadPool* fq_;
   google::dense_hash_map<StringPiece, ::file::WriteFile*> dest_files_;
   UniqueStrings str_db_;
   ::boost::fibers::mutex mu_;
 
+ public:
   using Result = std::pair<StringPiece, ::file::WriteFile*>;
 
- public:
-  GlobalDestFileManager(const std::string& root_dir, util::fibers_ext::FiberQueueThreadPool* fq)
-      : root_dir_(root_dir), fq_(fq) {
-    dest_files_.set_empty_key(StringPiece());
-  }
-
+  GlobalDestFileManager(const std::string& root_dir, const pb::Output& out,
+                        util::fibers_ext::FiberQueueThreadPool* fq);
+  ~GlobalDestFileManager();
+  
   Result Get(StringPiece key);
+
+  util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 };
 
 // ThreadLocal context
 class ExecutorContext : public RawContext {
  public:
-  ExecutorContext(const pb::Output& out, GlobalDestFileManager* mgr);
+  explicit ExecutorContext(GlobalDestFileManager* mgr);
   ~ExecutorContext();
 
+  void Flush();
  private:
   void WriteInternal(const ShardId& shard_id, std::string&& record) final;
 
-  struct Dest;
+  struct BufferedWriter;
 
-  google::dense_hash_map<StringPiece, Dest*> custom_shard_files_;
+  google::dense_hash_map<StringPiece, BufferedWriter*> custom_shard_files_;
 
   GlobalDestFileManager* mgr_;
 };

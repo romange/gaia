@@ -59,9 +59,9 @@ int main(int argc, char** argv) {
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", inputs);
-  ss.Apply([](std::string&& inp, DoContext<std::string>* context) {
+  ss/*.Apply([](std::string&& inp, DoContext<std::string>* context) {
       context->Write(inp.substr(0, 5));
-    })
+    })*/
       .Write("outp1", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP)
       .WithSharding(ShardNameFunc);
