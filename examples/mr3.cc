@@ -24,7 +24,7 @@ using namespace util;
 
 DEFINE_uint32(http_port, 8080, "Port number.");
 DEFINE_uint32(mr_threads, 0, "Number of mr threads");
-DEFINE_uint32(compress, false, "");
+DEFINE_bool(compress, false, "");
 
 using namespace mr3;
 using namespace util;
