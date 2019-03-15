@@ -30,7 +30,7 @@ class GlobalDestFileManager {
   GlobalDestFileManager(const std::string& root_dir, const pb::Output& out,
                         util::fibers_ext::FiberQueueThreadPool* fq);
   ~GlobalDestFileManager();
-  
+
   Result Get(StringPiece key);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
@@ -66,6 +66,10 @@ class Executor {
 
   void Init();
   void Run(const InputBase* input, StringStream* ss);
+
+  // Stops the executor in the middle.
+  void Stop();
+
   void Shutdown();
 
  private:

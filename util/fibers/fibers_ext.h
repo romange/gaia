@@ -39,19 +39,19 @@ class Done {
       done->use_count_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    friend void intrusive_ptr_release(Impl* done) noexcept {
-      if (1 == done->use_count_.fetch_sub(1, std::memory_order_release)) {
-        // We want to synchronize on all changes to ctx performed in other threads.
-        // ctx is not atomic but we know that whatever was being written - has been written
-        // in other threads and no references to ctx exist anymore.
+    friend void intrusive_ptr_release(Impl* impl) noexcept {
+      if (1 == impl->use_count_.fetch_sub(1, std::memory_order_release)) {
+        // We want to synchronize on all changes to obj performed in other threads.
+        // obj is not atomic but we know that whatever was being written - has been written
+        // in other threads and no references to obj exist anymore.
         // Therefore acquiring fence is enough to synchronize.
         // "acquire" requires a release opearation to mark the end of the memory changes we wish
         // to acquire, and "fetch_sub(std::memory_order_release)" provides this marker.
         // To summarize: fetch_sub(release) and fence(acquire) needed to order and synchronize
-        // on changes on ctx in most performant way.
+        // on changes on obj in most performant way.
         // See: https://stackoverflow.com/q/27751025/
         std::atomic_thread_fence(std::memory_order_acquire);
-        delete done;
+        delete impl;
       }
     }
 
@@ -82,18 +82,21 @@ class Done {
 
   void Notify() { impl_->Notify(); }
   void Wait() { impl_->Wait(); }
+
  private:
   ptr_t impl_;
 };
 
 class BlockingCounter {
  public:
-  using mutex = ::boost::fibers::mutex;
-
   explicit BlockingCounter(unsigned count) : count_(count) {}
 
   // Producer side -> should decrement the counter.
-  void Dec();
+  // I suspect all memory order accesses here could be "relaxed" but I do not bother.
+  void Dec() {
+    if (1 == count_.fetch_sub(1, std::memory_order_acq_rel))
+      ec_.notify();
+  }
 
   void Wait() {
     ec_.await([this] { return count_.load(std::memory_order_acquire) == 0; });
@@ -177,12 +180,6 @@ template <typename T> class Cell {
     cv_.notify_one();
   }
 };
-
-inline void BlockingCounter::Dec() {
-  auto prev = count_.fetch_sub(1, std::memory_order_acq_rel);
-  if (prev == 1)
-    ec_.notify();
-}
 
 }  // namespace fibers_ext
 

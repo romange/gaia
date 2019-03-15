@@ -21,8 +21,9 @@ AcceptServer::ListenerWrapper::ListenerWrapper(const endpoint& ep, IoContext* io
 }
 
 AcceptServer::AcceptServer(IoContextPool* pool)
-    : pool_(pool), signals_(pool->GetNextContext().raw_context(), SIGINT, SIGTERM), bc_(1) {
-  signals_.async_wait([this](system::error_code /*ec*/, int /*signo*/) {
+    : pool_(pool), signals_(pool->GetNextContext().raw_context(), SIGINT, SIGTERM), ref_bc_(1) {
+  // This cb function should not block.
+  auto non_blocking_cb = [this](system::error_code /*ec*/, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
@@ -32,8 +33,14 @@ AcceptServer::AcceptServer(IoContextPool* pool)
       }
     }
 
-    bc_.Dec();
-  });
+    if (on_stop_hook_) {
+      fibers::fiber{on_stop_hook_}.detach();
+    }
+
+    ref_bc_.Dec();
+  };
+
+  signals_.async_wait(non_blocking_cb);
 }
 
 AcceptServer::~AcceptServer() {
@@ -138,7 +145,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
   LOG(INFO) << "Accept server stopped for port " << wrapper->port;
 
   // Notify that AcceptThread is about to exit.
-  bc_.Dec();
+  ref_bc_.Dec();
   // Here accessing wrapper might be unsafe.
 }
 
@@ -165,7 +172,7 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper) -> AcceptResult {
 void AcceptServer::Run() {
   CHECK(!listeners_.empty());
 
-  bc_.Add(listeners_.size());
+  ref_bc_.Add(listeners_.size());
 
   for (auto& listener : listeners_) {
     ListenerWrapper* ptr = &listener;
@@ -181,7 +188,7 @@ void AcceptServer::Run() {
 
 void AcceptServer::Wait() {
   if (was_run_) {
-    bc_.Wait();
+    ref_bc_.Wait();
     VLOG(1) << "AcceptServer::Wait completed";
   } else {
     CHECK(listeners_.empty()) << "Must Call AcceptServer::Run() after adding listeners";

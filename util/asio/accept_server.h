@@ -41,6 +41,8 @@ class AcceptServer {
   // Returns the port number to which the listener was bound.
   unsigned short AddListener(unsigned short port, ListenerInterface* cf);
 
+  void CallOnStopSignal(std::function<void()> f) { on_stop_hook_ = std::move(f); }
+
  private:
   using acceptor = ::boost::asio::ip::tcp::acceptor;
   using endpoint = ::boost::asio::ip::tcp::endpoint;
@@ -68,11 +70,10 @@ class AcceptServer {
   };
 
   ::boost::asio::signal_set signals_;
-  fibers_ext::BlockingCounter bc_;
-
-  bool was_run_ = false;
-
+  fibers_ext::BlockingCounter ref_bc_;
   std::vector<ListenerWrapper> listeners_;
+  std::function<void()> on_stop_hook_;
+  bool was_run_ = false;
 };
 
 }  // namespace util

@@ -103,7 +103,7 @@ class FiberQueueThreadPool {
   size_t worker_size_;
   // base::mpmc_bounded_queue<Func> q_;
 
-  std::atomic_uint32_t next_index_{0};
+  std::atomic_ulong next_index_{0};
   std::atomic_bool is_closed_{false};
 };
 

@@ -19,7 +19,7 @@ const InputBase& Pipeline::input(const std::string& name) const {
 }
 
 StringStream& Pipeline::ReadText(const string& name, const string& glob) {
-  return ReadText(name, {glob});
+  return ReadText(name, std::vector<string>{glob});
 }
 
 StringStream& Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {

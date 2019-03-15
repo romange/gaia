@@ -3,7 +3,7 @@
 //
 
 #include "absl/strings/str_cat.h"
-
+#include "absl/strings/str_format.h"
 #include "base/init.h"
 #include "base/logging.h"
 
@@ -30,9 +30,7 @@ using namespace mr3;
 using namespace util;
 
 string ShardNameFunc(const std::string& line) {
-  char buf[32];
-  snprintf(buf, sizeof buf, "shard-%04d", base::Fingerprint32(line) % 10);
-  return buf;
+  return absl::StrFormat("shard-%04d", base::Fingerprint32(line) % 10);
 }
 
 int main(int argc, char** argv) {
@@ -57,6 +55,8 @@ int main(int argc, char** argv) {
 
   Executor executor("/tmp/mr3", &pool);
   executor.Init();
+
+  server->CallOnStopSignal([&] { executor.Stop();});
 
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", inputs);

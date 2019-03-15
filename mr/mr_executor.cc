@@ -161,6 +161,7 @@ struct Executor::PerIoStruct {
   fibers::fiber map_fd, process_fd;
   StringQueue record_q;
   std::unique_ptr<ExecutorContext> do_context;
+  bool stop_early = false;
 
   PerIoStruct(unsigned i);
 
@@ -203,6 +204,12 @@ void Executor::Shutdown() {
 
 void Executor::Init() { file_util::RecursivelyCreateDir(root_dir_, 0750); }
 
+void Executor::Stop() {
+  pool_->AwaitOnAll([&](IoContext&) {
+    per_io_->stop_early = true;
+  });
+}
+
 void Executor::Run(const InputBase* input, StringStream* ss) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
@@ -233,10 +240,11 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
 }
 
 void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
-  PerIoStruct* rec = per_io_.get();
+  PerIoStruct* trd_local = per_io_.get();
   string file_name;
   uint64_t cnt = 0;
-  while (true) {
+
+  while (!trd_local->stop_early) {
     channel_op_status st = file_name_q_.pop(file_name);
     if (st == channel_op_status::closed)
       break;
@@ -261,21 +269,21 @@ void Executor::ProcessFiles(pb::WireFormat::Type input_type) {
     }
   }
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
-  rec->record_q.StartClosing();
+  trd_local->record_q.StartClosing();
 }
 
 uint64_t Executor::ProcessText(file::ReadonlyFile* fd) {
-  PerIoStruct* record = per_io_.get();
+  PerIoStruct* trd_local = per_io_.get();
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
   uint64_t cnt = 0;
-  while (lr.Next(&result, &scratch)) {
+  while (!trd_local->stop_early && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
-    record->record_q.Push(std::move(tmp));
+    trd_local->record_q.Push(std::move(tmp));
   }
   return cnt;
 }
@@ -284,6 +292,7 @@ void Executor::MapFiber(StreamBase* sb) {
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;
+
   while (true) {
     bool is_open = record_q.Pop(record);
     if (!is_open)
