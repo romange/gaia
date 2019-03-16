@@ -58,6 +58,51 @@ int main(int argc, char** argv) {
 
   server->CallOnStopSignal([&] { executor.Stop();});
 
+  /*
+1. How do we allow flush hooks ?
+2. How do we allow joining of several collections of different types into a single
+joining object?
+
+mr3::Input<rapidjson::Document> inp1 = p.ReadText("inp1", input1.json.gz").AsJson();
+     mr3::Input<rapidjson::Document> inp2 = p.ReadText("inp2", "input2.json.gz").AsJson();
+
+     mr3::PCollection<pb::AddressBook> col1 = inp1.Apply("MyApplyFunc",
+        [] (rapidjson::Document&& doc, mr3::DoContext<pb::AddressBook>* ctx) {
+          pb::AddressBook res;
+          ctx->Write(std::move(res));
+        });
+
+  col1.ShardByKey([](const pb::AddressBook& ab) { return ab.user_id();});
+  col1.Write(...);
+
+  mr3::PCollection<pb::UserInfo> col2 = inp2.Apply("ReadUsers",
+        [] (rapidjson::Document&& doc, mr3::DoContext<pb::UserInfo>* ctx) {
+          pb::AddressBook res;
+          ctx->Write(std::move(res));
+        });
+
+  template <typename TOwner, void(TOwner::*func)()>
+void Call(TOwner *p) {
+    (p->*func)();
+}
+
+  MyJoinerToC()  {
+ public:
+   typedef pb::AddressBook OutputType;  // Must tell the joiner type.
+
+   void OnA(A&& a, mr3::DoContext<OutputType>* ctx) {}
+   void OnB(B&& b, mr3::DoContext<OutputType>* ctx) {}
+
+   void Flush(mr3::DoContext<OutputType>* ctx);
+}
+
+
+  mr3::PCollection<pb::AddressBook> merged = p.JoinWith<MyJoiner>().On(col1,
+    &MyJoiner::OnA).On(col2, &MyJoiner::OnB});
+
+  merged.
+*/
+
   // TODO: Should return Input<string> or something which can apply an operator.
   StringStream& ss = p.ReadText("inp1", inputs);
   auto& outp =
