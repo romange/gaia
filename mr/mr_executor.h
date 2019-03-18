@@ -78,7 +78,7 @@ class Executor {
   void ProcessFiles(pb::WireFormat::Type tp);
   uint64_t ProcessText(file::ReadonlyFile* fd);
 
-  void MapFiber(StreamBase* sb);
+  void MapFiber(TableBase* sb);
 
   std::string root_dir_;
   util::IoContextPool* pool_;

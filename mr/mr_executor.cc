@@ -288,10 +288,11 @@ uint64_t Executor::ProcessText(file::ReadonlyFile* fd) {
   return cnt;
 }
 
-void Executor::MapFiber(StreamBase* sb) {
+void Executor::MapFiber(TableBase* sb) {
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;
+  auto do_fn = sb->SetupDoFn(per_io_->do_context.get());
 
   while (true) {
     bool is_open = record_q.Pop(record);
@@ -306,7 +307,7 @@ void Executor::MapFiber(StreamBase* sb) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-    sb->Do(std::move(record), per_io_->do_context.get());
+    do_fn(std::move(record));
     if (++record_num % 1000 == 0) {
       this_fiber::yield();
     }

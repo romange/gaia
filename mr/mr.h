@@ -16,7 +16,7 @@
 
 namespace mr3 {
 
-class StreamBase;
+class TableBase;
 template <typename OutT> class Stream;
 template <typename T> class DoContext;
 
@@ -41,12 +41,11 @@ class InputBase {
 
 using ShardId = absl::variant<uint32_t, std::string>;
 
+
 class OutputBase {
  public:
   pb::Output* mutable_msg() { return out_; }
   const pb::Output& msg() const { return *out_; }
-
-  virtual ~OutputBase() {}
 
  protected:
   pb::Output* out_;
@@ -127,6 +126,7 @@ template <typename T> class DoContext {
   friend class Stream<T>;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
+
  public:
   void Write(T&& t) {
     ShardId shard_id = out_->Shard(t);
@@ -135,10 +135,13 @@ template <typename T> class DoContext {
   }
 };
 
-class StreamBase {
+class TableBase {
  public:
-  virtual ~StreamBase() {}
-  virtual void Do(std::string&& record, RawContext* context) = 0;
+  using RawRecord = std::string;
+  typedef std::function<void(RawRecord&& record)> DoFn;
+
+  virtual ~TableBase() {}
+  virtual DoFn SetupDoFn(RawContext* context) = 0;
 
   virtual util::Status InitializationStatus() const { return util::Status::OK; }
 
@@ -153,11 +156,11 @@ class StreamBase {
 };
 
 // Currently the input type is hard-coded - string.
-template <typename OutT> class Stream : public StreamBase {
+template <typename OutT> class Stream : public TableBase {
   Output<OutT> out_;
 
  public:
-  using InputType = std::string;
+  using InputType = RawRecord;
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
 
@@ -181,13 +184,10 @@ template <typename OutT> class Stream : public StreamBase {
   util::Status InitializationStatus() const override;
 
  protected:
-  // This function is access from all executor threads.
-  // TODO: instead of the executor calling this function directly, we must create a factory function
-  // creating "Do(std::string&& record, RawContext* context)" per each thread.
-  void Do(std::string&& record, RawContext* context);
+  DoFn SetupDoFn(RawContext* context) override;
 
  private:
-  std::function<void(InputType&&, DoContext<OutputType>* context)> do_fn_;
+  std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
 
 using StringStream = Stream<std::string>;
@@ -218,14 +218,17 @@ template <typename OutT> util::Status Stream<OutT>::InitializationStatus() const
   return util::Status::OK;
 }
 
-template <typename OutT> void Stream<OutT>::Do(std::string&& record, RawContext* context) {
-  // TODO: right now wrapper is globally access, i.e. must be thread-safe.
-  DoContext<OutT> wrapper(&out_, context);
-
+template <typename OutT> auto Stream<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
-    do_fn_(std::move(record), &wrapper);
+    return [f = this->do_fn_, wrapper = DoContext<OutT>(&out_, context)]
+    (RawRecord&& r) mutable {
+      f(std::move(r), &wrapper);
+    };
   } else {
-    wrapper.Write(std::move(record));
+    return [wrapper = DoContext<OutT>(&out_, context)]
+    (RawRecord&& r) mutable {
+      wrapper.Write(std::move(r));
+    };
   }
 }
 
