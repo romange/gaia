@@ -65,7 +65,7 @@ class Executor {
   ~Executor();
 
   void Init();
-  void Run(const InputBase* input, StringStream* ss);
+  void Run(const InputBase* input, TableBase* ss);
 
   // Stops the executor in the middle.
   void Stop();

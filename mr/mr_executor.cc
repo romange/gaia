@@ -210,14 +210,14 @@ void Executor::Stop() {
   });
 }
 
-void Executor::Run(const InputBase* input, StringStream* ss) {
+void Executor::Run(const InputBase* input, TableBase* tb) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
-  CHECK_STATUS(ss->InitializationStatus());
+  CHECK_STATUS(tb->InitializationStatus());
 
   LOG(INFO) << "Running on input " << input->msg().name();
 
-  dest_mgr_.reset(new GlobalDestFileManager(root_dir_, ss->output().msg(), fq_pool_.get()));
+  dest_mgr_.reset(new GlobalDestFileManager(root_dir_, tb->op().output(), fq_pool_.get()));
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
@@ -225,7 +225,7 @@ void Executor::Run(const InputBase* input, StringStream* ss) {
     per_io_->process_fd =
         fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type()};
     per_io_->do_context.reset(new ExecutorContext(dest_mgr_.get()));
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, ss);
+    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
   });
 
   for (const auto& file_spec : input->msg().file_spec()) {

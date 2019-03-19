@@ -17,7 +17,7 @@
 namespace mr3 {
 
 class TableBase;
-template <typename OutT> class Stream;
+template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
 
 // Planning interfaces.
@@ -62,7 +62,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class Stream<T>;
+  // friend class Stream<T>;
 
   std::function<std::string(const T&)> shard_op_;
 
@@ -123,7 +123,7 @@ template <typename T> class DoContext {
   RawContext* context_;
   RecordTraits<T> rt_;
 
-  friend class Stream<T>;
+  friend class TableImpl<T>;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
@@ -140,10 +140,17 @@ class TableBase {
   using RawRecord = std::string;
   typedef std::function<void(RawRecord&& record)> DoFn;
 
+  TableBase(const std::string& nm) {
+    op_.set_op_name(nm);
+  }
+
   virtual ~TableBase() {}
+
   virtual DoFn SetupDoFn(RawContext* context) = 0;
 
   virtual util::Status InitializationStatus() const { return util::Status::OK; }
+
+  const pb::Operator& op() const { return op_;}
 
  protected:
   pb::Operator op_;
@@ -156,15 +163,18 @@ class TableBase {
 };
 
 // Currently the input type is hard-coded - string.
-template <typename OutT> class Stream : public TableBase {
+template <typename OutT> class TableImpl : public TableBase {
   Output<OutT> out_;
 
  public:
-  using InputType = RawRecord;
+  using InputType = RawRecord;  // TBD: To change it.
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
 
-  Stream(const std::string& input_name) { op_.add_input_name(input_name); }
+  // Could be intrusive_ptr as well.
+  using PtrType = std::shared_ptr<TableImpl<OutT>>;
+
+  TableImpl(const std::string& name) : TableBase(name) {}
 
   Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
     SetOutput(name, type);
@@ -172,14 +182,14 @@ template <typename OutT> class Stream : public TableBase {
     return out_;
   }
 
-  Output<OutputType>& output() { return out_; }
+  /// Output<OutputType>& output() { return out_; }
 
-  template <typename Func> Stream& Apply(Func&& f) {
+  /*template <typename Func> TableImpl& Apply(Func&& f) {
     static_assert(base::is_invocable_r<void, Func, InputType&&, DoContext<OutputType>*>::value,
                   "");
     do_fn_ = std::forward<Func>(f);
     return *this;
-  }
+  }*/
 
   util::Status InitializationStatus() const override;
 
@@ -190,18 +200,33 @@ template <typename OutT> class Stream : public TableBase {
   std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
 
-using StringStream = Stream<std::string>;
+template <typename OutT> class PTable {
+public:
+  // TODO: to hide it from public interface.
+  TableBase* impl() { return impl_.get(); }
+private:
+  friend class Pipeline;
+
+  PTable(typename TableImpl<OutT>::PtrType ptr) : impl_(std::move(ptr)) {}
+
+  typename TableImpl<OutT>::PtrType impl_;
+};
+
+using StringStream = PTable<std::string>;
 
 class Pipeline {
  public:
-  StringStream& ReadText(const std::string& name, const std::string& glob);
-  StringStream& ReadText(const std::string& name, const std::vector<std::string>& globs);
+  StringStream ReadText(const std::string& name, const std::vector<std::string>& globs);
+
+  StringStream ReadText(const std::string& name, const std::string& glob) {
+    return ReadText(name, std::vector<std::string>{glob});
+  }
 
   const InputBase& input(const std::string& name) const;
 
  private:
   std::vector<std::unique_ptr<InputBase>> inputs_;
-  std::vector<std::unique_ptr<StringStream>> streams_;
+  std::vector<std::shared_ptr<TableBase>> tables_;
 };
 
 template <typename OutT>
@@ -210,15 +235,15 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
   return *this;
 }
 
-template <typename OutT> util::Status Stream<OutT>::InitializationStatus() const {
-  if (!std::is_same<OutputType, InputType>::value) {
+template <typename OutT> util::Status TableImpl<OutT>::InitializationStatus() const {
+  if (!std::is_same<OutputType, RawRecord>::value) {
     if (!do_fn_)
       return util::Status("Apply function is not set");
   }
   return util::Status::OK;
 }
 
-template <typename OutT> auto Stream<OutT>::SetupDoFn(RawContext* context) -> DoFn {
+template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
     return [f = this->do_fn_, wrapper = DoContext<OutT>(&out_, context)]
     (RawRecord&& r) mutable {
