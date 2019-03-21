@@ -63,7 +63,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  // friend class Stream<T>;
+  friend class TableImpl<T>; // To allow the instantiation of Output<T>;
 
   std::function<std::string(const T&)> shard_op_;
 
@@ -205,6 +205,11 @@ template <typename OutT> class PTable {
 public:
   // TODO: to hide it from public interface.
   TableBase* impl() { return impl_.get(); }
+
+  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
+    return impl_->Write(name, type);
+  }
+
 private:
   friend class Pipeline;
 
@@ -258,7 +263,7 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
   }
 }
 
-OutputBase::OutputBase(OutputBase&&) noexcept = default;
+inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
 template <typename T> Output<T>::Output(Output&&) noexcept = default;
 
 }  // namespace mr3
