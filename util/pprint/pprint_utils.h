@@ -51,7 +51,6 @@ class FdPath {
   void ExtractValueRecur(const gpb::Message& msg, uint32 index, ValueCb cb) const;
 
   std::vector<const gpb::FieldDescriptor*> path_;
-  mutable unsigned cur_repeated_depth_ = 0;
   mutable std::vector<uint32> cur_repeated_stack_;  // indices into the arrays of repeated messages.
 };
 

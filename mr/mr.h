@@ -50,6 +50,7 @@ class OutputBase {
  protected:
   pb::Output* out_;
 
+  OutputBase(OutputBase&&) noexcept;
   OutputBase(pb::Output* out) : out_(out) {}
 
   void SetCompress(pb::Output::CompressType ct, unsigned level) {
@@ -69,7 +70,7 @@ template <typename T> class Output : public OutputBase {
  public:
   Output() : OutputBase(nullptr) {}
   Output(const Output&) = delete;
-  Output(Output&&) noexcept = default;
+  Output(Output&&) noexcept;
 
   template <typename U> Output& WithSharding(U&& func) {
     static_assert(base::is_invocable_r<std::string, U, const T&>::value, "");
@@ -256,5 +257,8 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
     };
   }
 }
+
+OutputBase::OutputBase(OutputBase&&) noexcept = default;
+template <typename T> Output<T>::Output(Output&&) noexcept = default;
 
 }  // namespace mr3
