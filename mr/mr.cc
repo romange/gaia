@@ -18,7 +18,7 @@ const InputBase& Pipeline::input(const std::string& name) const {
   return *inputs_.front();
 }
 
-StringStream Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {
+StringTable Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {
   std::unique_ptr<InputBase> ib(new InputBase(name, pb::WireFormat::TXT));
   for (const auto& s : globs) {
     ib->mutable_msg()->add_file_spec()->set_url_glob(s);
@@ -26,11 +26,18 @@ StringStream Pipeline::ReadText(const string& name, const std::vector<std::strin
   inputs_.emplace_back(std::move(ib));
 
   TableImpl<std::string>::PtrType ptr(new TableImpl<std::string>(name));
-  tables_.emplace_back(ptr);
+  // tables_.emplace_back(ptr);
 
-  return StringStream(ptr);
+  return StringTable{ptr};
 }
 
 RawContext::~RawContext() {}
+
+PTable<rapidjson::Document> StringTable::AsJson() const {
+  TableImpl<rapidjson::Document>::PtrType ptr(
+    new TableImpl<rapidjson::Document>(impl_->op().op_name()));
+
+  return PTable<rapidjson::Document>{ptr};
+}
 
 }  // namespace mr3

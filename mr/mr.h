@@ -5,8 +5,11 @@
 #pragma once
 
 #include <functional>
-
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include "absl/types/variant.h"
+
 #include "base/type_traits.h"
 #include "file/file.h"
 #include "mr/mr3.pb.h"
@@ -17,8 +20,10 @@
 namespace mr3 {
 
 class TableBase;
+class StringTable;
 template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
+
 
 // Planning interfaces.
 class InputBase {
@@ -105,6 +110,10 @@ template <typename T> class Output : public OutputBase {
 // User facing interfaces
 template <typename Record> struct RecordTraits {
   static std::string Serialize(Record&& r) { return std::string(std::move(r)); }
+
+  static Record Parse(std::string&& tmp) {
+    return std::move(tmp);
+  }
 };
 
 class RawContext {
@@ -168,7 +177,6 @@ template <typename OutT> class TableImpl : public TableBase {
   Output<OutT> out_;
 
  public:
-  using InputType = RawRecord;  // TBD: To change it.
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
 
@@ -182,15 +190,6 @@ template <typename OutT> class TableImpl : public TableBase {
     out_ = Output<OutputType>(op_.mutable_output());
     return out_;
   }
-
-  /// Output<OutputType>& output() { return out_; }
-
-  /*template <typename Func> TableImpl& Apply(Func&& f) {
-    static_assert(base::is_invocable_r<void, Func, InputType&&, DoContext<OutputType>*>::value,
-                  "");
-    do_fn_ = std::forward<Func>(f);
-    return *this;
-  }*/
 
   util::Status InitializationStatus() const override;
 
@@ -210,21 +209,30 @@ public:
     return impl_->Write(name, type);
   }
 
-private:
+protected:
   friend class Pipeline;
+  friend class StringTable;
 
   PTable(typename TableImpl<OutT>::PtrType ptr) : impl_(std::move(ptr)) {}
 
   typename TableImpl<OutT>::PtrType impl_;
 };
 
-using StringStream = PTable<std::string>;
+class StringTable : public PTable<std::string> {
+  friend class Pipeline;
+
+ public:
+  PTable<rapidjson::Document> AsJson() const;
+
+ protected:
+  StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
+};
 
 class Pipeline {
  public:
-  StringStream ReadText(const std::string& name, const std::vector<std::string>& globs);
+  StringTable ReadText(const std::string& name, const std::vector<std::string>& globs);
 
-  StringStream ReadText(const std::string& name, const std::string& glob) {
+  StringTable ReadText(const std::string& name, const std::string& glob) {
     return ReadText(name, std::vector<std::string>{glob});
   }
 
@@ -258,12 +266,33 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
   } else {
     return [wrapper = DoContext<OutT>(&out_, context)]
     (RawRecord&& r) mutable {
-      wrapper.Write(std::move(r));
+      wrapper.Write(RecordTraits<OutT>::Parse(std::move(r)));
     };
   }
 }
 
 inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
 template <typename T> Output<T>::Output(Output&&) noexcept = default;
+
+template <> struct RecordTraits<rapidjson::Document> {
+
+  static std::string Serialize(rapidjson::Document&& doc) {
+    rapidjson::StringBuffer s;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(s);
+    doc.Accept(writer);
+
+    std::string res = s.GetString();
+    res.push_back('\n');
+    return res;
+  }
+
+  static rapidjson::Document Parse(std::string&& tmp) {
+    rapidjson::Document doc;
+    constexpr unsigned kFlags = rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag;
+    doc.Parse<kFlags>(tmp.c_str(), tmp.size());
+    return doc;
+  }
+};
+
 
 }  // namespace mr3
