@@ -272,7 +272,9 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
 }
 
 inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
-template <typename T> Output<T>::Output(Output&&) noexcept = default;
+template <typename T> Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_),
+  shard_op_(std::move(o.shard_op_)) {
+}
 
 template <> struct RecordTraits<rapidjson::Document> {
 
