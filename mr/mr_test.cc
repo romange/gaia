@@ -2,25 +2,136 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "mr/pipeline.h"
+#include <gmock/gmock.h>
+
+#include "absl/strings/str_join.h"
 #include "base/gtest.h"
+#include "base/logging.h"
+
+#include "util/asio/io_context_pool.h"
 
 namespace mr3 {
 
+using namespace std;
+using namespace util;
+using namespace boost;
+using testing::Pair;
+using testing::Contains;
+using testing::UnorderedElementsAre;
+using testing::ElementsAre;
+using testing::UnorderedElementsAreArray;
+
+using ShardedOutput = std::unordered_map<ShardId, std::vector<string>>;
+
+void PrintTo(const ShardId& src, std::ostream* os) {
+  if (absl::holds_alternative<uint32_t>(src)) {
+    *os << absl::get<uint32_t>(src);
+  } else {
+    *os << absl::get<std::string>(src);
+  }
+}
+
+
+class TestContext : public RawContext {
+  ShardedOutput& outp_;
+  fibers::mutex& mu_;
+ public:
+  TestContext(ShardedOutput* outp, fibers::mutex* mu) : outp_(*outp), mu_(*mu) {}
+
+  void WriteInternal(const ShardId& shard_id, std::string&& record) {
+    std::lock_guard<fibers::mutex> lk(mu_);
+
+    outp_[shard_id].push_back(record);
+  }
+
+};
+
+class TestRunner : public Runner {
+ public:
+  void Init() final;
+
+  void Shutdown() final;
+
+  RawContext* CreateContext() final;
+
+  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
+
+  // Read file and fill queue. This function must be fiber-friendly.
+  void ProcessFile(const std::string& filename, pb::WireFormat::Type type,
+                   RecordQueue* queue) final;
+
+  void AddRecords(const string& fl, const std::vector<string>& records) {
+    std::copy(records.begin(), records.end(), back_inserter(fs_[fl]));
+  }
+
+  const ShardedOutput& out() const { return out_; }
+
+ private:
+  std::unordered_map<string, std::vector<string>> fs_;
+  ShardedOutput out_;
+  fibers::mutex mu_;
+};
+
+void TestRunner::Init() {}
+
+void TestRunner::Shutdown() {}
+
+RawContext* TestRunner::CreateContext() { return new TestContext(&out_, &mu_); }
+
+void TestRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
+  auto it = fs_.find(glob);
+  if (it != fs_.end()) {
+    cb(it->first);
+  }
+}
+
+// Read file and fill queue. This function must be fiber-friendly.
+void TestRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
+                             RecordQueue* queue) {
+  auto it = fs_.find(filename);
+  CHECK(it != fs_.end());
+  for (const auto& str : it->second) {
+    queue->Push(str);
+  }
+}
+
 class MrTest : public testing::Test {
  protected:
-  void SetUp() final {}
+  void SetUp() final {
+    pool_.reset(new IoContextPool{1});
+    pool_->Run();
+  }
 
-  void TearDown() final {}
+  void TearDown() final { pool_.reset(); }
+
+  auto MatchShard(const string& sh_name, const vector<string>& elems) {
+    return Pair(ShardId{sh_name}, UnorderedElementsAreArray(elems));
+  }
+
+  std::unique_ptr<IoContextPool> pool_;
+  Pipeline pipeline_;
+  TestRunner runner_;
 };
 
 TEST_F(MrTest, Basic) {
-  Pipeline p;
-  StringTable str1 = p.ReadText("foo", "/tmp/bar");
+  EXPECT_EQ(ShardId{1}, ShardId{1});
+  EXPECT_NE(ShardId{1}, ShardId{"foo"});
+
+  StringTable str1 = pipeline_.ReadText("read_bar", "bar.txt");
   str1.Write("new_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
       .WithSharding([](const std::string& rec) { return "shard1"; });
 
-  PTable<rapidjson::Document> json_table = str1.AsJson();
+  vector<string> elements{{"1", "2", "3", "4"}};
+
+  runner_.AddRecords("bar.txt", elements);
+  pipeline_.Run(pool_.get(), &runner_);
+
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
+}
+
+TEST_F(MrTest, Json) {
+  PTable<rapidjson::Document> json_table = pipeline_.ReadText("read_bar", "bar.txt").AsJson();
   auto json_shard_func = [](const rapidjson::Document& doc) {
     return doc.HasMember("foo") ? "shard0" : "shard1";
   };

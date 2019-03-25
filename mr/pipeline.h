@@ -34,6 +34,7 @@ class Runner {
 };
 
 class Pipeline {
+  friend class TableBase;
  public:
   Pipeline();
   ~Pipeline();
@@ -44,15 +45,15 @@ class Pipeline {
     return ReadText(name, std::vector<std::string>{glob});
   }
 
-  const InputBase& input(const std::string& name) const;
-
   void Run(util::IoContextPool* pool, Runner* runner);
 
  private:
+  const InputBase* CheckedInput(const std::string& name) const;
+
   struct Executor;
 
-  std::vector<std::unique_ptr<InputBase>> inputs_;
-  std::vector<std::shared_ptr<TableBase>> tables_;
+  std::unordered_map<std::string, std::unique_ptr<InputBase>> inputs_;
+  std::vector<boost::intrusive_ptr<TableBase>> tables_;
 
   std::unique_ptr<Executor> executor_;
 };

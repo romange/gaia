@@ -5,11 +5,13 @@
 #pragma once
 
 #include <functional>
+
+#include <boost/smart_ptr/intrusive_ptr.hpp>
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
-#include "absl/types/variant.h"
 
+#include "absl/types/variant.h"
 #include "base/type_traits.h"
 #include "file/file.h"
 #include "mr/mr3.pb.h"
@@ -18,9 +20,10 @@
 #include "util/status.h"
 
 namespace mr3 {
-
+class Pipeline;
 class TableBase;
 class StringTable;
+
 template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
 
@@ -44,7 +47,13 @@ class InputBase {
   pb::Input input_;
 };
 
-using ShardId = absl::variant<uint32_t, std::string>;
+struct ShardId : public absl::variant<uint32_t, std::string> {
+  using Parent = absl::variant<uint32_t, std::string>;
+
+  using Parent::Parent;
+
+  ShardId() = default;
+};
 
 
 class OutputBase {
@@ -151,7 +160,7 @@ class TableBase {
   using RawRecord = std::string;
   typedef std::function<void(RawRecord&& record)> DoFn;
 
-  TableBase(const std::string& nm) {
+  TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) {
     op_.set_op_name(nm);
   }
 
@@ -162,15 +171,29 @@ class TableBase {
   virtual util::Status InitializationStatus() const { return util::Status::OK; }
 
   const pb::Operator& op() const { return op_;}
+  pb::Operator* mutable_op() { return &op_; }
+
+  friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
+    tbl->use_count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  friend void intrusive_ptr_release(TableBase* tbl) noexcept {
+    if (1 == tbl->use_count_.fetch_sub(1, std::memory_order_release)) {
+      // See connection_handler.h {intrusive_ptr_release} implementation
+      // for memory barriers explanation.
+      std::atomic_thread_fence(std::memory_order_acquire);
+      delete tbl;
+    }
+  }
+
+  Pipeline* pipeline() const { return pipeline_; }
 
  protected:
   pb::Operator op_;
+  Pipeline* pipeline_;
+  std::atomic<std::uint32_t> use_count_{0};
 
-  void SetOutput(const std::string& name, pb::WireFormat::Type type) {
-    auto* out = op_.mutable_output();
-    out->set_name(name);
-    out->mutable_format()->set_type(type);
-  }
+  void SetOutput(const std::string& name, pb::WireFormat::Type type);
 };
 
 // Currently the input type is hard-coded - string.
@@ -182,9 +205,9 @@ template <typename OutT> class TableImpl : public TableBase {
   using ContextType = DoContext<OutT>;
 
   // Could be intrusive_ptr as well.
-  using PtrType = std::shared_ptr<TableImpl<OutT>>;
+  using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
 
-  TableImpl(const std::string& name) : TableBase(name) {}
+  TableImpl(const std::string& name, Pipeline* owner) : TableBase(name, owner) {}
 
   Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
     SetOutput(name, type);
@@ -285,3 +308,13 @@ template <> struct RecordTraits<rapidjson::Document> {
 
 
 }  // namespace mr3
+
+namespace std {
+
+template<> struct hash<mr3::ShardId> {
+  size_t operator()(const mr3::ShardId& sid) const {
+    return hash<mr3::ShardId::Parent>{}(sid);
+  }
+};
+
+}  // namespace std

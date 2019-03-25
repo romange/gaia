@@ -22,6 +22,7 @@ Pipeline::Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(25
 thread_local std::unique_ptr<Pipeline::Executor::PerIoStruct> Pipeline::Executor::per_io_;
 
 void Pipeline::Executor::PerIoStruct::Shutdown() {
+  record_q.StartClosing();
   process_fd.join();
 
   if (map_fd.joinable()) {
@@ -50,58 +51,53 @@ void Pipeline::Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::End";
 }
 
-void Pipeline::Executor::Init() {
-  runner_->Init();
-}
+void Pipeline::Executor::Init() { runner_->Init(); }
 
 void Pipeline::Executor::Stop() {
-  pool_->AwaitOnAll([&](IoContext&) {
-    per_io_->stop_early = true;
-  });
+  pool_->AwaitOnAll([&](IoContext&) { per_io_->stop_early = true; });
 }
 
-void Pipeline::Executor::Run(const InputBase* input, TableBase* tb) {
-  CHECK(input && input->msg().file_spec_size() > 0);
-  CHECK(input->msg().has_format());
+void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableBase* tb) {
   CHECK_STATUS(tb->InitializationStatus());
-
-  LOG(INFO) << "Running on input " << input->msg().name();
-
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-    per_io_->process_fd =
-        fibers::fiber{&Executor::ProcessFiles, this, input->msg().format().type()};
+    per_io_->process_fd = fibers::fiber{&Executor::ProcessFiles, this};
     per_io_->do_context.reset(runner_->CreateContext());
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
   });
 
-  for (const auto& file_spec : input->msg().file_spec()) {
-    runner_->ExpandGlob(file_spec.url_glob(), [this](const std::string& nm) {
-      channel_op_status st = file_name_q_.push(nm);
-      CHECK_EQ(channel_op_status::success, st);
-    });
+  for (const auto& input : inputs) {
+    CHECK(input && input->msg().file_spec_size() > 0);
+    CHECK(input->msg().has_format());
+    LOG(INFO) << "Running on input " << input->msg().name();
+
+    for (const auto& file_spec : input->msg().file_spec()) {
+      runner_->ExpandGlob(file_spec.url_glob(), [&](const std::string& nm) {
+        channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
+        CHECK_EQ(channel_op_status::success, st);
+      });
+    }
   }
 }
 
-void Pipeline::Executor::ProcessFiles(pb::WireFormat::Type input_type) {
+void Pipeline::Executor::ProcessFiles() {
   PerIoStruct* trd_local = per_io_.get();
-  string file_name;
+  FileInput file_input;
   uint64_t cnt = 0;
 
   while (!trd_local->stop_early) {
-    channel_op_status st = file_name_q_.pop(file_name);
+    channel_op_status st = file_name_q_.pop(file_input);
     if (st == channel_op_status::closed)
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    runner_->ProcessFile(file_name, input_type, &trd_local->record_q);
+    runner_->ProcessFile(file_input.first, file_input.second->format().type(),
+                         &trd_local->record_q);
   }
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
-  trd_local->record_q.StartClosing();
 }
-
 
 void Pipeline::Executor::MapFiber(TableBase* sb) {
   auto& record_q = per_io_->record_q;

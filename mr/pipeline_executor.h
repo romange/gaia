@@ -16,7 +16,9 @@ namespace mr3 {
 
 class Pipeline::Executor {
   using StringQueue = util::fibers_ext::SimpleChannel<std::string>;
-  using FileNameQueue = ::boost::fibers::buffered_channel<std::string>;
+
+  using FileInput = std::pair<std::string, const pb::Input*>;
+  using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
 
   struct PerIoStruct {
     unsigned index;
@@ -36,7 +38,7 @@ class Pipeline::Executor {
   ~Executor();
 
   void Init();
-  void Run(const InputBase* input, TableBase* ss);
+  void Run(const std::vector<const InputBase*>& inputs, TableBase* ss);
 
   // Stops the executor in the middle.
   void Stop();
@@ -46,14 +48,13 @@ class Pipeline::Executor {
  private:
   // External, disk thread that reads files from disk and pumps data into record_q.
   // One per IO thread.
-  void ProcessFiles(pb::WireFormat::Type tp);
-  uint64_t ProcessText(file::ReadonlyFile* fd);
+  void ProcessFiles();
 
   void MapFiber(TableBase* sb);
 
   util::IoContextPool* pool_;
   FileNameQueue file_name_q_;
-  std::unique_ptr<Runner> runner_;
+  Runner* runner_;
 
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };

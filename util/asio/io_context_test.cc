@@ -65,6 +65,7 @@ class CancelImpl final : public IoContext::Cancellable {
   bool cancel_ = false;
   bool &finished_;
   fibers::fiber fb_;
+
  public:
   CancelImpl(bool *finished) : finished_(*finished) {
   }
