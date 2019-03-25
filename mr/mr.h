@@ -121,6 +121,7 @@ class RawContext {
  public:
   virtual ~RawContext();
 
+  virtual void Flush() {}
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };
@@ -228,20 +229,6 @@ class StringTable : public PTable<std::string> {
   StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
 };
 
-class Pipeline {
- public:
-  StringTable ReadText(const std::string& name, const std::vector<std::string>& globs);
-
-  StringTable ReadText(const std::string& name, const std::string& glob) {
-    return ReadText(name, std::vector<std::string>{glob});
-  }
-
-  const InputBase& input(const std::string& name) const;
-
- private:
-  std::vector<std::unique_ptr<InputBase>> inputs_;
-  std::vector<std::shared_ptr<TableBase>> tables_;
-};
 
 template <typename OutT>
 Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
