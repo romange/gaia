@@ -222,6 +222,23 @@ TEST_F(IoContextTest, Glog) {
   EXPECT_GE(32, num_calls);
 }
 
+TEST_F(IoContextTest, EventCount) {
+  std::atomic_long val{0};
+  fibers_ext::EventCount ec;
+
+  auto cb = [&] {
+    SleepForMilliseconds(200);
+    val = 1;
+    ec.notify();
+  };
+
+  pool_->GetNextContext().AwaitSafe([&] {
+    std::thread t1(cb);
+    ec.await([&] { return val > 0;});
+    t1.join();
+  });
+}
+
 static void BM_RunOneNoLock(benchmark::State &state) {
   io_context cntx(1);  // no locking
 
