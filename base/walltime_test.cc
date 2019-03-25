@@ -73,16 +73,6 @@ TEST_F(WalltimeTest, ClockRes) {
   EXPECT_LE(ts.tv_nsec, 1000000);
 }
 
-TEST_F(WalltimeTest, CoarseMonotonic) {
-  for (int i = 0; i < 10; ++i) {
-    MicrosecondsInt64 coarse = Timer::Usec();
-    MicrosecondsInt64 exact = GetMonotonicMicros();
-    EXPECT_LE(coarse, exact);
-    EXPECT_LE(exact - coarse, 8000);
-    SleepMicros(1000);
-  }
-}
-
 TEST_F(WalltimeTest, TimerMonotonic) {
   MicrosecondsInt64 start = GetMonotonicMicros();
   if (FLAGS_test_sleep_delay_sec >= 0) {
