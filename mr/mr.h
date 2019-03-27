@@ -131,6 +131,7 @@ class RawContext {
   virtual ~RawContext();
 
   virtual void Flush() {}
+
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };

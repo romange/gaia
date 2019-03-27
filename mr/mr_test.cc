@@ -44,6 +44,8 @@ class TestContext : public RawContext {
 
     outp_[shard_id].push_back(record);
   }
+
+  void Assign(pb::Output* output) final {};
 };
 
 class TestRunner : public Runner {

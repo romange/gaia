@@ -63,6 +63,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
+
     per_io_->process_fd = fibers::fiber{&Executor::ProcessFiles, this};
     per_io_->do_context.reset(runner_->CreateContext());
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);

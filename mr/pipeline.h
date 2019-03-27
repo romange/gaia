@@ -24,7 +24,7 @@ class Runner {
 
   virtual void Shutdown() = 0;
 
-  virtual RawContext* CreateContext() = 0;
+  virtual RawContext* CreateContext(const pb::Operator& op) = 0;
 
   virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
 
