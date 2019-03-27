@@ -9,7 +9,7 @@
 namespace mr3 {
 using namespace std;
 
-Pipeline::Pipeline() {}
+Pipeline::Pipeline(util::IoContextPool* pool) : pool_(pool) {}
 Pipeline::~Pipeline() {}
 
 const InputBase* Pipeline::CheckedInput(const std::string& name) const {
@@ -35,7 +35,7 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
   return StringTable{ptr};
 }
 
-void Pipeline::Run(util::IoContextPool* pool, Runner* runner) {
+void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
   boost::intrusive_ptr<TableBase> ptr = tables_.front();
 
@@ -46,7 +46,7 @@ void Pipeline::Run(util::IoContextPool* pool, Runner* runner) {
     return;
   }
 
-  executor_.reset(new Executor{pool, runner});
+  executor_.reset(new Executor{pool_, runner});
   executor_->Init();
 
   std::vector<const InputBase*> inputs;

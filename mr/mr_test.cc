@@ -44,8 +44,6 @@ class TestContext : public RawContext {
 
     outp_[shard_id].push_back(record);
   }
-
-  void Assign(pb::Output* output) final {};
 };
 
 class TestRunner : public Runner {
@@ -54,7 +52,7 @@ class TestRunner : public Runner {
 
   void Shutdown() final;
 
-  RawContext* CreateContext() final;
+  RawContext* CreateContext(const pb::Operator& op) final;
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 
@@ -78,7 +76,9 @@ void TestRunner::Init() {}
 
 void TestRunner::Shutdown() {}
 
-RawContext* TestRunner::CreateContext() { return new TestContext(&out_, &mu_); }
+RawContext* TestRunner::CreateContext(const pb::Operator& op) {
+  return new TestContext(&out_, &mu_);
+}
 
 void TestRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
   auto it = fs_.find(glob);
@@ -102,6 +102,7 @@ class MrTest : public testing::Test {
   void SetUp() final {
     pool_.reset(new IoContextPool{1});
     pool_->Run();
+    pipeline_.reset(new Pipeline(pool_.get()));
   }
 
   void TearDown() final { pool_.reset(); }
@@ -114,7 +115,7 @@ class MrTest : public testing::Test {
   }
 
   std::unique_ptr<IoContextPool> pool_;
-  Pipeline pipeline_;
+  std::unique_ptr<Pipeline> pipeline_;
   TestRunner runner_;
 
   vector<vector<string>> tmp_;
@@ -124,7 +125,7 @@ TEST_F(MrTest, Basic) {
   EXPECT_EQ(ShardId{1}, ShardId{1});
   EXPECT_NE(ShardId{1}, ShardId{"foo"});
 
-  StringTable str1 = pipeline_.ReadText("read_bar", "bar.txt");
+  StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
   str1.Write("new_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
       .WithSharding([](const std::string& rec) { return "shard1"; });
@@ -132,13 +133,13 @@ TEST_F(MrTest, Basic) {
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
-  pipeline_.Run(pool_.get(), &runner_);
+  pipeline_->Run(&runner_);
 
   EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
 }
 
 TEST_F(MrTest, Json) {
-  PTable<rapidjson::Document> json_table = pipeline_.ReadText("read_bar", "bar.txt").AsJson();
+  PTable<rapidjson::Document> json_table = pipeline_->ReadText("read_bar", "bar.txt").AsJson();
   auto json_shard_func = [](const rapidjson::Document& doc) {
     return doc.HasMember("foo") ? "shard0" : "shard1";
   };
@@ -154,7 +155,7 @@ TEST_F(MrTest, Json) {
   vector<string> elements{kJson2, kJson1, kJson3};
 
   runner_.AddRecords("bar.txt", elements);
-  pipeline_.Run(pool_.get(), &runner_);
+  pipeline_->Run(&runner_);
   EXPECT_THAT(runner_.out(), UnorderedElementsAre(MatchShard("shard0", {kJson3, kJson1}),
                                                   MatchShard("shard1", {kJson2})));
 }

@@ -10,7 +10,8 @@
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
-#include "mr/mr_executor.h"
+#include "mr/pipeline.h"
+#include "mr/local_runner.h"
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
@@ -51,12 +52,13 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Started http server on port " << port;
   server->Run();
 
-  Pipeline p;
-
-  Executor executor("/tmp/mr3", &pool);
+  Pipeline p(&pool);
+  LocalRunner runner("/tmp/mr3");
+  /*Executor executor(, &pool);
   executor.Init();
+*/
 
-  server->CallOnStopSignal([&] { executor.Stop();});
+  server->CallOnStopSignal([&] { p.Stop();});
 
   /*
 1. How do we allow flush hooks ?
@@ -122,8 +124,7 @@ void Call(TOwner *p) {
   merged.
 */
 
-  // TODO: Should return Input<string> or something which can apply an operator.
-  StringStream& ss = p.ReadText("inp1", inputs);
+  StringTable ss = p.ReadText("inp1", inputs);
   auto& outp =
   ss/*.Apply([](std::string&& inp, DoContext<std::string>* context) {
       context->Write(inp.substr(0, 5));
@@ -133,8 +134,7 @@ void Call(TOwner *p) {
     outp.AndCompress(pb::Output::GZIP);
   }
 
-  executor.Run(&p.input("inp1"), &ss);
-  executor.Shutdown();
+  p.Run(&runner);
 
   server->Stop(true);
   pool.Stop();

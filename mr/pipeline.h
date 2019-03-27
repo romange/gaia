@@ -36,7 +36,7 @@ class Runner {
 class Pipeline {
   friend class TableBase;
  public:
-  Pipeline();
+  explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
 
   StringTable ReadText(const std::string& name, const std::vector<std::string>& globs);
@@ -45,13 +45,17 @@ class Pipeline {
     return ReadText(name, std::vector<std::string>{glob});
   }
 
-  void Run(util::IoContextPool* pool, Runner* runner);
+  void Run(Runner* runner);
+
+  // Stops/breaks the run.
+  void Stop();
 
  private:
   const InputBase* CheckedInput(const std::string& name) const;
 
   struct Executor;
 
+  util::IoContextPool* pool_;
   std::unordered_map<std::string, std::unique_ptr<InputBase>> inputs_;
   std::vector<boost::intrusive_ptr<TableBase>> tables_;
 

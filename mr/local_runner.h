@@ -16,7 +16,7 @@ class LocalRunner : public Runner {
 
   void Shutdown() final;
 
-  RawContext* CreateContext() final;
+  RawContext* CreateContext(const pb::Operator& op) final;
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 

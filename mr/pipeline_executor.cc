@@ -65,7 +65,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
     per_io_.reset(new PerIoStruct(index));
 
     per_io_->process_fd = fibers::fiber{&Executor::ProcessFiles, this};
-    per_io_->do_context.reset(runner_->CreateContext());
+    per_io_->do_context.reset(runner_->CreateContext(tb->op()));
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
   });
 

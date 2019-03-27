@@ -71,17 +71,13 @@ class GlobalDestFileManager {
   fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 };
 
-
 class LocalContext : public RawContext {
  public:
-  explicit LocalContext(GlobalDestFileManager* mgr);
+  explicit LocalContext(const pb::Output& output, GlobalDestFileManager* mgr);
   ~LocalContext();
 
-  void Assign(pb::Output* output) final {
-    output_ = output;
-  }
-
   void Flush();
+
  private:
   void WriteInternal(const ShardId& shard_id, std::string&& record) final;
 
@@ -89,10 +85,9 @@ class LocalContext : public RawContext {
 
   google::dense_hash_map<StringPiece, BufferedWriter*> custom_shard_files_;
 
-  pb::Output* output_ = nullptr;
+  const pb::Output& output_;
   GlobalDestFileManager* mgr_;
 };
-
 
 GlobalDestFileManager::GlobalDestFileManager(const std::string& root_dir,
                                              fibers_ext::FiberQueueThreadPool* fq)
@@ -149,7 +144,7 @@ struct LocalContext::BufferedWriter {
 LocalContext::BufferedWriter::~BufferedWriter() { CHECK(buffer.empty()); }
 
 void LocalContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
-                                            fibers_ext::FiberQueueThreadPool* fq) {
+                                         fibers_ext::FiberQueueThreadPool* fq) {
   for (auto v : src) {
     buffer.append(v.data(), v.size());
   }
@@ -161,7 +156,8 @@ void LocalContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
   }
 }
 
-LocalContext::LocalContext(GlobalDestFileManager* mgr) : mgr_(mgr) {
+LocalContext::LocalContext(const pb::Output& out, GlobalDestFileManager* mgr)
+    : output_(out), mgr_(mgr) {
   custom_shard_files_.set_empty_key(StringPiece{});
 }
 
@@ -172,7 +168,7 @@ void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) 
 
   auto it = custom_shard_files_.find(shard_name);
   if (it == custom_shard_files_.end()) {
-    auto res = mgr_->Get(shard_name, );
+    auto res = mgr_->Get(shard_name, output_);
     StringPiece key = res.first;
 
     unsigned index =
@@ -203,33 +199,27 @@ struct LocalRunner::Impl {
   fibers_ext::FiberQueueThreadPool fq_pool;
 
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
-}
+};
 
 LocalRunner::LocalRunner(const std::string& data_dir) : impl_(new Impl(data_dir)) {}
 
 LocalRunner::~LocalRunner() {}
 
-  void LocalRunner::Init() {
-    file_util::RecursivelyCreateDir(impl_->data_dir, 0750);
-  }
-
-  void LocalRunner::Shutdown() {
-
-  }
-
-  RawContext* LocalRunner::CreateContext() {
-
-  }
-
-  void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
-
-  }
-
-  // Read file and fill queue. This function must be fiber-friendly.
-  void LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
-                                RecordQueue* queue) {
-
+void LocalRunner::Init() {
+  file_util::RecursivelyCreateDir(impl_->data_dir, 0750);
+  impl_->dest_mgr.reset(new GlobalDestFileManager(impl_->data_dir, &impl_->fq_pool));
 }
 
-}  // namespace mr3
+void LocalRunner::Shutdown() {}
 
+RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
+  return new LocalContext(op.output(), impl_->dest_mgr.get());
+}
+
+void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {}
+
+// Read file and fill queue. This function must be fiber-friendly.
+void LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
+                              RecordQueue* queue) {}
+
+}  // namespace mr3
