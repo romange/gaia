@@ -63,6 +63,8 @@ void Pipeline::Run(Runner* runner) {
   }
 
   executor_->Run(inputs, ptr.get());
+  VLOG(1) << "Executor finished running on " << op.op_name();
+
   executor_->Shutdown();
 }
 

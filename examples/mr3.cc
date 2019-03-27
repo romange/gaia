@@ -58,7 +58,10 @@ int main(int argc, char** argv) {
   executor.Init();
 */
 
-  server->CallOnStopSignal([&] { p.Stop();});
+  server->CallOnStopSignal([&] {
+    p.Stop();
+    runner.Stop();
+  });
 
   /*
 1. How do we allow flush hooks ?
@@ -135,6 +138,7 @@ void Call(TOwner *p) {
   }
 
   p.Run(&runner);
+  LOG(INFO) << "After pipeline run";
 
   server->Stop(true);
   pool.Stop();

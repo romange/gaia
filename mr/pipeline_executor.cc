@@ -57,6 +57,7 @@ void Pipeline::Executor::Shutdown() {
 void Pipeline::Executor::Init() { runner_->Init(); }
 
 void Pipeline::Executor::Stop() {
+  file_name_q_.close();
   pool_->AwaitOnAll([&](IoContext&) { per_io_->stop_early = true; });
 }
 
@@ -77,12 +78,19 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
     CHECK(input->msg().has_format());
     LOG(INFO) << "Running on input " << input->msg().name();
 
-    for (const auto& file_spec : input->msg().file_spec()) {
-      runner_->ExpandGlob(file_spec.url_glob(), [&](const std::string& nm) {
-        channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
+    auto cb = [&](const std::string& nm) {
+      channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
+      if (st !=channel_op_status::closed) {
         CHECK_EQ(channel_op_status::success, st);
-      });
+      }
+    };
+
+    for (const auto& file_spec : input->msg().file_spec()) {
+      runner_->ExpandGlob(file_spec.url_glob(), cb);
     }
+
+    if (file_name_q_.is_closed())
+      break;
   }
 }
 
