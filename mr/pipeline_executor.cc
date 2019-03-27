@@ -58,7 +58,7 @@ void Pipeline::Executor::Stop() {
 }
 
 void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableBase* tb) {
-  CHECK_STATUS(tb->InitializationStatus());
+  // CHECK_STATUS(tb->InitializationStatus());
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {

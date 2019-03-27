@@ -164,11 +164,14 @@ class TableBase {
     op_.set_op_name(nm);
   }
 
+  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {
+  }
+
   virtual ~TableBase() {}
 
   virtual DoFn SetupDoFn(RawContext* context) = 0;
 
-  virtual util::Status InitializationStatus() const { return util::Status::OK; }
+  // virtual util::Status InitializationStatus() const { return util::Status::OK; }
 
   const pb::Operator& op() const { return op_;}
   pb::Operator* mutable_op() { return &op_; }
@@ -198,8 +201,6 @@ class TableBase {
 
 // Currently the input type is hard-coded - string.
 template <typename OutT> class TableImpl : public TableBase {
-  Output<OutT> out_;
-
  public:
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
@@ -207,7 +208,7 @@ template <typename OutT> class TableImpl : public TableBase {
   // Could be intrusive_ptr as well.
   using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
 
-  TableImpl(const std::string& name, Pipeline* owner) : TableBase(name, owner) {}
+  using TableBase::TableBase;
 
   Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
     SetOutput(name, type);
@@ -215,12 +216,13 @@ template <typename OutT> class TableImpl : public TableBase {
     return out_;
   }
 
-  util::Status InitializationStatus() const override;
+  // util::Status InitializationStatus() const override;
 
  protected:
   DoFn SetupDoFn(RawContext* context) override;
 
  private:
+  Output<OutT> out_;
   std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
 
@@ -259,13 +261,10 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
   return *this;
 }
 
-template <typename OutT> util::Status TableImpl<OutT>::InitializationStatus() const {
-  if (!std::is_same<OutputType, RawRecord>::value) {
-    if (!do_fn_)
-      return util::Status("Apply function is not set");
-  }
+/*template <typename OutT> util::Status TableImpl<OutT>::InitializationStatus() const {
   return util::Status::OK;
 }
+*/
 
 template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
@@ -288,22 +287,8 @@ template <typename T> Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_
 
 template <> struct RecordTraits<rapidjson::Document> {
 
-  static std::string Serialize(rapidjson::Document&& doc) {
-    rapidjson::StringBuffer s;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(s);
-    doc.Accept(writer);
-
-    std::string res = s.GetString();
-    res.push_back('\n');
-    return res;
-  }
-
-  static rapidjson::Document Parse(std::string&& tmp) {
-    rapidjson::Document doc;
-    constexpr unsigned kFlags = rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag;
-    doc.Parse<kFlags>(tmp.c_str(), tmp.size());
-    return doc;
-  }
+  static std::string Serialize(rapidjson::Document&& doc);
+  static rapidjson::Document Parse(std::string&& tmp);
 };
 
 

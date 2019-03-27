@@ -1,8 +1,9 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include "mr/pipeline.h"
 #include <gmock/gmock.h>
+
+#include "mr/pipeline.h"
 
 #include "absl/strings/str_join.h"
 #include "base/gtest.h"
@@ -15,10 +16,10 @@ namespace mr3 {
 using namespace std;
 using namespace util;
 using namespace boost;
-using testing::Pair;
 using testing::Contains;
-using testing::UnorderedElementsAre;
 using testing::ElementsAre;
+using testing::Pair;
+using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
 
 using ShardedOutput = std::unordered_map<ShardId, std::vector<string>>;
@@ -31,10 +32,10 @@ void PrintTo(const ShardId& src, std::ostream* os) {
   }
 }
 
-
 class TestContext : public RawContext {
   ShardedOutput& outp_;
   fibers::mutex& mu_;
+
  public:
   TestContext(ShardedOutput* outp, fibers::mutex* mu) : outp_(*outp), mu_(*mu) {}
 
@@ -43,7 +44,6 @@ class TestContext : public RawContext {
 
     outp_[shard_id].push_back(record);
   }
-
 };
 
 class TestRunner : public Runner {
@@ -105,12 +105,17 @@ class MrTest : public testing::Test {
   void TearDown() final { pool_.reset(); }
 
   auto MatchShard(const string& sh_name, const vector<string>& elems) {
-    return Pair(ShardId{sh_name}, UnorderedElementsAreArray(elems));
+    // matcher references the array, so we must to store it in case we pass a temporary rvalue.
+    tmp_.push_back(elems);
+
+    return Pair(ShardId{sh_name}, UnorderedElementsAreArray(tmp_.back()));
   }
 
   std::unique_ptr<IoContextPool> pool_;
   Pipeline pipeline_;
   TestRunner runner_;
+
+  vector<vector<string>> tmp_;
 };
 
 TEST_F(MrTest, Basic) {
@@ -122,7 +127,7 @@ TEST_F(MrTest, Basic) {
       .AndCompress(pb::Output::GZIP, 1)
       .WithSharding([](const std::string& rec) { return "shard1"; });
 
-  vector<string> elements{{"1", "2", "3", "4"}};
+  vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
   pipeline_.Run(pool_.get(), &runner_);
@@ -139,6 +144,17 @@ TEST_F(MrTest, Json) {
   json_table.Write("json_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
       .WithSharding(json_shard_func);
+
+  const char kJson1[] = R"({"foo":"bar"})";
+  const char kJson2[] = R"({"id":1})";
+  const char kJson3[] = R"({"foo":null})";
+
+  vector<string> elements{kJson2, kJson1, kJson3};
+
+  runner_.AddRecords("bar.txt", elements);
+  pipeline_.Run(pool_.get(), &runner_);
+  EXPECT_THAT(runner_.out(), UnorderedElementsAre(MatchShard("shard0", {kJson3, kJson1}),
+                                                  MatchShard("shard1", {kJson2})));
 }
 
 }  // namespace mr3

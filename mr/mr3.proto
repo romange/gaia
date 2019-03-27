@@ -7,7 +7,6 @@ package mr3.pb;
 
 message WireFormat {
   enum Type {
-    JSON = 1;  // Do we need it? TXT might cover json use-case.
     LST = 2;
     TXT = 3;
   }
