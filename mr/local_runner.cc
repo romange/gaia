@@ -3,10 +3,16 @@
 //
 #include "mr/local_runner.h"
 
+#include <fcntl.h>
+
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
+
+#include "file/fiber_file.h"
+#include "file/filesource.h"
 #include "file/file_util.h"
 #include "file/gzip_file.h"
+
 #include "util/fibers/fiberqueue_threadpool.h"
 
 namespace mr3 {
@@ -197,9 +203,28 @@ struct LocalRunner::Impl {
   string data_dir;
   std::unique_ptr<GlobalDestFileManager> dest_mgr;
   fibers_ext::FiberQueueThreadPool fq_pool;
+  std::atomic_bool stop_signal_{false};
 
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
+
+  uint64_t ProcessText(file::ReadonlyFile* fd, RecordQueue* queue);
 };
+
+uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* queue) {
+  std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
+
+  file::LineReader lr(src.release(), TAKE_OWNERSHIP);
+  StringPiece result;
+  string scratch;
+
+  uint64_t cnt = 0;
+  while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
+    string tmp{result};
+    ++cnt;
+    queue->Push(std::move(tmp));
+  }
+  return cnt;
+}
 
 LocalRunner::LocalRunner(const std::string& data_dir) : impl_(new Impl(data_dir)) {}
 
@@ -210,16 +235,49 @@ void LocalRunner::Init() {
   impl_->dest_mgr.reset(new GlobalDestFileManager(impl_->data_dir, &impl_->fq_pool));
 }
 
-void LocalRunner::Shutdown() {}
+void LocalRunner::Shutdown() {
+  impl_->dest_mgr.reset();
+  impl_->fq_pool.Shutdown();
+}
 
 RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
   return new LocalContext(op.output(), impl_->dest_mgr.get());
 }
 
-void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {}
+void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
+  std::vector<file_util::StatShort> paths = file_util::StatFiles(glob);
+  for (const auto& v : paths) {
+    if (v.st_mode & S_IFREG) {
+      cb(v.name);
+    }
+  }
+}
 
 // Read file and fill queue. This function must be fiber-friendly.
-void LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
-                              RecordQueue* queue) {}
+size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
+                                RecordQueue* queue) {
+  auto res = file::OpenFiberReadFile(filename, &impl_->fq_pool);
+  if (!res.ok()) {
+    LOG(DFATAL) << "Skipping " << filename << " with " << res.status;
+    return 0;
+  }
+  LOG(INFO) << "Processing file " << filename;
+  std::unique_ptr<file::ReadonlyFile> read_file(res.obj);
+
+  switch (type) {
+    case pb::WireFormat::TXT:
+      return impl_->ProcessText(read_file.release(), queue);
+      break;
+
+    default:
+      LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
+      break;
+  }
+  return 0;
+}
+
+void LocalRunner::Stop() {
+  CHECK_NOTNULL(impl_)->stop_signal_.store(true, std::memory_order_seq_cst);
+}
 
 }  // namespace mr3

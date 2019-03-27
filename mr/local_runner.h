@@ -21,11 +21,13 @@ class LocalRunner : public Runner {
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 
   // Read file and fill queue. This function must be fiber-friendly.
-  void ProcessFile(const std::string& filename, pb::WireFormat::Type type,
-                   RecordQueue* queue) final;
+  size_t ProcessFile(const std::string& filename, pb::WireFormat::Type type,
+                     RecordQueue* queue) final;
+
+  void Stop();
+
  private:
   struct Impl;
-
   std::unique_ptr<Impl> impl_;
 };
 

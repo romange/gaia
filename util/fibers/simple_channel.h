@@ -64,6 +64,8 @@ template <typename T> class SimpleChannel {
     return false;
   }
 
+  bool IsClosing() const { return is_closing_.load(std::memory_order_relaxed); }
+
  private:
   unsigned quiet_pushes_ = 0;
 

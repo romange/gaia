@@ -22,8 +22,11 @@ Pipeline::Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(25
 thread_local std::unique_ptr<Pipeline::Executor::PerIoStruct> Pipeline::Executor::per_io_;
 
 void Pipeline::Executor::PerIoStruct::Shutdown() {
-  record_q.StartClosing();
   process_fd.join();
+
+  // Must follow process_fd because we need first to push all the records to the queue and
+  // then to signal it's closing.
+  record_q.StartClosing();
 
   if (map_fd.joinable()) {
     map_fd.join();
@@ -94,8 +97,8 @@ void Pipeline::Executor::ProcessFiles() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    runner_->ProcessFile(file_input.first, file_input.second->format().type(),
-                         &trd_local->record_q);
+    cnt += runner_->ProcessFile(file_input.first, file_input.second->format().type(),
+                                &trd_local->record_q);
   }
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
 }

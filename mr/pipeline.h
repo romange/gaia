@@ -29,8 +29,9 @@ class Runner {
   virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
 
   // Read file and fill queue. This function must be fiber-friendly.
-  virtual void ProcessFile(const std::string& filename,
-                           pb::WireFormat::Type type, RecordQueue* queue) = 0;
+  // Returns number of records processed.
+  virtual size_t ProcessFile(const std::string& filename,
+                             pb::WireFormat::Type type, RecordQueue* queue) = 0;
 };
 
 class Pipeline {

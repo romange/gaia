@@ -8,8 +8,9 @@
 
 namespace mr3 {
 using namespace std;
+using namespace util;
 
-Pipeline::Pipeline(util::IoContextPool* pool) : pool_(pool) {}
+Pipeline::Pipeline(IoContextPool* pool) : pool_(pool) {}
 Pipeline::~Pipeline() {}
 
 const InputBase* Pipeline::CheckedInput(const std::string& name) const {
@@ -33,6 +34,11 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
   ptr->mutable_op()->add_input_name(name);
 
   return StringTable{ptr};
+}
+
+void Pipeline::Stop() {
+  if (executor_)
+    executor_->Stop();
 }
 
 void Pipeline::Run(Runner* runner) {
