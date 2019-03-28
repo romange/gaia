@@ -240,6 +240,22 @@ TEST_F(IoContextTest, EventCount) {
   });
 }
 
+TEST_F(IoContextTest, AwaitOnAll) {
+  IoContextPool pool(4);
+  pool.Run();
+  constexpr unsigned kSz = 50;
+
+  std::thread ts[kSz];
+  for (unsigned i = 0; i < kSz; ++i) {
+    ts[i] = std::thread([&] {
+      pool.AwaitFiberOnAll([] (IoContext&) {});
+    });
+  }
+  for (unsigned i = 0; i < kSz; ++i) {
+    ts[i].join();
+  }
+}
+
 static void BM_RunOneNoLock(benchmark::State &state) {
   io_context cntx(1);  // no locking
 

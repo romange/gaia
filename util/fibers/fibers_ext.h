@@ -89,25 +89,52 @@ class Done {
 };
 
 class BlockingCounter {
+  class Impl {
+   public:
+    Impl(unsigned count) : count_(count) {}
+    Impl(const Impl&) = delete;
+    void operator=(const Impl&) = delete;
+
+    friend void intrusive_ptr_add_ref(Impl* done) noexcept {
+      done->use_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    friend void intrusive_ptr_release(Impl* impl) noexcept {
+      if (1 == impl->use_count_.fetch_sub(1, std::memory_order_release)) {
+        std::atomic_thread_fence(std::memory_order_acquire);
+        delete impl;
+      }
+    }
+
+   // I suspect all memory order accesses here could be "relaxed" but I do not bother.
+    void Wait() {
+      ec_.await([this] { return 0 == count_.load(std::memory_order_acquire); });
+    }
+
+    void Dec() {
+      if (1 == count_.fetch_sub(1, std::memory_order_acq_rel))
+        ec_.notify();
+    }
+
+   private:
+    friend class BlockingCounter;
+    EventCount ec_;
+    std::atomic<std::uint32_t> use_count_{0};
+    std::atomic_long count_;
+  };
+  using ptr_t = ::boost::intrusive_ptr<Impl>;
+
  public:
-  explicit BlockingCounter(unsigned count) : count_(count) {}
+  explicit BlockingCounter(unsigned count) : impl_(new Impl(count)) {}
 
-  // Producer side -> should decrement the counter.
-  // I suspect all memory order accesses here could be "relaxed" but I do not bother.
-  void Dec() {
-    if (1 == count_.fetch_sub(1, std::memory_order_acq_rel))
-      ec_.notify();
-  }
+  void Dec() { impl_->Dec(); }
 
-  void Wait() {
-    ec_.await([this] { return count_.load(std::memory_order_acquire) == 0; });
-  }
+  void Wait() { impl_->Wait(); }
 
-  void Add(unsigned delta) { count_.fetch_add(delta, std::memory_order_acq_rel); }
+  void Add(unsigned delta) { impl_->count_.fetch_add(delta, std::memory_order_acq_rel); }
 
  private:
-  std::atomic_long count_;
-  EventCount ec_;
+  ptr_t impl_;
 };
 
 class Semaphore {

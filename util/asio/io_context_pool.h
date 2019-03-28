@@ -57,7 +57,9 @@ class IoContextPool {
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
-      context.Async([&context, func = std::forward<Func>(func)]() mutable { func(context); });
+      // func must be copied, it can not be moved, because we dsitribute it into multiple
+      // IoContexts.
+      context.Async([&context, func] { func(context); });
     }
   }
 
@@ -66,14 +68,15 @@ class IoContextPool {
   void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
-      context.Async([&context, i, func = std::forward<Func>(func)]() mutable { func(i, context); });
+      // Copy func on purpose, see above.
+      context.Async([&context, i, func] { func(i, context); });
     }
   }
 
-   // Blocks until all the asynchronous calls to func return.
+  // Blocks until all the asynchronous calls to func return.
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
-    auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
+    auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {
       func(context);
       bc.Dec();
     };
@@ -86,7 +89,7 @@ class IoContextPool {
   template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
   void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
-    auto cb = [&bc, func = std::forward<Func>(func)](unsigned index, IoContext& context) {
+    auto cb = [func = std::forward<Func>(func), bc](unsigned index, IoContext& context) mutable {
       func(index, context);
       bc.Dec();
     };
@@ -106,7 +109,7 @@ class IoContextPool {
   // The callback runs inside a wrapping fiber.
   template <typename Func> void AwaitFiberOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
-    auto cb = [&bc, func = std::forward<Func>(func)](IoContext& context) {
+    auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {
       func(context);
       bc.Dec();
     };
