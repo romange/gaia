@@ -3,6 +3,7 @@
 #include "file/gzip_file.h"
 #include <zlib.h>
 
+#include "absl/strings/str_cat.h"
 #include "base/logging.h"
 
 using util::Status;
@@ -35,9 +36,13 @@ bool GzipFile::Close() {
 }
 
 Status GzipFile::Write(const uint8* buffer, uint64 length) {
+  CHECK_GT(length, 0);
+
   unsigned bytes = gzwrite(gz_file_, buffer, length);
   if (bytes == 0) {
-    return StatusFileError();
+    int err;
+    const char* str = gzerror(gz_file_, &err);
+    return Status(StatusCode::IO_ERROR, absl::StrCat(str, " ", err));
   }
   CHECK_EQ(bytes, length);
 

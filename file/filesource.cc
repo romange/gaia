@@ -59,7 +59,7 @@ util::Status Sink::Append(const strings::ByteRange& slice) {
 
 
 void LineReader::Init(uint32_t buf_log) {
-  CHECK_GT(buf_log, 10);
+  CHECK(buf_log > 10 && buf_log < 28) << buf_log;
   page_size_ = 1 << buf_log;
 
   buf_.reset(new char[page_size_]);

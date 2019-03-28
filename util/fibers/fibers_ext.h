@@ -18,6 +18,12 @@ ostream& operator<<(ostream& o, const ::boost::fibers::channel_op_status op);
 }  // namespace std
 
 namespace util {
+
+enum DoneWaitDirective {
+  AND_NOTHING = 0,
+  AND_RESET = 1
+};
+
 namespace fibers_ext {
 
 // Wrap canonical pattern for condition_variable + bool flag
@@ -55,8 +61,10 @@ class Done {
       }
     }
 
-    void Wait() {
+    void Wait(DoneWaitDirective reset) {
       ec_.await([this] { return ready_.load(std::memory_order_acquire); });
+      if (reset == AND_RESET)
+        ready_.store(false, std::memory_order_release);
     }
 
     // We use EventCount to wake threads without blocking.
@@ -81,7 +89,8 @@ class Done {
   ~Done() {}
 
   void Notify() { impl_->Notify(); }
-  void Wait() { impl_->Wait(); }
+  void Wait(DoneWaitDirective reset = AND_NOTHING) { impl_->Wait(reset); }
+
   void Reset() { impl_->Reset(); }
 
  private:

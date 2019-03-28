@@ -43,7 +43,7 @@ Status StatusFileError() {
 
 namespace {
 
-static size_t read_all(int fd, uint8* buffer, size_t length, size_t offset) {
+static ssize_t read_all(int fd, uint8* buffer, size_t length, size_t offset) {
   size_t left_to_read = length;
   uint8* curr_buf = buffer;
   while (left_to_read > 0) {
