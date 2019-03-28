@@ -124,6 +124,19 @@ TEST_F(FibersTest, MPMC_BoundedQ) {
   ASSERT_TRUE(q.try_dequeue(tmp));
   EXPECT_EQ(6, tmp);
   ASSERT_FALSE(q.try_dequeue(tmp));
+
+
+  base::mpmc_bounded_queue<std::shared_ptr<int>> sh_q(2);
+  int* const ptr = new int(5);
+  ASSERT_TRUE(sh_q.try_enqueue(ptr));
+
+  auto ptr2 = std::make_unique<int>(3);
+  ASSERT_TRUE(sh_q.try_enqueue(std::move(ptr2)));
+  ASSERT_FALSE(ptr2);
+  ptr2 = std::make_unique<int>(3);
+
+  ASSERT_FALSE(sh_q.try_enqueue(std::move(ptr2)));
+  ASSERT_TRUE(ptr2);
 }
 
 }  // namespace fibers_ext
