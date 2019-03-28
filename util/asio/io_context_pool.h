@@ -59,7 +59,7 @@ class IoContextPool {
       IoContext& context = context_arr_[i];
       // func must be copied, it can not be moved, because we dsitribute it into multiple
       // IoContexts.
-      context.Async([&context, func] { func(context); });
+      context.Async([&context, func] () mutable { func(context); });
     }
   }
 
@@ -69,7 +69,7 @@ class IoContextPool {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
       // Copy func on purpose, see above.
-      context.Async([&context, i, func] { func(i, context); });
+      context.Async([&context, i, func] () mutable { func(i, context); });
     }
   }
 
