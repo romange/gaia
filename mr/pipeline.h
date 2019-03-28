@@ -54,7 +54,7 @@ class Pipeline {
  private:
   const InputBase* CheckedInput(const std::string& name) const;
 
-  struct Executor;
+  class Executor;
 
   util::IoContextPool* pool_;
   std::unordered_map<std::string, std::unique_ptr<InputBase>> inputs_;
