@@ -83,8 +83,13 @@ TEST_F(CxxTest, MoveRef) {
   EXPECT_EQ("bar", bar);
 
   string beh = "beh";
+
   DummyFunc(std::move(beh));
   EXPECT_TRUE(beh.empty());
+
+  beh = "beh";
+  DummyFunc(beh);
+  EXPECT_FALSE(beh.empty());
 }
 
 TEST_F(CxxTest, SequenceOrder) {

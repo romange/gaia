@@ -59,7 +59,10 @@ template <typename T> class mpmc_bounded_queue {
 
   ~mpmc_bounded_queue() {}
 
-  bool try_enqueue(T&& data) {
+  // It's super important to leave try_enqueue as template function of free type U.
+  // Otherwise, moveable objects of different from V type (i.e. U) that can be
+  // moved into V will be moved regardless if try_enqueue succeeded.
+  template<typename U> bool try_enqueue(U&& data) {
     size_t pos;
     cell_t* cell;
 
@@ -71,7 +74,7 @@ template <typename T> class mpmc_bounded_queue {
     return true;
   }
 
-  bool try_enqueue(const T& data) {
+  /*bool try_enqueue(const T& data) {
     size_t pos;
     cell_t* cell;
     if (!enqueue_internal(pos, cell))
@@ -80,7 +83,7 @@ template <typename T> class mpmc_bounded_queue {
     cell->data_ = data;
     cell->sequence_.store(pos + 1, std::memory_order_release);
     return true;
-  }
+  }*/
 
   bool try_dequeue(T& data) {
     cell_t* cell;

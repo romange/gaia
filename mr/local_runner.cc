@@ -9,8 +9,8 @@
 #include "base/logging.h"
 
 #include "file/fiber_file.h"
-#include "file/filesource.h"
 #include "file/file_util.h"
+#include "file/filesource.h"
 #include "file/gzip_file.h"
 
 #include "util/fibers/fiberqueue_threadpool.h"
@@ -154,6 +154,7 @@ void LocalContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
   for (auto v : src) {
     buffer.append(v.data(), v.size());
   }
+
   if (buffer.size() >= kFlushLimit) {
     fq->Add(index, [b = std::move(buffer), wr = this->wr] {
       auto status = wr->Write(b);
@@ -222,6 +223,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* que
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
+
     queue->Push(std::move(tmp));
   }
   return cnt;
@@ -261,6 +263,8 @@ size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Typ
                                 RecordQueue* queue) {
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
+
+  opts.prefetch_size = 1 << 19;
   opts.stats = &stats;
 
   auto fl_res = file::OpenFiberReadFile(filename, &impl_->fq_pool, opts);
@@ -281,8 +285,9 @@ size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Typ
       break;
   }
 
-  VLOG(1) << "Read Stats (directly paged/pooled): " << stats.page_bytes << "/" << stats.tp_bytes;
-  impl_->file_cache_hit_bytes.fetch_add(stats.page_bytes, std::memory_order_relaxed);
+  VLOG(1) << "Read Stats (directly paged/pooled): " << stats.prefetch_bytes << "/"
+          << stats.tp_bytes;
+  impl_->file_cache_hit_bytes.fetch_add(stats.prefetch_bytes, std::memory_order_relaxed);
 
   return cnt;
 }
