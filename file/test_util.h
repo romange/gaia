@@ -40,6 +40,8 @@ public:
   bool force_error = false;
 
   void set_contents(const std::string& c) { contents_ = c; }
+
+   int Handle() const { return 0; }
  private:
   bool returned_partial_ = false;
 };
