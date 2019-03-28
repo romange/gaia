@@ -168,6 +168,7 @@ void AsioScheduler::MainLoop() {
       in_run_one_ = false;
     }
   }
+  suspend_timer_.cancel();
   in_run_one_ = false;
   VLOG(1) << "MainLoop exited";
 }

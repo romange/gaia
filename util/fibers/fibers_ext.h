@@ -82,6 +82,7 @@ class Done {
 
   void Notify() { impl_->Notify(); }
   void Wait() { impl_->Wait(); }
+  void Reset() { impl_->Reset(); }
 
  private:
   ptr_t impl_;

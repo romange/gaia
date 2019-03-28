@@ -179,7 +179,7 @@ ReadonlyFile::~ReadonlyFile() {
 }
 
 // pread() based access.
-class PosixReadFile: public ReadonlyFile {
+class PosixReadFile final: public ReadonlyFile {
  private:
   int fd_;
   const size_t file_size_;
@@ -218,7 +218,9 @@ class PosixReadFile: public ReadonlyFile {
     return r;
   }
 
-  size_t Size() const override { return file_size_; }
+  size_t Size() const final { return file_size_; }
+
+  int Handle() const final { return fd_; };
 };
 
 StatusObject<ReadonlyFile*> ReadonlyFile::Open(StringPiece name, const Options& opts) {

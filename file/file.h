@@ -46,6 +46,8 @@ class ReadonlyFile {
   // The ownership is passed to the caller.
   static util::StatusObject<ReadonlyFile*>
       Open(StringPiece name, const Options& opts = Options()) MUST_USE_RESULT;
+
+  virtual int Handle() const = 0;
 };
 
 // Wrapper class for system functions which handle basic file operations.

@@ -204,6 +204,7 @@ struct LocalRunner::Impl {
   std::unique_ptr<GlobalDestFileManager> dest_mgr;
   fibers_ext::FiberQueueThreadPool fq_pool;
   std::atomic_bool stop_signal_{false};
+  std::atomic_ulong file_cache_hit_bytes{0};
 
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
 
@@ -238,6 +239,8 @@ void LocalRunner::Init() {
 void LocalRunner::Shutdown() {
   impl_->dest_mgr.reset();
   impl_->fq_pool.Shutdown();
+
+  LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }
 
 RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
@@ -256,24 +259,32 @@ void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const s
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
                                 RecordQueue* queue) {
-  auto res = file::OpenFiberReadFile(filename, &impl_->fq_pool);
-  if (!res.ok()) {
-    LOG(DFATAL) << "Skipping " << filename << " with " << res.status;
+  file::FiberReadOptions::Stats stats;
+  file::FiberReadOptions opts;
+  opts.stats = &stats;
+
+  auto fl_res = file::OpenFiberReadFile(filename, &impl_->fq_pool, opts);
+  if (!fl_res.ok()) {
+    LOG(DFATAL) << "Skipping " << filename << " with " << fl_res.status;
     return 0;
   }
   LOG(INFO) << "Processing file " << filename;
-  std::unique_ptr<file::ReadonlyFile> read_file(res.obj);
-
+  std::unique_ptr<file::ReadonlyFile> read_file(fl_res.obj);
+  size_t cnt = 0;
   switch (type) {
     case pb::WireFormat::TXT:
-      return impl_->ProcessText(read_file.release(), queue);
+      cnt = impl_->ProcessText(read_file.release(), queue);
       break;
 
     default:
       LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
       break;
   }
-  return 0;
+
+  VLOG(1) << "Read Stats (directly paged/pooled): " << stats.page_bytes << "/" << stats.tp_bytes;
+  impl_->file_cache_hit_bytes.fetch_add(stats.page_bytes, std::memory_order_relaxed);
+
+  return cnt;
 }
 
 void LocalRunner::Stop() {
