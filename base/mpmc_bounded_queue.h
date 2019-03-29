@@ -49,7 +49,8 @@ template <typename T> class mpmc_bounded_queue {
       throw std::runtime_error("async logger queue size must be power of two");
 
     for (size_t i = 0; i != buffer_size; i += 1)
-      buffer_[i].sequence_.store(i, std::memory_order_relaxed);
+      buffer_[i].sequence.store(i, std::memory_order_relaxed);
+
     enqueue_pos_.store(0, std::memory_order_relaxed);
     dequeue_pos_.store(0, std::memory_order_relaxed);
   }
@@ -57,7 +58,18 @@ template <typename T> class mpmc_bounded_queue {
   mpmc_bounded_queue(mpmc_bounded_queue const&) = delete;
   mpmc_bounded_queue& operator=(mpmc_bounded_queue const&) = delete;
 
-  ~mpmc_bounded_queue() {}
+  ~mpmc_bounded_queue() {
+    for (;;) {
+      size_t pos = dequeue_pos_.fetch_add(1, std::memory_order_relaxed);
+      cell_t& cell = buffer_[pos & buffer_mask_];
+      size_t seq = cell.sequence.load(std::memory_order_acquire);
+      intptr_t dif = (intptr_t)seq - (intptr_t)(pos + 1);
+      if (dif < 0) {
+        return;
+      }
+      reinterpret_cast<T*>(&cell.storage)->~T();
+    }
+  }
 
   // It's super important to leave try_enqueue as template function of free type U.
   // Otherwise, moveable objects of different from V type (i.e. U) that can be
@@ -71,8 +83,8 @@ template <typename T> class mpmc_bounded_queue {
     if (!enqueue_internal(pos, cell))
       return false;
 
-    cell->data_ = T{std::forward<U>(data)};
-    cell->sequence_.store(pos + 1, std::memory_order_release);
+    new(&cell->storage) T(std::forward<U>(data));
+    cell->sequence.store(pos + 1, std::memory_order_release);
     return true;
   }
 
@@ -94,7 +106,7 @@ template <typename T> class mpmc_bounded_queue {
     for (;;) {
       pos = dequeue_pos_.load(std::memory_order_relaxed);
       cell = &buffer_[pos & buffer_mask_];
-      size_t seq = cell->sequence_.load(std::memory_order_acquire);
+      size_t seq = cell->sequence.load(std::memory_order_acquire);
       intptr_t dif = (intptr_t)seq - (intptr_t)(pos + 1);
       if (dif == 0) {
         if (dequeue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed))
@@ -103,8 +115,9 @@ template <typename T> class mpmc_bounded_queue {
         return false;
       }
     }
-    data = std::move(cell->data_);
-    cell->sequence_.store(pos + buffer_mask_ + 1, std::memory_order_release);
+
+    data = std::forward<T>(reinterpret_cast<T&>(cell->storage));
+    cell->sequence.store(pos + buffer_mask_ + 1, std::memory_order_release);
     return true;
   }
 
@@ -112,15 +125,15 @@ template <typename T> class mpmc_bounded_queue {
 
  private:
   struct cell_t {
-    std::atomic<size_t> sequence_;
-    T data_;
+    std::atomic<size_t> sequence;
+    std::aligned_storage_t<sizeof(T)> storage;
   };
 
   bool enqueue_internal(size_t& out, cell_t*& cell) {
     while (true) {
       out = enqueue_pos_.load(std::memory_order_relaxed);
       cell = &buffer_[out & buffer_mask_];
-      size_t seq = cell->sequence_.load(std::memory_order_acquire);
+      size_t seq = cell->sequence.load(std::memory_order_acquire);
       intptr_t dif = (intptr_t)seq - (intptr_t)(out);
       if (dif == 0) {
         if (enqueue_pos_.compare_exchange_weak(out, out + 1, std::memory_order_relaxed))
