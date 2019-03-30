@@ -129,7 +129,8 @@ struct LocalContext::BufferedWriter {
   std::string buffer;
   unsigned index;
 
-  static constexpr size_t kFlushLimit = 1 << 16;
+  size_t writes = 0, flushes = 0;
+  static constexpr size_t kFlushLimit = 1 << 15;
   void operator=(const BufferedWriter&) = delete;
 
   explicit BufferedWriter(file::WriteFile* wf, unsigned i) : wr(wf), index(i) {}
@@ -155,7 +156,11 @@ void LocalContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
     buffer.append(v.data(), v.size());
   }
 
+  VLOG_IF(2, ++writes % 1000 == 0) << "BufferedWrite " << writes;
+
   if (buffer.size() >= kFlushLimit) {
+    VLOG(2) << "Flush " << ++flushes;
+
     fq->Add(index, [b = std::move(buffer), wr = this->wr] {
       auto status = wr->Write(b);
       CHECK_STATUS(status);
@@ -180,7 +185,7 @@ void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) 
 
     unsigned index =
         base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
-    it = custom_shard_files_.emplace(res.first, new BufferedWriter{res.second, index}).first;
+    it = custom_shard_files_.emplace(key, new BufferedWriter{res.second, index}).first;
   }
   it->second->Write({record, "\n"}, mgr_->pool());
 }
@@ -224,8 +229,13 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* que
     string tmp{result};
     ++cnt;
 
+    VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
+    if (cnt % 1000 == 0) {
+      this_fiber::yield();
+    }
     queue->Push(std::move(tmp));
   }
+  VLOG(1) << "ProcessText Read " << cnt << " items";
   return cnt;
 }
 
@@ -264,7 +274,7 @@ size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Typ
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
 
-  opts.prefetch_size = 1 << 19;
+  opts.prefetch_size = 1 << 16;
   opts.stats = &stats;
 
   auto fl_res = file::OpenFiberReadFile(filename, &impl_->fq_pool, opts);
@@ -272,6 +282,7 @@ size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Typ
     LOG(DFATAL) << "Skipping " << filename << " with " << fl_res.status;
     return 0;
   }
+
   LOG(INFO) << "Processing file " << filename;
   std::unique_ptr<file::ReadonlyFile> read_file(fl_res.obj);
   size_t cnt = 0;

@@ -45,7 +45,7 @@ template <typename T> class SimpleChannel {
   // Non blocking
   template <typename... Args> bool TryPush(Args&&... args) noexcept {
     if (q_.write(std::forward<Args>(args)...)) {
-      if (++quiet_pushes_ > q_.capacity() / 3) {
+      if (true || ++quiet_pushes_ > q_.capacity() / 3) {
         pop_ec_.notify();
         quiet_pushes_ = 0;
       }

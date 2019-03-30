@@ -113,6 +113,7 @@ void Pipeline::Executor::ProcessFiles() {
 }
 
 void Pipeline::Executor::MapFiber(TableBase* sb) {
+  VLOG(1) << "Starting MapFiber";
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;
@@ -124,6 +125,9 @@ void Pipeline::Executor::MapFiber(TableBase* sb) {
     if (!is_open)
       break;
 
+    ++record_num;
+    VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
+
     // record is a binary input.
     // TODO: to implement binary to type to binary flow:
     // out_cntx-Deserialize<T>(record) -> T -> UDF(T) -> (Shard, U) -> Serialize(U)->string.
@@ -133,9 +137,9 @@ void Pipeline::Executor::MapFiber(TableBase* sb) {
 
     // We should have here Shard/string(out_record).
     do_fn(std::move(record));
-    if (++record_num % 1000 == 0) {
+    /*if (++record_num % 1000 == 0) {
       this_fiber::yield();
-    }
+    }*/
   }
   VLOG(1) << "MapFiber finished " << record_num;
 }

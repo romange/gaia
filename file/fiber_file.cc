@@ -67,7 +67,7 @@ class FiberReadFile : public ReadonlyFile {
   StatusObject<size_t> ReadAndPrefetch(size_t offset, const strings::MutableByteRange& range);
 
   strings::MutableByteRange prefetch_;
-  size_t file_prefetch_offset_ = 0;
+  size_t file_prefetch_offset_ = -1;
   std::unique_ptr<uint8_t[]> buf_;
   size_t buf_size_ = 0;
   std::unique_ptr<ReadonlyFile> next_;
@@ -104,6 +104,7 @@ FiberReadFile::FiberReadFile(const FiberReadOptions& opts, ReadonlyFile* next,
   buf_size_ = opts.prefetch_size;
   if (buf_size_) {
     buf_.reset(new uint8_t[buf_size_]);
+    prefetch_.reset(buf_.get(), 0);
   }
   stats_ = opts.stats;
 }
@@ -126,6 +127,8 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
       pending_prefetch_ = false;
     }
 
+    DCHECK(prefetch_.empty() || prefetch_.end() <= buf_.get() + buf_size_);
+
     // We could put a smarter check but for sequential access it's enough.
     if (offset == file_prefetch_offset_) {
       copied = std::min(prefetch_.size(), range.size());
@@ -146,13 +149,15 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
       // rotations.
       if (!prefetch_.empty()) {
         memmove(buf_.get(), prefetch_.data(), prefetch_.size());
-        prefetch_.reset(buf_.get(), prefetch_.size());
       }
     } else {
       prefetch_.clear();
     }
   }
   DCHECK(!pending_prefetch_);
+
+  // At this point prefetch_ must point at buf_ and might still contained prefetched slice.
+  prefetch_.reset(buf_.get(), prefetch_.size());
 
   iovec io[2] = {{range.data() + copied, range.size() - copied},
                  {buf_.get() + prefetch_.size(), buf_size_ - prefetch_.size()}};
@@ -170,7 +175,7 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
     if (res < 0)
       return file::StatusFileError();
     if (static_cast<size_t>(res) <= io[0].iov_len)  // EOF
-      return res;
+      return res + copied;
 
     file_prefetch_offset_ = offset + io[0].iov_len;
     res -= io[0].iov_len;
@@ -193,6 +198,9 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
     // We ignore the error, maximum the system will reread it in the through the main thread.
     if (res > 0) {
       prefetch_.reset(prefetch_.data(), prefetch_.size() + res);
+      DCHECK_LE(prefetch_.end() - buf_.get(), buf_size_);
+    } else {
+      file_prefetch_offset_ = -1;
     }
     pending.done.Notify();
   });
@@ -201,15 +209,19 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
 }
 
 StatusObject<size_t> FiberReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
-  if (buf_) {
-    return ReadAndPrefetch(offset, range);
-  }
   StatusObject<size_t> res;
+  if (buf_) {
+    res = ReadAndPrefetch(offset, range);
+    VLOG(1) << "ReadAndPrefetch " << offset << "/" << res.obj;
+    return res;
+  }
+
   tp_->Add([&] {
     res = next_->Read(offset, range);
     done_.Notify();
   });
   done_.Wait(AND_RESET);
+  VLOG(1) << "Read " << offset << "/" << res.obj;
   return res;
 }
 
