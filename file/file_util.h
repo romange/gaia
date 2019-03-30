@@ -58,11 +58,16 @@ void TraverseRecursively(StringPiece path, std::function<void(StringPiece)> cb);
 
 int64_t LocalFileSize(StringPiece path);  // In bytes.
 
-// Uses glob rules for local file system and the usual ls expansion for s3.
-std::vector<std::string> ExpandFiles(StringPiece path);
+// Expands path according to sh rules using expandexp. Does not check the existence of the files.
+std::vector<std::string> ExpandPathMultiple(StringPiece path);
 
-// Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
+// Convenience function similar to ExpandPathMultiple but verifies that the path translates to
+// a single result and returns it.
+std::string ExpandPath(StringPiece path);
+
+// Uses glob rules for local file system. Returns files that exists.
 std::vector<StatShort> StatFiles(StringPiece path);
+
 util::Status StatFilesSafe(StringPiece path, std::vector<StatShort>* res);
 
 // Creates 'file.gz', compresses file, once successful, deletes it. fails on any error.
@@ -96,6 +101,7 @@ class TempFile {
   // Similar as above but returns the file name rather than writing it to
   // an output argument.
   static std::string TempFilename(const char* directory_prefix);
+
 };
 
 };  // namespace file_util

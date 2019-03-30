@@ -76,19 +76,20 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
   for (const auto& input : inputs) {
     CHECK(input && input->msg().file_spec_size() > 0);
     CHECK(input->msg().has_format());
-    LOG(INFO) << "Running on input " << input->msg().name();
 
-    auto cb = [&](const std::string& nm) {
+    vector<string> files;
+    for (const auto& file_spec : input->msg().file_spec()) {
+      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
+    }
+
+    LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size()
+              << " files";
+    for (const auto nm : files) {
       channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
       if (st !=channel_op_status::closed) {
         CHECK_EQ(channel_op_status::success, st);
       }
-    };
-
-    for (const auto& file_spec : input->msg().file_spec()) {
-      runner_->ExpandGlob(file_spec.url_glob(), cb);
     }
-
     if (file_name_q_.is_closed())
       break;
   }

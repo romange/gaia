@@ -26,6 +26,7 @@ using namespace util;
 DEFINE_uint32(http_port, 8080, "Port number.");
 DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 DEFINE_bool(compress, false, "");
+DEFINE_string(dest_dir, "~/mr_output", "");
 
 using namespace mr3;
 using namespace util;
@@ -53,7 +54,7 @@ int main(int argc, char** argv) {
   server->Run();
 
   Pipeline p(&pool);
-  LocalRunner runner("/tmp/mr3");
+  LocalRunner runner(file_util::ExpandPath(FLAGS_dest_dir));
   /*Executor executor(, &pool);
   executor.Init();
 */

@@ -361,10 +361,23 @@ add_third_party(s2geometry
   LIB "libs2.so"
 )
 
-add_third_party(z
-  GIT_REPOSITORY https://github.com/madler/zlib
+add_third_party(cf_z
+  GIT_REPOSITORY https://github.com/cloudflare/zlib.git
+  GIT_TAG gcc.amd64
+
+  BUILD_IN_SOURCE 1
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=-g -O3"
-                    <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/z
+                    <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/cf_z
+  LIB libz.a
+)
+
+add_third_party(intel_z
+  GIT_REPOSITORY https://github.com/jtkukunas/zlib.git
+
+  BUILD_IN_SOURCE 1
+  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=-g -O3"
+                    <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/intel_z
+  LIB libz.a
 )
 
 set_property(TARGET TRDP::glog APPEND PROPERTY

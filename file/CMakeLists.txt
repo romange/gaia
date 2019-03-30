@@ -1,6 +1,6 @@
 add_library(file file.cc file_util.cc filesource.cc gzip_file.cc list_file.cc list_file_reader.cc
             meta_map_block.cc compressors.cc lst2_impl.cc)
-cxx_link(file base strings util TRDP::lz4 z TRDP::crc32c)
+cxx_link(file base strings util TRDP::lz4 TRDP::crc32c)
 
 add_library(test_util test_util.cc)
 target_link_libraries(test_util base file gtest_main)

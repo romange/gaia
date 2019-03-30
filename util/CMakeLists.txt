@@ -5,7 +5,7 @@ cxx_link(status base status_proto)
 
 add_library(util zlib_source.cc bzip_source.cc
             sinksource.cc zstd_sinksource.cc)
-cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 z)
+cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 TRDP::intel_z)
 
 add_library(pb2json pb2json.cc)
 cxx_link(pb2json strings status TRDP::protobuf absl_variant)

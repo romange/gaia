@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <sys/sendfile.h>  // sendfile
 #include <sys/stat.h>
+#include <wordexp.h>
 #include <zlib.h>
 
 #include <memory>
@@ -320,17 +321,26 @@ int errfunc(const char* epath, int eerrno) {
   return 0;
 }
 
-vector<string> ExpandFiles(StringPiece path) {
+vector<string> ExpandPathMultiple(StringPiece path) {
   vector<string> res;
-  glob_t glob_result;
-  int rv = glob(path.data(), 0, errfunc, &glob_result);
-  CHECK(!rv || rv == GLOB_NOMATCH) << rv;
-  for (size_t i = 0; i < glob_result.gl_pathc; i++) {
-    res.push_back(glob_result.gl_pathv[i]);
+  wordexp_t p;
+  int r = wordexp(path.data(), &p, WRDE_NOCMD | WRDE_UNDEF);
+
+  CHECK_EQ(0, r);
+
+  for (size_t i = 0; i < p.we_wordc; i++) {
+    res.push_back(p.we_wordv[i]);
   }
-  globfree(&glob_result);
+  wordfree(&p);
 
   return res;
+}
+
+string ExpandPath(StringPiece path) {
+  auto res = ExpandPathMultiple(path);
+  CHECK_EQ(1, res.size());
+
+  return std::move(res.front());
 }
 
 // Similar to ExpandFiles but also returns statistics about files sizes and timestamps.
