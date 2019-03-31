@@ -8,45 +8,46 @@
 
 namespace util {
 
-Sink::WritableBuffer Sink::GetAppendBuffer(
-    size_t min_capacity,
-    WritableBuffer scratch,
-    size_t /*desired_capacity_hint*/) {
+Sink::WritableBuffer Sink::GetAppendBuffer(size_t min_capacity, WritableBuffer scratch,
+                                           size_t /*desired_capacity_hint*/) {
   CHECK_GE(scratch.size(), min_capacity);
   return scratch;
 }
 
 Status Sink::Flush() { return Status::OK; }
 
-
 StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) {
   CHECK(!range.empty());
 
-  if (prepend_buf_.size() >= range.size()) {
-    memcpy(range.begin(), prepend_buf_.begin(), range.size());
-    auto src = prepend_buf_.begin() + range.size();
-    size_t new_size = prepend_buf_.size() - range.size();
-    memmove(prepend_buf_.begin(), src, new_size);
-    prepend_buf_.resize(new_size);
-
-    return range.size();
-  }
-
   size_t read = 0;
   if (!prepend_buf_.empty()) {
+    if (prepend_buf_.size() >= range.size()) {
+      memcpy(range.begin(), prepend_buf_.begin(), range.size());
+      auto src = prepend_buf_.begin() + range.size();
+      size_t new_size = prepend_buf_.size() - range.size();
+      memmove(prepend_buf_.begin(), src, new_size);
+      prepend_buf_.resize(new_size);
+
+      return range.size();
+    }
+
     memcpy(range.begin(), prepend_buf_.begin(), prepend_buf_.size());
 
     read = prepend_buf_.size();
     prepend_buf_.clear();
-
     DCHECK_LT(read, range.size());
   }
+  if (eof_)
+    return 0;
+
   auto res = ReadInternal(range.subpiece(read));
   if (!res.ok())
     return res;
+
+  eof_ = res.obj == 0;
+
   return res.obj + read;
 }
-
 
 StatusObject<size_t> StringSource::ReadInternal(const strings::MutableByteRange& range) {
   size_t to_fill = std::min<size_t>({range.size(), block_size_, input_.size()});
@@ -57,4 +58,3 @@ StatusObject<size_t> StringSource::ReadInternal(const strings::MutableByteRange&
 }
 
 }  // namespace util
-

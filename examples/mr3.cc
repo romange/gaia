@@ -27,12 +27,13 @@ DEFINE_uint32(http_port, 8080, "Port number.");
 DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 DEFINE_bool(compress, false, "");
 DEFINE_string(dest_dir, "~/mr_output", "");
+DEFINE_uint32(num_shards, 10, "");
 
 using namespace mr3;
 using namespace util;
 
 string ShardNameFunc(const std::string& line) {
-  return absl::StrFormat("shard-%04d", base::Fingerprint32(line) % 10);
+  return absl::StrFormat("shard-%04d", base::Fingerprint32(line) % FLAGS_num_shards);
 }
 
 int main(int argc, char** argv) {

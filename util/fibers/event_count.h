@@ -64,9 +64,9 @@ class EventCount {
 
   /**
    * Wait for condition() to become true.  Will clean up appropriately if
-   * condition() throws, and then rethrow.
+   * condition() throws. Returns true if had to preempt using wait_queue.
    */
-  template <typename Condition> void await(Condition condition);
+  template <typename Condition> bool await(Condition condition);
 
  private:
   friend class Key;
@@ -171,19 +171,23 @@ inline void EventCount::wait(uint32_t epoch) noexcept {
   }
 }
 
-template <typename Condition> void EventCount::await(Condition condition) {
+// Returns true if had to preempt, false if no preemption happenned.
+template <typename Condition> bool EventCount::await(Condition condition) {
   if (condition())
-    return;  // fast path
+    return false;  // fast path
 
   // condition() is the only thing that may throw, everything else is
   // noexcept, Key destructor makes sure to cancelWait state when exiting the function.
+  bool preempt = false;
   while (true) {
     Key key = prepareWait();
     if (condition()) {
       break;
     }
+    preempt = true;
     wait(key.epoch());
   }
+  return preempt;
 }
 
 }  // namespace fibers_ext

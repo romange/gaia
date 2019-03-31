@@ -20,18 +20,7 @@ class Pipeline::Executor {
   using FileInput = std::pair<std::string, const pb::Input*>;
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
 
-  struct PerIoStruct {
-    unsigned index;
-    ::boost::fibers::fiber map_fd, process_fd;
-
-    StringQueue record_q;
-    std::unique_ptr<RawContext> do_context;
-    bool stop_early = false;
-
-    PerIoStruct(unsigned i);
-
-    void Shutdown();
-  };
+  struct PerIoStruct;
 
  public:
   Executor(util::IoContextPool* pool, Runner* runner);

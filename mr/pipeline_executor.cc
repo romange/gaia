@@ -17,12 +17,27 @@ using namespace util;
 
 using fibers::channel_op_status;
 
+struct Pipeline::Executor::PerIoStruct {
+  unsigned index;
+  ::boost::fibers::fiber map_fd;
+  ::boost::fibers::fiber process_fd[1];
+
+  StringQueue record_q;
+  std::unique_ptr<RawContext> do_context;
+  bool stop_early = false;
+
+  PerIoStruct(unsigned i);
+
+  void Shutdown();
+};
+
 Pipeline::Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
 
 thread_local std::unique_ptr<Pipeline::Executor::PerIoStruct> Pipeline::Executor::per_io_;
 
 void Pipeline::Executor::PerIoStruct::Shutdown() {
-  process_fd.join();
+  for (auto& f : process_fd)
+    f.join();
 
   // Must follow process_fd because we need first to push all the records to the queue and
   // then to signal it's closing.
@@ -68,7 +83,9 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
 
-    per_io_->process_fd = fibers::fiber{&Executor::ProcessFiles, this};
+    for (auto& f : per_io_->process_fd)
+      f = fibers::fiber{&Executor::ProcessFiles, this};
+
     per_io_->do_context.reset(runner_->CreateContext(tb->op()));
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
   });
@@ -82,11 +99,10 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
       runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
     }
 
-    LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size()
-              << " files";
+    LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
     for (const auto nm : files) {
       channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
-      if (st !=channel_op_status::closed) {
+      if (st != channel_op_status::closed) {
         CHECK_EQ(channel_op_status::success, st);
       }
     }

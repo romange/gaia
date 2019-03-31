@@ -115,6 +115,7 @@ class Source {
   DISALLOW_COPY_AND_ASSIGN(Source);
 
   base::PODArray<uint8> prepend_buf_;
+  bool eof_ = false;
 };
 
 class StringSource : public Source {

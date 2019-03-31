@@ -61,10 +61,11 @@ class Done {
       }
     }
 
-    void Wait(DoneWaitDirective reset) {
-      ec_.await([this] { return ready_.load(std::memory_order_acquire); });
+    bool Wait(DoneWaitDirective reset) {
+      bool res = ec_.await([this] { return ready_.load(std::memory_order_acquire); });
       if (reset == AND_RESET)
         ready_.store(false, std::memory_order_release);
+      return res;
     }
 
     // We use EventCount to wake threads without blocking.
@@ -89,7 +90,7 @@ class Done {
   ~Done() {}
 
   void Notify() { impl_->Notify(); }
-  void Wait(DoneWaitDirective reset = AND_NOTHING) { impl_->Wait(reset); }
+  bool Wait(DoneWaitDirective reset = AND_NOTHING) { return impl_->Wait(reset); }
 
   void Reset() { impl_->Reset(); }
 

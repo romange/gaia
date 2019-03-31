@@ -12,8 +12,10 @@ namespace file {
 // in FiberQueueThreadPool.
 struct FiberReadOptions : public ReadonlyFile::Options {
   struct Stats {
-    size_t prefetch_bytes = 0;  // read because of prefetch logic.
-    size_t tp_bytes = 0;    // read via  ThreadPool calls.
+    size_t cache_bytes = 0;  // read because of prefetch logic.
+    size_t disk_bytes = 0;    // read via  ThreadPool calls.
+    size_t read_prefetch_cnt = 0;
+    size_t preempt_cnt = 0;
   };
 
   size_t prefetch_size = 0;

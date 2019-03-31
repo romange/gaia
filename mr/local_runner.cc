@@ -17,6 +17,8 @@
 
 namespace mr3 {
 
+DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
+
 using namespace util;
 using namespace boost;
 using namespace std;
@@ -268,13 +270,19 @@ void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const s
   }
 }
 
+ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
+  os << stats.cache_bytes << "/" << stats.disk_bytes << "/" << stats.read_prefetch_cnt << "/"
+     << stats.preempt_cnt;
+  return os;
+}
+
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
                                 RecordQueue* queue) {
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
 
-  opts.prefetch_size = 1 << 16;
+  opts.prefetch_size = FLAGS_local_runner_prefetch_size;
   opts.stats = &stats;
 
   auto fl_res = file::OpenFiberReadFile(filename, &impl_->fq_pool, opts);
@@ -296,9 +304,8 @@ size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Typ
       break;
   }
 
-  VLOG(1) << "Read Stats (directly paged/pooled): " << stats.prefetch_bytes << "/"
-          << stats.tp_bytes;
-  impl_->file_cache_hit_bytes.fetch_add(stats.prefetch_bytes, std::memory_order_relaxed);
+  VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats;
+  impl_->file_cache_hit_bytes.fetch_add(stats.cache_bytes, std::memory_order_relaxed);
 
   return cnt;
 }

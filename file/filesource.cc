@@ -83,9 +83,9 @@ LineReader::~LineReader() {
 }
 
 bool LineReader::Next(StringPiece* result, std::string* scratch) {
-  bool eof = false;
   bool use_scratch = false;
 
+  const char* const eof_page = buf_.get() + page_size_ - 1;
   while (true) {
     // Common case: search of EOL.
     char* ptr = next_;
@@ -113,8 +113,9 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
       return true;
     }
 
-    if (end_ != next_) {  // The initial buffer was not empty.
-      // We reach end of buffer. We must copy the data to accomodate the broken line.
+    if (end_ != next_) {
+      // Our internal buffer was not empty, but we did not find EOL yet.
+      // Now we've reach end of buffer, so we must copy the data to accomodate the broken line.
       if (!use_scratch) {
         if (scratch == nullptr)
           scratch = &scratch_;
@@ -125,7 +126,7 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
         scratch->append(next_, end_);
       }
       next_ = end_;
-      if (eof)
+      if (end_ != eof_page)
         break;
     }
 
@@ -136,11 +137,9 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
       return false;
     }
 
-    if (s.obj < page_size_ - 1) {
-      eof = true;
-      if (s.obj == 0)
-        break;
-    }
+    if (s.obj == 0)
+      break;
+
     next_ = buf_.get();
     end_ = next_ + s.obj;
     *end_ = '\n';  // sentinel.
@@ -148,8 +147,10 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
 
   if (use_scratch) {
     *result = *scratch;
+    ++line_num_;
+    return true;
   }
-  return next_ != end_;
+  return false;
 }
 
 CsvReader::CsvReader(const std::string& filename,
