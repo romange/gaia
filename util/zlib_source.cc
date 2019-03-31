@@ -38,6 +38,8 @@ bool ZlibSource::IsZlibSource(Source* source) {
   return is_zlib;
 }
 
+static constexpr size_t kBufSize = 8192;
+
 ZlibSource::ZlibSource(
     Source* sub_stream, Format format)
     : sub_stream_(sub_stream), format_(format) {
@@ -52,6 +54,7 @@ ZlibSource::ZlibSource(
 
   int zerror = internalInflateInit2(format_, &zcontext_);
   CHECK_EQ(Z_OK, zerror);
+  buf_.reset(new uint8_t[kBufSize]);
 }
 
 ZlibSource::~ZlibSource() {
@@ -60,29 +63,36 @@ ZlibSource::~ZlibSource() {
 }
 
 StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& range) {
-  std::array<unsigned char, 4096*2> buf;
-
   zcontext_.next_out = range.begin();
   zcontext_.avail_out = range.size();
-  do {
-    auto res = sub_stream_->Read(strings::MutableByteRange(buf));
+
+  while (true) {
+    if (zcontext_.avail_in > 0) {
+      int zerror = inflate(&zcontext_, Z_NO_FLUSH);
+      if (zerror != Z_OK && zerror != Z_STREAM_END) {
+        return ToStatus(zerror, zcontext_.msg);
+      }
+
+      if (zcontext_.next_out == range.end())
+        break;
+      DCHECK_EQ(0, zcontext_.avail_in);
+    }
+
+    auto res = sub_stream_->Read(strings::MutableByteRange(buf_.get(), kBufSize));
     if (!res.ok())
       return res;
 
     if (res.obj == 0)
       break;
-    zcontext_.next_in = buf.begin();
-    zcontext_.avail_in = res.obj;
 
-    int zerror = inflate(&zcontext_, Z_NO_FLUSH);
-    if (zerror != Z_OK && zerror != Z_STREAM_END) {
-      return ToStatus(zerror, zcontext_.msg);
-    }
-  } while (zcontext_.next_out != range.end());
+    DVLOG(1) << "Read " << res.obj << " bytes";
+
+    zcontext_.next_in = buf_.get();
+    zcontext_.avail_in = res.obj;
+  }
 
   if (zcontext_.avail_in > 0) {
     CHECK_EQ(0, zcontext_.avail_out);
-    sub_stream_->Prepend(strings::ByteRange(zcontext_.next_in, zcontext_.avail_in));
   }
 
   return zcontext_.next_out - range.begin();

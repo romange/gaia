@@ -38,7 +38,7 @@ StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) {
     DCHECK_LT(read, range.size());
   }
   if (eof_)
-    return 0;
+    return read;
 
   auto res = ReadInternal(range.subpiece(read));
   if (!res.ok())

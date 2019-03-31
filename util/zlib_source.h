@@ -40,6 +40,7 @@ class ZlibSource : public Source {
 
   Format format_;
   z_stream zcontext_;
+  std::unique_ptr<uint8_t[]> buf_;
 
   int Inflate();
 
