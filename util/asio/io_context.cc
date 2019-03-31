@@ -28,7 +28,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
  private:
   using ready_queue_type = fibers::scheduler::ready_queue_type;
   std::shared_ptr<asio::io_context> io_context_;
-  asio::steady_timer suspend_timer_;
+  std::unique_ptr<asio::steady_timer> suspend_timer_;
   //]
   ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
   fibers::mutex mtx_;
@@ -39,11 +39,13 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
   bool in_run_one_ = false;
+
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
-      : io_context_(io_svc), suspend_timer_(*io_svc) {
-  }
+      : io_context_(io_svc), suspend_timer_(new asio::steady_timer(*io_svc)) {}
+
+  ~AsioScheduler();
 
   void awakened(fibers::context* ctx, IoFiberProperties& props) noexcept override;
 
@@ -75,13 +77,9 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     awakened(ctx, props);
   }
 
-  bool has_ready_fibers() const noexcept override {
-    return 0 < active_cnt_;
-  }
+  bool has_ready_fibers() const noexcept override { return 0 < active_cnt_; }
 
-  size_t active_fiber_count() const {
-    return active_cnt_;
-  }
+  size_t active_fiber_count() const { return active_cnt_; }
 
   // suspend_until halts the thread in case there are no active fibers to run on it.
   // This is done by dispatcher fiber.
@@ -111,8 +109,8 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       // run_one() returns to loop()... etc. etc.
       // So only actually set the timer when we're passed a DIFFERENT
       // abs_time value.
-      suspend_timer_.expires_at(abs_time);
-      suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
+      suspend_timer_->expires_at(abs_time);
+      suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
     }
     CHECK(!in_run_one_) << "Deadlock detected";
 
@@ -122,6 +120,9 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   //]
 
   void notify() noexcept override {
+    if (!suspend_timer_)
+      return;
+
     // Something has happened that should wake one or more fibers BEFORE
     // suspend_timer_ expires. Reset the timer to cause it to fire
     // immediately, causing the run_one() call to return. In theory we
@@ -137,8 +138,8 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     // a new expiration time. This will cause us to spin the loop twice --
     // once for the operation_aborted handler, once for timer expiration
     // -- but that shouldn't be a big problem.
-    suspend_timer_.async_wait([](system::error_code const&) { this_fiber::yield(); });
-    suspend_timer_.expires_at(std::chrono::steady_clock::now());
+    suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
+    suspend_timer_->expires_at(std::chrono::steady_clock::now());
   }
 
   void MainLoop();
@@ -146,6 +147,9 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
  private:
   void WaitTillFibersSuspend();
 };
+
+AsioScheduler::~AsioScheduler() {
+}
 
 void AsioScheduler::MainLoop() {
   asio::io_context* io_cntx = io_context_.get();
@@ -168,9 +172,10 @@ void AsioScheduler::MainLoop() {
       in_run_one_ = false;
     }
   }
-  suspend_timer_.cancel();
+
   in_run_one_ = false;
   VLOG(1) << "MainLoop exited";
+  suspend_timer_.reset();
 }
 
 void AsioScheduler::WaitTillFibersSuspend() {
