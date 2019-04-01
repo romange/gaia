@@ -12,8 +12,8 @@
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "file/gzip_file.h"
-
 #include "util/fibers/fiberqueue_threadpool.h"
+#include "util/zlib_source.h"
 
 namespace mr3 {
 
@@ -60,23 +60,61 @@ static file::WriteFile* CreateFile(const std::string& path, const pb::Output& ou
   return res;
 }
 
+struct DestHandle {
+  ::file::WriteFile* wf;
+  StringSink* str_sink = nullptr;
+  std::unique_ptr<ZlibSink> zlib_sink;
+  unsigned fq_index;
+
+  auto WriteCb(string&& s) {
+    return [b = std::move(s), wf = this->wf] {
+      auto status = wf->Write(b);
+      CHECK_STATUS(status);
+    };
+  }
+
+  void Write(string str, fibers_ext::FiberQueueThreadPool* fq);
+};
+
 class GlobalDestFileManager {
   const string root_dir_;
 
   fibers_ext::FiberQueueThreadPool* fq_;
-  google::dense_hash_map<StringPiece, ::file::WriteFile*> dest_files_;
+
+  google::dense_hash_map<StringPiece, DestHandle*> dest_files_;
   UniqueStrings str_db_;
   fibers::mutex mu_;
 
  public:
-  using Result = std::pair<StringPiece, ::file::WriteFile*>;
+  using Result = std::pair<StringPiece, DestHandle*>;
 
   GlobalDestFileManager(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq);
   ~GlobalDestFileManager();
 
+  void Flush();
+
   Result Get(StringPiece key, const pb::Output& out);
 
   fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
+};
+
+class BufferedWriter {
+  DestHandle* dh_;
+  std::string buffer_;
+
+  size_t writes = 0, flushes = 0;
+  static constexpr size_t kFlushLimit = 1 << 15;
+  void operator=(const BufferedWriter&) = delete;
+
+ public:
+  explicit BufferedWriter(DestHandle* dh) : dh_(dh) {}
+
+  BufferedWriter(const BufferedWriter&) = delete;
+  ~BufferedWriter();
+
+  void Flush(fibers_ext::FiberQueueThreadPool* fq);
+
+  void Write(StringPiece src, fibers_ext::FiberQueueThreadPool* fq);
 };
 
 class LocalContext : public RawContext {
@@ -89,13 +127,17 @@ class LocalContext : public RawContext {
  private:
   void WriteInternal(const ShardId& shard_id, std::string&& record) final;
 
-  struct BufferedWriter;
-
   google::dense_hash_map<StringPiece, BufferedWriter*> custom_shard_files_;
 
   const pb::Output& output_;
   GlobalDestFileManager* mgr_;
 };
+
+
+void DestHandle::Write(string str, fibers_ext::FiberQueueThreadPool* fq) {
+  CHECK(!zlib_sink);
+  fq->Add(fq_index, WriteCb(std::move(str)));
+}
 
 GlobalDestFileManager::GlobalDestFileManager(const std::string& root_dir,
                                              fibers_ext::FiberQueueThreadPool* fq)
@@ -112,61 +154,58 @@ auto GlobalDestFileManager::Get(StringPiece key, const pb::Output& out) -> Resul
     string file_name = FileName(key, out);
     key = str_db_.Get(key);
     string full_path = file_util::JoinPath(root_dir_, file_name);
-    auto res = dest_files_.emplace(key, CreateFile(full_path, out, fq_));
-    CHECK(res.second && res.first->second);
+    DestHandle* dh = new DestHandle;
+    dh->wf = CreateFile(full_path, out, fq_);
+    CHECK(dh->wf);
+
+    dh->fq_index =
+        base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
+    auto res = dest_files_.emplace(key, dh);
+    CHECK(res.second);
     it = res.first;
   }
 
   return Result(it->first, it->second);
 }
 
-GlobalDestFileManager::~GlobalDestFileManager() {
+void GlobalDestFileManager::Flush() {
   for (auto& k_v : dest_files_) {
-    CHECK(k_v.second->Close());
+    DestHandle* dh = k_v.second;
+    if (dh->zlib_sink) {
+      CHECK_STATUS(dh->zlib_sink->Flush());
+
+      fq_->Add(dh->fq_index, dh->WriteCb(std::move(dh->str_sink->contents())));
+    }
+    bool res = fq_->Await(dh->fq_index, [wf = dh->wf] { return wf->Close();});
+    CHECK(res);
+    dh->wf = nullptr;
   }
 }
 
-struct LocalContext::BufferedWriter {
-  file::WriteFile* wr;
-  std::string buffer;
-  unsigned index;
-
-  size_t writes = 0, flushes = 0;
-  static constexpr size_t kFlushLimit = 1 << 15;
-  void operator=(const BufferedWriter&) = delete;
-
-  explicit BufferedWriter(file::WriteFile* wf, unsigned i) : wr(wf), index(i) {}
-  BufferedWriter(const BufferedWriter&) = delete;
-
-  void Flush(fibers_ext::FiberQueueThreadPool* fq) {
-    if (buffer.empty())
-      return;
-    auto status = fq->Await(index, [b = std::move(buffer), wr = this->wr] { return wr->Write(b); });
-    CHECK_STATUS(status);
+GlobalDestFileManager::~GlobalDestFileManager() {
+  for (auto& k_v : dest_files_) {
+    delete k_v.second;
   }
+}
 
-  ~BufferedWriter();
+BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
 
-  void Write(std::initializer_list<StringPiece> src, fibers_ext::FiberQueueThreadPool* fq);
-};
+void BufferedWriter::Flush(fibers_ext::FiberQueueThreadPool* fq) {
+  if (buffer_.empty())
+    return;
 
-LocalContext::BufferedWriter::~BufferedWriter() { CHECK(buffer.empty()); }
+  dh_->Write(std::move(buffer_), fq);
+}
 
-void LocalContext::BufferedWriter::Write(std::initializer_list<StringPiece> src,
-                                         fibers_ext::FiberQueueThreadPool* fq) {
-  for (auto v : src) {
-    buffer.append(v.data(), v.size());
-  }
+void BufferedWriter::Write(StringPiece src, fibers_ext::FiberQueueThreadPool* fq) {
+  buffer_.append(src.data(), src.size());
 
   VLOG_IF(2, ++writes % 1000 == 0) << "BufferedWrite " << writes;
 
-  if (buffer.size() >= kFlushLimit) {
+  if (buffer_.size() >= kFlushLimit) {
     VLOG(2) << "Flush " << ++flushes;
 
-    fq->Add(index, [b = std::move(buffer), wr = this->wr] {
-      auto status = wr->Write(b);
-      CHECK_STATUS(status);
-    });
+    dh_->Write(std::move(buffer_), fq);
   }
 }
 
@@ -185,11 +224,10 @@ void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) 
     auto res = mgr_->Get(shard_name, output_);
     StringPiece key = res.first;
 
-    unsigned index =
-        base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
-    it = custom_shard_files_.emplace(key, new BufferedWriter{res.second, index}).first;
+    it = custom_shard_files_.emplace(key, new BufferedWriter{res.second}).first;
   }
-  it->second->Write({record, "\n"}, mgr_->pool());
+  record.append("\n");
+  it->second->Write(record, mgr_->pool());
 }
 
 void LocalContext::Flush() {
@@ -251,6 +289,8 @@ void LocalRunner::Init() {
 }
 
 void LocalRunner::Shutdown() {
+  impl_->dest_mgr->Flush();
+
   impl_->dest_mgr.reset();
   impl_->fq_pool.Shutdown();
 
