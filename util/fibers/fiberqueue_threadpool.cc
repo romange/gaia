@@ -19,7 +19,7 @@ FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_
   workers_.reset(new Worker[num_threads]);
 
   for (unsigned i = 0; i < num_threads; ++i) {
-    string name = absl::StrCat("sq_threadpool", i);
+    string name = absl::StrCat("fq_pool", i);
 
     auto fn = std::bind(&FiberQueueThreadPool::WorkerFunction, this, i);
     workers_[i].q.reset(new FuncQ(queue_size));

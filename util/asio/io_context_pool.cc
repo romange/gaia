@@ -4,6 +4,7 @@
 
 #include "util/asio/io_context_pool.h"
 
+#include <sched.h>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/scheduler.hpp>
@@ -43,12 +44,21 @@ void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
   fibers_ext::BlockingCounter bc(thread_arr_.size());
+  char buf[32];
 
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
-    thread_arr_[i].tid = base::StartThread("IoPool", [this, i, &bc] {
+    snprintf(buf, sizeof(buf), "IoPool%lu", i);
+    thread_arr_[i].tid = base::StartThread(buf, [this, i, &bc] {
       this->WrapLoop(i, &bc);
     });
+    cpu_set_t cps;
+    CPU_ZERO(&cps);
+    CPU_SET(i % std::thread::hardware_concurrency(), &cps);
+
+    int rc = pthread_setaffinity_np(thread_arr_[i].tid,
+                                    sizeof(cpu_set_t), &cps);
+    LOG_IF(WARNING, rc) << "Error calling pthread_setaffinity_np: " << strerror(rc) << "\n";
   }
 
   // We can not use Await() here yet because StartLoop might not run yet and its implementation
