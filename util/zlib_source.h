@@ -1,8 +1,8 @@
 // Copyright 2013, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#ifndef GZIPSOURCE_H
-#define GZIPSOURCE_H
+#pragma once
+
 
 #include <zlib.h>
 
@@ -49,6 +49,21 @@ class ZlibSource : public Source {
   DISALLOW_EVIL_CONSTRUCTORS(ZlibSource);
 };
 
+class ZlibSink : public Sink {
+ public:
+  // Takes ownership over sub-sink.
+  explicit ZlibSink(Sink* sub, size_t buf_size = 1 << 16);
+  ~ZlibSink() final;
+
+  Status Append(const strings::ByteRange& slice) final;
+  Status Flush() final;
+
+ private:
+  std::unique_ptr<Sink> sub_;
+  std::unique_ptr<uint8_t[]> buf_;
+  size_t buf_size_;
+  z_stream zcontext_;
+};
+
 }  // namespace util
 
-#endif  // GZIPSOURCE_H

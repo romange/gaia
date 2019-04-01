@@ -20,6 +20,16 @@ namespace util {
 using google::protobuf::io::StringOutputStream;
 using google::protobuf::io::GzipOutputStream;
 
+bool is_rep_char(const string& s, char c) {
+  for (auto x : s) {
+    if (x != c)
+      return false;
+  }
+  return true;
+}
+
+using namespace strings;
+
 class SourceTest : public testing::Test {
   void SetUp() {
     for (int i = 0; i < 100000; ++i) {
@@ -109,20 +119,36 @@ TEST_F(SourceTest, MinSize) {
   EXPECT_EQ(original_.size(), compared);
 }
 
+TEST_F(SourceTest, Zlib) {
+  string buf;
+
+  StringSink* compressed = new StringSink;
+  ZlibSink z_compr(compressed);
+
+  for (unsigned i = 0; i < 1000; ++i) {
+    buf.assign(1000, 'a' + (i % 32));
+    auto status = z_compr.Append(ToByteRange(buf));
+    ASSERT_TRUE(status.ok()) << status;
+  }
+  ASSERT_TRUE(z_compr.Flush().ok());
+  EXPECT_GT(compressed->contents().size(), 8);
+
+  StringSource* src = new StringSource(compressed->contents(), 256);
+  ZlibSource z_src(src);
+
+  buf.resize(1000);
+
+  for (unsigned i = 0; i < 1000; ++i) {
+    auto result = z_src.Read(AsMutableByteRange(buf));
+    ASSERT_TRUE(result.ok()) << result.status;
+    ASSERT_EQ(buf.size(), result.obj);
+    ASSERT_TRUE(is_rep_char(buf, 'a' + (i % 32))) << i;
+  }
+}
 
 class ZstdSourceTest : public testing::Test {
 };
 
-
-bool is_rep_char(const string& s, char c) {
-  for (auto x : s) {
-    if (x != c)
-      return false;
-  }
-  return true;
-}
-
-using namespace strings;
 
 TEST_F(ZstdSourceTest, Basic) {
   string buf;
