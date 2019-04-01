@@ -20,6 +20,8 @@ using namespace util;
 
 namespace {
 
+constexpr size_t kBufLimit = 1 << 16;
+
 string FileName(StringPiece base, const pb::Output& out) {
   CHECK_EQ(out.format().type(), pb::WireFormat::TXT);
 
@@ -86,8 +88,14 @@ auto DestFileSet::Get(StringPiece key, const pb::Output& out) -> Result {
     if (FLAGS_local_runner_zsink && out.has_compress()) {
       CHECK(out.compress().type() == pb::Output::GZIP);
 
+      static std::default_random_engine rnd;
+
       dh->str_sink = new StringSink;
       dh->zlib_sink.reset(new ZlibSink(dh->str_sink, out.compress().level()));
+
+      // Randomize when we flush first for each handle. That should define uniform flushing cycle
+      // for all handles.
+      dh->start_delta_ = rnd() % (kBufLimit - 1);
     }
     auto res = dest_files_.emplace(key, dh);
     CHECK(res.second);
@@ -130,8 +138,9 @@ void DestHandle::Write(string str) {
     std::unique_lock<fibers::mutex> lk(zmu_);
     CHECK_STATUS(zlib_sink->Append(strings::ToByteRange(str)));
     str.clear();
-    if (str_sink->contents().size() >= 1 << 15) {
+    if (str_sink->contents().size() >= kBufLimit - start_delta_) {
       fq_->Add(fq_index_, WriteCb(std::move(str_sink->contents()), wf_));
+      start_delta_ = 0;
     }
     return;
   }

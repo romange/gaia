@@ -32,7 +32,8 @@ class BufferedWriter {
   std::string buffer_;
 
   size_t writes = 0, flushes = 0;
-  static constexpr size_t kFlushLimit = 1 << 15;
+  static constexpr size_t kFlushLimit = 1 << 13;
+
   void operator=(const BufferedWriter&) = delete;
 
  public:

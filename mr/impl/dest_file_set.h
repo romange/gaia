@@ -47,6 +47,7 @@ class DestHandle {
   std::unique_ptr<util::ZlibSink> zlib_sink;
   unsigned fq_index_;
   util::fibers_ext::FiberQueueThreadPool* fq_;
+  size_t start_delta_ = 0;
 
   friend class DestFileSet;
 
