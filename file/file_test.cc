@@ -11,6 +11,8 @@
 #include "file/lz4_file.h"
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "util/sinksource.h"
+#include "util/zlib_source.h"
 
 using testing::ElementsAre;
 
@@ -117,17 +119,35 @@ TEST_F(FileTest, UniquePtr) {
 }
 
 
+constexpr size_t kStrLen = 1 << 17;
+
 static void BM_GZipFile(benchmark::State& state) {
-  std::string data = base::RandStr(state.range(0));
+  std::string data = base::RandStr(kStrLen);
   string file_path = "/tmp/gzip_test.txt.gz";
 
   while (state.KeepRunning()) {
-    WriteFile* file = GzipFile::Create(file_path, 1);
+    WriteFile* file = GzipFile::Create("/dev/null", 1);
     CHECK(file->Open());
-    CHECK_STATUS(file->Write(data));
+    for (unsigned i = 0; i < state.range(0); ++i)
+      CHECK_STATUS(file->Write(data));
     CHECK(file->Close());
   }
 }
-BENCHMARK(BM_GZipFile)->Arg(17);
+BENCHMARK(BM_GZipFile)->Range(8, 32);
+
+static void BM_ZipSink(benchmark::State& state) {
+  std::string data = base::RandStr(kStrLen);
+
+  while (state.KeepRunning()) {
+    util::StringSink* str = new util::StringSink;
+    util::ZlibSink zsink(str, 1);
+    for (unsigned i = 0; i < state.range(0); ++i) {
+      CHECK_STATUS(zsink.Append(strings::ToByteRange(data)));
+    }
+    CHECK_STATUS(zsink.Flush());
+    file_util::WriteStringToFileOrDie(str->contents(), "/dev/null");
+  }
+}
+BENCHMARK(BM_ZipSink)->Range(8, 32);
 
 }  // namespace file
