@@ -105,12 +105,12 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
   return zcontext_.next_out - range.begin();
 }
 
-ZlibSink::ZlibSink(Sink* sub, size_t buf_size)
+ZlibSink::ZlibSink(Sink* sub, unsigned level, size_t buf_size)
     : sub_(sub), buf_(new uint8_t[buf_size]), buf_size_(buf_size) {
   InitCtx(&zcontext_);
 
-  int zerror =
-      deflateInit2(&zcontext_, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+  int lev = level == 0 ? Z_DEFAULT_COMPRESSION : level;
+  int zerror = deflateInit2(&zcontext_, lev, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
   CHECK_EQ(Z_OK, zerror);
 
   zcontext_.next_out = buf_.get();

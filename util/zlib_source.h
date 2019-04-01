@@ -52,7 +52,7 @@ class ZlibSource : public Source {
 class ZlibSink : public Sink {
  public:
   // Takes ownership over sub-sink.
-  explicit ZlibSink(Sink* sub, size_t buf_size = 1 << 16);
+  explicit ZlibSink(Sink* sub, unsigned level = 0, size_t buf_size = 1 << 16);
   ~ZlibSink() final;
 
   Status Append(const strings::ByteRange& slice) final;

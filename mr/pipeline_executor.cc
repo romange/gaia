@@ -11,6 +11,8 @@
 
 namespace mr3 {
 
+DEFINE_uint32(map_limit, 0, "");
+
 using namespace std;
 using namespace boost;
 using namespace util;
@@ -142,6 +144,11 @@ void Pipeline::Executor::MapFiber(TableBase* sb) {
       break;
 
     ++record_num;
+
+    if (FLAGS_map_limit && record_num > FLAGS_map_limit) {
+      continue;
+    }
+
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
     // record is a binary input.
