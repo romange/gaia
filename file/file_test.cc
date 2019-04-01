@@ -10,6 +10,7 @@
 #include "file/gzip_file.h"
 #include "file/lz4_file.h"
 #include "base/gtest.h"
+#include "base/logging.h"
 
 using testing::ElementsAre;
 
@@ -114,5 +115,19 @@ TEST_F(FileTest, CopyFile) {
 TEST_F(FileTest, UniquePtr) {
   std::unique_ptr<WriteFile> file(Open(base::GetTestTempPath("foo.txt")));
 }
+
+
+static void BM_GZipFile(benchmark::State& state) {
+  std::string data = base::RandStr(state.range(0));
+  string file_path = "/tmp/gzip_test.txt.gz";
+
+  while (state.KeepRunning()) {
+    WriteFile* file = GzipFile::Create(file_path, 1);
+    CHECK(file->Open());
+    CHECK_STATUS(file->Write(data));
+    CHECK(file->Close());
+  }
+}
+BENCHMARK(BM_GZipFile)->Arg(17);
 
 }  // namespace file
