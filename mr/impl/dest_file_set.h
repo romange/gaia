@@ -7,11 +7,11 @@
 #include "mr/mr3.pb.h"
 
 #include "file/file.h"
+#include "strings/unique_strings.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/fibers/fibers_ext.h"
 #include "util/sinksource.h"
 #include "util/zlib_source.h"
-#include "strings/unique_strings.h"
 
 namespace mr3 {
 namespace impl {
@@ -53,8 +53,11 @@ class DestHandle {
   DestHandle(::file::WriteFile* wf, unsigned index, util::fibers_ext::FiberQueueThreadPool* fq);
   DestHandle(const DestHandle&) = delete;
 
-public:
+ public:
   void Write(std::string str);
+
+ private:
+  boost::fibers::mutex zmu_;
 };
 
 }  // namespace impl

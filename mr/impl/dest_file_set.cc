@@ -11,6 +11,9 @@
 
 namespace mr3 {
 namespace impl {
+
+DEFINE_bool(local_runner_zsink, false, "");
+
 using namespace boost;
 using namespace std;
 using namespace util;
@@ -42,7 +45,7 @@ inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
 file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
                             fibers_ext::FiberQueueThreadPool* fq) {
   std::function<file::WriteFile*()> cb;
-  if (out.has_compress()) {
+  if (out.has_compress() && !FLAGS_local_runner_zsink) {
     if (out.compress().type() == pb::Output::GZIP) {
       file::WriteFile* gzres{file::GzipFile::Create(path, out.compress().level())};
       cb = [gzres] {
@@ -62,8 +65,7 @@ file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
 
 }  // namespace
 
-DestFileSet::DestFileSet(const std::string& root_dir,
-                                             fibers_ext::FiberQueueThreadPool* fq)
+DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq)
     : root_dir_(root_dir), fq_(fq) {
   dest_files_.set_empty_key(StringPiece());
 }
@@ -80,6 +82,13 @@ auto DestFileSet::Get(StringPiece key, const pb::Output& out) -> Result {
     unsigned index =
         base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
     DestHandle* dh = new DestHandle{CreateFile(full_path, out, fq_), index, fq_};
+
+    if (FLAGS_local_runner_zsink && out.has_compress()) {
+      CHECK(out.compress().type() == pb::Output::GZIP);
+
+      dh->str_sink = new StringSink;
+      dh->zlib_sink.reset(new ZlibSink(dh->str_sink, out.compress().level()));
+    }
     auto res = dest_files_.emplace(key, dh);
     CHECK(res.second);
     it = res.first;
@@ -94,8 +103,11 @@ void DestFileSet::Flush() {
     if (dh->zlib_sink) {
       CHECK_STATUS(dh->zlib_sink->Flush());
 
-      dh->Write(std::move(dh->str_sink->contents()));
+      if (!dh->str_sink->contents().empty()) {
+        fq_->Add(dh->fq_index_, WriteCb(std::move(dh->str_sink->contents()), dh->wf_));
+      }
     }
+
     bool res = fq_->Await(dh->fq_index_, [wf = dh->wf_] { return wf->Close(); });
     CHECK(res);
     dh->wf_ = nullptr;
@@ -114,7 +126,15 @@ DestHandle::DestHandle(::file::WriteFile* wf, unsigned index, fibers_ext::FiberQ
 }
 
 void DestHandle::Write(string str) {
-  CHECK(!zlib_sink);
+  if (zlib_sink) {
+    std::unique_lock<fibers::mutex> lk(zmu_);
+    CHECK_STATUS(zlib_sink->Append(strings::ToByteRange(str)));
+    str.clear();
+    if (str_sink->contents().size() >= 1 << 15) {
+      fq_->Add(fq_index_, WriteCb(std::move(str_sink->contents()), wf_));
+    }
+    return;
+  }
   fq_->Add(fq_index_, WriteCb(std::move(str), wf_));
 }
 
