@@ -54,6 +54,14 @@ void FiberQueueThreadPool::Shutdown() {
 }
 
 void FiberQueueThreadPool::WorkerFunction(unsigned index) {
+  /*
+  sched_param param;
+  param.sched_priority = 1;
+  int err = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+  if (err) {
+    LOG(INFO) << "Could not set FIFO priority in fiber-queue-thread";
+  }*/
+
   bool is_closed = false;
   Func f;
   Worker& me = workers_[index];
