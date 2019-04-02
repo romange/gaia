@@ -274,9 +274,9 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
       f(std::move(r), &wrapper);
     };
   } else {
-    return [wrapper = DoContext<OutT>(&out_, context)]
+    return [wrapper = DoContext<OutT>(&out_, context), record_traits = RecordTraits<OutT>{}]
     (RawRecord&& r) mutable {
-      wrapper.Write(RecordTraits<OutT>::Parse(std::move(r)));
+      wrapper.Write(record_traits.Parse(std::move(r)));
     };
   }
 }
@@ -286,10 +286,12 @@ template <typename T> Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_
   shard_op_(std::move(o.shard_op_)) {
 }
 
-template <> struct RecordTraits<rapidjson::Document> {
+template <> class RecordTraits<rapidjson::Document> {
+  std::string tmp_;
 
+public:
   static std::string Serialize(rapidjson::Document&& doc);
-  static rapidjson::Document Parse(std::string&& tmp);
+  rapidjson::Document Parse(std::string&& tmp);
 };
 
 

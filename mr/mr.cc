@@ -44,12 +44,14 @@ std::string RecordTraits<rj::Document>::Serialize(rj::Document&& doc) {
 }
 
 rj::Document RecordTraits<rj::Document>::Parse(std::string&& tmp) {
+  tmp_ = std::move(tmp);
+
   rj::Document doc;
   constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
-  doc.Parse<kFlags>(tmp.c_str(), tmp.size());
+  doc.ParseInsitu<kFlags>(&tmp_.front());
 
-  CHECK(!doc.HasParseError()) << rj::GetParseError_En(doc.GetParseError()) << " for string " << tmp;
-
+  CHECK(!doc.HasParseError()) << rj::GetParseError_En(doc.GetParseError()) << " for string "
+                              << tmp_;
   return doc;
 }
 
