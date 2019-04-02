@@ -8,7 +8,10 @@
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
-#define RAPIDJSON_SSE42
+// I do not enable SSE42 for rapidjson because it may go out of boundaries, they assume
+// all the inputs are aligned at the end.
+//
+// #define RAPIDJSON_SSE42
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -123,11 +126,15 @@ template <typename T> class Output : public OutputBase {
 template <typename Record> struct RecordTraits {
   static std::string Serialize(Record&& r) { return std::string(std::move(r)); }
 
-  static Record Parse(std::string&& tmp) {
-    return std::move(tmp);
+  static bool Parse(std::string&& tmp, Record* res) {
+    *res = std::move(tmp);
+    return true;
   }
 };
 
+
+// This class is created per IO Context thread. In other words, RawContext is thread-local but
+// not fiber local.
 class RawContext {
   template <typename T> friend class DoContext;
  public:
@@ -135,23 +142,36 @@ class RawContext {
 
   virtual void Flush() {}
 
+  size_t parse_errors = 0;
+
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };
 
 
-// Right now this class is not thread-local and is access by all threads concurrently
-// i.e. all its method must be thread-safe.
+// This class is created per MapFiber in SetupDoFn and it wraps RawContext.
+// It's packaged together with the DoFn function.
 template <typename T> class DoContext {
   Output<T>* out_;
   RawContext* context_;
   RecordTraits<T> rt_;
 
+  using RawRecord = std::string;
+
   friend class TableImpl<T>;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
+  bool ParseRaw(RawRecord&& rr, T* res) {
+    bool parse_res = rt_.Parse(std::move(rr), res);
+    if (!parse_res)
+      ++context_->parse_errors;
+
+    return parse_res;
+  }
+
  public:
+
   void Write(T&& t) {
     ShardId shard_id = out_->Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
@@ -272,14 +292,16 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
 
 template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
-    return [f = this->do_fn_, wrapper = DoContext<OutT>(&out_, context)]
+    return [f = this->do_fn_, wrapper = ContextType(&out_, context)]
     (RawRecord&& r) mutable {
       f(std::move(r), &wrapper);
     };
   } else {
-    return [wrapper = DoContext<OutT>(&out_, context), record_traits = RecordTraits<OutT>{}]
+    return [wrapper = ContextType(&out_, context)]
     (RawRecord&& r) mutable {
-      wrapper.Write(record_traits.Parse(std::move(r)));
+      OutT val;
+      if (wrapper.ParseRaw(std::move(r), &val))
+        wrapper.Write(std::move(val));
     };
   }
 }
@@ -294,7 +316,7 @@ template <> class RecordTraits<rapidjson::Document> {
 
 public:
   static std::string Serialize(rapidjson::Document&& doc);
-  rapidjson::Document Parse(std::string&& tmp);
+  bool Parse(std::string&& tmp, rapidjson::Document* res);
 };
 
 

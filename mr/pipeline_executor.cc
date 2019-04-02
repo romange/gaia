@@ -63,8 +63,7 @@ void Pipeline::Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
 
-  // Use AwaitFiberOnAll because we block in the function.
-  pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
+  pool_->AwaitOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   runner_->Shutdown();
 
@@ -111,6 +110,13 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
     if (file_name_q_.is_closed())
       break;
   }
+
+  atomic_uint64_t parse_errs{0};
+  pool_->AwaitOnAll([&](IoContext&) {
+    parse_errs.fetch_add(per_io_->do_context->parse_errors, std::memory_order_relaxed);
+  });
+
+  LOG_IF(WARNING, parse_errs > 0) << tb->op().op_name() << " had " << parse_errs << " errors";
 }
 
 void Pipeline::Executor::ProcessFiles() {

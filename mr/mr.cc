@@ -43,16 +43,16 @@ std::string RecordTraits<rj::Document>::Serialize(rj::Document&& doc) {
   return s.GetString();
 }
 
-rj::Document RecordTraits<rj::Document>::Parse(std::string&& tmp) {
+bool RecordTraits<rj::Document>::Parse(std::string&& tmp, rj::Document* res) {
   tmp_ = std::move(tmp);
 
-  rj::Document doc;
   constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
-  doc.ParseInsitu<kFlags>(&tmp_.front());
+  res->ParseInsitu<kFlags>(&tmp_.front());
 
-  CHECK(!doc.HasParseError()) << rj::GetParseError_En(doc.GetParseError()) << " for string "
-                              << tmp_;
-  return doc;
+  bool has_error = res->HasParseError();
+  LOG_IF(INFO, has_error)
+      << rj::GetParseError_En(res->GetParseError()) << " for string " << tmp_;
+  return !has_error;
 }
 
 }  // namespace mr3
