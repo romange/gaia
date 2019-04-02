@@ -33,7 +33,6 @@ class StringTable;
 template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
 
-
 // Planning interfaces.
 class InputBase {
  public:
@@ -61,7 +60,6 @@ struct ShardId : public absl::variant<uint32_t, std::string> {
   ShardId() = default;
 };
 
-
 class OutputBase {
  public:
   pb::Output* mutable_msg() { return out_; }
@@ -83,7 +81,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class TableImpl<T>; // To allow the instantiation of Output<T>;
+  friend class TableImpl<T>;  // To allow the instantiation of Output<T>;
 
   std::function<std::string(const T&)> shard_op_;
 
@@ -132,11 +130,11 @@ template <typename Record> struct RecordTraits {
   }
 };
 
-
 // This class is created per IO Context thread. In other words, RawContext is thread-local but
 // not fiber local.
 class RawContext {
   template <typename T> friend class DoContext;
+
  public:
   virtual ~RawContext();
 
@@ -147,7 +145,6 @@ class RawContext {
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };
-
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
 // It's packaged together with the DoFn function.
@@ -171,7 +168,6 @@ template <typename T> class DoContext {
   }
 
  public:
-
   void Write(T&& t) {
     ShardId shard_id = out_->Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
@@ -184,12 +180,9 @@ class TableBase {
   using RawRecord = std::string;
   typedef std::function<void(RawRecord&& record)> DoFn;
 
-  TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) {
-    op_.set_op_name(nm);
-  }
+  TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
 
-  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {
-  }
+  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
 
   virtual ~TableBase() {}
 
@@ -197,7 +190,7 @@ class TableBase {
 
   // virtual util::Status InitializationStatus() const { return util::Status::OK; }
 
-  const pb::Operator& op() const { return op_;}
+  const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
 
   friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
@@ -251,7 +244,7 @@ template <typename OutT> class TableImpl : public TableBase {
 };
 
 template <typename OutT> class PTable {
-public:
+ public:
   // TODO: to hide it from public interface.
   TableBase* impl() { return impl_.get(); }
 
@@ -259,7 +252,10 @@ public:
     return impl_->Write(name, type);
   }
 
-protected:
+  template <typename MapType>
+  PTable<typename MapType::OutputType> Map(const std::string& name) const;
+
+ protected:
   friend class Pipeline;
   friend class StringTable;
 
@@ -272,12 +268,13 @@ class StringTable : public PTable<std::string> {
   friend class Pipeline;
 
  public:
+  StringTable(PTable<std::string>&& p) : PTable(p.impl_) {}
+
   PTable<rapidjson::Document> AsJson() const;
 
  protected:
   StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
 };
-
 
 template <typename OutT>
 Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
@@ -289,16 +286,22 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
   return util::Status::OK;
 }
 */
+template <typename OutT> template <typename MapType>
+  PTable<typename MapType::OutputType> PTable<OutT>::Map(const std::string& name) const {
+    using NewType = typename MapType::OutputType;
+
+    typename TableImpl<NewType>::PtrType ptr;
+    return PTable<NewType>(ptr);
+}
+
 
 template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
-    return [f = this->do_fn_, wrapper = ContextType(&out_, context)]
-    (RawRecord&& r) mutable {
+    return [f = this->do_fn_, wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
       f(std::move(r), &wrapper);
     };
   } else {
-    return [wrapper = ContextType(&out_, context)]
-    (RawRecord&& r) mutable {
+    return [wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
       OutT val;
       if (wrapper.ParseRaw(std::move(r), &val))
         wrapper.Write(std::move(val));
@@ -307,27 +310,25 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
 }
 
 inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
-template <typename T> Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_),
-  shard_op_(std::move(o.shard_op_)) {
-}
+template <typename T>
+Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_), shard_op_(std::move(o.shard_op_)) {}
+
+
 
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;
 
-public:
+ public:
   static std::string Serialize(rapidjson::Document&& doc);
   bool Parse(std::string&& tmp, rapidjson::Document* res);
 };
-
 
 }  // namespace mr3
 
 namespace std {
 
-template<> struct hash<mr3::ShardId> {
-  size_t operator()(const mr3::ShardId& sid) const {
-    return hash<mr3::ShardId::Parent>{}(sid);
-  }
+template <> struct hash<mr3::ShardId> {
+  size_t operator()(const mr3::ShardId& sid) const { return hash<mr3::ShardId::Parent>{}(sid); }
 };
 
 }  // namespace std

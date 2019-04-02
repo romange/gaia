@@ -165,6 +165,33 @@ TEST_F(MrTest, Json) {
                                                   MatchShard("shard1", {kJson2})));
 }
 
+
+class MyMapper {
+  public:
+  typedef std::string OutputType;
+
+  void Do(std::string&& val, mr3::DoContext<OutputType>* cnt) {
+    val.append("a");
+    cnt->Write(std::move(val));
+  }
+};
+
+TEST_F(MrTest, Map) {
+  StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
+  StringTable str2 = str1.Map<MyMapper>("Map1");
+
+  return;
+  // str2.Write("table", pb::WireFormat::TXT)
+  //    .WithSharding(json_shard_func);
+
+  vector<string> elements{"1", "2", "3", "4"};
+
+  runner_.AddRecords("bar.txt", elements);
+  pipeline_->Run(&runner_);
+
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
+}
+
 TEST_F(MrTest, Json2) {
   char str[] = R"({"roman":"��i���u�.nW��'$��uٿ�����d�ݹ��5�"} )";
 
