@@ -5,6 +5,7 @@
 
 #include "base/logging.h"
 #include "strings/strcat.h"
+#include "util/fibers/fibers_ext.h"
 #include "util/http/http_testing.h"
 
 DECLARE_string(sentry_dsn);
@@ -27,10 +28,13 @@ class SentryTest : public util::HttpBaseTest {
 
 
 TEST_F(SentryTest, Basic) {
+  fibers_ext::Done done;
+
   listener_.RegisterCb("/api/id/store/", false,
-      [this](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
+      [this, done](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) mutable {
     this->req_++;
     http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
+    done.Notify();
 
     return send->Invoke(std::move(resp));
   });
@@ -39,6 +43,8 @@ TEST_F(SentryTest, Basic) {
   EnableSentry(&pool_->GetNextContext());
   LOG(ERROR) << "Try";
   this_fiber::sleep_for(10ms);
+  done.Wait();
+
   EXPECT_EQ(1, req_);
 }
 
