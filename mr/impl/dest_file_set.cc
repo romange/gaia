@@ -12,6 +12,12 @@
 namespace mr3 {
 namespace impl {
 
+// For some reason enabling local_runner_zsink as true performs slower than
+// using GzipFile in the threadpool. I think there is something to dig here and I think
+// compress operations should not be part of the FiberQueueThreadPool workload but after spending
+// quite some time I am giving up.
+// TODO: to implement compress directly using zlib interface an not using zlibsink/stringsink
+// abstractions.
 DEFINE_bool(local_runner_zsink, false, "");
 
 using namespace boost;
