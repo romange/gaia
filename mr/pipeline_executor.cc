@@ -63,7 +63,8 @@ void Pipeline::Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
   file_name_q_.close();
 
-  pool_->AwaitOnAll([&](IoContext&) { per_io_->Shutdown(); });
+  // Use AwaitFiberOnAll because Shutdown() blocks the callback.
+  pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   runner_->Shutdown();
 
