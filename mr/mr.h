@@ -7,6 +7,9 @@
 #include <functional>
 
 #include <boost/smart_ptr/intrusive_ptr.hpp>
+
+#define RAPIDJSON_SSE42
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>

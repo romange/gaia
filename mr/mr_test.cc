@@ -3,6 +3,8 @@
 //
 #include <gmock/gmock.h>
 
+#include <rapidjson/error/en.h>
+
 #include "mr/pipeline.h"
 
 #include "absl/strings/str_join.h"
@@ -23,6 +25,7 @@ using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
 
 using ShardedOutput = std::unordered_map<ShardId, std::vector<string>>;
+namespace rj = rapidjson;
 
 void PrintTo(const ShardId& src, std::ostream* os) {
   if (absl::holds_alternative<uint32_t>(src)) {
@@ -161,5 +164,18 @@ TEST_F(MrTest, Json) {
   EXPECT_THAT(runner_.out(), UnorderedElementsAre(MatchShard("shard0", {kJson3, kJson1}),
                                                   MatchShard("shard1", {kJson2})));
 }
+
+TEST_F(MrTest, Json2) {
+  char str[] = R"({"roman":"��i���u�.nW��'$��uٿ�����d�ݹ��5�"} )";
+
+  rapidjson::Document doc;
+  doc.Parse(str);
+
+  rj::StringBuffer s;
+  rj::Writer<rj::StringBuffer> writer(s);
+  doc.Accept(writer);
+  LOG(INFO) << s.GetString();
+}
+
 
 }  // namespace mr3
