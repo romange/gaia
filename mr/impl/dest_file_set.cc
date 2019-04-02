@@ -121,6 +121,7 @@ void DestFileSet::Flush() {
         fq_->Add(dh->fq_index_, WriteCb(std::move(dh->str_sink->contents()), dh->wf_));
       }
     }
+    VLOG(1) << "Closing file "  << k_v.first;
 
     bool res = fq_->Await(dh->fq_index_, [wf = dh->wf_] { return wf->Close(); });
     CHECK(res);
