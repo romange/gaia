@@ -10,6 +10,8 @@ AllowShortFunctionsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: false
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
+DerivePointerAlignment: false
+PointerAlignment: Left
 ---
 Language: Proto
 BasedOnStyle: Google

@@ -81,6 +81,7 @@ void IoContextPool::Stop() {
   for (TInfo& tinfo : thread_arr_) {
     tinfo.work.reset();
   }
+  VLOG(1) << "Asio Contexts has been stopped";
 
   for (size_t i = 0; i <thread_arr_.size(); ++i) {
     pthread_join(thread_arr_[i].tid, nullptr);

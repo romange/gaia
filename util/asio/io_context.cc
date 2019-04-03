@@ -120,8 +120,10 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   //]
 
   void notify() noexcept override {
-    if (!suspend_timer_)
+    if (!suspend_timer_) {
+      VLOG(1) << "Called during shutdown phase";
       return;
+    }
 
     // Something has happened that should wake one or more fibers BEFORE
     // suspend_timer_ expires. Reset the timer to cause it to fire
@@ -323,6 +325,7 @@ void IoContext::Stop() {
   }
 
   context_ptr_->stop();
+  VLOG(1) << "AsioIoContext stopped";
 }
 
 }  // namespace util
