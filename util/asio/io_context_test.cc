@@ -21,11 +21,10 @@ namespace {
 
 class TestSink final : public ::google::LogSink {
  public:
-  TestSink() {
-  }
+  TestSink() {}
 
-  void send(google::LogSeverity severity, const char *full_filename, const char *base_filename,
-            int line, const struct ::tm *tm_time, const char *message, size_t message_len) override;
+  void send(google::LogSeverity severity, const char* full_filename, const char* base_filename,
+            int line, const struct ::tm* tm_time, const char* message, size_t message_len) override;
 
   void WaitTillSent() override;
 
@@ -35,26 +34,23 @@ class TestSink final : public ::google::LogSink {
  private:
 };
 
-void TestSink::send(google::LogSeverity severity, const char *full_filename,
-                    const char *base_filename, int line, const struct ::tm *tm_time,
-                    const char *message, size_t message_len) {
+void TestSink::send(google::LogSeverity severity, const char* full_filename,
+                    const char* base_filename, int line, const struct ::tm* tm_time,
+                    const char* message, size_t message_len) {
   // cout << full_filename << "/" << StringPiece(message, message_len) << ": " << severity << endl;
   ++sends;
 }
 
-void TestSink::WaitTillSent() {
-  ++waits;
-}
+void TestSink::WaitTillSent() { ++waits; }
 
 class TestGlogClient : public GlogAsioSink {
-  unsigned &num_calls_;
+  unsigned& num_calls_;
 
  public:
-  TestGlogClient(unsigned *num_calls) : num_calls_(*num_calls) {
-  }
+  TestGlogClient(unsigned* num_calls) : num_calls_(*num_calls) {}
 
  protected:
-  void HandleItem(const Item &item) override {
+  void HandleItem(const Item& item) override {
     if (0 == strcmp(item.base_filename, _TEST_BASE_FILE_)) {
       ++num_calls_;
     }
@@ -63,16 +59,13 @@ class TestGlogClient : public GlogAsioSink {
 
 class CancelImpl final : public IoContext::Cancellable {
   bool cancel_ = false;
-  bool &finished_;
+  bool& finished_;
   fibers::fiber fb_;
 
  public:
-  CancelImpl(bool *finished) : finished_(*finished) {
-  }
+  CancelImpl(bool* finished) : finished_(*finished) {}
 
-  ~CancelImpl() {
-    CHECK(finished_);
-  }
+  ~CancelImpl() { CHECK(finished_); }
 
   void Run() override {
     fb_ = fibers::fiber([this] {
@@ -103,9 +96,7 @@ class IoContextTest : public testing::Test {
     pool_->Run();
   }
 
-  void TearDown() {
-    pool_->Stop();
-  }
+  void TearDown() { pool_->Stop(); }
   std::unique_ptr<IoContextPool> pool_;
 };
 
@@ -136,7 +127,7 @@ TEST_F(IoContextTest, Stop) {
 }
 
 TEST_F(IoContextTest, FiberJoin) {
-  IoContext &cntx = pool_->GetNextContext();
+  IoContext& cntx = pool_->GetNextContext();
 
   int i = 0;
   auto cb = [&] {
@@ -157,15 +148,14 @@ TEST_F(IoContextTest, FiberJoin) {
 TEST_F(IoContextTest, Results) {
   IoContext& cntx = pool_->GetNextContext();
 
-  int i = cntx.Await([] { return 5;});
+  int i = cntx.Await([] { return 5; });
   EXPECT_EQ(5, i);
 
-  i = cntx.AwaitSafe([&] { return i + 5;});
+  i = cntx.AwaitSafe([&] { return i + 5; });
   EXPECT_EQ(10, i);
 }
 
-TEST_F(IoContextTest, RunAndStop) {
-}
+TEST_F(IoContextTest, RunAndStop) {}
 
 TEST_F(IoContextTest, RunAndStopFromContext) {
   IoContext& cntx = pool_->GetNextContext();
@@ -235,7 +225,7 @@ TEST_F(IoContextTest, EventCount) {
 
   pool_->GetNextContext().AwaitSafe([&] {
     std::thread t1(cb);
-    ec.await([&] { return val > 0;});
+    ec.await([&] { return val > 0; });
     t1.join();
   });
 }
@@ -247,27 +237,25 @@ TEST_F(IoContextTest, AwaitOnAll) {
 
   std::thread ts[kSz];
   for (unsigned i = 0; i < kSz; ++i) {
-    ts[i] = std::thread([&] {
-      pool.AwaitFiberOnAll([] (IoContext&) {});
-    });
+    ts[i] = std::thread([&] { pool.AwaitFiberOnAll([](IoContext&) {}); });
   }
   for (unsigned i = 0; i < kSz; ++i) {
     ts[i].join();
   }
 }
 
-static void BM_RunOneNoLock(benchmark::State &state) {
+static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);  // no locking
 
   ip::tcp::endpoint endpoint(ip::tcp::v4(), 0);
   std::vector<std::unique_ptr<ip::tcp::acceptor>> acc_arr(state.range(0));
   std::vector<std::unique_ptr<steady_timer>> timer_arr(state.range(0));
-  for (auto &a : acc_arr) {
+  for (auto& a : acc_arr) {
     a.reset(new ip::tcp::acceptor(cntx, endpoint));
     a->async_accept([](auto ec, boost::asio::ip::tcp::socket s) {});
   }
 
-  for (auto &a : timer_arr) {
+  for (auto& a : timer_arr) {
     a.reset(new steady_timer(cntx));
     a->expires_after(2s);
     a->async_wait([](auto ec) {});
@@ -280,5 +268,9 @@ static void BM_RunOneNoLock(benchmark::State &state) {
   }
 }
 BENCHMARK(BM_RunOneNoLock)->Range(1, 64);
+
+static void BM_PickOne(benchmark::State& state) {
+}
+BENCHMARK(BM_PickOne);
 
 }  // namespace util

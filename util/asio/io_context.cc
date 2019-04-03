@@ -35,11 +35,11 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
   // it's single threaded and so https://github.com/boostorg/fiber/issues/194 is unlikely to affect
   // here.
-  fibers::condition_variable cnd_;
+  fibers::condition_variable_any cnd_;
   std::size_t active_cnt_{0};
   std::size_t switch_cnt_{0};
   bool in_run_one_ = false;
-
+  bool is_main_loop_suspended_ = false;
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
@@ -183,11 +183,13 @@ void AsioScheduler::MainLoop() {
 void AsioScheduler::WaitTillFibersSuspend() {
   // block this fiber till all pending (ready) fibers are processed
   // == AsioScheduler::suspend_until() has been called.
+  is_main_loop_suspended_ = true;
 
   std::unique_lock<fibers::mutex> lk(mtx_);
   DVLOG(2) << "WaitTillFibersSuspend:Start";
   cnd_.wait(lk);
   switch_cnt_ = 0;
+  is_main_loop_suspended_ = false;
   DVLOG(2) << "WaitTillFibersSuspend:End";
 }
 
@@ -223,7 +225,13 @@ fibers::context* AsioScheduler::pick_next() noexcept {
 
     DCHECK(ctx && fibers::context::active() != ctx);
 
-    if (!ctx->is_context(fibers::type::dispatcher_context)) {
+    if (ctx->is_context(fibers::type::dispatcher_context)) {
+      #if 0
+      if (is_main_loop_suspended_) {
+        cnd_.notify_one();  // TODO: to handle the case where we want to revive main loop.
+      }
+      #endif
+    } else {
       DCHECK_GT(active_cnt_, 0);
       --active_cnt_;
 

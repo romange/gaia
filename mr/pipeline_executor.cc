@@ -74,8 +74,15 @@ void Pipeline::Executor::Shutdown() {
 void Pipeline::Executor::Init() { runner_->Init(); }
 
 void Pipeline::Executor::Stop() {
+  VLOG(1) << "PipelineExecutor StopStart";
+
   file_name_q_.close();
-  pool_->AwaitOnAll([&](IoContext&) { per_io_->stop_early = true; });
+  pool_->AwaitOnAll([&](IoContext&) {
+    per_io_->stop_early = true;
+    VLOG(1) << "StopEarly";
+  }
+  );
+  VLOG(1) << "PipelineExecutor StopEnd";
 }
 
 void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableBase* tb) {
@@ -167,9 +174,9 @@ void Pipeline::Executor::MapFiber(TableBase* sb) {
 
     // We should have here Shard/string(out_record).
     do_fn(std::move(record));
-    /*if (++record_num % 1000 == 0) {
+    if (++record_num % 1000 == 0) {
       this_fiber::yield();
-    }*/
+    }
   }
   VLOG(1) << "MapFiber finished " << record_num;
 }
