@@ -119,7 +119,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableB
       break;
   }
 
-  atomic_uint64_t parse_errs{0};
+  atomic<uint64_t> parse_errs{0};
   pool_->AwaitOnAll([&](IoContext&) {
     parse_errs.fetch_add(per_io_->do_context->parse_errors, std::memory_order_relaxed);
   });
