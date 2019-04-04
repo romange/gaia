@@ -61,8 +61,9 @@ TEST_F(RpcTest, BadHeader) {
   string control("Hello "), message("world!!!");
   asio::write(*sock2_, make_buffer_seq(control, message), ec_);
   ASSERT_FALSE(ec_);
-
+  VLOG(1) << "After the write";
   asio::read(*sock2_, make_buffer_seq(control, message), ec_);
+  VLOG(1) << "After the read";
 
   ASSERT_EQ(asio::error::make_error_code(asio::error::eof), ec_) << ec_.message();
 }

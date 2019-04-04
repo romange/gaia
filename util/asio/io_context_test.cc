@@ -17,7 +17,71 @@ using namespace std::chrono_literals;
 
 namespace util {
 
+using fibers_ext::short_id;
+
 namespace {
+
+class RRAlgo : public fibers::algo::algorithm {
+ private:
+  typedef fibers::scheduler::ready_queue_type rqueue_type;
+
+  rqueue_type rqueue_{};
+  std::mutex mtx_{};
+  std::condition_variable cnd_{};
+  bool flag_{false};
+
+ public:
+  RRAlgo() = default;
+
+  RRAlgo(RRAlgo const&) = delete;
+  RRAlgo& operator=(RRAlgo const&) = delete;
+
+  void awakened(fibers::context*) noexcept final;
+
+  fibers::context* pick_next() noexcept final;
+
+  bool has_ready_fibers() const noexcept final { return !rqueue_.empty(); }
+
+  void suspend_until(std::chrono::steady_clock::time_point const&) noexcept final;
+
+  void notify() noexcept final;
+};
+
+void RRAlgo::awakened(fibers::context* ctx) noexcept {
+  DVLOG(1) << "Ready " << short_id(ctx);
+  ctx->ready_link(rqueue_);
+}
+
+fibers::context* RRAlgo::pick_next() noexcept {
+  fibers::context* victim = nullptr;
+  if (!rqueue_.empty()) {
+    victim = &rqueue_.front();
+    rqueue_.pop_front();
+    DVLOG(1) << "pick_next " << short_id(victim);
+  }
+  return victim;
+}
+
+void RRAlgo::suspend_until(std::chrono::steady_clock::time_point const& time_point) noexcept {
+  if ((std::chrono::steady_clock::time_point::max)() == time_point) {
+    std::unique_lock<std::mutex> lk{mtx_};
+    cnd_.wait(lk, [&]() { return flag_; });
+    flag_ = false;
+  } else {
+    DVLOG(1) << "wait_until " << time_point.time_since_epoch().count();
+
+    std::unique_lock<std::mutex> lk{mtx_};
+    cnd_.wait_until(lk, time_point, [&]() { return flag_; });
+    flag_ = false;
+  }
+}
+
+void RRAlgo::notify() noexcept {
+  std::unique_lock<std::mutex> lk{mtx_};
+  flag_ = true;
+  lk.unlock();
+  cnd_.notify_all();
+}
 
 class TestSink final : public ::google::LogSink {
  public:
@@ -244,6 +308,49 @@ TEST_F(IoContextTest, AwaitOnAll) {
   }
   for (unsigned i = 0; i < kSz; ++i) {
     ts[i].join();
+  }
+}
+
+TEST_F(IoContextTest, PlainFiberYield) {
+  fibers::use_scheduling_algorithm<RRAlgo>();
+  bool stop = false;
+  fibers::fiber fb_yied{[&] {
+    while (!stop)
+      this_fiber::yield();
+  }};
+  fibers::fiber fb_sleep{[&] {
+    VLOG(1) << "Before Sleep " << short_id();
+    this_fiber::sleep_for(20ms);
+    stop = true;
+  }};
+  fb_yied.join();
+  fb_sleep.join();
+}
+
+TEST_F(IoContextTest, YieldInIO) {
+  IoContext& cntx = pool_->GetNextContext();
+  constexpr unsigned kSz = 3;
+  fibers::fiber fbs[kSz];
+  fibers::fiber sl;
+  std::atomic_bool cancel{false};
+  auto cb = [&](int i) {
+    while (!cancel) {
+      VLOG(1) << "Yield " << short_id() << " " << i;
+      this_fiber::yield();
+    }
+  };
+
+  for (unsigned i = 0; i < kSz; ++i) {
+    fbs[i] = cntx.LaunchFiber(cb, i);
+  }
+  sl = cntx.LaunchFiber([] {
+    VLOG(1) << "Sleep " << short_id();
+    this_fiber::sleep_for(10ms);
+  });
+  cancel = true;
+  sl.join();
+  for (unsigned i = 0; i < kSz; ++i) {
+    fbs[i].join();
   }
 }
 

@@ -26,6 +26,15 @@ enum DoneWaitDirective {
 
 namespace fibers_ext {
 
+inline uint16_t short_id(::boost::fibers::context* ctx) {
+  return reinterpret_cast<uintptr_t>(ctx);
+}
+
+inline uint16_t short_id() {
+  return short_id(::boost::fibers::context::active());
+}
+
+
 // Wrap canonical pattern for condition_variable + bool flag
 // We can not synchronize threads with a condition-like variable on a stack.
 // The reason is that it's possible that the main (waiting) thread will pass "Wait()" call

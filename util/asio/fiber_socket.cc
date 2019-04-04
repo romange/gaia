@@ -44,25 +44,28 @@ FiberSyncSocket::FiberSyncSocket(const std::string& hname, const std::string& po
 void FiberSyncSocket::Shutdown(error_code& ec) {
   if (!is_open_)
     return;
-
+  auto handle = sock_.native_handle();
   auto cb = [&] {
-    if (!is_open_)
+    if (!is_open_) {
+      DVLOG(1) << "Already closed " << handle;
       return;
+    }
+
     is_open_ = false;
     sock_.cancel(ec);
     sock_.shutdown(socket_t::shutdown_both, ec);
-    VLOG(1) << "Sock Shutdown";
+    VLOG(1) << "Sock Shutdown " << handle;
     if (clientsock_data_) {
-      VLOG(1) << "Sock Closed";
+      DVLOG(1) << "Sock Closed";
       clientsock_data_->worker_cv.notify_one();
       if (clientsock_data_->worker.joinable())
         clientsock_data_->worker.join();
-      VLOG(1) << "Worker Joined";
+      DVLOG(1) << "Worker Joined";
     }
   };
 
   if (clientsock_data_) {
-    VLOG(1) << "AwaitShutdown";
+    VLOG(1) << "AwaitShutdown " << handle;
     clientsock_data_->io_cntx->AwaitSafe(cb);
   } else {
     cb();
@@ -137,7 +140,7 @@ void FiberSyncSocket::Worker(const std::string& hname, const std::string& servic
 
     VLOG(2) << "WorkerIteration: ";
   }
-  VLOG(1) << "WorkerExit";
+  VLOG(1) << "FiberSocketReadExit";
 }
 
 system::error_code FiberSyncSocket::Reconnect(const std::string& hname,

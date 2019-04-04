@@ -67,7 +67,7 @@ auto Channel::Connect(uint32_t ms) -> error_code {
   expiry_task_->Start([this](int ticks) {
     DCHECK_GT(ticks, 0);
     this->expire_timer_.advance(ticks);
-    DVLOG(2) << "Advancing expiry to " << this->expire_timer_.now();
+    DVLOG(3) << "Advancing expiry to " << this->expire_timer_.now();
   });
 
   return ec;
