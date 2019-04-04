@@ -329,7 +329,7 @@ TEST_F(IoContextTest, PlainFiberYield) {
 
 TEST_F(IoContextTest, YieldInIO) {
   IoContext& cntx = pool_->GetNextContext();
-  constexpr unsigned kSz = 3;
+  constexpr unsigned kSz = 15;
   fibers::fiber fbs[kSz];
   fibers::fiber sl;
   std::atomic_bool cancel{false};
@@ -352,6 +352,15 @@ TEST_F(IoContextTest, YieldInIO) {
   for (unsigned i = 0; i < kSz; ++i) {
     fbs[i].join();
   }
+}
+
+TEST_F(IoContextTest, FiberWaits) {
+  IoContext& cntx = pool_->GetNextContext();
+  fibers_ext::Done done;
+  auto fb = cntx.LaunchFiber([&] { done.Wait(); });
+  this_fiber::sleep_for(10ms);
+  done.Notify();
+  fb.join();
 }
 
 static void BM_RunOneNoLock(benchmark::State& state) {

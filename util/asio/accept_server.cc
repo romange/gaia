@@ -22,19 +22,23 @@ AcceptServer::ListenerWrapper::ListenerWrapper(const endpoint& ep, IoContext* io
 
 AcceptServer::AcceptServer(IoContextPool* pool)
     : pool_(pool), signals_(pool->GetNextContext().raw_context(), SIGINT, SIGTERM), ref_bc_(1) {
+
   // This cb function should not block.
-  auto non_blocking_cb = [this](system::error_code /*ec*/, int /*signo*/) {
+  auto non_blocking_cb = [this](system::error_code ec, int /*signo*/) {
     // The server is stopped by cancelling all outstanding asynchronous
     // operations. Once all operations have finished the io_context::run()
     // call will exit.
+    VLOG(1) << "Signal with ec " << ec << " " << ec.message();
     for (auto& l : listeners_) {
       if (l.acceptor.is_open()) {
         asio::post(l.acceptor.get_executor(), [acc = &l.acceptor]() mutable { acc->close(); });
       }
     }
 
-    if (on_stop_hook_) {
-      fibers::fiber{on_stop_hook_}.detach();
+    // non_blocking_cb is also triggerred during the normal shutdown flow.
+    // In that case we should not call on_break_hook_.
+    if (!ec && on_break_hook_) {
+      fibers::fiber{on_break_hook_}.detach();
     }
 
     ref_bc_.Dec();

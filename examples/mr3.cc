@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
   executor.Init();
 */
 
-  server->CallOnStopSignal([&] {
+  server->TriggerOnBreakSignal([&] {
     p.Stop();
     runner.Stop();
   });
