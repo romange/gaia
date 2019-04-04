@@ -70,11 +70,13 @@ class CancelImpl final : public IoContext::Cancellable {
   void Run() override {
     fb_ = fibers::fiber([this] {
       while (!cancel_) {
+        VLOG(1) << "Before sleep_for infiber";
         this_fiber::sleep_for(10ms);
       }
     });
 
     while (!cancel_) {
+      VLOG(1) << "Before sleep_for";
       this_fiber::sleep_for(1ms);
     }
     finished_ = true;
@@ -166,6 +168,7 @@ TEST_F(IoContextTest, AttachCancellableStopFromMain) {
   bool cancellable_finished = false;
   IoContext& cntx = pool_->GetNextContext();
   cntx.AttachCancellable(new CancelImpl(&cancellable_finished));
+  VLOG(1) << "After AttachCancellable";
 
   pool_->Stop();
   EXPECT_TRUE(cancellable_finished);
@@ -269,8 +272,39 @@ static void BM_RunOneNoLock(benchmark::State& state) {
 }
 BENCHMARK(BM_RunOneNoLock)->Range(1, 64);
 
-static void BM_PickOne(benchmark::State& state) {
-}
-BENCHMARK(BM_PickOne);
+static void BM_IOFiberYield(benchmark::State& state) {
+  IoContextPool pool(1);
+  pool.Run();
+  IoContext& cntx = pool.GetNextContext();
+  bool cancel = false;
+  size_t items1{0}, items2{0};
+
+  fibers::fiber fb1;
+  fibers::fiber fb2;
+  cntx.Await([&] {
+    fb1 = fibers::fiber([&] {
+      while (!cancel) {
+        ++items1;
+        this_fiber::yield();
+      }
+    });
+
+    fb2 = fibers::fiber([&] {
+      while (state.KeepRunning()) {
+        ++items2;
+        this_fiber::yield();
+      }
+      cancel = true;
+    });
+  });
+  LOG(INFO) << "After launching fibers";
+
+  fb1.join();
+  fb2.join();
+  LOG(INFO) << "Processed " << items1 << "/" << items2;
+
+  state.SetItemsProcessed(items1 + items2);
+}  // namespace util
+BENCHMARK(BM_IOFiberYield);
 
 }  // namespace util
