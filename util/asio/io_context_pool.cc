@@ -49,7 +49,7 @@ void IoContextPool::Run() {
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
     snprintf(buf, sizeof(buf), "IoPool%lu", i);
-    thread_arr_[i].tid = base::StartThread(buf, [this, i, &bc] {
+    thread_arr_[i].tid = base::StartThread(buf, [this, i, bc] () mutable {
       this->WrapLoop(i, &bc);
     });
     cpu_set_t cps;
