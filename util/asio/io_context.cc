@@ -22,16 +22,17 @@ constexpr unsigned DISPATCH_LEVEL = IoFiberProperties::NUM_NICE_LEVELS;
 
 // Amount of fiber switches we make before bringing back the main IO loop.
 constexpr unsigned MAIN_SWITCH_LIMIT = 100;
-
-thread_local unsigned main_resumes = 0;
+constexpr unsigned NOTIFY_GUARD_SHIFT = 16;
 
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
   using ready_queue_type = fibers::scheduler::ready_queue_type;
   std::shared_ptr<asio::io_context> io_context_;
   std::unique_ptr<asio::steady_timer> suspend_timer_;
-  std::atomic_uint32_t notify_guard_{0};
+  std::atomic_uint_fast64_t notify_cnt_{0};
+  uint64_t main_loop_wakes_{0};
 
+  std::atomic_uint_fast32_t notify_guard_{0};
   uint32_t last_nice_level_ = 0;
   ready_queue_type rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS + 1];
   std::size_t ready_cnt_{0};
@@ -120,7 +121,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     }
     CHECK_EQ(0, mask_ & LOOP_RUN_ONE) << "Deadlock detected";
 
-    // We do not need a mutex here.
+    // Awake main_loop_ctx_ in WaitTillFibersSuspend().
     main_loop_ctx_->get_scheduler()->schedule(main_loop_ctx_);
   }
   //]
@@ -166,7 +167,7 @@ void AsioScheduler::MainLoop() {
 
   VLOG(1) << "MainLoop exited";
 
-  // We won't run "run_one" anymore therefore we can remove our dependence on suspend_timer_ and 
+  // We won't run "run_one" anymore therefore we can remove our dependence on suspend_timer_ and
   // asio:context. In fact, we can not use timed-waits from now on using fibers code because we've
   // relied on asio for that.
   // We guard suspend_timer_ using notify_guard_ with no locks in notify(). However we must block here.
@@ -174,17 +175,20 @@ void AsioScheduler::MainLoop() {
   // they rely on the loop above. Therefore we just use thread yield.
 
   // Signal that we shutdown and check if we need to wait for current notify calls to exit.
-  uint32_t seq = notify_guard_.fetch_or(1U << 16);  
+  constexpr uint32_t NOTIFY_BIT = 1U << NOTIFY_GUARD_SHIFT;
+  uint32_t seq = notify_guard_.fetch_or(NOTIFY_BIT);
   while (seq) {
     pthread_yield();  // almost like a sleep
-    seq = notify_guard_.load() & 0xFFFF;   // Block untill all notify calls exited. 
+    seq = notify_guard_.load() & (NOTIFY_BIT - 1);   // Block untill all notify calls exited.
   }
   suspend_timer_.reset();  // now we can free suspend_timer_.
+
+  LOG(INFO) << "MainLoopWakes/NotifyCnt: " << main_loop_wakes_ << "/" << notify_cnt_;
 }
 
 void AsioScheduler::WaitTillFibersSuspend() {
-  // block this fiber till all pending (ready) fibers are processed
-  // == AsioScheduler::suspend_until() has been called.
+  // block this fiber till all (ready) fibers are processed
+  // or when  AsioScheduler::suspend_until() has been called or awaken() decided to resume it.
   mask_ |= MAIN_LOOP_SUSPEND;
 
   switch_cnt_ = 0;
@@ -194,6 +198,7 @@ void AsioScheduler::WaitTillFibersSuspend() {
   DVLOG(2) << "WaitTillFibersSuspend:End";
 }
 
+// Thread-local function
 void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noexcept {
   DCHECK(!ctx->ready_is_linked());
 
@@ -226,6 +231,7 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
       ++ready_cnt_;
       main_loop_ctx_->ready_link(rqueue_arr_[MAIN_NICE_LEVEL]);
       last_nice_level_ = MAIN_NICE_LEVEL;
+      ++main_loop_wakes_;
     }
 
     DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << ", nice/rdc: " << nice << "/"
@@ -310,6 +316,7 @@ void AsioScheduler::notify() noexcept {
     // -- but that shouldn't be a big problem.
     suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
     suspend_timer_->expires_at(std::chrono::steady_clock::now());
+    notify_cnt_.fetch_add(1, std::memory_order_relaxed);
   } else {
     VLOG(1) << "Called during shutdown phase";
   }
@@ -357,6 +364,7 @@ void IoContext::StartLoop(BlockingCounter* bc) {
   // It will block until MainLoop exits. See comment above.
   io_cntx.run_one();
 
+  // Shutdown phase.
   for (unsigned i = 0; i < 2; ++i) {
     DVLOG(1) << "Cleanup Loop " << i;
     while (io_cntx.poll() || scheduler->has_ready_fibers()) {
@@ -364,8 +372,6 @@ void IoContext::StartLoop(BlockingCounter* bc) {
     }
     io_cntx.restart();
   }
-
-  VLOG(1) << "MainSwitch Resumes :" << main_resumes;
 }
 
 void IoContext::Stop() {

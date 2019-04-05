@@ -13,10 +13,10 @@ namespace util {
 
 class IoFiberProperties : public boost::fibers::fiber_properties {
  public:
-  constexpr static unsigned MAX_NICE_LEVEL = 5;
+  constexpr static unsigned MAX_NICE_LEVEL = 4;
   constexpr static unsigned NUM_NICE_LEVELS = MAX_NICE_LEVEL + 1;
 
-  IoFiberProperties(::boost::fibers::context* ctx) : fiber_properties(ctx), nice_(3) {}
+  IoFiberProperties(::boost::fibers::context* ctx) : fiber_properties(ctx), nice_(2) {}
 
   unsigned nice_level() const { return nice_; }
 

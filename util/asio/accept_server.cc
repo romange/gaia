@@ -75,7 +75,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
 
   ConnectionHandler::ListType clist;
 
-  this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
 
   fibers_ext::condition_variable_any clist_empty_cnd;
   system::error_code ec;

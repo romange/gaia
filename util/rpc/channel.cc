@@ -192,7 +192,7 @@ void Channel::ReadFiber() {
 void Channel::FlushFiber() {
   using namespace std::chrono_literals;
   CHECK(socket_->context().get_executor().running_in_this_thread());
-  this_fiber::properties<IoFiberProperties>().SetNiceLevel(4);
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
 
   while (true) {
     this_fiber::sleep_for(300us);
