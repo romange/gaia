@@ -119,6 +119,13 @@ class MrTest : public testing::Test {
     return Pair(ShardId{sh_name}, UnorderedElementsAreArray(tmp_.back()));
   }
 
+  auto MatchShard(unsigned index, const vector<string>& elems) {
+    // matcher references the array, so we must to store it in case we pass a temporary rvalue.
+    tmp_.push_back(elems);
+
+    return Pair(ShardId{index}, UnorderedElementsAreArray(tmp_.back()));
+  }
+
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<Pipeline> pipeline_;
   TestRunner runner_;
@@ -194,14 +201,16 @@ TEST_F(MrTest, Map) {
 
   str2.Write("table", pb::WireFormat::TXT)
           .WithModNSharding(10, [](const std::string&) { return 0;});
-  return;
-
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
   pipeline_->Run(&runner_);
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
+  vector<string> expected;
+  for (const auto& e : elements)
+    expected.push_back(e + "a");
+
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(0, expected)));
 }
 
 

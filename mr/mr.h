@@ -32,6 +32,7 @@ class StringTable;
 
 template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
+template <typename T> class PTable;
 
 // Planning interfaces.
 class InputBase {
@@ -172,6 +173,14 @@ template <typename T> class DoContext {
   }
 
  public:
+  template <typename U> bool ParseRaw(RawRecord&& rr, RecordTraits<U>* rt, U* res) {
+    bool parse_res = rt->Parse(std::move(rr), res);
+    if (!parse_res)
+      ++context_->parse_errors;
+
+    return parse_res;
+  }
+
   void Write(T&& t) {
     ShardId shard_id = out_->Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
@@ -222,6 +231,8 @@ class TableBase {
 
 // Currently the input type is hard-coded - string.
 template <typename OutT> class TableImpl : public TableBase {
+  template <typename T> friend class PTable;
+
  public:
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
@@ -236,13 +247,29 @@ template <typename OutT> class TableImpl : public TableBase {
     return out_;
   }
 
-  template<typename U> typename TableImpl<U>::PtrType CloneAs(pb::Operator op) const {
+  template <typename U> typename TableImpl<U>::PtrType CloneAs(pb::Operator op) const {
     return new TableImpl<U>{std::move(op), pipeline_};
   }
+
  protected:
   DoFn SetupDoFn(RawContext* context) override;
 
  private:
+  template <typename FromType, typename MapType> void MapWith() {
+    struct Helper {
+      MapType m;
+      RecordTraits<FromType> rt;
+    };
+
+    do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
+      FromType tmp_rec;
+      bool parse_res = context->ParseRaw(std::move(rr), &h.rt, &tmp_rec);
+      if (parse_res) {
+        h.m.Do(std::move(tmp_rec), context);
+      }
+    };
+  }
+
   Output<OutT> out_;
   std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
@@ -299,6 +326,7 @@ PTable<typename MapType::OutputType> PTable<OutT>::Map(const std::string& name) 
   new_op.set_op_name(name);
 
   auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
+  ptr->template MapWith<OutT, MapType>();
 
   return PTable<NewOutType>(ptr);
 }
