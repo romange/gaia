@@ -95,7 +95,7 @@ mr3::PTable<rapidjson::Document> inp1 = p.ReadText("inp1", input1.json.gz").AsJs
      mr3::PTable<pb::AddressBook> col1 = p.Map<MapperClass>("MyApplyFunc", inp1);
 
   // inp1 != inp3 since inp3 is sharded
-  mr3::PTable<pb::AddressBook> inp3 = inp1.Write(...).WithSharding(...);
+  mr3::PTable<pb::AddressBook> inp3 = inp1.Write(...).WithCustomSharding(...);
 
 
   col1.ShardByKey([](const pb::AddressBook& ab) { return ab.user_id();});
@@ -134,7 +134,7 @@ void Call(TOwner *p) {
   ss/*.Apply([](std::string&& inp, DoContext<std::string>* context) {
       context->Write(inp.substr(0, 5));
     })*/
-      .Write("outp1", pb::WireFormat::TXT).WithSharding(ShardNameFunc);
+      .Write("outp1", pb::WireFormat::TXT).WithCustomSharding(ShardNameFunc);
   if (FLAGS_compress) {
     outp.AndCompress(pb::Output::GZIP);
   }

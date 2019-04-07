@@ -25,12 +25,24 @@ void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   out->mutable_format()->set_type(type);
 }
 
+void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
+  auto* co = out_->mutable_compress();
+  co->set_type(ct);
+  if (level) {
+    co->set_level(level);
+  }
+}
+
+void OutputBase::SetShardType(pb::Output::ShardType st) {
+  CHECK(!out_->has_shard_type()) << "Must be defined only once";
+  out_->set_shard_type(st);
+}
+
 PTable<rj::Document> StringTable::AsJson() const {
   pb::Operator new_op = impl_->op();
   new_op.mutable_op_name()->append("_as_json");
 
-  TableImpl<rj::Document>::PtrType ptr(
-      new TableImpl<rj::Document>(std::move(new_op), impl_->pipeline()));
+  TableImpl<rj::Document>::PtrType ptr(impl_->CloneAs<rj::Document>(std::move(new_op)));
 
   return PTable<rj::Document>{ptr};
 }
@@ -50,8 +62,7 @@ bool RecordTraits<rj::Document>::Parse(std::string&& tmp, rj::Document* res) {
   res->ParseInsitu<kFlags>(&tmp_.front());
 
   bool has_error = res->HasParseError();
-  LOG_IF(INFO, has_error)
-      << rj::GetParseError_En(res->GetParseError()) << " for string " << tmp_;
+  LOG_IF(INFO, has_error) << rj::GetParseError_En(res->GetParseError()) << " for string " << tmp_;
   return !has_error;
 }
 

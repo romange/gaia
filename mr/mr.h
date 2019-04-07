@@ -71,29 +71,33 @@ class OutputBase {
   OutputBase(OutputBase&&) noexcept;
   OutputBase(pb::Output* out) : out_(out) {}
 
-  void SetCompress(pb::Output::CompressType ct, unsigned level) {
-    auto* co = out_->mutable_compress();
-    co->set_type(ct);
-    if (level) {
-      co->set_level(level);
-    }
-  }
+  void SetCompress(pb::Output::CompressType ct, unsigned level);
+  void SetShardType(pb::Output::ShardType st);
 };
 
 template <typename T> class Output : public OutputBase {
   friend class TableImpl<T>;  // To allow the instantiation of Output<T>;
 
   std::function<std::string(const T&)> shard_op_;
+  std::function<unsigned(const T&)> modn_op_;
 
  public:
   Output() : OutputBase(nullptr) {}
   Output(const Output&) = delete;
   Output(Output&&) noexcept;
 
-  template <typename U> Output& WithSharding(U&& func) {
+  template <typename U> Output& WithCustomSharding(U&& func) {
     static_assert(base::is_invocable_r<std::string, U, const T&>::value, "");
     shard_op_ = std::forward<U>(func);
-    mutable_msg()->set_shard_type(pb::Output::USER_DEFINED);
+    SetShardType(pb::Output::USER_DEFINED);
+
+    return *this;
+  }
+
+  template <typename U> Output& WithModNSharding(unsigned N, U&& func) {
+    static_assert(base::is_invocable_r<unsigned, U, const T&>::value, "");
+    modn_op_ = std::forward<U>(func);
+    SetShardType(pb::Output::MODN);
 
     return *this;
   }
@@ -222,7 +226,6 @@ template <typename OutT> class TableImpl : public TableBase {
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
 
-  // Could be intrusive_ptr as well.
   using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
 
   using TableBase::TableBase;
@@ -233,8 +236,9 @@ template <typename OutT> class TableImpl : public TableBase {
     return out_;
   }
 
-  // util::Status InitializationStatus() const override;
-
+  template<typename U> typename TableImpl<U>::PtrType CloneAs(pb::Operator op) const {
+    return new TableImpl<U>{std::move(op), pipeline_};
+  }
  protected:
   DoFn SetupDoFn(RawContext* context) override;
 
@@ -286,14 +290,18 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
   return util::Status::OK;
 }
 */
-template <typename OutT> template <typename MapType>
-  PTable<typename MapType::OutputType> PTable<OutT>::Map(const std::string& name) const {
-    using NewType = typename MapType::OutputType;
+template <typename OutT>
+template <typename MapType>
+PTable<typename MapType::OutputType> PTable<OutT>::Map(const std::string& name) const {
+  using NewOutType = typename MapType::OutputType;
 
-    typename TableImpl<NewType>::PtrType ptr;
-    return PTable<NewType>(ptr);
+  pb::Operator new_op = impl_->op();
+  new_op.set_op_name(name);
+
+  auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
+
+  return PTable<NewOutType>(ptr);
 }
-
 
 template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
   if (do_fn_) {
@@ -312,8 +320,6 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
 inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
 template <typename T>
 Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_), shard_op_(std::move(o.shard_op_)) {}
-
-
 
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;

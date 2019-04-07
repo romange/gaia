@@ -133,7 +133,7 @@ TEST_F(MrTest, Basic) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
   str1.Write("new_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
-      .WithSharding([](const std::string& rec) { return "shard1"; });
+      .WithCustomSharding([](const std::string& rec) { return "shard1"; });
 
   vector<string> elements{"1", "2", "3", "4"};
 
@@ -151,7 +151,7 @@ TEST_F(MrTest, Json) {
 
   json_table.Write("json_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
-      .WithSharding(json_shard_func);
+      .WithCustomSharding(json_shard_func);
 
   const char kJson1[] = R"({"foo":"bar"})";
   const char kJson2[] = R"({"id":1})";
@@ -165,6 +165,18 @@ TEST_F(MrTest, Json) {
                                                   MatchShard("shard1", {kJson2})));
 }
 
+
+TEST_F(MrTest, InvalidJson) {
+  char str[] = R"({"roman":"��i���u�.nW��'$��uٿ�����d�ݹ��5�"} )";
+
+  rapidjson::Document doc;
+  doc.Parse(str);
+
+  rj::StringBuffer s;
+  rj::Writer<rj::StringBuffer> writer(s);
+  doc.Accept(writer);
+  LOG(INFO) << s.GetString();
+}
 
 class MyMapper {
   public:
@@ -180,9 +192,9 @@ TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
   StringTable str2 = str1.Map<MyMapper>("Map1");
 
+  str2.Write("table", pb::WireFormat::TXT)
+          .WithModNSharding(10, [](const std::string&) { return 0;});
   return;
-  // str2.Write("table", pb::WireFormat::TXT)
-  //    .WithSharding(json_shard_func);
 
   vector<string> elements{"1", "2", "3", "4"};
 
@@ -192,17 +204,6 @@ TEST_F(MrTest, Map) {
   EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
 }
 
-TEST_F(MrTest, Json2) {
-  char str[] = R"({"roman":"��i���u�.nW��'$��uٿ�����d�ݹ��5�"} )";
-
-  rapidjson::Document doc;
-  doc.Parse(str);
-
-  rj::StringBuffer s;
-  rj::Writer<rj::StringBuffer> writer(s);
-  doc.Accept(writer);
-  LOG(INFO) << s.GetString();
-}
 
 
 }  // namespace mr3
