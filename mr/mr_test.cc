@@ -18,7 +18,11 @@ struct A {
   string val;
 };
 
-template <> class mr3::RecordTraits<A> {
+namespace mr3 {
+
+// For gcc less than 7 we should enclose the specialization into the original namespace.
+// https://stackoverflow.com/questions/25594644/warning-specialization-of-template-in-different-namespace
+template <> class RecordTraits<A> {
   std::string tmp_;
 
  public:
@@ -29,8 +33,6 @@ template <> class mr3::RecordTraits<A> {
     return true;
   }
 };
-
-namespace mr3 {
 
 using namespace util;
 using namespace boost;
