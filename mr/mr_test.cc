@@ -66,7 +66,7 @@ class TestContext : public RawContext {
 };
 
 class AMapper {
-  public:
+ public:
   void Do(string val, mr3::DoContext<A>* cnt) {
     A a;
     val.append("a");
@@ -75,7 +75,6 @@ class AMapper {
     cnt->Write(std::move(a));
   }
 };
-
 
 class TestRunner : public Runner {
  public:
@@ -92,14 +91,19 @@ class TestRunner : public Runner {
                      RecordQueue* queue) final;
 
   void AddRecords(const string& fl, const std::vector<string>& records) {
-    std::copy(records.begin(), records.end(), back_inserter(fs_[fl]));
+    std::copy(records.begin(), records.end(), back_inserter(input_fs_[fl]));
   }
 
-  const ShardedOutput& out() const { return out_; }
+  const ShardedOutput& Table(const string& tb_name) const {
+    auto it = out_fs_.find(tb_name);
+    CHECK(it != out_fs_.end());
+
+    return it->second;
+  }
 
  private:
-  std::unordered_map<string, std::vector<string>> fs_;
-  ShardedOutput out_;
+  std::unordered_map<string, std::vector<string>> input_fs_;
+  std::unordered_map<string, ShardedOutput> out_fs_;
   fibers::mutex mu_;
 };
 
@@ -108,12 +112,14 @@ void TestRunner::Init() {}
 void TestRunner::Shutdown() {}
 
 RawContext* TestRunner::CreateContext(const pb::Operator& op) {
-  return new TestContext(&out_, &mu_);
+  CHECK(!op.output().name().empty());
+
+  return new TestContext(&out_fs_[op.output().name()], &mu_);
 }
 
 void TestRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
-  auto it = fs_.find(glob);
-  if (it != fs_.end()) {
+  auto it = input_fs_.find(glob);
+  if (it != input_fs_.end()) {
     cb(it->first);
   }
 }
@@ -121,8 +127,8 @@ void TestRunner::ExpandGlob(const std::string& glob, std::function<void(const st
 // Read file and fill queue. This function must be fiber-friendly.
 size_t TestRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
                                RecordQueue* queue) {
-  auto it = fs_.find(filename);
-  CHECK(it != fs_.end());
+  auto it = input_fs_.find(filename);
+  CHECK(it != input_fs_.end());
   for (const auto& str : it->second) {
     queue->Push(str);
   }
@@ -175,7 +181,7 @@ TEST_F(MrTest, Basic) {
   runner_.AddRecords("bar.txt", elements);
   pipeline_->Run(&runner_);
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard("shard1", elements)));
+  EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
 }
 
 TEST_F(MrTest, Json) {
@@ -196,10 +202,10 @@ TEST_F(MrTest, Json) {
 
   runner_.AddRecords("bar.txt", elements);
   pipeline_->Run(&runner_);
-  EXPECT_THAT(runner_.out(), UnorderedElementsAre(MatchShard("shard0", {kJson3, kJson1}),
-                                                  MatchShard("shard1", {kJson2})));
+  EXPECT_THAT(
+      runner_.Table("json_table"),
+      UnorderedElementsAre(MatchShard("shard0", {kJson3, kJson1}), MatchShard("shard1", {kJson2})));
 }
-
 
 TEST_F(MrTest, InvalidJson) {
   char str[] = R"({"roman":"��i���u�.nW��'$��uٿ�����d�ݹ��5�"} )";
@@ -213,13 +219,11 @@ TEST_F(MrTest, InvalidJson) {
   LOG(INFO) << s.GetString();
 }
 
-
 TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
   PTable<A> str2 = str1.Map<AMapper>("Map1");
 
-  str2.Write("table", pb::WireFormat::TXT)
-          .WithModNSharding(10, [](const A&) { return 11;});
+  str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
@@ -229,9 +233,8 @@ TEST_F(MrTest, Map) {
   for (const auto& e : elements)
     expected.push_back(e + "a");
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));
+  EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
 }
-
 
 struct IntVal {
   int val;
@@ -249,9 +252,8 @@ template <> class RecordTraits<IntVal> {
   }
 };
 
-
 class IntMapper {
-  public:
+ public:
   void Do(A a, mr3::DoContext<IntVal>* cnt) {
     CHECK(!a.val.empty());
     a.val.pop_back();
@@ -265,11 +267,11 @@ TEST_F(MrTest, MapAB) {
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
-  PTable<IntVal> itable = pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();   // Map<AMapper>("Map1");
+  PTable<IntVal> itable =
+      pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<AMapper>("Map1");
   PTable<A> atable = itable.Map<AMapper>("Map1");
 
-  atable.Write("table", pb::WireFormat::TXT)
-          .WithModNSharding(10, [](const A&) { return 11;});
+  atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
 
   /*PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
   final_table.Write("final_table", pb::WireFormat::TXT)
@@ -281,8 +283,7 @@ TEST_F(MrTest, MapAB) {
   for (const auto& e : elements)
     expected.push_back(e + "a");
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));
+  EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
 }
-
 
 }  // namespace mr3
