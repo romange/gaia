@@ -47,7 +47,7 @@ message Output {
     USER_DEFINED = 2;
   }
   required ShardType shard_type = 4;
-  // optional uint32 modn = 5;
+  optional uint32 modn = 5;
 }
 
 

@@ -33,6 +33,32 @@ template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
 template <typename T> class PTable;
 
+namespace detail {
+template <typename T> struct IsDoCtxHelper : public std::false_type {};
+template <typename T> struct IsDoCtxHelper<DoContext<T>*> : public std::true_type {
+  using OutType = T;
+};
+
+template <typename T, typename MapperType> struct MapperTraits {
+  using ftraits = base::function_traits<decltype(&MapperType::Do)>;
+
+  static_assert(ftraits::arity == 3, "MapperType::Do must accept 2 arguments");
+
+  using first_arg_t = typename ftraits::template argument_type<1>;
+  using second_arg_t = typename ftraits::template argument_type<2>;
+
+  static_assert(std::is_constructible<first_arg_t, T&&>::value,
+                "MapperType::Do() first argument "
+                "should be constructed from PTable element type");
+
+  static_assert(IsDoCtxHelper<second_arg_t>::value,
+                "MapperType::Do's second argument should be "
+                "DoContext<T>* for some type T");
+  using OutputType = typename IsDoCtxHelper<second_arg_t>::OutType;
+};
+
+}  // namespace detail
+
 // Planning interfaces.
 class InputBase {
  public:
@@ -51,8 +77,6 @@ class InputBase {
  protected:
   pb::Input input_;
 };
-
-
 
 // User facing interfaces
 template <typename Record> struct RecordTraits {
@@ -83,25 +107,22 @@ class RawContext {
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
 // It's packaged together with the DoFn function.
 template <typename T> class DoContext {
-  Output<T>* out_;
-  RawContext* context_;
-  RecordTraits<T> rt_;
-
-  using RawRecord = std::string;
-
   friend class TableImpl<T>;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
-  bool ParseRaw(RawRecord&& rr, T* res) {
-    bool parse_res = rt_.Parse(std::move(rr), res);
-    if (!parse_res)
-      ++context_->parse_errors;
+ public:
+  using RawRecord = std::string;
 
-    return parse_res;
+  void Write(T&& t) {
+    ShardId shard_id = out_->Shard(t);
+    std::string dest = rt_.Serialize(std::move(t));
+    context_->WriteInternal(shard_id, std::move(dest));
   }
 
- public:
+ private:
+  bool ParseRaw(RawRecord&& rr, T* res) { return ParseRaw(std::move(rr), &rt_, res); }
+
   template <typename U> bool ParseRaw(RawRecord&& rr, RecordTraits<U>* rt, U* res) {
     bool parse_res = rt->Parse(std::move(rr), res);
     if (!parse_res)
@@ -110,11 +131,9 @@ template <typename T> class DoContext {
     return parse_res;
   }
 
-  void Write(T&& t) {
-    ShardId shard_id = out_->Shard(t);
-    std::string dest = rt_.Serialize(std::move(t));
-    context_->WriteInternal(shard_id, std::move(dest));
-  }
+  Output<T>* out_;
+  RawContext* context_;
+  RecordTraits<T> rt_;
 };
 
 class TableBase {
@@ -184,20 +203,7 @@ template <typename OutT> class TableImpl : public TableBase {
   DoFn SetupDoFn(RawContext* context) override;
 
  private:
-  template <typename FromType, typename MapType> void MapWith() {
-    struct Helper {
-      MapType m;
-      RecordTraits<FromType> rt;
-    };
-
-    do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
-      FromType tmp_rec;
-      bool parse_res = context->ParseRaw(std::move(rr), &h.rt, &tmp_rec);
-      if (parse_res) {
-        h.m.Do(std::move(tmp_rec), context);
-      }
-    };
-  }
+  template <typename FromType, typename MapType> void MapWith();
 
   Output<OutT> out_;
   std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
@@ -213,11 +219,15 @@ template <typename OutT> class PTable {
   }
 
   template <typename MapType>
-  PTable<typename MapType::OutputType> Map(const std::string& name) const;
+  PTable<typename detail::MapperTraits<OutT, MapType>::OutputType> Map(
+      const std::string& name) const;
 
  protected:
   friend class Pipeline;
   friend class StringTable;
+
+  // apparently PTable of different type can not access this members.
+  template <typename T> friend class PTable;
 
   PTable(typename TableImpl<OutT>::PtrType ptr) : impl_(std::move(ptr)) {}
 
@@ -237,19 +247,10 @@ class StringTable : public PTable<std::string> {
 };
 
 template <typename OutT>
-Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
-  SetCompress(ct, level);
-  return *this;
-}
-
-/*template <typename OutT> util::Status TableImpl<OutT>::InitializationStatus() const {
-  return util::Status::OK;
-}
-*/
-template <typename OutT>
 template <typename MapType>
-PTable<typename MapType::OutputType> PTable<OutT>::Map(const std::string& name) const {
-  using NewOutType = typename MapType::OutputType;
+PTable<typename detail::MapperTraits<OutT, MapType>::OutputType> PTable<OutT>::Map(
+    const std::string& name) const {
+  using NewOutType = typename detail::MapperTraits<OutT, MapType>::OutputType;
 
   pb::Operator new_op = impl_->op();
   new_op.set_op_name(name);
@@ -274,10 +275,6 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
   }
 }
 
-inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
-template <typename T>
-Output<T>::Output(Output&& o) noexcept : OutputBase(o.out_), shard_op_(std::move(o.shard_op_)) {}
-
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;
 
@@ -285,5 +282,22 @@ template <> class RecordTraits<rapidjson::Document> {
   static std::string Serialize(rapidjson::Document&& doc);
   bool Parse(std::string&& tmp, rapidjson::Document* res);
 };
+
+template <typename OutT>
+template <typename FromType, typename MapType>
+void TableImpl<OutT>::MapWith() {
+  struct Helper {
+    MapType m;
+    RecordTraits<FromType> rt;
+  };
+
+  do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
+    FromType tmp_rec;
+    bool parse_res = context->ParseRaw(std::move(rr), &h.rt, &tmp_rec);
+    if (parse_res) {
+      h.m.Do(std::move(tmp_rec), context);
+    }
+  };
+}
 
 }  // namespace mr3

@@ -13,9 +13,25 @@
 
 #include "util/asio/io_context_pool.h"
 
+using namespace std;
+struct A {
+  string val;
+};
+
+template <> class mr3::RecordTraits<A> {
+  std::string tmp_;
+
+ public:
+  static std::string Serialize(A&& doc) { return std::move(doc.val); }
+
+  bool Parse(std::string&& tmp, A* res) {
+    res->val = tmp;
+    return true;
+  }
+};
+
 namespace mr3 {
 
-using namespace std;
 using namespace util;
 using namespace boost;
 using testing::Contains;
@@ -48,6 +64,18 @@ class TestContext : public RawContext {
     outp_[shard_id].push_back(record);
   }
 };
+
+class AMapper {
+  public:
+  void Do(string val, mr3::DoContext<A>* cnt) {
+    A a;
+    val.append("a");
+    a.val = std::move(val);
+
+    cnt->Write(std::move(a));
+  }
+};
+
 
 class TestRunner : public Runner {
  public:
@@ -185,22 +213,13 @@ TEST_F(MrTest, InvalidJson) {
   LOG(INFO) << s.GetString();
 }
 
-class MyMapper {
-  public:
-  typedef std::string OutputType;
-
-  void Do(std::string&& val, mr3::DoContext<OutputType>* cnt) {
-    val.append("a");
-    cnt->Write(std::move(val));
-  }
-};
 
 TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
-  StringTable str2 = str1.Map<MyMapper>("Map1");
+  PTable<A> str2 = str1.Map<AMapper>("Map1");
 
   str2.Write("table", pb::WireFormat::TXT)
-          .WithModNSharding(10, [](const std::string&) { return 0;});
+          .WithModNSharding(10, [](const A&) { return 0;});
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);

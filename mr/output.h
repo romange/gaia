@@ -32,12 +32,13 @@ class OutputBase {
   OutputBase(pb::Output* out) : out_(out) {}
 
   void SetCompress(pb::Output::CompressType ct, unsigned level);
-  void SetShardType(pb::Output::ShardType st);
+  void SetShardType(pb::Output::ShardType st, unsigned modn = 0);
 };
 
 template <typename T> class Output : public OutputBase {
   friend class TableImpl<T>;  // To allow the instantiation of Output<T>;
 
+  // TODO: to make it variant.
   std::function<std::string(const T&)> shard_op_;
   std::function<unsigned(const T&)> modn_op_;
 
@@ -54,10 +55,10 @@ template <typename T> class Output : public OutputBase {
     return *this;
   }
 
-  template <typename U> Output& WithModNSharding(unsigned N, U&& func) {
+  template <typename U> Output& WithModNSharding(unsigned modn, U&& func) {
     static_assert(base::is_invocable_r<unsigned, U, const T&>::value, "");
     modn_op_ = std::forward<U>(func);
-    SetShardType(pb::Output::MODN);
+    SetShardType(pb::Output::MODN, modn);
 
     return *this;
   }
@@ -83,6 +84,18 @@ template <typename T> class Output : public OutputBase {
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 };
+
+template <typename OutT>
+Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
+  SetCompress(ct, level);
+  return *this;
+}
+
+inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
+
+template <typename T>
+Output<T>::Output(Output&& o) noexcept
+    : OutputBase(o.out_), shard_op_(std::move(o.shard_op_)), modn_op_(std::move(o.modn_op_)) {}
 
 }  // namespace mr3
 

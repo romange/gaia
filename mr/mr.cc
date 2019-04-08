@@ -33,9 +33,13 @@ void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
   }
 }
 
-void OutputBase::SetShardType(pb::Output::ShardType st) {
+void OutputBase::SetShardType(pb::Output::ShardType st, unsigned modn) {
   CHECK(!out_->has_shard_type()) << "Must be defined only once";
+
   out_->set_shard_type(st);
+  if (st == pb::Output::MODN) {
+    CHECK_GT(modn, 0);
+  }
 }
 
 PTable<rj::Document> StringTable::AsJson() const {
