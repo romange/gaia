@@ -23,8 +23,6 @@ namespace mr3 {
 // For gcc less than 7 we should enclose the specialization into the original namespace.
 // https://stackoverflow.com/questions/25594644/warning-specialization-of-template-in-different-namespace
 template <> class RecordTraits<A> {
-  std::string tmp_;
-
  public:
   static std::string Serialize(A&& doc) { return std::move(doc.val); }
 
@@ -234,6 +232,39 @@ TEST_F(MrTest, Map) {
   EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));
 }
 
+
+struct BInt {
+  int val;
+};
+
+template <> class RecordTraits<BInt> {
+ public:
+  static std::string Serialize(BInt&& doc) { return std::to_string(doc.val); }
+
+  bool Parse(std::string&& tmp, A* res) {
+    res->val = std::stoi(tmp);
+    return true;
+  }
+};
+
+TEST_F(MrTest, MapAB) {
+  vector<string> elements{"1", "2", "3", "4"};
+
+  runner_.AddRecords("bar.txt", elements);
+/*
+  PTable<BInt> atable = pipeline_->ReadText("read_bar", "bar.txt").As<BInt>();   // Map<AMapper>("Map1");
+
+  str2.Write("table", pb::WireFormat::TXT)
+          .WithModNSharding(10, [](const A&) { return 11;});
+
+  pipeline_->Run(&runner_);
+
+  vector<string> expected;
+  for (const auto& e : elements)
+    expected.push_back(e + "a");
+
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));*/
+}
 
 
 }  // namespace mr3

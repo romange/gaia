@@ -39,17 +39,14 @@ template <typename T> struct IsDoCtxHelper<DoContext<T>*> : public std::true_typ
   using OutType = T;
 };
 
-template <typename T, typename MapperType> struct MapperTraits {
-  using ftraits = base::function_traits<decltype(&MapperType::Do)>;
+template <typename MapperType> struct MapperTraits {
+  using do_raits_t = base::function_traits<decltype(&MapperType::Do)>;
 
-  static_assert(ftraits::arity == 3, "MapperType::Do must accept 2 arguments");
+  // arg0 is 'this' of MapperType.
+  static_assert(do_raits_t::arity == 3, "MapperType::Do must accept 2 arguments");
 
-  using first_arg_t = typename ftraits::template argument_type<1>;
-  using second_arg_t = typename ftraits::template argument_type<2>;
-
-  static_assert(std::is_constructible<first_arg_t, T&&>::value,
-                "MapperType::Do() first argument "
-                "should be constructed from PTable element type");
+  using first_arg_t = typename do_raits_t::template argument_type<1>;
+  using second_arg_t = typename do_raits_t::template argument_type<2>;
 
   static_assert(IsDoCtxHelper<second_arg_t>::value,
                 "MapperType::Do's second argument should be "
@@ -219,7 +216,7 @@ template <typename OutT> class PTable {
   }
 
   template <typename MapType>
-  PTable<typename detail::MapperTraits<OutT, MapType>::OutputType> Map(
+  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(
       const std::string& name) const;
 
  protected:
@@ -248,9 +245,15 @@ class StringTable : public PTable<std::string> {
 
 template <typename OutT>
 template <typename MapType>
-PTable<typename detail::MapperTraits<OutT, MapType>::OutputType> PTable<OutT>::Map(
+PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
     const std::string& name) const {
-  using NewOutType = typename detail::MapperTraits<OutT, MapType>::OutputType;
+  using mapper_traits_t = detail::MapperTraits<MapType>;
+  using NewOutType = typename mapper_traits_t::OutputType;
+
+  static_assert(std::is_constructible<typename mapper_traits_t::first_arg_t, OutT&&>::value,
+                "MapperType::Do() first argument "
+                "should be constructed from PTable element type");
+
 
   pb::Operator new_op = impl_->op();
   new_op.set_op_name(name);
