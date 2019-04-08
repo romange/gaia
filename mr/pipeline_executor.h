@@ -27,6 +27,7 @@ class Pipeline::Executor {
   ~Executor();
 
   void Init();
+
   void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* ss);
 
   // Stops the executor in the middle.
@@ -42,7 +43,7 @@ class Pipeline::Executor {
   void MapFiber(detail::TableBase* sb);
 
   util::IoContextPool* pool_;
-  FileNameQueue file_name_q_;
+  std::unique_ptr<FileNameQueue> file_name_q_;
   Runner* runner_;
 
   static thread_local std::unique_ptr<PerIoStruct> per_io_;

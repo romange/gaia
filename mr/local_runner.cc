@@ -63,7 +63,6 @@ class LocalContext : public RawContext {
   DestFileSet* mgr_;
 };
 
-
 BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
 
 void BufferedWriter::Flush() {
@@ -85,8 +84,7 @@ void BufferedWriter::Write(StringPiece src) {
   }
 }
 
-LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr)
-    : output_(out), mgr_(mgr) {
+LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(out), mgr_(mgr) {
   custom_shard_files_.set_empty_key(StringPiece{});
 }
 
@@ -131,6 +129,11 @@ struct LocalRunner::Impl {
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RecordQueue* queue);
+
+  void SetupDestFileSet() {
+    CHECK(!dest_mgr);
+    dest_mgr.reset(new DestFileSet(data_dir, &fq_pool));
+  }
 };
 
 uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* queue) {
@@ -159,22 +162,23 @@ LocalRunner::LocalRunner(const std::string& data_dir) : impl_(new Impl(data_dir)
 
 LocalRunner::~LocalRunner() {}
 
-void LocalRunner::Init() {
-  file_util::RecursivelyCreateDir(impl_->data_dir, 0750);
-  impl_->dest_mgr.reset(new DestFileSet(impl_->data_dir, &impl_->fq_pool));
-}
+void LocalRunner::Init() { file_util::RecursivelyCreateDir(impl_->data_dir, 0750); }
 
 void LocalRunner::Shutdown() {
-  impl_->dest_mgr->Flush();
-
-  impl_->dest_mgr.reset();
   impl_->fq_pool.Shutdown();
 
   LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }
 
+void LocalRunner::OperatorStart() { impl_->SetupDestFileSet(); }
+
 RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
   return new LocalContext(op.output(), impl_->dest_mgr.get());
+}
+
+void LocalRunner::OperatorEnd() {
+  impl_->dest_mgr->Flush();
+  impl_->dest_mgr.reset();
 }
 
 void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {

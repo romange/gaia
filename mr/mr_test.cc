@@ -10,7 +10,7 @@
 #include "absl/strings/str_join.h"
 #include "base/gtest.h"
 #include "base/logging.h"
-
+#include "strings/numbers.h"
 #include "util/asio/io_context_pool.h"
 
 using namespace std;
@@ -89,6 +89,9 @@ class TestRunner : public Runner {
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessFile(const std::string& filename, pb::WireFormat::Type type,
                      RecordQueue* queue) final;
+
+  void OperatorStart() final {}
+  void OperatorEnd() final {}
 
   void AddRecords(const string& fl, const std::vector<string>& records) {
     std::copy(records.begin(), records.end(), back_inserter(input_fs_[fl]));
@@ -247,8 +250,7 @@ template <> class RecordTraits<IntVal> {
   static std::string Serialize(IntVal&& doc) { return std::to_string(doc.val); }
 
   bool Parse(std::string&& tmp, IntVal* res) {
-    res->val = std::stoi(tmp);
-    return true;
+    return safe_strto32(tmp, &res->val);
   }
 };
 
@@ -258,7 +260,7 @@ class IntMapper {
     CHECK(!a.val.empty());
     a.val.pop_back();
     IntVal iv;
-    iv.val = std::stoi(a.val);
+    CHECK(safe_strto32(a.val, &iv.val)) << a.val;
     cnt->Write(std::move(iv));
   }
 };
@@ -274,8 +276,9 @@ TEST_F(MrTest, MapAB) {
   atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
 
   PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
-  final_table.Write("final_table", pb::WireFormat::TXT)
-          .WithModNSharding(7, [](const IntVal&) { return 10;});
+  /*final_table.Write("final_table", pb::WireFormat::TXT).WithModNSharding(7, [](const IntVal&) {
+    return 10;
+  });*/
 
   pipeline_->Run(&runner_);
 

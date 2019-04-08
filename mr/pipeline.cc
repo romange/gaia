@@ -43,32 +43,31 @@ void Pipeline::Stop() {
 
 void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
-  boost::intrusive_ptr<detail::TableBase> ptr = tables_.front();
-
-  const pb::Operator& op = ptr->op();
-
-  if (op.input_name_size() == 0) {
-    LOG(INFO) << "No inputs for " << op.op_name() << ", skipping";
-    return;
-  }
 
   executor_.reset(new Executor{pool_, runner});
   executor_->Init();
 
-  std::vector<const InputBase*> inputs;
+  for (auto ptr : tables_) {
+    const pb::Operator& op = ptr->op();
 
+    if (op.input_name_size() == 0) {
+      LOG(INFO) << "No inputs for " << op.op_name() << ", skipping";
+      continue;
+    }
 
-  for (const auto& input_name : op.input_name()) {
-    inputs.push_back(CheckedInput(input_name));
+    std::vector<const InputBase*> inputs;
+
+    for (const auto& input_name : op.input_name()) {
+      inputs.push_back(CheckedInput(input_name));
+    }
+
+    executor_->Run(inputs, ptr.get());
+    VLOG(1) << "Executor finished running on " << op.op_name();
   }
-
-  executor_->Run(inputs, ptr.get());
-  VLOG(1) << "Executor finished running on " << op.op_name();
 
   executor_->Shutdown();
 }
 
-Runner::~Runner() {
-}
+Runner::~Runner() {}
 
 }  // namespace mr3

@@ -52,19 +52,15 @@ void Pipeline::Executor::PerIoStruct::Shutdown() {
 }
 
 Pipeline::Executor::Executor(util::IoContextPool* pool, Runner* runner)
-    : pool_(pool), file_name_q_(16), runner_(runner) {}
+    : pool_(pool), runner_(runner) {}
 
 Pipeline::Executor::~Executor() {
   VLOG(1) << "Executor::~Executor";
-  CHECK(file_name_q_.is_closed());
+  CHECK(!file_name_q_);
 }
 
 void Pipeline::Executor::Shutdown() {
   VLOG(1) << "Executor::Shutdown::Start";
-  file_name_q_.close();
-
-  // Use AwaitFiberOnAll because Shutdown() blocks the callback.
-  pool_->AwaitFiberOnAll([&](IoContext&) { per_io_->Shutdown(); });
 
   runner_->Shutdown();
 
@@ -76,17 +72,21 @@ void Pipeline::Executor::Init() { runner_->Init(); }
 void Pipeline::Executor::Stop() {
   VLOG(1) << "PipelineExecutor StopStart";
 
-  file_name_q_.close();
-  pool_->AwaitOnAll([&](IoContext&) {
-    per_io_->stop_early = true;
-    VLOG(1) << "StopEarly";
+  if (file_name_q_) {
+    file_name_q_->close();
+    pool_->AwaitOnAll([&](IoContext&) {
+      per_io_->stop_early = true;
+      VLOG(1) << "StopEarly";
+    });
   }
-  );
   VLOG(1) << "PipelineExecutor StopEnd";
 }
 
 void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb) {
   // CHECK_STATUS(tb->InitializationStatus());
+
+  file_name_q_.reset(new FileNameQueue{16});
+  runner_->OperatorStart();
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
@@ -110,12 +110,12 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
 
     LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
     for (const auto nm : files) {
-      channel_op_status st = file_name_q_.push(FileInput{nm, &input->msg()});
+      channel_op_status st = file_name_q_->push(FileInput{nm, &input->msg()});
       if (st != channel_op_status::closed) {
         CHECK_EQ(channel_op_status::success, st);
       }
     }
-    if (file_name_q_.is_closed())
+    if (file_name_q_->is_closed())
       break;
   }
 
@@ -123,8 +123,16 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
   pool_->AwaitOnAll([&](IoContext&) {
     parse_errs.fetch_add(per_io_->do_context->parse_errors, std::memory_order_relaxed);
   });
-
   LOG_IF(WARNING, parse_errs > 0) << tb->op().op_name() << " had " << parse_errs << " errors";
+  file_name_q_->close();
+
+  // Use AwaitFiberOnAll because Shutdown() blocks the callback.
+  pool_->AwaitFiberOnAll([&](IoContext&) {
+    per_io_->Shutdown();
+    per_io_.reset();
+  });
+  runner_->OperatorEnd();
+  file_name_q_.reset();
 }
 
 void Pipeline::Executor::ProcessFiles() {
@@ -133,7 +141,7 @@ void Pipeline::Executor::ProcessFiles() {
   uint64_t cnt = 0;
 
   while (!trd_local->stop_early) {
-    channel_op_status st = file_name_q_.pop(file_input);
+    channel_op_status st = file_name_q_->pop(file_input);
     if (st == channel_op_status::closed)
       break;
 

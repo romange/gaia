@@ -24,7 +24,12 @@ class Runner {
 
   virtual void Shutdown() = 0;
 
+  virtual void OperatorStart() = 0;
+
+  // Must be thread-safe. Called from multiple threads in pipeline_executor.
   virtual RawContext* CreateContext(const pb::Operator& op) = 0;
+
+  virtual void OperatorEnd() = 0;
 
   virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
 
