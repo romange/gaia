@@ -76,8 +76,9 @@ template <typename T> class Output : public OutputBase {
   ShardId Shard(const T& t) {
     if (shard_op_)
       return shard_op_(t);
+    else if (modn_op_)
+      return modn_op_(t) % out_->modn();
 
-    // TODO: Hasher<T>(t) & msg().modn();
     return ShardId{0};
   }
 

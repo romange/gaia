@@ -39,6 +39,7 @@ void OutputBase::SetShardType(pb::Output::ShardType st, unsigned modn) {
   out_->set_shard_type(st);
   if (st == pb::Output::MODN) {
     CHECK_GT(modn, 0);
+    out_->set_modn(modn);
   }
 }
 

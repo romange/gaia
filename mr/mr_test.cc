@@ -221,7 +221,7 @@ TEST_F(MrTest, Map) {
   PTable<A> str2 = str1.Map<AMapper>("Map1");
 
   str2.Write("table", pb::WireFormat::TXT)
-          .WithModNSharding(10, [](const A&) { return 0;});
+          .WithModNSharding(10, [](const A&) { return 11;});
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
@@ -231,7 +231,7 @@ TEST_F(MrTest, Map) {
   for (const auto& e : elements)
     expected.push_back(e + "a");
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(0, expected)));
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));
 }
 
 
