@@ -176,15 +176,13 @@ class TableBase {
 
 // Currently the input type is hard-coded - string.
 template <typename OutT> class TableImpl : public TableBase {
-  template <typename T> friend class PTable;
-
  public:
   using OutputType = OutT;
   using ContextType = DoContext<OutT>;
 
   using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
 
-  using TableBase::TableBase;
+  using TableBase::TableBase;  // C'tor
 
   Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
     SetOutput(name, type);
@@ -196,12 +194,18 @@ template <typename OutT> class TableImpl : public TableBase {
     return new TableImpl<U>{std::move(op), pipeline_};
   }
 
+  template <typename U> typename TableImpl<U>::PtrType CloneAs() const {
+    auto new_op = op_;
+    new_op.clear_output();
+    return CloneAs<U>(std::move(new_op));
+  }
+
+  template <typename FromType, typename MapType> void MapWith();
+
  protected:
   DoFn SetupDoFn(RawContext* context) override;
 
  private:
-  template <typename FromType, typename MapType> void MapWith();
-
   Output<OutT> out_;
   std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
@@ -237,9 +241,15 @@ class StringTable : public PTable<std::string> {
  public:
   StringTable(PTable<std::string>&& p) : PTable(p.impl_) {}
 
-  PTable<rapidjson::Document> AsJson() const;
+  template<typename U> PTable<U> As() const {
+    return PTable<U>{impl_->CloneAs<U>()};
+  }
 
-  template<typename U> PTable<U> As() const;
+  PTable<rapidjson::Document> AsJson() const {
+    return As<rapidjson::Document>();
+  }
+
+
  protected:
   StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
 };
@@ -258,6 +268,7 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
 
   pb::Operator new_op = impl_->op();
   new_op.set_op_name(name);
+  new_op.clear_output();
 
   auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
   ptr->template MapWith<OutT, MapType>();
@@ -302,12 +313,6 @@ void TableImpl<OutT>::MapWith() {
       h.m.Do(std::move(tmp_rec), context);
     }
   };
-}
-
-template<typename U> PTable<U> StringTable::As() const {
-  pb::Operator new_op = impl_->op();
-  typename TableImpl<U>::PtrType ptr(impl_->CloneAs<U>(std::move(new_op)));
-  return PTable<U>{ptr};
 }
 
 }  // namespace mr3

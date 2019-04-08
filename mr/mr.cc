@@ -34,22 +34,13 @@ void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
 }
 
 void OutputBase::SetShardType(pb::Output::ShardType st, unsigned modn) {
-  CHECK(!out_->has_shard_type()) << "Must be defined only once";
+  CHECK(!out_->has_shard_type()) << "Must be defined only once. \n" << out_->ShortDebugString();
 
   out_->set_shard_type(st);
   if (st == pb::Output::MODN) {
     CHECK_GT(modn, 0);
     out_->set_modn(modn);
   }
-}
-
-PTable<rj::Document> StringTable::AsJson() const {
-  pb::Operator new_op = impl_->op();
-  new_op.mutable_op_name()->append("_as_json");
-
-  TableImpl<rj::Document>::PtrType ptr(impl_->CloneAs<rj::Document>(std::move(new_op)));
-
-  return PTable<rj::Document>{ptr};
 }
 
 std::string RecordTraits<rj::Document>::Serialize(rj::Document&& doc) {

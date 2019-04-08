@@ -96,7 +96,7 @@ class TestRunner : public Runner {
 
   const ShardedOutput& Table(const string& tb_name) const {
     auto it = out_fs_.find(tb_name);
-    CHECK(it != out_fs_.end());
+    CHECK(it != out_fs_.end()) << "Missing table file " << tb_name;
 
     return it->second;
   }
@@ -273,9 +273,9 @@ TEST_F(MrTest, MapAB) {
 
   atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
 
-  /*PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
+  PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
   final_table.Write("final_table", pb::WireFormat::TXT)
-          .WithModNSharding(10, [](const IntVal&) { return 11;});*/
+          .WithModNSharding(7, [](const IntVal&) { return 10;});
 
   pipeline_->Run(&runner_);
 
@@ -284,6 +284,7 @@ TEST_F(MrTest, MapAB) {
     expected.push_back(e + "a");
 
   EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
+  // EXPECT_THAT(runner_.Table("final_table"), ElementsAre(MatchShard(3, elements)));
 }
 
 }  // namespace mr3
