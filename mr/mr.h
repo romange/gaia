@@ -239,6 +239,7 @@ class StringTable : public PTable<std::string> {
 
   PTable<rapidjson::Document> AsJson() const;
 
+  template<typename U> PTable<U> As() const;
  protected:
   StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
 };
@@ -301,6 +302,12 @@ void TableImpl<OutT>::MapWith() {
       h.m.Do(std::move(tmp_rec), context);
     }
   };
+}
+
+template<typename U> PTable<U> StringTable::As() const {
+  pb::Operator new_op = impl_->op();
+  typename TableImpl<U>::PtrType ptr(impl_->CloneAs<U>(std::move(new_op)));
+  return PTable<U>{ptr};
 }
 
 }  // namespace mr3
