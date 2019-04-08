@@ -27,7 +27,7 @@ class Pipeline::Executor {
   ~Executor();
 
   void Init();
-  void Run(const std::vector<const InputBase*>& inputs, TableBase* ss);
+  void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* ss);
 
   // Stops the executor in the middle.
   void Stop();
@@ -39,7 +39,7 @@ class Pipeline::Executor {
   // One per IO thread.
   void ProcessFiles();
 
-  void MapFiber(TableBase* sb);
+  void MapFiber(detail::TableBase* sb);
 
   util::IoContextPool* pool_;
   FileNameQueue file_name_q_;

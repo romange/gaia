@@ -15,7 +15,7 @@ namespace rj = rapidjson;
 
 RawContext::~RawContext() {}
 
-void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
+void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   if (!op_.has_output()) {
     pipeline_->tables_.emplace_back(this);
   }

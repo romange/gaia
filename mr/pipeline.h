@@ -35,7 +35,7 @@ class Runner {
 };
 
 class Pipeline {
-  friend class TableBase;
+  friend class detail::TableBase;
  public:
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
@@ -58,7 +58,7 @@ class Pipeline {
 
   util::IoContextPool* pool_;
   std::unordered_map<std::string, std::unique_ptr<InputBase>> inputs_;
-  std::vector<boost::intrusive_ptr<TableBase>> tables_;
+  std::vector<boost::intrusive_ptr<detail::TableBase>> tables_;
 
   std::unique_ptr<Executor> executor_;
 };

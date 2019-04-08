@@ -6,7 +6,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
-
+#include "mr/impl/table_impl.h"
 #include "util/fibers/fibers_ext.h"
 
 namespace mr3 {
@@ -85,7 +85,7 @@ void Pipeline::Executor::Stop() {
   VLOG(1) << "PipelineExecutor StopEnd";
 }
 
-void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, TableBase* tb) {
+void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb) {
   // CHECK_STATUS(tb->InitializationStatus());
 
   // As long as we do not block in the function we can use AwaitOnAll.
@@ -144,7 +144,7 @@ void Pipeline::Executor::ProcessFiles() {
   VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
 }
 
-void Pipeline::Executor::MapFiber(TableBase* sb) {
+void Pipeline::Executor::MapFiber(detail::TableBase* sb) {
   VLOG(1) << "Starting MapFiber";
   auto& record_q = per_io_->record_q;
   string record;

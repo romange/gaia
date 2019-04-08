@@ -30,7 +30,7 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
     inp_ptr->mutable_msg()->add_file_spec()->set_url_glob(s);
   }
 
-  TableImpl<std::string>::PtrType ptr(new TableImpl<std::string>(name, this));
+  detail::TableImpl<std::string>::PtrType ptr(new detail::TableImpl<std::string>(name, this));
   ptr->mutable_op()->add_input_name(name);
 
   return StringTable{ptr};
@@ -43,7 +43,7 @@ void Pipeline::Stop() {
 
 void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
-  boost::intrusive_ptr<TableBase> ptr = tables_.front();
+  boost::intrusive_ptr<detail::TableBase> ptr = tables_.front();
 
   const pb::Operator& op = ptr->op();
 

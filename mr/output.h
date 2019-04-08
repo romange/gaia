@@ -10,7 +10,9 @@
 
 namespace mr3 {
 
+namespace detail {
 template <typename OutT> class TableImpl;
+}  // detail
 
 struct ShardId : public absl::variant<uint32_t, std::string> {
   using Parent = absl::variant<uint32_t, std::string>;
@@ -36,7 +38,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class TableImpl<T>;  // To allow the instantiation of Output<T>;
+  friend class detail::TableImpl<T>;  // To allow the instantiation of Output<T>;
 
   // TODO: to make it variant.
   std::function<std::string(const T&)> shard_op_;

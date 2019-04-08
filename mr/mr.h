@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <functional>
-
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
 // I do not enable SSE42 for rapidjson because it may go out of boundaries, they assume
@@ -20,16 +18,16 @@
 #include "base/type_traits.h"
 #include "file/file.h"
 #include "mr/output.h"
+#include "mr/impl/table_impl.h"
 
 #include "strings/unique_strings.h"
 #include "util/status.h"
 
 namespace mr3 {
+
 class Pipeline;
-class TableBase;
 class StringTable;
 
-template <typename OutT> class TableImpl;
 template <typename T> class DoContext;
 template <typename T> class PTable;
 
@@ -104,7 +102,7 @@ class RawContext {
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
 // It's packaged together with the DoFn function.
 template <typename T> class DoContext {
-  friend class TableImpl<T>;
+  friend class detail::TableImpl<T>;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
@@ -133,88 +131,9 @@ template <typename T> class DoContext {
   RecordTraits<T> rt_;
 };
 
-class TableBase {
- public:
-  using RawRecord = std::string;
-  typedef std::function<void(RawRecord&& record)> DoFn;
-
-  TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
-
-  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
-
-  virtual ~TableBase() {}
-
-  virtual DoFn SetupDoFn(RawContext* context) = 0;
-
-  // virtual util::Status InitializationStatus() const { return util::Status::OK; }
-
-  const pb::Operator& op() const { return op_; }
-  pb::Operator* mutable_op() { return &op_; }
-
-  friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
-    tbl->use_count_.fetch_add(1, std::memory_order_relaxed);
-  }
-
-  friend void intrusive_ptr_release(TableBase* tbl) noexcept {
-    if (1 == tbl->use_count_.fetch_sub(1, std::memory_order_release)) {
-      // See connection_handler.h {intrusive_ptr_release} implementation
-      // for memory barriers explanation.
-      std::atomic_thread_fence(std::memory_order_acquire);
-      delete tbl;
-    }
-  }
-
-  Pipeline* pipeline() const { return pipeline_; }
-
- protected:
-  pb::Operator op_;
-  Pipeline* pipeline_;
-  std::atomic<std::uint32_t> use_count_{0};
-
-  void SetOutput(const std::string& name, pb::WireFormat::Type type);
-};
-
-// Currently the input type is hard-coded - string.
-template <typename OutT> class TableImpl : public TableBase {
- public:
-  using OutputType = OutT;
-  using ContextType = DoContext<OutT>;
-
-  using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
-
-  using TableBase::TableBase;  // C'tor
-
-  Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
-    SetOutput(name, type);
-    out_ = Output<OutputType>(op_.mutable_output());
-    return out_;
-  }
-
-  template <typename U> typename TableImpl<U>::PtrType CloneAs(pb::Operator op) const {
-    return new TableImpl<U>{std::move(op), pipeline_};
-  }
-
-  template <typename U> typename TableImpl<U>::PtrType CloneAs() const {
-    auto new_op = op_;
-    new_op.clear_output();
-    return CloneAs<U>(std::move(new_op));
-  }
-
-  template <typename FromType, typename MapType> void MapWith();
-
- protected:
-  DoFn SetupDoFn(RawContext* context) override;
-
- private:
-  Output<OutT> out_;
-  std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
-};
 
 template <typename OutT> class PTable {
  public:
-  // TODO: to hide it from public interface.
-  TableBase* impl() { return impl_.get(); }
-
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
     return impl_->Write(name, type);
   }
@@ -229,10 +148,11 @@ template <typename OutT> class PTable {
 
   // apparently PTable of different type can not access this members.
   template <typename T> friend class PTable;
+  using TableImpl = detail::TableImpl<OutT>;
 
-  PTable(typename TableImpl<OutT>::PtrType ptr) : impl_(std::move(ptr)) {}
+  PTable(typename TableImpl::PtrType ptr) : impl_(std::move(ptr)) {}
 
-  typename TableImpl<OutT>::PtrType impl_;
+  typename TableImpl::PtrType impl_;
 };
 
 class StringTable : public PTable<std::string> {
@@ -251,7 +171,7 @@ class StringTable : public PTable<std::string> {
 
 
  protected:
-  StringTable(TableImpl<std::string>::PtrType ptr) : PTable(ptr) {}
+  StringTable(TableImpl::PtrType ptr) : PTable(ptr) {}
 };
 
 template <typename OutT>
@@ -276,19 +196,6 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
   return PTable<NewOutType>(ptr);
 }
 
-template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
-  if (do_fn_) {
-    return [f = this->do_fn_, wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
-      f(std::move(r), &wrapper);
-    };
-  } else {
-    return [wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
-      OutT val;
-      if (wrapper.ParseRaw(std::move(r), &val))
-        wrapper.Write(std::move(val));
-    };
-  }
-}
 
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;
@@ -297,22 +204,5 @@ template <> class RecordTraits<rapidjson::Document> {
   static std::string Serialize(rapidjson::Document&& doc);
   bool Parse(std::string&& tmp, rapidjson::Document* res);
 };
-
-template <typename OutT>
-template <typename FromType, typename MapType>
-void TableImpl<OutT>::MapWith() {
-  struct Helper {
-    MapType m;
-    RecordTraits<FromType> rt;
-  };
-
-  do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
-    FromType tmp_rec;
-    bool parse_res = context->ParseRaw(std::move(rr), &h.rt, &tmp_rec);
-    if (parse_res) {
-      h.m.Do(std::move(tmp_rec), context);
-    }
-  };
-}
 
 }  // namespace mr3
