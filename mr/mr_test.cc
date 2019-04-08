@@ -233,17 +233,31 @@ TEST_F(MrTest, Map) {
 }
 
 
-struct BInt {
+struct IntVal {
   int val;
+
+  operator string() const { return std::to_string(val); }
 };
 
-template <> class RecordTraits<BInt> {
+template <> class RecordTraits<IntVal> {
  public:
-  static std::string Serialize(BInt&& doc) { return std::to_string(doc.val); }
+  static std::string Serialize(IntVal&& doc) { return std::to_string(doc.val); }
 
-  bool Parse(std::string&& tmp, A* res) {
+  bool Parse(std::string&& tmp, IntVal* res) {
     res->val = std::stoi(tmp);
     return true;
+  }
+};
+
+
+class IntMapper {
+  public:
+  void Do(A a, mr3::DoContext<IntVal>* cnt) {
+    CHECK(!a.val.empty());
+    a.val.pop_back();
+    IntVal iv;
+    iv.val = std::stoi(a.val);
+    cnt->Write(std::move(iv));
   }
 };
 
@@ -251,11 +265,15 @@ TEST_F(MrTest, MapAB) {
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
-/*
-  PTable<BInt> atable = pipeline_->ReadText("read_bar", "bar.txt").As<BInt>();   // Map<AMapper>("Map1");
+  PTable<IntVal> itable = pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();   // Map<AMapper>("Map1");
+  PTable<A> atable = itable.Map<AMapper>("Map1");
 
-  str2.Write("table", pb::WireFormat::TXT)
+  atable.Write("table", pb::WireFormat::TXT)
           .WithModNSharding(10, [](const A&) { return 11;});
+
+  /*PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
+  final_table.Write("final_table", pb::WireFormat::TXT)
+          .WithModNSharding(10, [](const IntVal&) { return 11;});*/
 
   pipeline_->Run(&runner_);
 
@@ -263,7 +281,7 @@ TEST_F(MrTest, MapAB) {
   for (const auto& e : elements)
     expected.push_back(e + "a");
 
-  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));*/
+  EXPECT_THAT(runner_.out(), ElementsAre(MatchShard(1, expected)));
 }
 
 
