@@ -14,7 +14,7 @@
 #include "util/asio/io_context_pool.h"
 
 using namespace std;
-struct A {
+struct StrVal {
   string val;
 };
 
@@ -22,11 +22,11 @@ namespace mr3 {
 
 // For gcc less than 7 we should enclose the specialization into the original namespace.
 // https://stackoverflow.com/questions/25594644/warning-specialization-of-template-in-different-namespace
-template <> class RecordTraits<A> {
+template <> class RecordTraits<StrVal> {
  public:
-  static std::string Serialize(A&& doc) { return std::move(doc.val); }
+  static std::string Serialize(StrVal&& doc) { return std::move(doc.val); }
 
-  bool Parse(std::string&& tmp, A* res) {
+  bool Parse(std::string&& tmp, StrVal* res) {
     res->val = tmp;
     return true;
   }
@@ -65,10 +65,10 @@ class TestContext : public RawContext {
   }
 };
 
-class AMapper {
+class StrValMapper {
  public:
-  void Do(string val, mr3::DoContext<A>* cnt) {
-    A a;
+  void Do(string val, mr3::DoContext<StrVal>* cnt) {
+    StrVal a;
     val.append("a");
     a.val = std::move(val);
 
@@ -224,9 +224,9 @@ TEST_F(MrTest, InvalidJson) {
 
 TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
-  PTable<A> str2 = str1.Map<AMapper>("Map1");
+  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1");
 
-  str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
+  str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddRecords("bar.txt", elements);
@@ -256,9 +256,10 @@ template <> class RecordTraits<IntVal> {
 
 class IntMapper {
  public:
-  void Do(A a, mr3::DoContext<IntVal>* cnt) {
-    CHECK(!a.val.empty());
+  void Do(StrVal a, mr3::DoContext<IntVal>* cnt) {
+    CHECK_GT(a.val.size(), 1);
     a.val.pop_back();
+
     IntVal iv;
     CHECK(safe_strto32(a.val, &iv.val)) << a.val;
     cnt->Write(std::move(iv));
@@ -270,15 +271,15 @@ TEST_F(MrTest, MapAB) {
 
   runner_.AddRecords("bar.txt", elements);
   PTable<IntVal> itable =
-      pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<AMapper>("Map1");
-  PTable<A> atable = itable.Map<AMapper>("Map1");
+      pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<StrValMapper>("Map1");
+  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1");
 
-  atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const A&) { return 11; });
+  atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
 
   PTable<IntVal> final_table = atable.Map<IntMapper>("IntMap");
   /*final_table.Write("final_table", pb::WireFormat::TXT).WithModNSharding(7, [](const IntVal&) {
     return 10;
-  });*/
+  }); */
 
   pipeline_->Run(&runner_);
 
