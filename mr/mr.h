@@ -185,10 +185,9 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
                 "MapperType::Do() first argument "
                 "should be constructed from PTable element type");
 
-
-  pb::Operator new_op = impl_->op();
+  bool read_from_input = impl_->is_identity();
+  pb::Operator new_op = impl_->CreateLink(!read_from_input);
   new_op.set_op_name(name);
-  new_op.clear_output();
 
   auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
   ptr->template MapWith<OutT, MapType>();

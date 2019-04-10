@@ -28,7 +28,7 @@ class TableBase {
 
   virtual DoFn SetupDoFn(RawContext* context) = 0;
 
-  // virtual util::Status InitializationStatus() const { return util::Status::OK; }
+  pb::Operator CreateLink(bool from_output) const;
 
   const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
@@ -83,6 +83,8 @@ template <typename OutT> class TableImpl : public TableBase {
   }
 
   template <typename FromType, typename MapType> void MapWith();
+
+  bool is_identity() const { return !do_fn_; }
 
  protected:
   DoFn SetupDoFn(RawContext* context) override;

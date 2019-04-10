@@ -25,6 +25,19 @@ void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type 
   out->mutable_format()->set_type(type);
 }
 
+pb::Operator detail::TableBase::CreateLink(bool from_output) const {
+  pb::Operator res;
+
+  if (from_output) {
+    CHECK(!op_.output().name().empty());
+    res.add_input_name(op_.output().name());
+  } else {
+    res = op_;
+    res.clear_output();
+  }
+  return res;
+}
+
 void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
   auto* co = out_->mutable_compress();
   co->set_type(ct);
