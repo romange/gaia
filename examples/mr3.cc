@@ -11,6 +11,7 @@
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "mr/pipeline.h"
+#include "mr/mr_main.h"
 #include "mr/local_runner.h"
 
 #include "util/asio/accept_server.h"
@@ -37,7 +38,7 @@ string ShardNameFunc(const std::string& line) {
 }
 
 int main(int argc, char** argv) {
-  MainInitGuard guard(&argc, &argv);
+  PipelineMain pm(&argc, &argv);
 
   std::vector<string> inputs;
   for (int i = 1; i < argc; ++i) {
@@ -45,21 +46,15 @@ int main(int argc, char** argv) {
   }
   CHECK(!inputs.empty());
 
-  IoContextPool pool(FLAGS_mr_threads);
-  pool.Run();
-
-  std::unique_ptr<util::AcceptServer> server(new AcceptServer(&pool));
+  std::unique_ptr<util::AcceptServer> server(new AcceptServer(pm.pool()));
   util::http::Listener<> http_listener;
   uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
   LOG(INFO) << "Started http server on port " << port;
   server->Run();
 
-  Pipeline p(&pool);
   LocalRunner runner(file_util::ExpandPath(FLAGS_dest_dir));
-  /*Executor executor(, &pool);
-  executor.Init();
-*/
 
+  Pipeline& p = *pm.pipeline();
   server->TriggerOnBreakSignal([&] {
     p.Stop();
     runner.Stop();
@@ -131,10 +126,7 @@ void Call(TOwner *p) {
 
   StringTable ss = p.ReadText("inp1", inputs);
   auto& outp =
-  ss/*.Apply([](std::string&& inp, DoContext<std::string>* context) {
-      context->Write(inp.substr(0, 5));
-    })*/
-      .Write("outp1", pb::WireFormat::TXT).WithCustomSharding(ShardNameFunc);
+  ss.Write("outp1", pb::WireFormat::TXT).WithCustomSharding(ShardNameFunc);
   if (FLAGS_compress) {
     outp.AndCompress(pb::Output::GZIP);
   }
@@ -143,7 +135,6 @@ void Call(TOwner *p) {
   LOG(INFO) << "After pipeline run";
 
   server->Stop(true);
-  pool.Stop();
 
   return 0;
 }

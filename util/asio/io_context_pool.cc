@@ -13,21 +13,24 @@
 #include "base/pthread_utils.h"
 
 using namespace boost;
+using std::thread;
+
+DEFINE_uint32(io_context_threads, 0, "Number of io threads in the pool");
 
 namespace util {
 
 thread_local size_t IoContextPool::context_indx_ = 0;
 
-IoContextPool::IoContextPool(std::size_t pool_size) {
-  if (pool_size == 0)
-    pool_size = std::thread::hardware_concurrency();
+IoContextPool::IoContextPool(size_t pool_size) {
+  if (pool_size == 0) {
+    pool_size =
+        FLAGS_io_context_threads > 0 ? FLAGS_io_context_threads : thread::hardware_concurrency();
+  }
   context_arr_.resize(pool_size);
   thread_arr_.resize(pool_size);
 }
 
-IoContextPool::~IoContextPool() {
-  Stop();
-}
+IoContextPool::~IoContextPool() { Stop(); }
 
 void IoContextPool::WrapLoop(size_t index, fibers_ext::BlockingCounter* bc) {
   context_indx_ = index;
@@ -49,15 +52,13 @@ void IoContextPool::Run() {
   for (size_t i = 0; i < thread_arr_.size(); ++i) {
     thread_arr_[i].work.emplace(asio::make_work_guard(*context_arr_[i].context_ptr_));
     snprintf(buf, sizeof(buf), "IoPool%lu", i);
-    thread_arr_[i].tid = base::StartThread(buf, [this, i, bc] () mutable {
-      this->WrapLoop(i, &bc);
-    });
+    thread_arr_[i].tid =
+        base::StartThread(buf, [this, i, bc]() mutable { this->WrapLoop(i, &bc); });
     cpu_set_t cps;
     CPU_ZERO(&cps);
-    CPU_SET(i % std::thread::hardware_concurrency(), &cps);
+    CPU_SET(i % thread::hardware_concurrency(), &cps);
 
-    int rc = pthread_setaffinity_np(thread_arr_[i].tid,
-                                    sizeof(cpu_set_t), &cps);
+    int rc = pthread_setaffinity_np(thread_arr_[i].tid, sizeof(cpu_set_t), &cps);
     LOG_IF(WARNING, rc) << "Error calling pthread_setaffinity_np: " << strerror(rc) << "\n";
   }
 
@@ -83,7 +84,7 @@ void IoContextPool::Stop() {
   }
   VLOG(1) << "Asio Contexts has been stopped";
 
-  for (size_t i = 0; i <thread_arr_.size(); ++i) {
+  for (size_t i = 0; i < thread_arr_.size(); ++i) {
     pthread_join(thread_arr_[i].tid, nullptr);
     VLOG(2) << "Thread " << i << " has joined";
   }
