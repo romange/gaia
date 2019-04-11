@@ -40,9 +40,10 @@ endif()
 
 # ---[ Color diagnostics
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+#  -fsanitize=address has a bug with clang: multiple definition of `operator delete(void*)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics -Wno-inconsistent-missing-override")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef -fsanitize=address \
-                         -fsanitize=undefined  -DADDRESS_SANITIZER -DUNDEFINED_BEHAVIOR_SANITIZER")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedef \
+                         -fsanitize=undefined -DUNDEFINED_BEHAVIOR_SANITIZER")
 endif()
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
