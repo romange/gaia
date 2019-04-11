@@ -16,16 +16,11 @@
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
-#include "util/http/http_conn_handler.h"
-
-#include "util/status.h"
 
 using namespace std;
 using namespace boost;
 using namespace util;
 
-DEFINE_uint32(http_port, 8080, "Port number.");
-DEFINE_uint32(mr_threads, 0, "Number of mr threads");
 DEFINE_bool(compress, false, "");
 DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
@@ -46,16 +41,10 @@ int main(int argc, char** argv) {
   }
   CHECK(!inputs.empty());
 
-  std::unique_ptr<util::AcceptServer> server(new AcceptServer(pm.pool()));
-  util::http::Listener<> http_listener;
-  uint16_t port = server->AddListener(FLAGS_http_port, &http_listener);
-  LOG(INFO) << "Started http server on port " << port;
-  server->Run();
-
   LocalRunner runner(file_util::ExpandPath(FLAGS_dest_dir));
 
   Pipeline& p = *pm.pipeline();
-  server->TriggerOnBreakSignal([&] {
+  pm.accept_server()->TriggerOnBreakSignal([&] {
     p.Stop();
     runner.Stop();
   });
@@ -133,8 +122,6 @@ void Call(TOwner *p) {
 
   p.Run(&runner);
   LOG(INFO) << "After pipeline run";
-
-  server->Stop(true);
 
   return 0;
 }
