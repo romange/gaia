@@ -47,8 +47,8 @@ gdbbt() {
 
 run_timeout() {
   	timeout=$1
-	(./"${TEST_NAME}" --log_dir="${LOG_DIR}" --gtest_output=xml:"${LOG_DIR}"/"${TEST_NAME}".xml |tee ${TEST_NAME}.test_result.log) &
-	pid=$!
+	(./"${TEST_NAME}" --log_dir="${LOG_DIR}" --gtest_output=xml:"${LOG_DIR}"/"${TEST_NAME}".xml \
+     --gtest_color=yes | tee ${TEST_NAME}.test_result.log) & pid=$!
 
 	while kill -0 $pid &>/dev/null && [ "${timeout}" -ne 0 ]; do
 		sleep 1
