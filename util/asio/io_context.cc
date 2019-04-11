@@ -205,7 +205,7 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
   ready_queue_type* rq;
 
   if (ctx->is_context(fibers::type::dispatcher_context)) {
-    rq = rqueue_arr_ + IoFiberProperties::MAX_NICE_LEVEL + 1;
+    rq = rqueue_arr_ + DISPATCH_LEVEL;
     DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << " dispatch"
              << ", ready_cnt: " << ready_cnt_;
   } else {
@@ -281,7 +281,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
 
   DCHECK_EQ(0, ready_cnt_);
 
-  auto& dispatch_q = rqueue_arr_[IoFiberProperties::NUM_NICE_LEVELS];
+  auto& dispatch_q = rqueue_arr_[DISPATCH_LEVEL];
   if (!dispatch_q.empty()) {
     fibers::context* ctx = &dispatch_q.front();
     dispatch_q.pop_front();

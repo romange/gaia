@@ -45,13 +45,6 @@ constexpr uint32_t SEQ_DICT_MAX_SIZE = 1U << 17;
 constexpr unsigned kArrLengthLimit = 1 << 14;  // to accommodate at least 1 array in 128KB.
 constexpr unsigned kLenLimit = (1 << 16);
 
-inline uint8* Ensure(size_t sz, base::PODArray<uint8>* dest) {
-  size_t p = dest->size();
-  dest->resize(p + sz);
-  return dest->begin() + p;
-}
-
-
 #define CHECK_ZSTDERR(res) do { auto foo = (res); \
     CHECK(!ZSTD_isError(foo)) << ZSTD_getErrorName(foo); } while(false)
 
