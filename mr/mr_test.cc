@@ -9,6 +9,7 @@
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/container/flat_hash_map.h"
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "strings/numbers.h"
@@ -107,8 +108,8 @@ class TestRunner : public Runner {
   }
 
  private:
-  unordered_map<string, vector<string>> input_fs_;
-  unordered_map<string, ShardedOutput> out_fs_;
+  absl::flat_hash_map<string, vector<string>> input_fs_;
+  absl::flat_hash_map<string, ShardedOutput> out_fs_;
   string last_out_name_;
 
   fibers::mutex mu_;
