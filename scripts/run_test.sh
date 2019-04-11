@@ -8,6 +8,8 @@ usage() {
 while [[ $# -gt 1 ]]
 do
 key="$1"
+TIMEOUT=10
+LOG_DIR=`pwd`
 
 case $key in
     -l)
