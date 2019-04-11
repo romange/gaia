@@ -38,13 +38,13 @@ template <typename T> struct IsDoCtxHelper<DoContext<T>*> : public std::true_typ
 };
 
 template <typename MapperType> struct MapperTraits {
-  using do_raits_t = base::function_traits<decltype(&MapperType::Do)>;
+  using do_traits_t = base::function_traits<decltype(&MapperType::Do)>;
 
   // arg0 is 'this' of MapperType.
-  static_assert(do_raits_t::arity == 3, "MapperType::Do must accept 2 arguments");
+  static_assert(do_traits_t::arity == 3, "MapperType::Do must accept 2 arguments");
 
-  using first_arg_t = typename do_raits_t::template argument_type<1>;
-  using second_arg_t = typename do_raits_t::template argument_type<2>;
+  using first_arg_t = typename do_traits_t::template argument_type<1>;
+  using second_arg_t = typename do_traits_t::template argument_type<2>;
 
   static_assert(IsDoCtxHelper<second_arg_t>::value,
                 "MapperType::Do's second argument should be "

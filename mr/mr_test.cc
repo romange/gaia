@@ -12,27 +12,14 @@
 #include "absl/container/flat_hash_map.h"
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "mr/test_utils.h"
+
 #include "strings/numbers.h"
 #include "util/asio/io_context_pool.h"
 
 using namespace std;
-struct StrVal {
-  string val;
-};
 
 namespace mr3 {
-
-// For gcc less than 7 we should enclose the specialization into the original namespace.
-// https://stackoverflow.com/questions/25594644/warning-specialization-of-template-in-different-namespace
-template <> class RecordTraits<StrVal> {
- public:
-  static std::string Serialize(StrVal&& doc) { return std::move(doc.val); }
-
-  bool Parse(std::string&& tmp, StrVal* res) {
-    res->val = tmp;
-    return true;
-  }
-};
 
 using namespace util;
 using namespace boost;
@@ -41,32 +28,10 @@ using testing::ElementsAre;
 using testing::Pair;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
-
-using ShardedOutput = std::unordered_map<ShardId, std::vector<string>>;
+using other::StrVal;
 
 namespace rj = rapidjson;
 
-void PrintTo(const ShardId& src, std::ostream* os) {
-  if (absl::holds_alternative<uint32_t>(src)) {
-    *os << absl::get<uint32_t>(src);
-  } else {
-    *os << absl::get<std::string>(src);
-  }
-}
-
-class TestContext : public RawContext {
-  ShardedOutput& outp_;
-  fibers::mutex& mu_;
-
- public:
-  TestContext(ShardedOutput* outp, fibers::mutex* mu) : outp_(*outp), mu_(*mu) {}
-
-  void WriteInternal(const ShardId& shard_id, std::string&& record) {
-    std::lock_guard<fibers::mutex> lk(mu_);
-
-    outp_[shard_id].push_back(record);
-  }
-};
 
 class StrValMapper {
  public:

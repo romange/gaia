@@ -39,6 +39,30 @@ class Runner {
                                   pb::WireFormat::Type type, RecordQueue* queue) = 0;
 };
 
+
+template<typename Joiner, typename Out> class JoinArg {
+ public:
+  using RawRecord = detail::TableBase::RawRecord;
+
+  template<typename U> using FunctionPtr = void (Joiner::*)(U&&, DoContext<Out>*);
+  using EmitFunc = std::function<void(RawRecord&&, DoContext<Out>* context)>;
+  using SetupEmitFunc = std::function<EmitFunc(Joiner* joiner)>;
+
+  template<typename U> JoinArg(const PTable<U>& tbl, FunctionPtr<U> ptr) {
+    setup_func = [ptr](Joiner* joiner) {
+      [ptr, joiner, rt = RecordTraits<U>{}] (RawRecord&& rr, DoContext<Out>* context) mutable {
+        U tmp_rec;
+        bool parse_res = context->ParseRaw(std::move(rr), &rt, &tmp_rec);
+        if (parse_res) {
+          ptr(joiner, std::move(tmp_rec), context);
+        }
+      };
+    };
+  }
+
+  SetupEmitFunc setup_func;
+};
+
 class Pipeline {
   friend class detail::TableBase;
  public:
@@ -55,6 +79,9 @@ class Pipeline {
 
   // Stops/breaks the run.
   void Stop();
+
+  template<typename JoinerType, typename Out> PTable<Out>
+  Join(const std::string& name, const std::vector<JoinArg<JoinerType, Out>>& args);
 
  private:
   const InputBase* CheckedInput(const std::string& name) const;
