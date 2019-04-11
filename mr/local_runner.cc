@@ -177,6 +177,8 @@ RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
 }
 
 void LocalRunner::OperatorEnd(std::vector<std::string>* out_files) {
+  VLOG(1) << "LocalRunner::OperatorEnd";
+  // TODO: to return files.
   impl_->dest_mgr->Flush();
   impl_->dest_mgr.reset();
 }

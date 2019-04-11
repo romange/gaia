@@ -29,7 +29,7 @@ PipelineMain::PipelineMain(int* argc, char*** argv)
 }
 
 PipelineMain::~PipelineMain() {
-  acc_server_->Stop();
+  acc_server_->Stop(true);
   pool_->Stop();
 }
 
