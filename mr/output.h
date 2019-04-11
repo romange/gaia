@@ -20,6 +20,8 @@ struct ShardId : public absl::variant<uint32_t, std::string> {
   using Parent::Parent;
 
   ShardId() = default;
+
+  std::string ToString(absl::string_view basename) const;
 };
 
 class OutputBase {

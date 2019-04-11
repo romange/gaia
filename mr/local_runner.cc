@@ -176,7 +176,7 @@ RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
   return new LocalContext(op.output(), impl_->dest_mgr.get());
 }
 
-void LocalRunner::OperatorEnd() {
+void LocalRunner::OperatorEnd(std::vector<std::string>* out_files) {
   impl_->dest_mgr->Flush();
   impl_->dest_mgr.reset();
 }
@@ -197,8 +197,8 @@ ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
 }
 
 // Read file and fill queue. This function must be fiber-friendly.
-size_t LocalRunner::ProcessFile(const std::string& filename, pb::WireFormat::Type type,
-                                RecordQueue* queue) {
+size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
+                                     RecordQueue* queue) {
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
 

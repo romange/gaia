@@ -28,7 +28,8 @@ class Pipeline::Executor {
 
   void Init();
 
-  void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* ss);
+  void Run(const std::vector<const InputBase*>& inputs,
+           detail::TableBase* ss, std::vector<std::string>* out_files);
 
   // Stops the executor in the middle.
   void Stop();
@@ -38,7 +39,7 @@ class Pipeline::Executor {
  private:
   // External, disk thread that reads files from disk and pumps data into record_q.
   // One per IO thread.
-  void ProcessFiles();
+  void ProcessInputFiles();
 
   void MapFiber(detail::TableBase* sb);
 

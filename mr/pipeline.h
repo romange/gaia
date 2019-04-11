@@ -29,14 +29,14 @@ class Runner {
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
   virtual RawContext* CreateContext(const pb::Operator& op) = 0;
 
-  virtual void OperatorEnd() = 0;
+  virtual void OperatorEnd(std::vector<std::string>* out_files) = 0;
 
   virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
 
   // Read file and fill queue. This function must be fiber-friendly.
   // Returns number of records processed.
-  virtual size_t ProcessFile(const std::string& filename,
-                             pb::WireFormat::Type type, RecordQueue* queue) = 0;
+  virtual size_t ProcessInputFile(const std::string& filename,
+                                  pb::WireFormat::Type type, RecordQueue* queue) = 0;
 };
 
 class Pipeline {

@@ -78,26 +78,26 @@ DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThre
   dest_files_.set_empty_key(StringPiece());
 }
 
-auto DestFileSet::Get(StringPiece key, const pb::Output& out) -> Result {
-  CHECK_EQ(out.shard_type(), pb::Output::USER_DEFINED);
+auto DestFileSet::Get(StringPiece key, const pb::Output& pb_out) -> Result {
+  CHECK_EQ(pb_out.shard_type(), pb::Output::USER_DEFINED);
 
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(key);
   if (it == dest_files_.end()) {
-    string file_name = FileName(key, out);
+    string file_name = FileName(key, pb_out);
     key = str_db_.Get(key);
     string full_path = file_util::JoinPath(root_dir_, file_name);
     unsigned index =
         base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(key.data()), key.size(), 1);
-    DestHandle* dh = new DestHandle{CreateFile(full_path, out, fq_), index, fq_};
+    DestHandle* dh = new DestHandle{CreateFile(full_path, pb_out, fq_), index, fq_};
 
-    if (FLAGS_local_runner_zsink && out.has_compress()) {
-      CHECK(out.compress().type() == pb::Output::GZIP);
+    if (FLAGS_local_runner_zsink && pb_out.has_compress()) {
+      CHECK(pb_out.compress().type() == pb::Output::GZIP);
 
       static std::default_random_engine rnd;
 
       dh->str_sink = new StringSink;
-      dh->zlib_sink.reset(new ZlibSink(dh->str_sink, out.compress().level()));
+      dh->zlib_sink.reset(new ZlibSink(dh->str_sink, pb_out.compress().level()));
 
       // Randomize when we flush first for each handle. That should define uniform flushing cycle
       // for all handles.

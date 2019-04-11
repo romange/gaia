@@ -5,6 +5,7 @@
 
 #include <rapidjson/error/en.h>
 
+#include "absl/strings/str_format.h"
 #include "mr/pipeline.h"
 
 #include "base/logging.h"
@@ -36,6 +37,13 @@ pb::Operator detail::TableBase::CreateLink(bool from_output) const {
     res.clear_output();
   }
   return res;
+}
+
+std::string ShardId::ToString(absl::string_view basename) const {
+  if (absl::holds_alternative<string>(*this)) {
+    return absl::get<string>(*this);
+  }
+  return absl::StrFormat("%s-%04d", basename, absl::get<uint32_t>(*this));
 }
 
 void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {

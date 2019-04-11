@@ -21,13 +21,13 @@ class LocalRunner : public Runner {
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
   RawContext* CreateContext(const pb::Operator& op) final;
 
-  void OperatorEnd() final;
+  void OperatorEnd(std::vector<std::string>* out_files) final;
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 
   // Read file and fill queue. This function must be fiber-friendly.
-  size_t ProcessFile(const std::string& filename, pb::WireFormat::Type type,
-                     RecordQueue* queue) final;
+  size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
+                          RecordQueue* queue) final;
 
   void Stop();
 

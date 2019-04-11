@@ -55,14 +55,27 @@ void Pipeline::Run(Runner* runner) {
       continue;
     }
 
+    // TODO: to move this to the planning phase.
+    CHECK(!op.output().name().empty());
+    auto inp_insert_res = inputs_.emplace(op.output().name(), nullptr);
+    CHECK(inp_insert_res.second) << "Input '" << op.output().name() << "' already exists";
+    auto& inp_ptr = inp_insert_res.first->second;
+    inp_ptr.reset(new InputBase(op.output().name(), op.output().format().type()));
+
     std::vector<const InputBase*> inputs;
 
     for (const auto& input_name : op.input_name()) {
       inputs.push_back(CheckedInput(input_name));
     }
 
-    executor_->Run(inputs, ptr.get());
-    VLOG(1) << "Executor finished running on " << op.op_name();
+    std::vector<string> out_files;
+    executor_->Run(inputs, ptr.get(), &out_files);
+    VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to "
+            << out_files.size() << " output files";
+    for (const auto& fl : out_files) {
+      auto* fs = inp_ptr->mutable_msg()->add_file_spec();
+      fs->set_url_glob(fl);
+    }
   }
 
   executor_->Shutdown();

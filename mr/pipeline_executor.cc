@@ -82,7 +82,8 @@ void Pipeline::Executor::Stop() {
   VLOG(1) << "PipelineExecutor StopEnd";
 }
 
-void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb) {
+void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs,
+                             detail::TableBase* tb, std::vector<std::string>* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
 
   file_name_q_.reset(new FileNameQueue{16});
@@ -93,7 +94,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
     per_io_.reset(new PerIoStruct(index));
 
     for (auto& f : per_io_->process_fd)
-      f = fibers::fiber{&Executor::ProcessFiles, this};
+      f = fibers::fiber{&Executor::ProcessInputFiles, this};
 
     per_io_->do_context.reset(runner_->CreateContext(tb->op()));
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
@@ -131,11 +132,12 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
     per_io_->Shutdown();
     per_io_.reset();
   });
-  runner_->OperatorEnd();
+
+  runner_->OperatorEnd(out_files);
   file_name_q_.reset();
 }
 
-void Pipeline::Executor::ProcessFiles() {
+void Pipeline::Executor::ProcessInputFiles() {
   PerIoStruct* trd_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
@@ -146,10 +148,10 @@ void Pipeline::Executor::ProcessFiles() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    cnt += runner_->ProcessFile(file_input.first, file_input.second->format().type(),
-                                &trd_local->record_q);
+    cnt += runner_->ProcessInputFile(file_input.first, file_input.second->format().type(),
+                                     &trd_local->record_q);
   }
-  VLOG(1) << "ProcessFiles closing after processing " << cnt << " items";
+  VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 }
 
 void Pipeline::Executor::MapFiber(detail::TableBase* sb) {
