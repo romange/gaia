@@ -192,6 +192,19 @@ TEST_F(MrTest, MapAB) {
   EXPECT_THAT(runner_.Table("final_table"), ElementsAre(MatchShard(3, elements)));
 }
 
+class StrJoiner {
+  absl::flat_hash_map<int, int> counts_;
+
+  public:
+  void On1(IntVal&& iv, DoContext<string>* out) {
+
+  }
+
+  void On2(IntVal&& iv, DoContext<string>* out) {
+
+  }
+};
+
 TEST_F(MrTest, Join) {
   vector<string> stream1{"1", "2", "3", "4"}, stream2{"2", "3"};
 
@@ -200,6 +213,9 @@ TEST_F(MrTest, Join) {
 
   PTable<IntVal> itable1 = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
   PTable<IntVal> itable2 = pipeline_->ReadText("read2", "stream2.txt").As<IntVal>();
+  PTable<string> res = pipeline_->Join<StrJoiner>("join_tables", {JoinInput(itable1, &StrJoiner::On1),
+                                                                  JoinInput(itable2, &StrJoiner::On2)});
+
 }
 
 }  // namespace mr3

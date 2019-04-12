@@ -7,7 +7,6 @@
 
 #include "util/fibers/simple_channel.h"
 
-
 namespace util {
 class IoContextPool;
 }  // namespace util
@@ -35,36 +34,43 @@ class Runner {
 
   // Read file and fill queue. This function must be fiber-friendly.
   // Returns number of records processed.
-  virtual size_t ProcessInputFile(const std::string& filename,
-                                  pb::WireFormat::Type type, RecordQueue* queue) = 0;
+  virtual size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
+                                  RecordQueue* queue) = 0;
 };
 
-
-template<typename Joiner, typename Out> class JoinArg {
+template <typename Joiner, typename Out> class JoinArg {
  public:
   using RawRecord = detail::TableBase::RawRecord;
 
-  template<typename U> using FunctionPtr = void (Joiner::*)(U&&, DoContext<Out>*);
+  template <typename U> using FunctionPtr = void (Joiner::*)(U&&, DoContext<Out>*);
   using EmitFunc = std::function<void(RawRecord&&, DoContext<Out>* context)>;
   using SetupEmitFunc = std::function<EmitFunc(Joiner* joiner)>;
 
-  template<typename U> JoinArg(const PTable<U>& tbl, FunctionPtr<U> ptr) {
+  template <typename U> JoinArg(const PTable<U>& tbl, FunctionPtr<U> ptr) {
     setup_func = [ptr](Joiner* joiner) {
-      [ptr, joiner, rt = RecordTraits<U>{}] (RawRecord&& rr, DoContext<Out>* context) mutable {
-        U tmp_rec;
+      auto f = [ptr, joiner, rt = RecordTraits<U>{}](RawRecord&& rr,
+                                                     DoContext<Out>* context) mutable {
+        /*U tmp_rec;
         bool parse_res = context->ParseRaw(std::move(rr), &rt, &tmp_rec);
         if (parse_res) {
           ptr(joiner, std::move(tmp_rec), context);
-        }
+        }*/
       };
+      return f;
     };
   }
 
   SetupEmitFunc setup_func;
 };
 
+template <typename Joiner, typename Out, typename U>
+JoinArg<Joiner, Out> JoinInput(const PTable<U>& tbl, void (Joiner::*fnc)(U&&, DoContext<Out>*)) {
+  return JoinArg<Joiner, Out>{tbl, fnc};
+}
+
 class Pipeline {
   friend class detail::TableBase;
+
  public:
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
@@ -80,11 +86,16 @@ class Pipeline {
   // Stops/breaks the run.
   void Stop();
 
-  template<typename JoinerType, typename Out> PTable<Out>
-  Join(const std::string& name, const std::vector<JoinArg<JoinerType, Out>>& args);
+  template <typename JoinerType, typename Out>
+  PTable<Out> Join(const std::string& name, std::initializer_list<JoinArg<JoinerType, Out>> args);
 
  private:
   const InputBase* CheckedInput(const std::string& name) const;
+
+  template <typename U>
+  typename detail::TableImpl<U>::PtrType CreateTableImpl(const std::string& name) {
+    return new detail::TableImpl<U>(name, this);
+  }
 
   class Executor;
 
@@ -94,5 +105,12 @@ class Pipeline {
 
   std::unique_ptr<Executor> executor_;
 };
+
+template <typename JoinerType, typename Out>
+PTable<Out> Pipeline::Join(const std::string& name,
+                           std::initializer_list<JoinArg<JoinerType, Out>> args) {
+  auto ptr = CreateTableImpl<Out>(name);
+  return PTable<Out>(ptr);
+}
 
 }  // namespace mr3
