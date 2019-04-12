@@ -7,9 +7,6 @@
 
 #include "mr/pipeline.h"
 
-#include "absl/strings/str_format.h"
-#include "absl/strings/str_join.h"
-#include "absl/container/flat_hash_map.h"
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "mr/test_utils.h"
@@ -44,80 +41,6 @@ class StrValMapper {
   }
 };
 
-class TestRunner : public Runner {
- public:
-  void Init() final;
-
-  void Shutdown() final;
-
-  RawContext* CreateContext(const pb::Operator& op) final;
-
-  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
-
-  // Read file and fill queue. This function must be fiber-friendly.
-  size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          RecordQueue* queue) final;
-
-  void OperatorStart() final {}
-  void OperatorEnd(std::vector<std::string>* out_files) final;
-
-  void AddInputRecords(const string& fl, const std::vector<string>& records) {
-    std::copy(records.begin(), records.end(), back_inserter(input_fs_[fl]));
-  }
-
-  const ShardedOutput& Table(const string& tb_name) const {
-    auto it = out_fs_.find(tb_name);
-    CHECK(it != out_fs_.end()) << "Missing table file " << tb_name;
-
-    return it->second;
-  }
-
- private:
-  absl::flat_hash_map<string, vector<string>> input_fs_;
-  absl::flat_hash_map<string, ShardedOutput> out_fs_;
-  string last_out_name_;
-
-  fibers::mutex mu_;
-};
-
-void TestRunner::Init() {}
-
-void TestRunner::Shutdown() {}
-
-RawContext* TestRunner::CreateContext(const pb::Operator& op) {
-  CHECK(!op.output().name().empty());
-  last_out_name_= op.output().name();
-  return new TestContext(&out_fs_[last_out_name_], &mu_);
-}
-
-void TestRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
-  auto it = input_fs_.find(glob);
-  if (it != input_fs_.end()) {
-    cb(it->first);
-  }
-}
-
-void TestRunner::OperatorEnd(std::vector<std::string>* out_files) {
-  auto it = out_fs_.find(last_out_name_);
-  CHECK(it != out_fs_.end());
-  for (const auto& k_v : it->second) {
-    string name = last_out_name_ + "/" + k_v.first.ToString("shard");
-    out_files->push_back(name);
-    input_fs_[name] = k_v.second;
-  }
-}
-
-// Read file and fill queue. This function must be fiber-friendly.
-size_t TestRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                    RecordQueue* queue) {
-  auto it = input_fs_.find(filename);
-  CHECK(it != input_fs_.end());
-  for (const auto& str : it->second) {
-    queue->Push(str);
-  }
-
-  return it->second.size();
-}
 
 class MrTest : public testing::Test {
  protected:
@@ -267,6 +190,16 @@ TEST_F(MrTest, MapAB) {
 
   EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
   EXPECT_THAT(runner_.Table("final_table"), ElementsAre(MatchShard(3, elements)));
+}
+
+TEST_F(MrTest, Join) {
+  vector<string> stream1{"1", "2", "3", "4"}, stream2{"2", "3"};
+
+  runner_.AddInputRecords("stream1.txt", stream1);
+  runner_.AddInputRecords("stream2.txt", stream2);
+
+  PTable<IntVal> itable1 = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
+  PTable<IntVal> itable2 = pipeline_->ReadText("read2", "stream2.txt").As<IntVal>();
 }
 
 }  // namespace mr3
