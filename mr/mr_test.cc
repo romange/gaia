@@ -213,8 +213,8 @@ TEST_F(MrTest, Join) {
 
   PTable<IntVal> itable1 = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
   PTable<IntVal> itable2 = pipeline_->ReadText("read2", "stream2.txt").As<IntVal>();
-  PTable<string> res = pipeline_->Join<StrJoiner>("join_tables", {JoinInput(itable1, &StrJoiner::On1),
-                                                                  JoinInput(itable2, &StrJoiner::On2)});
+  PTable<string> res = pipeline_->Join("join_tables", {JoinInput(itable1, &StrJoiner::On1),
+                                                       JoinInput(itable2, &StrJoiner::On2)});
 
 }
 

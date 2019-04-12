@@ -31,6 +31,8 @@ class StringTable;
 template <typename T> class DoContext;
 template <typename T> class PTable;
 
+using RawRecord = std::string;
+
 namespace detail {
 template <typename T> struct DoCtxResolver : public std::false_type {};
 template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_type {
@@ -97,6 +99,14 @@ class RawContext {
 
   size_t parse_errors = 0;
 
+  // Returns true if succeeded.
+  template <typename U> bool ParseInto(RawRecord&& rr, RecordTraits<U>* rt, U* res) {
+    bool parse_res = rt->Parse(std::move(rr), res);
+    if (!parse_res)
+      ++parse_errors;
+
+    return parse_res;
+  }
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };
@@ -109,23 +119,17 @@ template <typename T> class DoContext {
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
  public:
-  using RawRecord = std::string;
-
   void Write(T&& t) {
     ShardId shard_id = out_->Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
     context_->WriteInternal(shard_id, std::move(dest));
   }
 
+  RawContext* raw_context() { return context_; }
+
  private:
-  bool ParseRaw(RawRecord&& rr, T* res) { return ParseRaw(std::move(rr), &rt_, res); }
-
-  template <typename U> bool ParseRaw(RawRecord&& rr, RecordTraits<U>* rt, U* res) {
-    bool parse_res = rt->Parse(std::move(rr), res);
-    if (!parse_res)
-      ++context_->parse_errors;
-
-    return parse_res;
+  bool ParseRaw(RawRecord&& rr, T* res) {
+    return context_->ParseInto(std::move(rr), &rt_, res);
   }
 
   Output<T>* out_;

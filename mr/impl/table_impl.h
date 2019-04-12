@@ -102,8 +102,9 @@ template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) ->
   } else {
     return [wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
       OutT val;
-      if (wrapper.ParseRaw(std::move(r), &val))
+      if (wrapper.ParseRaw(std::move(r), &val)) {
         wrapper.Write(std::move(val));
+      }
     };
   }
 }
@@ -118,7 +119,7 @@ void TableImpl<OutT>::MapWith() {
 
   do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
     FromType tmp_rec;
-    bool parse_res = context->ParseRaw(std::move(rr), &h.rt, &tmp_rec);
+    bool parse_res = context->raw_context()->ParseInto(std::move(rr), &h.rt, &tmp_rec);
     if (parse_res) {
       h.m.Do(std::move(tmp_rec), context);
     }

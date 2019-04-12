@@ -50,11 +50,11 @@ template <typename Joiner, typename Out> class JoinArg {
     setup_func = [ptr](Joiner* joiner) {
       auto f = [ptr, joiner, rt = RecordTraits<U>{}](RawRecord&& rr,
                                                      DoContext<Out>* context) mutable {
-        /*U tmp_rec;
-        bool parse_res = context->ParseRaw(std::move(rr), &rt, &tmp_rec);
+        U tmp_rec;
+        bool parse_res = context->raw_context()->ParseInto(std::move(rr), &rt, &tmp_rec);
         if (parse_res) {
-          ptr(joiner, std::move(tmp_rec), context);
-        }*/
+          ((*joiner).*ptr)(std::move(tmp_rec), context);
+        }
       };
       return f;
     };
