@@ -17,8 +17,8 @@
 
 #include "base/type_traits.h"
 #include "file/file.h"
-#include "mr/output.h"
 #include "mr/impl/table_impl.h"
+#include "mr/output.h"
 
 #include "strings/unique_strings.h"
 #include "util/status.h"
@@ -32,25 +32,27 @@ template <typename T> class DoContext;
 template <typename T> class PTable;
 
 namespace detail {
-template <typename T> struct IsDoCtxHelper : public std::false_type {};
-template <typename T> struct IsDoCtxHelper<DoContext<T>*> : public std::true_type {
+template <typename T> struct DoCtxResolver : public std::false_type {};
+template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_type {
   using OutType = T;
 };
 
-template <typename MapperType> struct MapperTraits {
-  using do_traits_t = base::function_traits<decltype(&MapperType::Do)>;
+template <typename Func> struct EmitFuncTraits {
+  using do_traits_t = base::function_traits<Func>;
 
-  // arg0 is 'this' of MapperType.
-  static_assert(do_traits_t::arity == 3, "MapperType::Do must accept 2 arguments");
+  static_assert(do_traits_t::arity == 2, "MapperType::Do must accept 2 arguments");
 
-  using first_arg_t = typename do_traits_t::template argument_type<1>;
-  using second_arg_t = typename do_traits_t::template argument_type<2>;
+  using first_arg_t = typename do_traits_t::template arg<0>;
+  using second_arg_t = typename do_traits_t::template arg<1>;
 
-  static_assert(IsDoCtxHelper<second_arg_t>::value,
+  static_assert(DoCtxResolver<second_arg_t>::value,
                 "MapperType::Do's second argument should be "
                 "DoContext<T>* for some type T");
-  using OutputType = typename IsDoCtxHelper<second_arg_t>::OutType;
+  using OutputType = typename DoCtxResolver<second_arg_t>::OutType;
 };
+
+template <typename MapperType>
+struct MapperTraits : public EmitFuncTraits<decltype(&MapperType::Do)> {};
 
 }  // namespace detail
 
@@ -131,7 +133,6 @@ template <typename T> class DoContext {
   RecordTraits<T> rt_;
 };
 
-
 template <typename OutT> class PTable {
  public:
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
@@ -139,8 +140,7 @@ template <typename OutT> class PTable {
   }
 
   template <typename MapType>
-  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(
-      const std::string& name) const;
+  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name) const;
 
  protected:
   friend class Pipeline;
@@ -161,14 +161,9 @@ class StringTable : public PTable<std::string> {
  public:
   StringTable(PTable<std::string>&& p) : PTable(p.impl_) {}
 
-  template<typename U> PTable<U> As() const {
-    return PTable<U>{impl_->CloneAs<U>()};
-  }
+  template <typename U> PTable<U> As() const { return PTable<U>{impl_->CloneAs<U>()}; }
 
-  PTable<rapidjson::Document> AsJson() const {
-    return As<rapidjson::Document>();
-  }
-
+  PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
 
  protected:
   StringTable(TableImpl::PtrType ptr) : PTable(ptr) {}
@@ -194,7 +189,6 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
 
   return PTable<NewOutType>(ptr);
 }
-
 
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;

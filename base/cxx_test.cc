@@ -6,6 +6,7 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "base/type_traits.h"
 
 namespace base {
 using benchmark::DoNotOptimize;
@@ -96,6 +97,22 @@ TEST_F(CxxTest, SequenceOrder) {
   A().Next(A("First")).Next(A("Second"));
   (A(), A("First")), A("Second");
 }
+
+struct C1 {
+  unsigned foo();
+  int bar(double, int) const;
+};
+
+static_assert(std::is_same<unsigned, function_traits<decltype(LoopSwitch)>::result_type>::value, "");
+using C1FooTraits = function_traits<decltype(&C1::foo)>;
+using C1BarTraits = function_traits<decltype(&C1::bar)>;
+
+static_assert(std::is_same<unsigned, C1FooTraits::result_type>::value, "");
+static_assert(std::is_same<std::tuple<>, C1FooTraits::args_tuple>::value, "");
+
+static_assert(std::is_same<int, C1BarTraits::result_type>::value, "");
+static_assert(std::is_same<std::tuple<double, int>, C1BarTraits::args_tuple>::value, "");
+static_assert(C1BarTraits::is_const::value, "");
 
 static void BM_LoopSwitch(benchmark::State& state) {
   int val = state.range(0);

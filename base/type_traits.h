@@ -63,58 +63,59 @@ struct DecayedTupleFromParams<R (C::*)(Args...) const> {
 template <typename C>
 struct DecayedTupleFromParams : public DecayedTupleFromParams<decltype(&C::operator())> {};
 
-// Remove the first item in a tuple
-template <typename T> struct tuple_tail;
+template <typename RType, typename... Args> struct ReturnArgs {
+  //! arity is the number of arguments.
+  static constexpr size_t arity = sizeof...(Args);
 
-template <typename Head, typename... Tail> struct tuple_tail<std::tuple<Head, Tail...>> {
-  using type = std::tuple<Tail...>;
+  using result_type = RType;
+
+  //! the tuple of arguments
+  using args_tuple = std::tuple<Args...>;
+
+  //! the tuple of arguments: with remove_cv and remove_reference applied.
+  using args_tuple_plain =
+      std::tuple<typename std::remove_cv<typename std::remove_reference<Args>::type>::type...>;
+
+  //! the i-th argument is equivalent to the i-th tuple element of a tuple
+  //! composed of those arguments.
+  template <size_t i> using arg = typename std::tuple_element<i, args_tuple>::type;
+
+  //! return i-th argument reduced to plain type: remove_cv and
+  //! remove_reference.
+  template <size_t i>
+  using arg_plain = typename std::remove_cv<typename std::remove_reference<arg<i>>::type>::type;
 };
 
-// std::function
-template <typename FunctionT> struct function_traits {
-  using arguments = typename tuple_tail<
-      typename function_traits<decltype(&FunctionT::operator())>::arguments>::type;
+// Based on
+// https://stackoverflow.com/questions/7943525/
+template <typename T> struct function_traits : public function_traits<decltype(&T::operator())> {};
 
-  static constexpr std::size_t arity = std::tuple_size<arguments>::value;
-
-  template <std::size_t N> using argument_type = typename std::tuple_element<N, arguments>::type;
-
-  using return_type = typename function_traits<decltype(&FunctionT::operator())>::return_type;
+//! specialize for pointers to const member function
+template <typename C, typename RType, typename... Args>
+struct function_traits<RType (C::*)(Args...) const> : public ReturnArgs<RType, Args...> {
+  using is_const = std::true_type;
+  using ClassType = C;
+  using is_member = std::true_type;
 };
 
-// Free functions
-template <typename ReturnTypeT, typename... Args> struct function_traits<ReturnTypeT(Args...)> {
-  using arguments = std::tuple<Args...>;
-
-  static constexpr std::size_t arity = std::tuple_size<arguments>::value;
-
-  template <std::size_t N> using argument_type = typename std::tuple_element<N, arguments>::type;
-
-  using return_type = ReturnTypeT;
+//! specialize for pointers to mutable member function
+template <typename C, typename RType, typename... Args>
+struct function_traits<RType (C::*)(Args...)> : public ReturnArgs<RType, Args...> {
+  using is_const = std::false_type;
+  using ClassType = C;
+  using is_member = std::true_type;
 };
 
-// Function pointers
-template <typename ReturnTypeT, typename... Args>
-struct function_traits<ReturnTypeT (*)(Args...)> : function_traits<ReturnTypeT(Args...)> {};
+//! specialize for function pointers
+template <typename RType, typename... Args>
+struct function_traits<RType(Args...)> : public ReturnArgs<RType, Args...> {};
 
-// Lambdas
-template<typename ClassT, typename ReturnTypeT, typename ... Args>
-struct function_traits<ReturnTypeT (ClassT::*)(Args ...) const>
-  : function_traits<ReturnTypeT(ClassT &, Args ...)>
-{};
+template <typename R, typename... Args>
+struct function_traits<R (*)(Args...)> : public function_traits<R(Args...)> {};
 
-template<typename ClassT, typename ReturnTypeT, typename ... Args>
-struct function_traits<ReturnTypeT (ClassT::*)(Args ...)>
-  : function_traits<ReturnTypeT(ClassT &, Args ...)>
-{};
+template <typename T> struct function_traits<T&> : function_traits<T> {};
 
-template<typename FunctionT>
-struct function_traits<FunctionT &>: function_traits<FunctionT>
-{};
-
-template<typename FunctionT>
-struct function_traits<FunctionT &&>: function_traits<FunctionT>
-{};
+template <typename T> struct function_traits<T&&> : function_traits<T> {};
 
 }  // namespace base
 
