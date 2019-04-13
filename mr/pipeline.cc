@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "mr/pipeline.h"
-#include "mr/pipeline_executor.h"
+#include "mr/mapper_executor.h"
 
 #include "base/logging.h"
 

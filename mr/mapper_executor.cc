@@ -1,8 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-
-#include "mr/pipeline_executor.h"
+#include "mr/mapper_executor.h"
 
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
