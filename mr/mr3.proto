@@ -35,7 +35,7 @@ message Input {
     oneof shard_id_ref {
       string custom_shard_id = 3;
       uint32 shard_id = 4;
-   }
+    }
   };
 
   // In case of sharded input, each file_spec corresponds to a shard.

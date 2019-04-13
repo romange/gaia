@@ -34,8 +34,6 @@ class Pipeline::Executor {
   // Stops the executor in the middle.
   void Stop();
 
-  void Shutdown();
-
  private:
   void PushInput(const InputBase*);
 

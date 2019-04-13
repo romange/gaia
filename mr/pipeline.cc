@@ -83,7 +83,8 @@ void Pipeline::Run(Runner* runner) {
     }
   }
 
-  executor_->Shutdown();
+  VLOG(1) << "Before Runner::Shutdown";
+  runner->Shutdown();
 }
 
 Runner::~Runner() {}

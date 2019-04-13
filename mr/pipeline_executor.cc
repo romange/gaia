@@ -19,6 +19,16 @@ using namespace util;
 
 using fibers::channel_op_status;
 
+namespace {
+
+ShardId GetShard(const pb::Input::FileSpec& fspec) {
+  if (fspec.has_shard_id())
+    return ShardId{fspec.shard_id()};
+  return ShardId{fspec.custom_shard_id()};
+}
+
+}  // namespace
+
 struct Pipeline::Executor::PerIoStruct {
   unsigned index;
   ::boost::fibers::fiber map_fd;
@@ -59,14 +69,6 @@ Pipeline::Executor::~Executor() {
   CHECK(!file_name_q_);
 }
 
-void Pipeline::Executor::Shutdown() {
-  VLOG(1) << "Executor::Shutdown::Start";
-
-  runner_->Shutdown();
-
-  VLOG(1) << "Executor::Shutdown::End";
-}
-
 void Pipeline::Executor::Init() { runner_->Init(); }
 
 void Pipeline::Executor::Stop() {
@@ -104,7 +106,6 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
 
   if (is_join) {
     CHECK_GT(inputs.size(), 1);
-    const pb::ShardSpec* sp = nullptr;
     uint32 modn = 0;
     for (const auto& input : inputs) {
       const pb::Output* linked_outp = input->linked_outp();
@@ -115,7 +116,21 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
       } else {
         CHECK_EQ(modn, linked_outp->shard_spec().modn());
       }
+
+      for (const auto& fspec : input->msg().file_spec()) {
+        CHECK_GT(fspec.shard_id_ref_case(), 0);  // all inputs have sharding info.
+      }
     }
+
+    using IndexedInput = std::pair<uint32_t, const pb::Input::FileSpec*>;
+    absl::flat_hash_map<ShardId, std::vector<IndexedInput>> joined_shards;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      for (const auto& fspec : inputs[i]->msg().file_spec()) {
+        ShardId sid = GetShard(fspec);
+        joined_shards[sid].emplace_back(i, &fspec);
+      }
+    }
+
   } else {
     for (const auto& input : inputs) {
       PushInput(input);
