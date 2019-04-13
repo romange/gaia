@@ -44,7 +44,7 @@ void Pipeline::Stop() {
 void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
 
-  executor_.reset(new Executor{pool_, runner});
+  executor_.reset(new MapperExecutor{pool_, runner});
   executor_->Init();
 
   for (auto ptr : tables_) {

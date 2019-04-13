@@ -29,7 +29,7 @@ ShardId GetShard(const pb::Input::FileSpec& fspec) {
 
 }  // namespace
 
-struct Pipeline::Executor::PerIoStruct {
+struct MapperExecutor::PerIoStruct {
   unsigned index;
   ::boost::fibers::fiber map_fd;
   ::boost::fibers::fiber process_fd[1];
@@ -43,11 +43,11 @@ struct Pipeline::Executor::PerIoStruct {
   void Shutdown();
 };
 
-Pipeline::Executor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
+MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
 
-thread_local std::unique_ptr<Pipeline::Executor::PerIoStruct> Pipeline::Executor::per_io_;
+thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
-void Pipeline::Executor::PerIoStruct::Shutdown() {
+void MapperExecutor::PerIoStruct::Shutdown() {
   for (auto& f : process_fd)
     f.join();
 
@@ -61,17 +61,17 @@ void Pipeline::Executor::PerIoStruct::Shutdown() {
   do_context->Flush();
 }
 
-Pipeline::Executor::Executor(util::IoContextPool* pool, Runner* runner)
-    : pool_(pool), runner_(runner) {}
+MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
+    : OperatorExecutor(pool, runner) {}
 
-Pipeline::Executor::~Executor() {
+MapperExecutor::~MapperExecutor() {
   VLOG(1) << "Executor::~Executor";
   CHECK(!file_name_q_);
 }
 
-void Pipeline::Executor::Init() { runner_->Init(); }
+void MapperExecutor::Init() { runner_->Init(); }
 
-void Pipeline::Executor::Stop() {
+void MapperExecutor::Stop() {
   VLOG(1) << "PipelineExecutor StopStart";
 
   if (file_name_q_) {
@@ -84,8 +84,8 @@ void Pipeline::Executor::Stop() {
   VLOG(1) << "PipelineExecutor StopEnd";
 }
 
-void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
-                             ShardFileMap* out_files) {
+void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
+                         ShardFileMap* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
 
   file_name_q_.reset(new FileNameQueue{16});
@@ -96,10 +96,10 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
     per_io_.reset(new PerIoStruct(index));
 
     for (auto& f : per_io_->process_fd)
-      f = fibers::fiber{&Executor::ProcessInputFiles, this};
+      f = fibers::fiber{&MapperExecutor::ProcessInputFiles, this};
 
     per_io_->do_context.reset(runner_->CreateContext(tb->op()));
-    per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
+    per_io_->map_fd = fibers::fiber(&MapperExecutor::MapFiber, this, tb);
   });
 
   bool is_join = tb->op().type() == pb::Operator::HASH_JOIN;
@@ -157,7 +157,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
   file_name_q_.reset();
 }
 
-void Pipeline::Executor::PushInput(const InputBase* input) {
+void MapperExecutor::PushInput(const InputBase* input) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
 
@@ -175,7 +175,7 @@ void Pipeline::Executor::PushInput(const InputBase* input) {
   }
 }
 
-void Pipeline::Executor::ProcessInputFiles() {
+void MapperExecutor::ProcessInputFiles() {
   PerIoStruct* trd_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
@@ -192,7 +192,7 @@ void Pipeline::Executor::ProcessInputFiles() {
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 }
 
-void Pipeline::Executor::MapFiber(detail::TableBase* sb) {
+void MapperExecutor::MapFiber(detail::TableBase* sb) {
   VLOG(1) << "Starting MapFiber";
   auto& record_q = per_io_->record_q;
   string record;

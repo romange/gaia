@@ -7,14 +7,14 @@
 #include <boost/fiber/fiber.hpp>
 #include <functional>
 
-#include "mr/pipeline.h"
+#include "mr/operator_executor.h"
 
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 
 namespace mr3 {
 
-class Pipeline::Executor {
+class MapperExecutor  : public OperatorExecutor {
   using StringQueue = util::fibers_ext::SimpleChannel<std::string>;
 
   using FileInput = std::pair<std::string, const pb::Input*>;
@@ -23,16 +23,16 @@ class Pipeline::Executor {
   struct PerIoStruct;
 
  public:
-  Executor(util::IoContextPool* pool, Runner* runner);
-  ~Executor();
+  MapperExecutor(util::IoContextPool* pool, Runner* runner);
+  ~MapperExecutor();
 
-  void Init();
+  void Init() final;
 
   void Run(const std::vector<const InputBase*>& inputs,
-           detail::TableBase* ss, ShardFileMap* out_files);
+           detail::TableBase* ss, ShardFileMap* out_files) final;
 
   // Stops the executor in the middle.
-  void Stop();
+  void Stop() final;
 
  private:
   void PushInput(const InputBase*);
@@ -43,10 +43,7 @@ class Pipeline::Executor {
 
   void MapFiber(detail::TableBase* sb);
 
-  util::IoContextPool* pool_;
   std::unique_ptr<FileNameQueue> file_name_q_;
-  Runner* runner_;
-
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 

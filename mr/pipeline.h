@@ -15,8 +15,8 @@ class IoContextPool;
 namespace mr3 {
 
 using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
-
 using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
+class OperatorExecutor;
 
 class Runner {
  public:
@@ -100,13 +100,11 @@ class Pipeline {
     return new detail::TableImpl<U>(name, this);
   }
 
-  class Executor;
-
   util::IoContextPool* pool_;
   absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
   std::vector<boost::intrusive_ptr<detail::TableBase>> tables_;
 
-  std::unique_ptr<Executor> executor_;
+  std::unique_ptr<OperatorExecutor> executor_;
 };
 
 template <typename JoinerType, typename Out>
