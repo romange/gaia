@@ -37,7 +37,9 @@ class Pipeline::Executor {
   void Shutdown();
 
  private:
-  // External, disk thread that reads files from disk and pumps data into record_q.
+  void ProcessInput(const InputBase*);
+
+  // Input managing fiber that reads files from disk and pumps data into record_q.
   // One per IO thread.
   void ProcessInputFiles();
 

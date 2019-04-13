@@ -82,8 +82,8 @@ void Pipeline::Executor::Stop() {
   VLOG(1) << "PipelineExecutor StopEnd";
 }
 
-void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs,
-                             detail::TableBase* tb, std::vector<std::string>* out_files) {
+void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
+                             std::vector<std::string>* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
 
   file_name_q_.reset(new FileNameQueue{16});
@@ -101,21 +101,8 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs,
   });
 
   for (const auto& input : inputs) {
-    CHECK(input && input->msg().file_spec_size() > 0);
-    CHECK(input->msg().has_format());
+    ProcessInput(input);
 
-    vector<string> files;
-    for (const auto& file_spec : input->msg().file_spec()) {
-      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
-    }
-
-    LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
-    for (const auto nm : files) {
-      channel_op_status st = file_name_q_->push(FileInput{nm, &input->msg()});
-      if (st != channel_op_status::closed) {
-        CHECK_EQ(channel_op_status::success, st);
-      }
-    }
     if (file_name_q_->is_closed())
       break;
   }
@@ -135,6 +122,24 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs,
 
   runner_->OperatorEnd(out_files);
   file_name_q_.reset();
+}
+
+void Pipeline::Executor::ProcessInput(const InputBase* input) {
+  CHECK(input && input->msg().file_spec_size() > 0);
+  CHECK(input->msg().has_format());
+
+  vector<string> files;
+  for (const auto& file_spec : input->msg().file_spec()) {
+    runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
+  }
+
+  LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
+  for (const auto& fl_name : files) {
+    channel_op_status st = file_name_q_->push(FileInput{fl_name, &input->msg()});
+    if (st != channel_op_status::closed) {
+      CHECK_EQ(channel_op_status::success, st);
+    }
+  }
 }
 
 void Pipeline::Executor::ProcessInputFiles() {

@@ -36,7 +36,7 @@ class OutputBase {
   OutputBase(pb::Output* out) : out_(out) {}
 
   void SetCompress(pb::Output::CompressType ct, unsigned level);
-  void SetShardType(pb::Output::ShardType st, unsigned modn = 0);
+  void SetShardSpec(pb::ShardSpec::Type st, unsigned modn = 0);
 };
 
 template <typename T> class Output : public OutputBase {
@@ -54,7 +54,7 @@ template <typename T> class Output : public OutputBase {
   template <typename U> Output& WithCustomSharding(U&& func) {
     static_assert(base::is_invocable_r<std::string, U, const T&>::value, "");
     shard_op_ = std::forward<U>(func);
-    SetShardType(pb::Output::USER_DEFINED);
+    SetShardSpec(pb::ShardSpec::USER_DEFINED);
 
     return *this;
   }
@@ -62,7 +62,7 @@ template <typename T> class Output : public OutputBase {
   template <typename U> Output& WithModNSharding(unsigned modn, U&& func) {
     static_assert(base::is_invocable_r<unsigned, U, const T&>::value, "");
     modn_op_ = std::forward<U>(func);
-    SetShardType(pb::Output::MODN, modn);
+    SetShardSpec(pb::ShardSpec::MODN, modn);
 
     return *this;
   }
@@ -73,6 +73,7 @@ template <typename T> class Output : public OutputBase {
 
   Output& operator=(Output&& o) {
     shard_op_ = std::move(o.shard_op_);
+    modn_op_ = std::move(o.modn_op_);
     out_ = o.out_;
     return *this;
   }
@@ -81,7 +82,7 @@ template <typename T> class Output : public OutputBase {
     if (shard_op_)
       return shard_op_(t);
     else if (modn_op_)
-      return modn_op_(t) % out_->modn();
+      return modn_op_(t) % out_->shard_spec().modn();
 
     return ShardId{0};
   }

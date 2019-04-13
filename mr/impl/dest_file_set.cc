@@ -79,7 +79,7 @@ DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThre
 }
 
 auto DestFileSet::Get(StringPiece key, const pb::Output& pb_out) -> Result {
-  CHECK_EQ(pb_out.shard_type(), pb::Output::USER_DEFINED);
+  CHECK_EQ(pb_out.shard_spec().type(), pb::ShardSpec::USER_DEFINED);
 
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(key);

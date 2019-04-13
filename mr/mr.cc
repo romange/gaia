@@ -54,13 +54,13 @@ void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
   }
 }
 
-void OutputBase::SetShardType(pb::Output::ShardType st, unsigned modn) {
-  CHECK(!out_->has_shard_type()) << "Must be defined only once. \n" << out_->ShortDebugString();
+void OutputBase::SetShardSpec(pb::ShardSpec::Type st, unsigned modn) {
+  CHECK(!out_->has_shard_spec()) << "Must be defined only once. \n" << out_->ShortDebugString();
 
-  out_->set_shard_type(st);
-  if (st == pb::Output::MODN) {
+  out_->mutable_shard_spec()->set_type(st);
+  if (st == pb::ShardSpec::MODN) {
     CHECK_GT(modn, 0);
-    out_->set_modn(modn);
+    out_->mutable_shard_spec()->set_modn(modn);
   }
 }
 
