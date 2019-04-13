@@ -62,7 +62,7 @@ class TestRunner : public Runner {
                           RecordQueue* queue) final;
 
   void OperatorStart() final {}
-  void OperatorEnd(std::vector<std::string>* out_files) final;
+  void OperatorEnd(ShardFileMap* out_files) final;
 
   void AddInputRecords(const std::string& fl, const std::vector<std::string>& records) {
     std::copy(records.begin(), records.end(), std::back_inserter(input_fs_[fl]));

@@ -4,6 +4,8 @@
 #include "mr/mr.h"
 
 #include <rapidjson/error/en.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 #include "absl/strings/str_format.h"
 #include "mr/pipeline.h"
@@ -17,6 +19,8 @@ namespace rj = rapidjson;
 RawContext::~RawContext() {}
 
 void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
+  CHECK(!name.empty());
+
   if (!op_.has_output()) {
     pipeline_->tables_.emplace_back(this);
   }
@@ -24,6 +28,10 @@ void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type 
   auto* out = op_.mutable_output();
   out->set_name(name);
   out->mutable_format()->set_type(type);
+
+  std::unique_ptr<InputBase> ib(new InputBase(name, type, out));
+  auto res = pipeline_->inputs_.emplace(name, std::move(ib));
+  CHECK(res.second) << "Input '" << name << "' already exists";
 }
 
 pb::Operator detail::TableBase::CreateLink(bool from_output) const {

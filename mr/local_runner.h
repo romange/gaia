@@ -21,7 +21,7 @@ class LocalRunner : public Runner {
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
   RawContext* CreateContext(const pb::Operator& op) final;
 
-  void OperatorEnd(std::vector<std::string>* out_files) final;
+  void OperatorEnd(ShardFileMap* out_files) final;
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 

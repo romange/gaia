@@ -39,12 +39,12 @@ void TestRunner::ExpandGlob(const string& glob, function<void(const string&)> cb
   }
 }
 
-void TestRunner::OperatorEnd(vector<string>* out_files) {
+void TestRunner::OperatorEnd(ShardFileMap* out_files) {
   auto it = out_fs_.find(last_out_name_);
   CHECK(it != out_fs_.end());
   for (const auto& k_v : it->second) {
     string name = last_out_name_ + "/" + k_v.first.ToString("shard");
-    out_files->push_back(name);
+    out_files->emplace(k_v.first, name);
     input_fs_[name] = k_v.second;
   }
 }

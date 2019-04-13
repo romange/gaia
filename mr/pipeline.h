@@ -5,6 +5,7 @@
 
 #include "mr/mr.h"
 
+#include "absl/container/flat_hash_map.h"
 #include "util/fibers/simple_channel.h"
 
 namespace util {
@@ -14,6 +15,8 @@ class IoContextPool;
 namespace mr3 {
 
 using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
+
+using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
 
 class Runner {
  public:
@@ -28,7 +31,7 @@ class Runner {
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
   virtual RawContext* CreateContext(const pb::Operator& op) = 0;
 
-  virtual void OperatorEnd(std::vector<std::string>* out_files) = 0;
+  virtual void OperatorEnd(ShardFileMap* out_files) = 0;
 
   virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
 
@@ -100,7 +103,7 @@ class Pipeline {
   class Executor;
 
   util::IoContextPool* pool_;
-  std::unordered_map<std::string, std::unique_ptr<InputBase>> inputs_;
+  absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
   std::vector<boost::intrusive_ptr<detail::TableBase>> tables_;
 
   std::unique_ptr<Executor> executor_;

@@ -55,26 +55,31 @@ void Pipeline::Run(Runner* runner) {
       continue;
     }
 
-    // TODO: to move this to the planning phase.
-    CHECK(!op.output().name().empty());
-    auto inp_insert_res = inputs_.emplace(op.output().name(), nullptr);
-    CHECK(inp_insert_res.second) << "Input '" << op.output().name() << "' already exists";
-    auto& inp_ptr = inp_insert_res.first->second;
-    inp_ptr.reset(new InputBase(op.output().name(), op.output().format().type()));
-
     std::vector<const InputBase*> inputs;
 
     for (const auto& input_name : op.input_name()) {
       inputs.push_back(CheckedInput(input_name));
     }
 
-    std::vector<string> out_files;
+    ShardFileMap out_files;
     executor_->Run(inputs, ptr.get(), &out_files);
+
     VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to "
             << out_files.size() << " output files";
-    for (const auto& fl : out_files) {
+
+    // Fill the corresponsing input with sharded files.
+    auto it = inputs_.find(op.output().name());
+    CHECK(it != inputs_.end());
+    auto& inp_ptr = it->second;
+
+    for (const auto& k_v : out_files) {
       auto* fs = inp_ptr->mutable_msg()->add_file_spec();
-      fs->set_url_glob(fl);
+      fs->set_url_glob(k_v.second);
+      if (absl::holds_alternative<uint32_t>(k_v.first)) {
+        fs->set_shard_id(absl::get<uint32_t>(k_v.first));
+      } else {
+        fs->set_custom_shard_id(absl::get<string>(k_v.first));
+      }
     }
   }
 

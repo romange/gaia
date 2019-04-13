@@ -31,10 +31,15 @@ message Input {
   message FileSpec {
     required string url_glob = 1;
     optional string metadata = 2;
+
+    oneof shard_id_ref {
+      string custom_shard_id = 3;
+      uint32 shard_id = 4;
+   }
   };
 
+  // In case of sharded input, each file_spec corresponds to a shard.
   repeated FileSpec file_spec = 4;
-  optional ShardSpec shard_spec = 5;
 }
 
 message Output {
@@ -63,6 +68,12 @@ message Operator {
   optional string op_name = 2;
 
   required Output output = 3;
+
+  enum Type {
+    MAP = 1;
+    HASH_JOIN = 2;
+  }
+  optional Type type = 4;
 }
 
 message Pipeline {

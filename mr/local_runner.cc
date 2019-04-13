@@ -176,7 +176,7 @@ RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
   return new LocalContext(op.output(), impl_->dest_mgr.get());
 }
 
-void LocalRunner::OperatorEnd(std::vector<std::string>* out_files) {
+void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
   // TODO: to return files.
   impl_->dest_mgr->Flush();

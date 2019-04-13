@@ -29,7 +29,7 @@ class Pipeline::Executor {
   void Init();
 
   void Run(const std::vector<const InputBase*>& inputs,
-           detail::TableBase* ss, std::vector<std::string>* out_files);
+           detail::TableBase* ss, ShardFileMap* out_files);
 
   // Stops the executor in the middle.
   void Stop();
@@ -37,7 +37,7 @@ class Pipeline::Executor {
   void Shutdown();
 
  private:
-  void ProcessInput(const InputBase*);
+  void PushInput(const InputBase*);
 
   // Input managing fiber that reads files from disk and pumps data into record_q.
   // One per IO thread.

@@ -4,6 +4,7 @@
 #include <gmock/gmock.h>
 
 #include <rapidjson/error/en.h>
+#include <rapidjson/writer.h>
 
 #include "mr/pipeline.h"
 

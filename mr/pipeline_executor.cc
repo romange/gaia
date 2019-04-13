@@ -83,7 +83,7 @@ void Pipeline::Executor::Stop() {
 }
 
 void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
-                             std::vector<std::string>* out_files) {
+                             ShardFileMap* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
 
   file_name_q_.reset(new FileNameQueue{16});
@@ -100,11 +100,29 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
     per_io_->map_fd = fibers::fiber(&Executor::MapFiber, this, tb);
   });
 
-  for (const auto& input : inputs) {
-    ProcessInput(input);
+  bool is_join = tb->op().type() == pb::Operator::HASH_JOIN;
 
-    if (file_name_q_->is_closed())
-      break;
+  if (is_join) {
+    CHECK_GT(inputs.size(), 1);
+    const pb::ShardSpec* sp = nullptr;
+    uint32 modn = 0;
+    for (const auto& input : inputs) {
+      const pb::Output* linked_outp = input->linked_outp();
+      CHECK(linked_outp && linked_outp->has_shard_spec());
+      CHECK_EQ(linked_outp->shard_spec().type(), pb::ShardSpec::MODN);
+      if (!modn) {
+        modn = linked_outp->shard_spec().modn();
+      } else {
+        CHECK_EQ(modn, linked_outp->shard_spec().modn());
+      }
+    }
+  } else {
+    for (const auto& input : inputs) {
+      PushInput(input);
+
+      if (file_name_q_->is_closed())
+        break;
+    }
   }
 
   atomic<uint64_t> parse_errs{0};
@@ -124,7 +142,7 @@ void Pipeline::Executor::Run(const std::vector<const InputBase*>& inputs, detail
   file_name_q_.reset();
 }
 
-void Pipeline::Executor::ProcessInput(const InputBase* input) {
+void Pipeline::Executor::PushInput(const InputBase* input) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
 

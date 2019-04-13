@@ -12,8 +12,6 @@
 // #define RAPIDJSON_SSE42
 
 #include <rapidjson/document.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
 
 #include "base/type_traits.h"
 #include "file/file.h"
@@ -63,17 +61,20 @@ class InputBase {
  public:
   InputBase(const InputBase&) = delete;
 
-  InputBase(const std::string& name, pb::WireFormat::Type type) {
+  InputBase(const std::string& name, pb::WireFormat::Type type,
+            const pb::Output* linked_outp = nullptr) : linked_outp_(linked_outp) {
     input_.set_name(name);
     input_.mutable_format()->set_type(type);
   }
 
+  void operator=(const InputBase&) = delete;
+
   pb::Input* mutable_msg() { return &input_; }
   const pb::Input& msg() const { return input_; }
 
-  void operator=(const InputBase&) = delete;
-
+  const pb::Output* linked_outp() const { return linked_outp_; }
  protected:
+  const pb::Output* linked_outp_;
   pb::Input input_;
 };
 
@@ -187,6 +188,7 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
   bool read_from_input = impl_->is_identity();
   pb::Operator new_op = impl_->CreateLink(!read_from_input);
   new_op.set_op_name(name);
+  new_op.set_type(pb::Operator::MAP);
 
   auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
   ptr->template MapWith<OutT, MapType>();
