@@ -2,11 +2,13 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "mr/pipeline.h"
+#include "mr/joiner_executor.h"
 #include "mr/mapper_executor.h"
 
 #include "base/logging.h"
 
 namespace mr3 {
+using namespace boost;
 using namespace std;
 using namespace util;
 
@@ -37,15 +39,14 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
 }
 
 void Pipeline::Stop() {
+  std::lock_guard<fibers::mutex> lk(mu_);
+
   if (executor_)
     executor_->Stop();
 }
 
 void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
-
-  executor_.reset(new MapperExecutor{pool_, runner});
-  executor_->Init();
 
   for (auto ptr : tables_) {
     const pb::Operator& op = ptr->op();
@@ -54,6 +55,18 @@ void Pipeline::Run(Runner* runner) {
       LOG(INFO) << "No inputs for " << op.op_name() << ", skipping";
       continue;
     }
+
+    std::unique_lock<fibers::mutex> lk(mu_);
+    switch (op.type()) {
+      case pb::Operator::HASH_JOIN:
+        executor_.reset(new JoinerExecutor{pool_, runner});
+        break;
+      default:
+        executor_.reset(new MapperExecutor{pool_, runner});
+    }
+
+    executor_->Init();
+    lk.unlock();
 
     std::vector<const InputBase*> inputs;
 
@@ -64,8 +77,8 @@ void Pipeline::Run(Runner* runner) {
     ShardFileMap out_files;
     executor_->Run(inputs, ptr.get(), &out_files);
 
-    VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to "
-            << out_files.size() << " output files";
+    VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to " << out_files.size()
+            << " output files";
 
     // Fill the corresponsing input with sharded files.
     auto it = inputs_.find(op.output().name());

@@ -18,15 +18,6 @@ using namespace util;
 
 using fibers::channel_op_status;
 
-namespace {
-
-ShardId GetShard(const pb::Input::FileSpec& fspec) {
-  if (fspec.has_shard_id())
-    return ShardId{fspec.shard_id()};
-  return ShardId{fspec.custom_shard_id()};
-}
-
-}  // namespace
 
 struct MapperExecutor::PerIoStruct {
   unsigned index;
@@ -101,42 +92,11 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     per_io_->map_fd = fibers::fiber(&MapperExecutor::MapFiber, this, tb);
   });
 
-  bool is_join = tb->op().type() == pb::Operator::HASH_JOIN;
+  for (const auto& input : inputs) {
+    PushInput(input);
 
-  if (is_join) {
-    CHECK_GT(inputs.size(), 1);
-    uint32 modn = 0;
-    for (const auto& input : inputs) {
-      const pb::Output* linked_outp = input->linked_outp();
-      CHECK(linked_outp && linked_outp->has_shard_spec());
-      CHECK_EQ(linked_outp->shard_spec().type(), pb::ShardSpec::MODN);
-      if (!modn) {
-        modn = linked_outp->shard_spec().modn();
-      } else {
-        CHECK_EQ(modn, linked_outp->shard_spec().modn());
-      }
-
-      for (const auto& fspec : input->msg().file_spec()) {
-        CHECK_GT(fspec.shard_id_ref_case(), 0);  // all inputs have sharding info.
-      }
-    }
-
-    using IndexedInput = std::pair<uint32_t, const pb::Input::FileSpec*>;
-    absl::flat_hash_map<ShardId, std::vector<IndexedInput>> joined_shards;
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      for (const auto& fspec : inputs[i]->msg().file_spec()) {
-        ShardId sid = GetShard(fspec);
-        joined_shards[sid].emplace_back(i, &fspec);
-      }
-    }
-
-  } else {
-    for (const auto& input : inputs) {
-      PushInput(input);
-
-      if (file_name_q_->is_closed())
-        break;
-    }
+    if (file_name_q_->is_closed())
+      break;
   }
 
   atomic<uint64_t> parse_errs{0};

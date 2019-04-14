@@ -104,6 +104,7 @@ class Pipeline {
   absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
   std::vector<boost::intrusive_ptr<detail::TableBase>> tables_;
 
+  ::boost::fibers::mutex mu_;
   std::unique_ptr<OperatorExecutor> executor_;
 };
 
