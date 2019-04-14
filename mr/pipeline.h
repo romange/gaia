@@ -6,40 +6,14 @@
 #include "mr/mr.h"
 
 #include "absl/container/flat_hash_map.h"
-#include "util/fibers/simple_channel.h"
 
 namespace util {
 class IoContextPool;
 }  // namespace util
 
 namespace mr3 {
-
-using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
-using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
+class Runner;
 class OperatorExecutor;
-
-class Runner {
- public:
-  virtual ~Runner();
-
-  virtual void Init() = 0;
-
-  virtual void Shutdown() = 0;
-
-  virtual void OperatorStart() = 0;
-
-  // Must be thread-safe. Called from multiple threads in pipeline_executor.
-  virtual RawContext* CreateContext(const pb::Operator& op) = 0;
-
-  virtual void OperatorEnd(ShardFileMap* out_files) = 0;
-
-  virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
-
-  // Read file and fill queue. This function must be fiber-friendly.
-  // Returns number of records processed.
-  virtual size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                  RecordQueue* queue) = 0;
-};
 
 template <typename Joiner, typename Out> class JoinArg {
  public:

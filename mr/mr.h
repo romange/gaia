@@ -17,9 +17,10 @@
 #include "file/file.h"
 #include "mr/impl/table_impl.h"
 #include "mr/output.h"
+#include "util/fibers/simple_channel.h"
 
-#include "strings/unique_strings.h"
-#include "util/status.h"
+// #include "strings/unique_strings.h"
+// #include "util/status.h"
 
 namespace mr3 {
 
@@ -55,6 +56,8 @@ template <typename MapperType>
 struct MapperTraits : public EmitFuncTraits<decltype(&MapperType::Do)> {};
 
 }  // namespace detail
+
+using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
 
 // Planning interfaces.
 class InputBase {

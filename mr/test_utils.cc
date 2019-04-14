@@ -51,11 +51,11 @@ void TestRunner::OperatorEnd(ShardFileMap* out_files) {
 
 // Read file and fill queue. This function must be fiber-friendly.
 size_t TestRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                    RecordQueue* queue) {
+                                    std::function<void(std::string&&)> cb) {
   auto it = input_fs_.find(filename);
   CHECK(it != input_fs_.end());
   for (const auto& str : it->second) {
-    queue->Push(str);
+    cb(string{str});
   }
 
   return it->second.size();

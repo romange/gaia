@@ -5,6 +5,8 @@
 
 #include "base/logging.h"
 #include "mr/impl/table_impl.h"
+#include "mr/pipeline.h"
+#include "mr/runner.h"
 
 namespace mr3 {
 
@@ -32,7 +34,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   if (inputs.empty())
     return;
 
-  uint32 modn = 0;
+  uint32_t modn = 0;
   for (const auto& input : inputs) {
     const pb::Output* linked_outp = input->linked_outp();
     CHECK(linked_outp && linked_outp->has_shard_spec());
@@ -70,7 +72,8 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   for (const auto& k_v : shard_inputs) {
     for (const IndexedInput& ii : k_v.second) {
-      runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), &record_q);
+      runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(),
+                                [&](auto&& s) { record_q.Push(std::move(s)); });
       // TODO: Mark end of input
     }
     // TODO: finalize shard.
@@ -82,8 +85,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 // Stops the executor in the middle.
 void JoinerExecutor::Stop() {}
 
-void JoinerExecutor::JoinerFiber() {
-
-}
+void JoinerExecutor::JoinerFiber() {}
 
 }  // namespace mr3

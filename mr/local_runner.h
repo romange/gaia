@@ -3,7 +3,7 @@
 //
 #pragma once
 
-#include "mr/pipeline.h"
+#include "mr/runner.h"
 
 namespace mr3 {
 
@@ -27,7 +27,7 @@ class LocalRunner : public Runner {
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          RecordQueue* queue) final;
+                          std::function<void(std::string&&)> cb) final;
 
   void Stop();
 

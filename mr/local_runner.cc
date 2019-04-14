@@ -11,6 +11,7 @@
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
+#include "mr/mr.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/zlib_source.h"
 
@@ -128,7 +129,7 @@ struct LocalRunner::Impl {
 
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
 
-  uint64_t ProcessText(file::ReadonlyFile* fd, RecordQueue* queue);
+  uint64_t ProcessText(file::ReadonlyFile* fd, std::function<void(string&&)> cb);
 
   void SetupDestFileSet() {
     CHECK(!dest_mgr);
@@ -136,7 +137,7 @@ struct LocalRunner::Impl {
   }
 };
 
-uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* queue) {
+uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, std::function<void(string&&)> cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -152,7 +153,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RecordQueue* que
     if (cnt % 1000 == 0) {
       this_fiber::yield();
     }
-    queue->Push(std::move(tmp));
+    cb(std::move(tmp));
   }
   VLOG(1) << "ProcessText Read " << cnt << " items";
   return cnt;
@@ -200,7 +201,7 @@ ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
 
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                     RecordQueue* queue) {
+                                     std::function<void(string&&)> cb) {
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
 
@@ -218,7 +219,7 @@ size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
   size_t cnt = 0;
   switch (type) {
     case pb::WireFormat::TXT:
-      cnt = impl_->ProcessText(read_file.release(), queue);
+      cnt = impl_->ProcessText(read_file.release(), cb);
       break;
 
     default:

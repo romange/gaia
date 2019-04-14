@@ -3,9 +3,15 @@
 //
 #pragma once
 
-#include "mr/pipeline.h"
+#include "mr/impl/table_impl.h"
+#include "mr/runner.h"
+
+namespace util {
+class IoContextPool;
+}  // namespace util
 
 namespace mr3 {
+class InputBase;
 
 class OperatorExecutor {
  public:

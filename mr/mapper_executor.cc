@@ -6,6 +6,7 @@
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
 #include "mr/impl/table_impl.h"
+#include "mr/mr.h"
 #include "util/fibers/fibers_ext.h"
 
 namespace mr3 {
@@ -17,7 +18,6 @@ using namespace boost;
 using namespace util;
 
 using fibers::channel_op_status;
-
 
 struct MapperExecutor::PerIoStruct {
   unsigned index;
@@ -145,8 +145,9 @@ void MapperExecutor::ProcessInputFiles() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    cnt += runner_->ProcessInputFile(file_input.first, file_input.second->format().type(),
-                                     &trd_local->record_q);
+    cnt += runner_->ProcessInputFile(
+        file_input.first, file_input.second->format().type(),
+        [trd_local](auto&& s) { trd_local->record_q.Push(std::move(s)); });
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 }

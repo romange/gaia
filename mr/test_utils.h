@@ -8,6 +8,7 @@
 #include <boost/fiber/mutex.hpp>
 
 #include "absl/container/flat_hash_map.h"
+#include "mr/runner.h"
 #include "mr/pipeline.h"
 
 namespace other {
@@ -59,7 +60,7 @@ class TestRunner : public Runner {
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          RecordQueue* queue) final;
+                          std::function<void(std::string&&)> cb) final;
 
   void OperatorStart() final {}
   void OperatorEnd(ShardFileMap* out_files) final;
