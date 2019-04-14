@@ -24,7 +24,7 @@ struct MapperExecutor::PerIoStruct {
   ::boost::fibers::fiber map_fd;
   ::boost::fibers::fiber process_fd[1];
 
-  StringQueue record_q;
+  RecordQueue record_q;
   std::unique_ptr<RawContext> do_context;
   bool stop_early = false;
 
@@ -153,6 +153,7 @@ void MapperExecutor::ProcessInputFiles() {
 
 void MapperExecutor::MapFiber(detail::TableBase* sb) {
   VLOG(1) << "Starting MapFiber";
+
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;

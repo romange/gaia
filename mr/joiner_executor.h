@@ -24,6 +24,8 @@ class JoinerExecutor  : public OperatorExecutor {
   void Stop() final;
 
  private:
+  void JoinerFiber();
+  
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 

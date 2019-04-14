@@ -8,6 +8,8 @@
 
 namespace mr3 {
 
+using namespace boost;
+
 namespace {
 
 ShardId GetShard(const pb::Input::FileSpec& fspec) {
@@ -27,7 +29,9 @@ void JoinerExecutor::Init() {}
 void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
                          ShardFileMap* out_files) {
   CHECK_EQ(tb->op().type(), pb::Operator::HASH_JOIN);
-  CHECK_GT(inputs.size(), 1);
+  if (inputs.empty())
+    return;
+
   uint32 modn = 0;
   for (const auto& input : inputs) {
     const pb::Output* linked_outp = input->linked_outp();
@@ -44,17 +48,42 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     }
   }
 
-  using IndexedInput = std::pair<uint32_t, const pb::Input::FileSpec*>;
-  absl::flat_hash_map<ShardId, std::vector<IndexedInput>> joined_shards;
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    for (const auto& fspec : inputs[i]->msg().file_spec()) {
+  struct IndexedInput {
+    uint32_t index;
+    const pb::Input::FileSpec* fspec;
+    const pb::WireFormat* wf;
+  };
+
+  std::map<ShardId, std::vector<IndexedInput>> shard_inputs;
+  for (uint32_t i = 0; i < inputs.size(); ++i) {
+    const pb::Input& input = inputs[i]->msg();
+    for (const auto& fspec : input.file_spec()) {
       ShardId sid = GetShard(fspec);
-      joined_shards[sid].emplace_back(i, &fspec);
+      shard_inputs[sid].emplace_back(IndexedInput{i, &fspec, &input.format()});
     }
   }
+  std::unique_ptr<RawContext> do_context{runner_->CreateContext(tb->op())};
+  RecordQueue record_q(256);
+  runner_->OperatorStart();
+
+  fibers::fiber join_fiber(&JoinerExecutor::JoinerFiber, this);
+
+  for (const auto& k_v : shard_inputs) {
+    for (const IndexedInput& ii : k_v.second) {
+      runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), &record_q);
+      // TODO: Mark end of input
+    }
+    // TODO: finalize shard.
+  }
+  join_fiber.join();
+  runner_->OperatorEnd(out_files);
 }
 
 // Stops the executor in the middle.
 void JoinerExecutor::Stop() {}
+
+void JoinerExecutor::JoinerFiber() {
+
+}
 
 }  // namespace mr3
