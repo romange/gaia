@@ -160,7 +160,8 @@ void MapperExecutor::MapFiber(detail::TableBase* sb) {
   string record;
   uint64_t record_num = 0;
 
-  auto do_fn = sb->SetupDoFn(per_io_->do_context.get());
+  std::unique_ptr<detail::HandlerWrapperBase> handler{sb->CreateHandler(per_io_->do_context.get())};
+  RawSinkCb cb = handler->at(0);
 
   while (true) {
     bool is_open = record_q.Pop(record);
@@ -183,7 +184,8 @@ void MapperExecutor::MapFiber(detail::TableBase* sb) {
     // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
-    do_fn(std::move(record));
+    cb(std::move(record));
+
     if (++record_num % 1000 == 0) {
       this_fiber::yield();
     }

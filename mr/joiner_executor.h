@@ -35,7 +35,7 @@ class JoinerExecutor : public OperatorExecutor {
  private:
   void CheckInputs(const std::vector<const InputBase*>& inputs);
 
-  void ProcessInputQ();
+  void ProcessInputQ(detail::TableBase* tb);
 
   void JoinerFiber();
 

@@ -15,9 +15,9 @@ namespace mr3 {
 class Runner;
 class OperatorExecutor;
 
-template <typename Joiner, typename Out, typename U>
+template <typename U, typename Joiner, typename Out>
 HandlerBinding<Joiner, Out> JoinInput(
-    const PTable<U>& tbl, void (Joiner::* ptr)(U&&, DoContext<Out>*)) {
+    const PTable<U>& tbl, EmitMemberFn<U, Joiner, Out> ptr) {
   return tbl.BindWith(ptr);
 }
 

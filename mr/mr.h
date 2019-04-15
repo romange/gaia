@@ -16,41 +16,19 @@
 #include "base/type_traits.h"
 #include "file/file.h"
 #include "mr/impl/table_impl.h"
+#include "mr/mr_types.h"
 #include "mr/output.h"
 #include "util/fibers/simple_channel.h"
-
-// #include "strings/unique_strings.h"
-// #include "util/status.h"
 
 namespace mr3 {
 
 class Pipeline;
 class StringTable;
 
-template <typename T> class DoContext;
 template <typename T> class PTable;
 
-using RawRecord = std::string;
 
 namespace detail {
-template <typename T> struct DoCtxResolver : public std::false_type {};
-template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_type {
-  using OutType = T;
-};
-
-template <typename Func> struct EmitFuncTraits {
-  using do_traits_t = base::function_traits<Func>;
-
-  static_assert(do_traits_t::arity == 2, "MapperType::Do must accept 2 arguments");
-
-  using first_arg_t = typename do_traits_t::template arg<0>;
-  using second_arg_t = typename do_traits_t::template arg<1>;
-
-  static_assert(DoCtxResolver<second_arg_t>::value,
-                "MapperType::Do's second argument should be "
-                "DoContext<T>* for some type T");
-  using OutputType = typename DoCtxResolver<second_arg_t>::OutType;
-};
 
 template <typename MapperType>
 struct MapperTraits : public EmitFuncTraits<decltype(&MapperType::Do)> {};
@@ -119,9 +97,13 @@ class RawContext {
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
-// It's packaged together with the DoFn function.
 template <typename T> class DoContext {
   friend class detail::TableImpl<T>;
+
+  template <typename FromType, typename Handler, typename ToType>
+  friend class detail::HandlerWrapper;
+
+  template <typename U> friend class detail::IdentityHandlerWrapper;
 
   DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
 
@@ -146,9 +128,6 @@ template <typename Handler, typename ToType> class HandlerBinding;
 
 template <typename OutT> class PTable {
  public:
-  // TODO: to free input parameter as well.
-  template <typename Class, typename O> using DoFn = void (Class::*)(OutT&&, DoContext<O>*);
-
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
     return impl_->Write(name, type);
   }
@@ -157,7 +136,7 @@ template <typename OutT> class PTable {
   PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name) const;
 
   template <typename Handler, typename ToType>
-  HandlerBinding<Handler, ToType> BindWith(DoFn<Handler, ToType> ptr) const {
+  HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<OutT, Handler, ToType> ptr) const {
     return HandlerBinding<Handler, ToType>{impl_.get(), ptr};
   }
 
@@ -225,7 +204,7 @@ template <typename Handler, typename ToType> class HandlerBinding {
 
   template <typename FromType>
   HandlerBinding(const detail::TableImpl<FromType>* from,
-                 typename PTable<FromType>::template DoFn<Handler, ToType> ptr) {
+                 EmitMemberFn<FromType, Handler, ToType> ptr) {
     tbase_from = from;
     setup_func = [ptr](Handler* handler) {
       auto f = [ptr, handler, rt = RecordTraits<FromType>{}](RawRecord&& rr,

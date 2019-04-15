@@ -6,28 +6,94 @@
 #include <boost/intrusive_ptr.hpp>
 #include <functional>
 
+#include "mr/mr_types.h"
 #include "mr/output.h"
 
 namespace mr3 {
 class Pipeline;
 class RawContext;
-template <typename T> class DoContext;
+
 template <typename Record> struct RecordTraits;
 
 namespace detail {
 
+template <typename T> struct DoCtxResolver : public std::false_type {};
+
+template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_type {
+  using OutType = T;
+};
+
+template <typename Func> struct EmitFuncTraits {
+  using emit_traits_t = base::function_traits<Func>;
+
+  static_assert(emit_traits_t::arity == 2, "MapperType::Do must accept 2 arguments");
+
+  using first_arg_t = typename emit_traits_t::template arg<0>;
+  using second_arg_t = typename emit_traits_t::template arg<1>;
+
+  static_assert(DoCtxResolver<second_arg_t>::value,
+                "MapperType::Do's second argument should be "
+                "DoContext<T>* for some type T");
+  using OutputType = typename DoCtxResolver<second_arg_t>::OutType;
+};
+
+class HandlerWrapperBase {
+ public:
+  virtual ~HandlerWrapperBase() {}
+
+  void Do(size_t index, RawRecord&& s) { raw_fn_[index](std::move(s)); }
+  RawSinkCb& at(size_t index) { return raw_fn_[index]; }
+
+ protected:
+  template <typename F> void AddFn(F&& f) { raw_fn_.emplace_back(std::forward<F>(f)); }
+
+ private:
+  std::vector<RawSinkCb> raw_fn_;
+};
+
+template <typename FromType, typename Handler, typename ToType>
+class HandlerWrapper : public HandlerWrapperBase {
+  Handler h_;
+  RecordTraits<FromType> rt_;
+  DoContext<ToType> do_ctx_;
+
+ public:
+  HandlerWrapper(Output<ToType>* out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
+
+  template<typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
+    AddFn([this, ptr](RawRecord&& rr) {
+      FromType tmp_rec;
+      bool parse_res = do_ctx_.raw_context()->ParseInto(std::move(rr), &rt_, &tmp_rec);
+      if (parse_res) {
+        (h_.*ptr)(std::move(tmp_rec), &do_ctx_);
+      }
+    });
+  }
+};
+
+template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
+  DoContext<T> do_ctx_;
+
+ public:
+  IdentityHandlerWrapper(Output<T>* out, RawContext* raw_context) : do_ctx_(out, raw_context) {
+    AddFn([this](RawRecord&& rr) {
+      T val;
+      if (do_ctx_.ParseRaw(std::move(rr), &val)) {
+        do_ctx_.Write(std::move(val));
+      }
+    });
+  }
+};
+
 class TableBase {
  public:
-  using RawRecord = std::string;
-  typedef std::function<void(RawRecord&& record)> DoFn;
-
   TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
 
   TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
 
   virtual ~TableBase() {}
 
-  virtual DoFn SetupDoFn(RawContext* context) = 0;
+  virtual HandlerWrapperBase* CreateHandler(RawContext* context) = 0;
 
   pb::Operator CreateLink(bool from_output) const;
 
@@ -53,6 +119,7 @@ class TableBase {
   pb::Operator op_;
   Pipeline* pipeline_;
   std::atomic<std::uint32_t> use_count_{0};
+  std::function<HandlerWrapperBase*(RawContext* context)> handler_factory_;
 
   void SetOutput(const std::string& name, pb::WireFormat::Type type);
 };
@@ -85,45 +152,29 @@ template <typename OutT> class TableImpl : public TableBase {
 
   template <typename FromType, typename MapType> void MapWith();
 
-  bool is_identity() const { return !do_fn_; }
+  bool is_identity() const { return !handler_factory_; }
 
+  HandlerWrapperBase* CreateHandler(RawContext* context) final;
  protected:
-  DoFn SetupDoFn(RawContext* context) override;
 
  private:
   Output<OutT> out_;
-  std::function<void(RawRecord&&, DoContext<OutputType>* context)> do_fn_;
 };
 
-template <typename OutT> auto TableImpl<OutT>::SetupDoFn(RawContext* context) -> DoFn {
-  if (do_fn_) {
-    return [f = this->do_fn_, wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
-      f(std::move(r), &wrapper);
-    };
-  } else {
-    return [wrapper = ContextType(&out_, context)](RawRecord&& r) mutable {
-      OutT val;
-      if (wrapper.ParseRaw(std::move(r), &val)) {
-        wrapper.Write(std::move(val));
-      }
-    };
+template <typename OutT> HandlerWrapperBase* TableImpl<OutT>::CreateHandler(RawContext* context) {
+  if (handler_factory_) {
+    return handler_factory_(context);
   }
+  return new IdentityHandlerWrapper<OutT>(&out_, context);
 }
 
 template <typename OutT>
 template <typename FromType, typename MapType>
 void TableImpl<OutT>::MapWith() {
-  struct Helper {
-    MapType m;
-    RecordTraits<FromType> rt;
-  };
-
-  do_fn_ = [h = Helper{}](RawRecord&& rr, DoContext<OutputType>* context) mutable {
-    FromType tmp_rec;
-    bool parse_res = context->raw_context()->ParseInto(std::move(rr), &h.rt, &tmp_rec);
-    if (parse_res) {
-      h.m.Do(std::move(tmp_rec), context);
-    }
+  handler_factory_ = [this](RawContext* raw_ctxt) {
+    auto* ptr = new HandlerWrapper<FromType, MapType, OutT>(&out_, raw_ctxt);
+    ptr->Add(&MapType::Do);
+    return ptr;
   };
 }
 

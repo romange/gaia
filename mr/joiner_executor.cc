@@ -59,7 +59,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
 
-    per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this};
+    per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb};
 
     per_io_->do_context.reset(runner_->CreateContext(tb->op()));
   });
@@ -112,10 +112,12 @@ void JoinerExecutor::Stop() {}
 
 void JoinerExecutor::JoinerFiber() {}
 
-void JoinerExecutor::ProcessInputQ() {
+void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
   uint64_t cnt = 0;
+
+  std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
 
   while (true) {
     channel_op_status st = input_q_.pop(shard_input);
@@ -123,12 +125,13 @@ void JoinerExecutor::ProcessInputQ() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
+
     for (const IndexedInput& ii : shard_input.second) {
       cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), [&](auto&& s) {});
       // TODO: Mark end of input
     }
   }
-  VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
+  VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
 }
 
 }  // namespace mr3
