@@ -21,15 +21,14 @@ namespace mr3 {
 
 using namespace util;
 using namespace boost;
+using other::StrVal;
 using testing::Contains;
 using testing::ElementsAre;
 using testing::Pair;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
-using other::StrVal;
 
 namespace rj = rapidjson;
-
 
 class StrValMapper {
  public:
@@ -41,7 +40,6 @@ class StrValMapper {
     cnt->Write(std::move(a));
   }
 };
-
 
 class MrTest : public testing::Test {
  protected:
@@ -196,14 +194,10 @@ TEST_F(MrTest, MapAB) {
 class StrJoiner {
   absl::flat_hash_map<int, int> counts_;
 
-  public:
-  void On1(IntVal&& iv, DoContext<string>* out) {
+ public:
+  void On1(IntVal&& iv, DoContext<string>* out) {}
 
-  }
-
-  void On2(IntVal&& iv, DoContext<string>* out) {
-
-  }
+  void On2(IntVal&& iv, DoContext<string>* out) {}
 };
 
 TEST_F(MrTest, Join) {
@@ -214,9 +208,21 @@ TEST_F(MrTest, Join) {
 
   PTable<IntVal> itable1 = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
   PTable<IntVal> itable2 = pipeline_->ReadText("read2", "stream2.txt").As<IntVal>();
-  PTable<string> res = pipeline_->Join("join_tables", {JoinInput(itable1, &StrJoiner::On1),
-                                                       JoinInput(itable2, &StrJoiner::On2)});
+  itable1.Write("ss1", pb::WireFormat::TXT).WithModNSharding(5, [](const IntVal& iv) {
+    return iv.val;
+  });
 
+  itable2.Write("ss2", pb::WireFormat::TXT).WithModNSharding(5, [](const IntVal& iv) {
+    return iv.val;
+  });
+
+  PTable<string> res = pipeline_->Join(
+      "join_tables", {JoinInput(itable1, &StrJoiner::On1), JoinInput(itable2, &StrJoiner::On2)});
+
+  // TODO: to prohibit sharding. join tables preserve sharding of their inputs.
+  res.Write("joinw", pb::WireFormat::TXT);
+
+  pipeline_->Run(&runner_);
 }
 
 }  // namespace mr3

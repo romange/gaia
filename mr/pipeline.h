@@ -15,34 +15,10 @@ namespace mr3 {
 class Runner;
 class OperatorExecutor;
 
-template <typename Joiner, typename Out> class JoinArg {
- public:
-  using RawRecord = detail::TableBase::RawRecord;
-
-  template <typename U> using FunctionPtr = void (Joiner::*)(U&&, DoContext<Out>*);
-  using EmitFunc = std::function<void(RawRecord&&, DoContext<Out>* context)>;
-  using SetupEmitFunc = std::function<EmitFunc(Joiner* joiner)>;
-
-  template <typename U> JoinArg(const PTable<U>& tbl, FunctionPtr<U> ptr) {
-    setup_func = [ptr](Joiner* joiner) {
-      auto f = [ptr, joiner, rt = RecordTraits<U>{}](RawRecord&& rr,
-                                                     DoContext<Out>* context) mutable {
-        U tmp_rec;
-        bool parse_res = context->raw_context()->ParseInto(std::move(rr), &rt, &tmp_rec);
-        if (parse_res) {
-          ((*joiner).*ptr)(std::move(tmp_rec), context);
-        }
-      };
-      return f;
-    };
-  }
-
-  SetupEmitFunc setup_func;
-};
-
 template <typename Joiner, typename Out, typename U>
-JoinArg<Joiner, Out> JoinInput(const PTable<U>& tbl, void (Joiner::*fnc)(U&&, DoContext<Out>*)) {
-  return JoinArg<Joiner, Out>{tbl, fnc};
+HandlerBinding<Joiner, Out> JoinInput(
+    const PTable<U>& tbl, void (Joiner::* ptr)(U&&, DoContext<Out>*)) {
+  return tbl.BindWith(ptr);
 }
 
 class Pipeline {
@@ -64,7 +40,7 @@ class Pipeline {
   void Stop();
 
   template <typename JoinerType, typename Out>
-  PTable<Out> Join(const std::string& name, std::initializer_list<JoinArg<JoinerType, Out>> args);
+  PTable<Out> Join(const std::string& name, std::initializer_list<HandlerBinding<JoinerType, Out>> args);
 
  private:
   const InputBase* CheckedInput(const std::string& name) const;
@@ -84,8 +60,13 @@ class Pipeline {
 
 template <typename JoinerType, typename Out>
 PTable<Out> Pipeline::Join(const std::string& name,
-                           std::initializer_list<JoinArg<JoinerType, Out>> args) {
+                           std::initializer_list<HandlerBinding<JoinerType, Out>> args) {
   auto ptr = CreateTableImpl<Out>(name);
+  std::for_each(args.begin(), args.end(), [&](const auto& arg) {
+    ptr->mutable_op()->add_input_name(arg.tbase_from->op().output().name());
+  });
+  ptr->mutable_op()->set_type(pb::Operator::HASH_JOIN);
+
   return PTable<Out>(ptr);
 }
 

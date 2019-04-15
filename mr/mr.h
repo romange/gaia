@@ -65,7 +65,8 @@ class InputBase {
   InputBase(const InputBase&) = delete;
 
   InputBase(const std::string& name, pb::WireFormat::Type type,
-            const pb::Output* linked_outp = nullptr) : linked_outp_(linked_outp) {
+            const pb::Output* linked_outp = nullptr)
+      : linked_outp_(linked_outp) {
     input_.set_name(name);
     input_.mutable_format()->set_type(type);
   }
@@ -76,6 +77,7 @@ class InputBase {
   const pb::Input& msg() const { return input_; }
 
   const pb::Output* linked_outp() const { return linked_outp_; }
+
  protected:
   const pb::Output* linked_outp_;
   pb::Input input_;
@@ -111,6 +113,7 @@ class RawContext {
 
     return parse_res;
   }
+
  protected:
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 };
@@ -132,23 +135,31 @@ template <typename T> class DoContext {
   RawContext* raw_context() { return context_; }
 
  private:
-  bool ParseRaw(RawRecord&& rr, T* res) {
-    return context_->ParseInto(std::move(rr), &rt_, res);
-  }
+  bool ParseRaw(RawRecord&& rr, T* res) { return context_->ParseInto(std::move(rr), &rt_, res); }
 
   Output<T>* out_;
   RawContext* context_;
   RecordTraits<T> rt_;
 };
 
+template <typename Handler, typename ToType> class HandlerBinding;
+
 template <typename OutT> class PTable {
  public:
+  // TODO: to free input parameter as well.
+  template <typename Class, typename O> using DoFn = void (Class::*)(OutT&&, DoContext<O>*);
+
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
     return impl_->Write(name, type);
   }
 
   template <typename MapType>
   PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name) const;
+
+  template <typename Handler, typename ToType>
+  HandlerBinding<Handler, ToType> BindWith(DoFn<Handler, ToType> ptr) const {
+    return HandlerBinding<Handler, ToType>{impl_.get(), ptr};
+  }
 
  protected:
   friend class Pipeline;
@@ -205,6 +216,32 @@ template <> class RecordTraits<rapidjson::Document> {
  public:
   static std::string Serialize(rapidjson::Document&& doc);
   bool Parse(std::string&& tmp, rapidjson::Document* res);
+};
+
+template <typename Handler, typename ToType> class HandlerBinding {
+ public:
+  using EmitFunc = std::function<void(RawRecord&&, DoContext<ToType>* context)>;
+  using SetupEmitFunc = std::function<EmitFunc(Handler* handler)>;
+
+  template <typename FromType>
+  HandlerBinding(const detail::TableImpl<FromType>* from,
+                 typename PTable<FromType>::template DoFn<Handler, ToType> ptr) {
+    tbase_from = from;
+    setup_func = [ptr](Handler* handler) {
+      auto f = [ptr, handler, rt = RecordTraits<FromType>{}](RawRecord&& rr,
+                                                             DoContext<ToType>* context) mutable {
+        FromType tmp_rec;
+        bool parse_res = context->raw_context()->ParseInto(std::move(rr), &rt, &tmp_rec);
+        if (parse_res) {
+          ((*handler).*ptr)(std::move(tmp_rec), context);
+        }
+      };
+      return f;
+    };
+  }
+
+  const detail::TableBase* tbase_from;
+  SetupEmitFunc setup_func;
 };
 
 }  // namespace mr3

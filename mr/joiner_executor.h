@@ -4,28 +4,43 @@
 
 #pragma once
 
+#include <boost/fiber/unbuffered_channel.hpp>
+
 #include "mr/operator_executor.h"
 
 namespace mr3 {
 
-class JoinerExecutor  : public OperatorExecutor {
+class JoinerExecutor : public OperatorExecutor {
   struct PerIoStruct;
 
+  struct IndexedInput {
+    uint32_t index;
+    const pb::Input::FileSpec* fspec;
+    const pb::WireFormat* wf;
+  };
+
+  using ShardInput = std::pair<ShardId, std::vector<IndexedInput>>;
  public:
   JoinerExecutor(util::IoContextPool* pool, Runner* runner);
   ~JoinerExecutor();
 
   void Init() final;
 
-  void Run(const std::vector<const InputBase*>& inputs,
-           detail::TableBase* tb, ShardFileMap* out_files) final;
+  void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
+           ShardFileMap* out_files) final;
 
   // Stops the executor in the middle.
   void Stop() final;
 
  private:
+  void CheckInputs(const std::vector<const InputBase*>& inputs);
+
+  void ProcessInputQ();
+
   void JoinerFiber();
-  
+
+  ::boost::fibers::unbuffered_channel<ShardInput> input_q_;
+
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 

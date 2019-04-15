@@ -9,9 +9,6 @@
 
 #include "mr/operator_executor.h"
 
-#include "util/asio/io_context_pool.h"
-#include "util/fibers/fiberqueue_threadpool.h"
-
 namespace mr3 {
 
 class MapperExecutor  : public OperatorExecutor {

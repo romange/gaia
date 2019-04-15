@@ -1,31 +1,31 @@
 {
-  "configurations": [
-    {
-      "name": "Linux",
-      "defines": ["_TEST_BASE_FILE_=\"mytest.cc\""],
-      "compilerPath": "/usr/bin/g++",
-      "cppStandard": "c++14",
-
-      "includePath": [
-        "${workspaceFolder}/abseil-cpp",
-        "${workspaceFolder}/third_party/libs/protobuf/include",
-        "${workspaceFolder}/third_party/libs/glog/include",
-        "${workspaceFolder}/third_party/libs/gflags/include",
-        "${workspaceFolder}/third_party/libs/pmr/include",
-        "${workspaceFolder}/third_party/libs/sparsehash/include",
-        "${workspaceFolder}/third_party/libs/zstd/include",
-        "${workspaceFolder}/third_party/libs/benchmark/include",
-        "${workspaceFolder}/third_party/libs/gtest/include",
-        "${workspaceFolder}/third_party/libs/gperf/include",
-        "${workspaceFolder}/third_party/libs/rapidjson/include",
-        "${workspaceFolder}/third_party/libs/crc32c/include",
-        "${workspaceFolder}/third_party/libs/xxhash/include",
-        "${workspaceFolder}/third_party/libs/lz4/include",
-        "${workspaceFolder}",
-        "${workspaceFolder}/genfiles",
-        "${default}"
-      ]
-    }
-  ],
-  "version": 4
+    "configurations": [
+        {
+            "name": "Linux",
+            "defines": [
+                "_TEST_BASE_FILE_=\"mytest.cc\""
+            ],
+            "cppStandard": "c++14",
+            "includePath": [
+                "${workspaceFolder}/abseil-cpp",
+                "${workspaceFolder}/third_party/libs/protobuf/include",
+                "${workspaceFolder}/third_party/libs/glog/include",
+                "${workspaceFolder}/third_party/libs/gflags/include",
+                "${workspaceFolder}/third_party/libs/pmr/include",
+                "${workspaceFolder}/third_party/libs/sparsehash/include",
+                "${workspaceFolder}/third_party/libs/zstd/include",
+                "${workspaceFolder}/third_party/libs/benchmark/include",
+                "${workspaceFolder}/third_party/libs/gtest/include",
+                "${workspaceFolder}/third_party/libs/gperf/include",
+                "${workspaceFolder}/third_party/libs/rapidjson/include",
+                "${workspaceFolder}/third_party/libs/crc32c/include",
+                "${workspaceFolder}/third_party/libs/xxhash/include",
+                "${workspaceFolder}/third_party/libs/lz4/include",
+                "${workspaceFolder}",
+                "${workspaceFolder}/genfiles",
+                "${default}"
+            ]
+        }
+    ],
+    "version": 4
 }

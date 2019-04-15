@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "mr/impl/table_impl.h"
 #include "mr/mr.h"
+#include "util/asio/io_context_pool.h"
 #include "util/fibers/fibers_ext.h"
 
 namespace mr3 {
