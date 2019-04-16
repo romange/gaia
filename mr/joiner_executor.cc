@@ -28,7 +28,6 @@ ShardId GetShard(const pb::Input::FileSpec& fspec) {
 struct JoinerExecutor::PerIoStruct {
   unsigned index;
   ::boost::fibers::fiber process_fd;
-  std::unique_ptr<RawContext> do_context;
 
   void Shutdown();
 
@@ -60,8 +59,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     per_io_.reset(new PerIoStruct(index));
 
     per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb};
-
-    per_io_->do_context.reset(runner_->CreateContext(tb->op()));
   });
 
   std::map<ShardId, std::vector<IndexedInput>> shard_inputs;
@@ -113,11 +110,12 @@ void JoinerExecutor::Stop() {}
 void JoinerExecutor::JoinerFiber() {}
 
 void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
-  PerIoStruct* trd_local = per_io_.get();
+  // PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
   uint64_t cnt = 0;
 
   std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
+  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(raw_context.get())};
 
   while (true) {
     channel_op_status st = input_q_.pop(shard_input);
@@ -127,7 +125,11 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
     CHECK_EQ(channel_op_status::success, st);
 
     for (const IndexedInput& ii : shard_input.second) {
-      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), [&](auto&& s) {});
+      CHECK_LT(ii.index, handler->Size());
+      auto emit_cb = handler->Get(ii.index);
+
+      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(),
+        emit_cb);
       // TODO: Mark end of input
     }
   }

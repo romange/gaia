@@ -6,6 +6,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "mr/mr3.pb.h"
 #include "mr/output.h"
+#include "mr/mr_types.h"
 
 namespace mr3 {
 
@@ -33,7 +34,7 @@ class Runner {
   // Read file and fill queue. This function must be fiber-friendly.
   // Returns number of records processed.
   virtual size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                  std::function<void(std::string&&)> cb) = 0;
+                                  RawSinkCb cb) = 0;
 };
 
 }  // namespace mr3

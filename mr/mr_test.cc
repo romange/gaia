@@ -195,9 +195,13 @@ class StrJoiner {
   absl::flat_hash_map<int, int> counts_;
 
  public:
-  void On1(IntVal&& iv, DoContext<string>* out) {}
+  void On1(IntVal&& iv, DoContext<string>* out) {
+    out->Write(std::to_string(100 + iv.val));
+  }
 
-  void On2(IntVal&& iv, DoContext<string>* out) {}
+  void On2(IntVal&& iv, DoContext<string>* out) {
+    out->Write(std::to_string(200 + iv.val));
+  }
 };
 
 TEST_F(MrTest, Join) {
@@ -217,12 +221,14 @@ TEST_F(MrTest, Join) {
   });
 
   PTable<string> res = pipeline_->Join(
-      "join_tables", {itable1.BindWith(&StrJoiner::On1), JoinInput(itable2,&StrJoiner::On2)});
+      "join_tables", {itable1.BindWith(&StrJoiner::On1), JoinInput(itable2, &StrJoiner::On2)});
 
   // TODO: to prohibit sharding. join tables preserve sharding of their inputs.
   res.Write("joinw", pb::WireFormat::TXT);
 
   pipeline_->Run(&runner_);
+  vector<string> expected({"101", "102", "103", "104", "202", "203"});
+  EXPECT_THAT(runner_.Table("joinw"), ElementsAre(MatchShard(0, expected)));
 }
 
 }  // namespace mr3
