@@ -16,4 +16,7 @@ using RawRecord = ::std::string;
 
 typedef std::function<void(RawRecord&& record)> RawSinkCb;
 
+template <typename Handler, typename ToType>
+using RawSinkMethodFactory = std::function<RawSinkCb(Handler* handler, DoContext<ToType>* context)>;
+
 }  // namespace mr3

@@ -78,6 +78,10 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
       ParseAndDo(&h_, &rt, &do_ctx_, ptr, std::move(rr));
     });
   }
+
+  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) {
+    AddFn(f(&h_, &do_ctx_));
+  }
 };
 
 template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
@@ -174,8 +178,6 @@ template <typename OutT> class TableImpl : public TableBase {
 
 template <typename Handler, typename ToType> class HandlerBinding {
  public:
-  using SetupEmitFunc = std::function<RawSinkCb(Handler* handler, DoContext<ToType>* context)>;
-
   // This C'tor eliminates FromType and U and leaves common types (Joiner and ToType).
   template <typename FromType, typename U>
   HandlerBinding(const detail::TableImpl<FromType>* from, EmitMemberFn<U, Handler, ToType> ptr) {
@@ -188,7 +190,7 @@ template <typename Handler, typename ToType> class HandlerBinding {
   }
 
   const TableBase* tbase_from;
-  SetupEmitFunc setup_func;
+  RawSinkMethodFactory<Handler, ToType> setup_func;
 };
 
 template <typename OutT> HandlerWrapperBase* TableImpl<OutT>::CreateHandler(RawContext* context) {
@@ -211,8 +213,19 @@ void TableImpl<OutT>::MapWith() {
 
 template <typename OutT>
 template <typename JoinerType> void TableImpl<OutT>::JoinOn(
-    std::initializer_list<detail::HandlerBinding<JoinerType, OutT>> args) {
+    std::initializer_list<HandlerBinding<JoinerType, OutT>> args) {
+  std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories;
+  for (auto& a : args) {
+    factories.push_back(a.setup_func);
+  }
+  handler_factory_ = [this, factories = std::move(factories)](RawContext* raw_ctxt) {
+    auto* ptr = new HandlerWrapper<JoinerType, OutT>(&out_, raw_ctxt);
+    for (const auto& m : factories) {
+      ptr->AddFromFactory(m);
+    }
 
+    return ptr;
+  };
 }
 
 }  // namespace detail
