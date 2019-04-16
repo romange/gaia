@@ -15,9 +15,9 @@ namespace mr3 {
 class Runner;
 class OperatorExecutor;
 
-template <typename U, typename Joiner, typename Out>
-HandlerBinding<Joiner, Out> JoinInput(
-    const PTable<U>& tbl, EmitMemberFn<U, Joiner, Out> ptr) {
+template <typename U, typename Joiner, typename Out, typename S>
+detail::HandlerBinding<Joiner, Out> JoinInput(const PTable<U>& tbl,
+                                              EmitMemberFn<S, Joiner, Out> ptr) {
   return tbl.BindWith(ptr);
 }
 
@@ -40,7 +40,8 @@ class Pipeline {
   void Stop();
 
   template <typename JoinerType, typename Out>
-  PTable<Out> Join(const std::string& name, std::initializer_list<HandlerBinding<JoinerType, Out>> args);
+  PTable<Out> Join(const std::string& name,
+                   std::initializer_list<detail::HandlerBinding<JoinerType, Out>> args);
 
  private:
   const InputBase* CheckedInput(const std::string& name) const;
@@ -60,12 +61,13 @@ class Pipeline {
 
 template <typename JoinerType, typename Out>
 PTable<Out> Pipeline::Join(const std::string& name,
-                           std::initializer_list<HandlerBinding<JoinerType, Out>> args) {
+                           std::initializer_list<detail::HandlerBinding<JoinerType, Out>> args) {
   auto ptr = CreateTableImpl<Out>(name);
   std::for_each(args.begin(), args.end(), [&](const auto& arg) {
     ptr->mutable_op()->add_input_name(arg.tbase_from->op().output().name());
   });
   ptr->mutable_op()->set_type(pb::Operator::HASH_JOIN);
+  ptr->template JoinOn<JoinerType>(args);
 
   return PTable<Out>(ptr);
 }

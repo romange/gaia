@@ -161,7 +161,9 @@ void MapperExecutor::MapFiber(detail::TableBase* sb) {
   uint64_t record_num = 0;
 
   std::unique_ptr<detail::HandlerWrapperBase> handler{sb->CreateHandler(per_io_->do_context.get())};
-  RawSinkCb cb = handler->at(0);
+  CHECK_EQ(1, handler->Size());
+
+  RawSinkCb cb = handler->Get(0);
 
   while (true) {
     bool is_open = record_q.Pop(record);

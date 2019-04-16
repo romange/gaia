@@ -10,7 +10,7 @@ namespace mr3 {
 template <typename T> class DoContext;
 
 template <typename FromType, typename Class, typename O>
-using EmitMemberFn = void (Class::*)(FromType&&, DoContext<O>*);
+using EmitMemberFn = void (Class::*)(FromType, DoContext<O>*);
 
 using RawRecord = ::std::string;
 

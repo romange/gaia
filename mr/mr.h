@@ -124,8 +124,6 @@ template <typename T> class DoContext {
   RecordTraits<T> rt_;
 };
 
-template <typename Handler, typename ToType> class HandlerBinding;
-
 template <typename OutT> class PTable {
  public:
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
@@ -135,9 +133,9 @@ template <typename OutT> class PTable {
   template <typename MapType>
   PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name) const;
 
-  template <typename Handler, typename ToType>
-  HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<OutT, Handler, ToType> ptr) const {
-    return HandlerBinding<Handler, ToType>{impl_.get(), ptr};
+  template <typename Handler, typename ToType, typename U>
+  detail::HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
+    return detail::HandlerBinding<Handler, ToType>{impl_.get(), ptr};
   }
 
  protected:
@@ -195,32 +193,6 @@ template <> class RecordTraits<rapidjson::Document> {
  public:
   static std::string Serialize(rapidjson::Document&& doc);
   bool Parse(std::string&& tmp, rapidjson::Document* res);
-};
-
-template <typename Handler, typename ToType> class HandlerBinding {
- public:
-  using EmitFunc = std::function<void(RawRecord&&, DoContext<ToType>* context)>;
-  using SetupEmitFunc = std::function<EmitFunc(Handler* handler)>;
-
-  template <typename FromType>
-  HandlerBinding(const detail::TableImpl<FromType>* from,
-                 EmitMemberFn<FromType, Handler, ToType> ptr) {
-    tbase_from = from;
-    setup_func = [ptr](Handler* handler) {
-      auto f = [ptr, handler, rt = RecordTraits<FromType>{}](RawRecord&& rr,
-                                                             DoContext<ToType>* context) mutable {
-        FromType tmp_rec;
-        bool parse_res = context->raw_context()->ParseInto(std::move(rr), &rt, &tmp_rec);
-        if (parse_res) {
-          ((*handler).*ptr)(std::move(tmp_rec), context);
-        }
-      };
-      return f;
-    };
-  }
-
-  const detail::TableBase* tbase_from;
-  SetupEmitFunc setup_func;
 };
 
 }  // namespace mr3

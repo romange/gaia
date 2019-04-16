@@ -217,7 +217,7 @@ TEST_F(MrTest, Join) {
   });
 
   PTable<string> res = pipeline_->Join(
-      "join_tables", {JoinInput(itable1, &StrJoiner::On1), JoinInput(itable2, &StrJoiner::On2)});
+      "join_tables", {itable1.BindWith(&StrJoiner::On1), JoinInput(itable2,&StrJoiner::On2)});
 
   // TODO: to prohibit sharding. join tables preserve sharding of their inputs.
   res.Write("joinw", pb::WireFormat::TXT);

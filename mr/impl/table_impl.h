@@ -17,11 +17,14 @@ template <typename Record> struct RecordTraits;
 
 namespace detail {
 
+template <typename Handler, typename ToType> class HandlerBinding;
+
 template <typename T> struct DoCtxResolver : public std::false_type {};
 
 template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_type {
   using OutType = T;
 };
+
 
 template <typename Func> struct EmitFuncTraits {
   using emit_traits_t = base::function_traits<Func>;
@@ -42,7 +45,9 @@ class HandlerWrapperBase {
   virtual ~HandlerWrapperBase() {}
 
   void Do(size_t index, RawRecord&& s) { raw_fn_[index](std::move(s)); }
-  RawSinkCb& at(size_t index) { return raw_fn_[index]; }
+  RawSinkCb Get(size_t index) const { return raw_fn_[index]; }
+
+  size_t Size() const { return raw_fn_.size(); }
 
  protected:
   template <typename F> void AddFn(F&& f) { raw_fn_.emplace_back(std::forward<F>(f)); }
@@ -51,22 +56,26 @@ class HandlerWrapperBase {
   std::vector<RawSinkCb> raw_fn_;
 };
 
-template <typename FromType, typename Handler, typename ToType>
-class HandlerWrapper : public HandlerWrapperBase {
+template <typename Handler, typename FromType, typename ToType, typename U>
+void ParseAndDo(Handler* h, RecordTraits<FromType>* rt, DoContext<ToType>* context,
+                EmitMemberFn<U, Handler, ToType> ptr, RawRecord&& rr) {
+  FromType tmp_rec;
+  bool parse_ok = context->raw_context()->ParseInto(std::move(rr), rt, &tmp_rec);
+  if (parse_ok) {
+    (h->*ptr)(std::move(tmp_rec), context);
+  }
+}
+
+template <typename Handler, typename ToType> class HandlerWrapper : public HandlerWrapperBase {
   Handler h_;
-  RecordTraits<FromType> rt_;
   DoContext<ToType> do_ctx_;
 
  public:
   HandlerWrapper(Output<ToType>* out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
 
-  template<typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
-    AddFn([this, ptr](RawRecord&& rr) {
-      FromType tmp_rec;
-      bool parse_res = do_ctx_.raw_context()->ParseInto(std::move(rr), &rt_, &tmp_rec);
-      if (parse_res) {
-        (h_.*ptr)(std::move(tmp_rec), &do_ctx_);
-      }
+  template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
+    AddFn([this, ptr, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
+      ParseAndDo(&h_, &rt, &do_ctx_, ptr, std::move(rr));
     });
   }
 };
@@ -152,13 +161,34 @@ template <typename OutT> class TableImpl : public TableBase {
 
   template <typename FromType, typename MapType> void MapWith();
 
+  template <typename JoinerType> void JoinOn(
+    std::initializer_list<HandlerBinding<JoinerType, OutT>> args);
+
   bool is_identity() const { return !handler_factory_; }
 
   HandlerWrapperBase* CreateHandler(RawContext* context) final;
- protected:
 
  private:
   Output<OutT> out_;
+};
+
+template <typename Handler, typename ToType> class HandlerBinding {
+ public:
+  using SetupEmitFunc = std::function<RawSinkCb(Handler* handler, DoContext<ToType>* context)>;
+
+  // This C'tor eliminates FromType and U and leaves common types (Joiner and ToType).
+  template <typename FromType, typename U>
+  HandlerBinding(const detail::TableImpl<FromType>* from, EmitMemberFn<U, Handler, ToType> ptr) {
+    tbase_from = from;
+    setup_func = [ptr](Handler* handler, DoContext<ToType>* context) {
+      return [=, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
+        detail::ParseAndDo(handler, &rt, context, ptr, std::move(rr));
+      };
+    };
+  }
+
+  const TableBase* tbase_from;
+  SetupEmitFunc setup_func;
 };
 
 template <typename OutT> HandlerWrapperBase* TableImpl<OutT>::CreateHandler(RawContext* context) {
@@ -172,10 +202,17 @@ template <typename OutT>
 template <typename FromType, typename MapType>
 void TableImpl<OutT>::MapWith() {
   handler_factory_ = [this](RawContext* raw_ctxt) {
-    auto* ptr = new HandlerWrapper<FromType, MapType, OutT>(&out_, raw_ctxt);
-    ptr->Add(&MapType::Do);
+    auto* ptr = new HandlerWrapper<MapType, OutT>(&out_, raw_ctxt);
+    ptr->template Add<FromType>(&MapType::Do);
+
     return ptr;
   };
+}
+
+template <typename OutT>
+template <typename JoinerType> void TableImpl<OutT>::JoinOn(
+    std::initializer_list<detail::HandlerBinding<JoinerType, OutT>> args) {
+
 }
 
 }  // namespace detail
