@@ -45,7 +45,7 @@ class A {
   A(string val = string()) : val_(val) {
     CONSOLE_INFO << "A::A " << val_;
   }
-  // virtual ~A() {}
+  virtual ~A() {}
 
   A& Then(std::function<void()> f) {
     f();
