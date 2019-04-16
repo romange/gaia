@@ -45,6 +45,7 @@ class A {
   A(string val = string()) : val_(val) {
     CONSOLE_INFO << "A::A " << val_;
   }
+  // virtual ~A() {}
 
   A& Then(std::function<void()> f) {
     f();
@@ -96,6 +97,16 @@ TEST_F(CxxTest, MoveRef) {
 TEST_F(CxxTest, SequenceOrder) {
   A().Next(A("First")).Next(A("Second"));
   (A(), A("First")), A("Second");
+}
+
+
+TEST_F(CxxTest, DerivedAlloc) {
+  class B : public A {
+    char buf[1000];
+  };
+
+  A* a = new B;
+  delete a;
 }
 
 struct C1 {
