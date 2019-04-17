@@ -46,30 +46,33 @@ class Pipeline {
  private:
   const InputBase* CheckedInput(const std::string& name) const;
 
-  template <typename U>
-  typename detail::TableImpl<U>::PtrType CreateTableImpl(const std::string& name) {
-    return new detail::TableImpl<U>(name, this);
+  typename detail::TableBase* CreateTableImpl(const std::string& name) {
+    return new detail::TableBase(name, this);
   }
 
   util::IoContextPool* pool_;
   absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
-  std::vector<boost::intrusive_ptr<detail::TableBase>> tables_;
+  std::vector<detail::TableBase*> tables_;
 
   ::boost::fibers::mutex mu_;
   std::unique_ptr<OperatorExecutor> executor_;
 };
 
-template <typename JoinerType, typename Out>
-PTable<Out> Pipeline::Join(const std::string& name,
-                           std::initializer_list<detail::HandlerBinding<JoinerType, Out>> args) {
-  auto ptr = CreateTableImpl<Out>(name);
+template <typename JoinerType, typename OutT>
+PTable<OutT> Pipeline::Join(const std::string& name,
+                            std::initializer_list<detail::HandlerBinding<JoinerType, OutT>> args) {
+  detail::TableBase* ptr = CreateTableImpl(name);
   std::for_each(args.begin(), args.end(), [&](const auto& arg) {
-    ptr->mutable_op()->add_input_name(arg.tbase_from->op().output().name());
+    ptr->mutable_op()->add_input_name(arg.tbase()->op().output().name());
   });
   ptr->mutable_op()->set_type(pb::Operator::HASH_JOIN);
-  ptr->template JoinOn<JoinerType>(args);
 
-  return PTable<Out>(ptr);
+  std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories;
+  for (auto& a : args) {
+    factories.push_back(a.factory());
+  }
+
+  return PTable<OutT>::template AsJoin<JoinerType>(ptr, std::move(factories));
 }
 
 }  // namespace mr3

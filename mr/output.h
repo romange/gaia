@@ -11,9 +11,7 @@
 
 namespace mr3 {
 
-namespace detail {
-template <typename OutT> class TableImpl;
-}  // detail
+template <typename T> class PTable;
 
 struct ShardId : public absl::variant<uint32_t, std::string> {
   using Parent = absl::variant<uint32_t, std::string>;
@@ -33,7 +31,6 @@ class OutputBase {
  protected:
   pb::Output* out_;
 
-  OutputBase(OutputBase&&) noexcept;
   OutputBase(pb::Output* out) : out_(out) {}
 
   void SetCompress(pb::Output::CompressType ct, unsigned level);
@@ -41,7 +38,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class detail::TableImpl<T>;  // To allow the instantiation of Output<T>;
+  friend class PTable<T>;  // To allow the instantiation of Output<T>;
 
   // TODO: to make it variant.
   std::function<std::string(const T&)> shard_op_;
@@ -49,8 +46,6 @@ template <typename T> class Output : public OutputBase {
 
  public:
   Output() : OutputBase(nullptr) {}
-  Output(const Output&) = delete;
-  Output(Output&&) noexcept;
 
   template <typename U> Output& WithCustomSharding(U&& func) {
     static_assert(base::is_invocable_r<std::string, U, const T&>::value, "");
@@ -70,15 +65,6 @@ template <typename T> class Output : public OutputBase {
 
   Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
 
-  void operator=(const Output&) = delete;
-
-  Output& operator=(Output&& o) {
-    shard_op_ = std::move(o.shard_op_);
-    modn_op_ = std::move(o.modn_op_);
-    out_ = o.out_;
-    return *this;
-  }
-
   ShardId Shard(const T& t) {
     if (shard_op_)
       return shard_op_(t);
@@ -97,12 +83,6 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
   SetCompress(ct, level);
   return *this;
 }
-
-inline OutputBase::OutputBase(OutputBase&&) noexcept = default;
-
-template <typename T>
-Output<T>::Output(Output&& o) noexcept
-    : OutputBase(o.out_), shard_op_(std::move(o.shard_op_)), modn_op_(std::move(o.modn_op_)) {}
 
 }  // namespace mr3
 

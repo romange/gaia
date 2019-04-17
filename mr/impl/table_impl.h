@@ -25,7 +25,6 @@ template <typename T> struct DoCtxResolver<DoContext<T>*> : public std::true_typ
   using OutType = T;
 };
 
-
 template <typename Func> struct EmitFuncTraits {
   using emit_traits_t = base::function_traits<Func>;
 
@@ -71,7 +70,7 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   DoContext<ToType> do_ctx_;
 
  public:
-  HandlerWrapper(Output<ToType>* out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
+  HandlerWrapper(const Output<ToType>& out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
 
   template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
     AddFn([this, ptr, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
@@ -79,16 +78,15 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
     });
   }
 
-  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) {
-    AddFn(f(&h_, &do_ctx_));
-  }
+  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) { AddFn(f(&h_, &do_ctx_)); }
 };
 
 template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
   DoContext<T> do_ctx_;
 
  public:
-  IdentityHandlerWrapper(Output<T>* out, RawContext* raw_context) : do_ctx_(out, raw_context) {
+  IdentityHandlerWrapper(const Output<T>& out, RawContext* raw_context)
+      : do_ctx_(out, raw_context) {
     AddFn([this](RawRecord&& rr) {
       T val;
       if (do_ctx_.ParseRaw(std::move(rr), &val)) {
@@ -100,13 +98,11 @@ template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
 
 class TableBase {
  public:
+  using PtrType = ::boost::intrusive_ptr<TableBase>;
+
   TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
 
   TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
-
-  virtual ~TableBase() {}
-
-  virtual HandlerWrapperBase* CreateHandler(RawContext* context) = 0;
 
   pb::Operator CreateLink(bool from_output) const;
 
@@ -128,105 +124,65 @@ class TableBase {
 
   Pipeline* pipeline() const { return pipeline_; }
 
- protected:
+  void SetOutput(const std::string& name, pb::WireFormat::Type type);
+
+  template <typename F> void SetHandlerFactory(F&& f) {
+    handler_factory_ = std::forward<F>(f);
+    is_identity_ = false;
+  }
+
+  bool is_identity() const { return is_identity_; }
+
+  template <typename OutT> void SetIdentity(const Output<OutT>* outp) {
+    handler_factory_ = [outp](RawContext* raw_ctxt) {
+      return new IdentityHandlerWrapper<OutT>(*outp, raw_ctxt);
+    };
+    is_identity_ = true;
+  }
+
+  TableBase* Clone() { return new TableBase(op_, pipeline_); }
+  HandlerWrapperBase* CreateHandler(RawContext* context);
+
+  void CheckFailIdentity();
+ private:
+  bool defined() const { return bool(handler_factory_); }
+
+  TableBase(const TableBase&) = delete;
+  void operator=(const TableBase&) = delete;
+
   pb::Operator op_;
   Pipeline* pipeline_;
   std::atomic<std::uint32_t> use_count_{0};
   std::function<HandlerWrapperBase*(RawContext* context)> handler_factory_;
-
-  void SetOutput(const std::string& name, pb::WireFormat::Type type);
+  bool is_identity_ = true;
 };
 
-// Currently the input type is hard-coded - string.
-template <typename OutT> class TableImpl : public TableBase {
- public:
-  using OutputType = OutT;
-  using ContextType = DoContext<OutT>;
-
-  using PtrType = ::boost::intrusive_ptr<TableImpl<OutT>>;
-
-  using TableBase::TableBase;  // C'tor
-
-  Output<OutputType>& Write(const std::string& name, pb::WireFormat::Type type) {
-    SetOutput(name, type);
-    out_ = Output<OutputType>(op_.mutable_output());
-    return out_;
-  }
-
-  template <typename U> typename TableImpl<U>::PtrType CloneAs(pb::Operator op) const {
-    return new TableImpl<U>{std::move(op), pipeline_};
-  }
-
-  template <typename U> typename TableImpl<U>::PtrType CloneAs() const {
-    auto new_op = op_;
-    new_op.clear_output();
-    return CloneAs<U>(std::move(new_op));
-  }
-
-  template <typename FromType, typename MapType> void MapWith();
-
-  template <typename JoinerType> void JoinOn(
-    std::initializer_list<HandlerBinding<JoinerType, OutT>> args);
-
-  bool is_identity() const { return !handler_factory_; }
-
-  HandlerWrapperBase* CreateHandler(RawContext* context) final;
-
- private:
-  Output<OutT> out_;
-};
 
 template <typename Handler, typename ToType> class HandlerBinding {
+  HandlerBinding(const TableBase* from) : tbase_(from) {}
+
  public:
   // This C'tor eliminates FromType and U and leaves common types (Joiner and ToType).
   template <typename FromType, typename U>
-  HandlerBinding(const detail::TableImpl<FromType>* from, EmitMemberFn<U, Handler, ToType> ptr) {
-    tbase_from = from;
-    setup_func = [ptr](Handler* handler, DoContext<ToType>* context) {
+  static HandlerBinding<Handler, ToType> Create(const TableBase* from,
+                                                EmitMemberFn<U, Handler, ToType> ptr) {
+    HandlerBinding<Handler, ToType> res(from);
+    res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
       return [=, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
         detail::ParseAndDo(handler, &rt, context, ptr, std::move(rr));
       };
     };
+    return res;
   }
 
-  const TableBase* tbase_from;
-  RawSinkMethodFactory<Handler, ToType> setup_func;
+  const TableBase* tbase() const { return tbase_; }
+  RawSinkMethodFactory<Handler, ToType> factory() const { return setup_func_; }
+
+ private:
+  const TableBase* tbase_;
+  RawSinkMethodFactory<Handler, ToType> setup_func_;
 };
 
-template <typename OutT> HandlerWrapperBase* TableImpl<OutT>::CreateHandler(RawContext* context) {
-  if (handler_factory_) {
-    return handler_factory_(context);
-  }
-  return new IdentityHandlerWrapper<OutT>(&out_, context);
-}
-
-template <typename OutT>
-template <typename FromType, typename MapType>
-void TableImpl<OutT>::MapWith() {
-  handler_factory_ = [this](RawContext* raw_ctxt) {
-    auto* ptr = new HandlerWrapper<MapType, OutT>(&out_, raw_ctxt);
-    ptr->template Add<FromType>(&MapType::Do);
-
-    return ptr;
-  };
-}
-
-template <typename OutT>
-template <typename JoinerType> void TableImpl<OutT>::JoinOn(
-    std::initializer_list<HandlerBinding<JoinerType, OutT>> args) {
-  std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories;
-  for (auto& a : args) {
-    factories.push_back(a.setup_func);
-  }
-  handler_factory_ = [this, factories = std::move(factories)](RawContext* raw_ctxt) {
-    auto* ptr = new HandlerWrapper<JoinerType, OutT>(&out_, raw_ctxt);
-    for (const auto& m : factories) {
-      ptr->AddFromFactory(m);
-    }
-
-    return ptr;
-  };
-}
 
 }  // namespace detail
 }  // namespace mr3

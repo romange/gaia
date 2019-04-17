@@ -32,10 +32,10 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
     inp_ptr->mutable_msg()->add_file_spec()->set_url_glob(s);
   }
 
-  detail::TableImpl<std::string>::PtrType ptr = CreateTableImpl<string>(name);
+  detail::TableBase* ptr = CreateTableImpl(name);
   ptr->mutable_op()->add_input_name(name);
 
-  return StringTable{ptr};
+  return StringTable{PTable<string>::AsIdentity(ptr)};
 }
 
 void Pipeline::Stop() {
@@ -75,7 +75,7 @@ void Pipeline::Run(Runner* runner) {
     }
 
     ShardFileMap out_files;
-    executor_->Run(inputs, ptr.get(), &out_files);
+    executor_->Run(inputs, ptr, &out_files);
 
     VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to " << out_files.size()
             << " output files";

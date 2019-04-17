@@ -47,6 +47,16 @@ pb::Operator detail::TableBase::CreateLink(bool from_output) const {
   return res;
 }
 
+detail::HandlerWrapperBase* detail::TableBase::CreateHandler(RawContext* context) {
+  CHECK(defined());
+
+  return handler_factory_(context);
+}
+
+void detail::TableBase::CheckFailIdentity() {
+  CHECK(defined() && is_identity_);
+}
+
 std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
     return absl::get<string>(*this);

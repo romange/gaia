@@ -23,10 +23,6 @@
 namespace mr3 {
 
 class Pipeline;
-class StringTable;
-
-template <typename T> class PTable;
-
 
 namespace detail {
 
@@ -98,18 +94,16 @@ class RawContext {
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
 template <typename T> class DoContext {
-  friend class detail::TableImpl<T>;
-
   template <typename FromType, typename Handler, typename ToType>
   friend class detail::HandlerWrapper;
 
   template <typename U> friend class detail::IdentityHandlerWrapper;
 
-  DoContext(Output<T>* out, RawContext* context) : out_(out), context_(context) {}
+  DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
 
  public:
   void Write(T&& t) {
-    ShardId shard_id = out_->Shard(t);
+    ShardId shard_id = out_.Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
     context_->WriteInternal(shard_id, std::move(dest));
   }
@@ -119,15 +113,19 @@ template <typename T> class DoContext {
  private:
   bool ParseRaw(RawRecord&& rr, T* res) { return context_->ParseInto(std::move(rr), &rt_, res); }
 
-  Output<T>* out_;
+  Output<T> out_;
   RawContext* context_;
   RecordTraits<T> rt_;
 };
 
 template <typename OutT> class PTable {
+  Output<OutT> out_;
+
  public:
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
-    return impl_->Write(name, type);
+    impl_->SetOutput(name, type);
+    out_ = Output<OutT>{impl_->mutable_op()->mutable_output()};
+    return out_;
   }
 
   template <typename MapType>
@@ -135,35 +133,53 @@ template <typename OutT> class PTable {
 
   template <typename Handler, typename ToType, typename U>
   detail::HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
-    return detail::HandlerBinding<Handler, ToType>{impl_.get(), ptr};
+    return detail::HandlerBinding<Handler, ToType>::template Create<OutT>(impl_.get(), ptr);
   }
 
- protected:
-  friend class Pipeline;
-  friend class StringTable;
-
-  // apparently PTable of different type can not access this members.
-  template <typename T> friend class PTable;
-  using TableImpl = detail::TableImpl<OutT>;
-
-  PTable(typename TableImpl::PtrType ptr) : impl_(std::move(ptr)) {}
-
-  typename TableImpl::PtrType impl_;
-};
-
-class StringTable : public PTable<std::string> {
-  friend class Pipeline;
-
- public:
-  StringTable(PTable<std::string>&& p) : PTable(p.impl_) {}
-
-  template <typename U> PTable<U> As() const { return PTable<U>{impl_->CloneAs<U>()}; }
+  template <typename U> PTable<U> As() const {
+    impl_->CheckFailIdentity();
+    return PTable<U>::AsIdentity(impl_->Clone());
+  }
 
   PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
 
  protected:
-  StringTable(TableImpl::PtrType ptr) : PTable(ptr) {}
+  friend class Pipeline;
+
+  // apparently PTable of different type can not access this members.
+  template <typename T> friend class PTable;
+  using TableImpl = detail::TableBase;
+
+  PTable(TableImpl* ptr) : impl_(ptr) {}
+  PTable(TableImpl::PtrType ptr) : impl_(ptr) {}
+
+  static PTable<OutT> AsIdentity(TableImpl* ptr) {
+    PTable<OutT> res(ptr);
+    res.impl_->SetIdentity(&res.out_);
+    return res;
+  }
+
+  // Map c'tor
+  template <typename FromType, typename MapType> static PTable<OutT> AsMap(TableImpl* ptr) {
+    PTable<OutT> res(ptr);
+    ptr->SetHandlerFactory([o = &res.out_](RawContext* raw_ctxt) {
+      auto* ptr = new detail::HandlerWrapper<MapType, OutT>(*o, raw_ctxt);
+      ptr->template Add<FromType>(&MapType::Do);
+      return ptr;
+    });
+
+    return res;
+  }
+
+  std::unique_ptr<detail::TableBase> impl_;
+
+ private:
+  template <typename JoinerType>
+  static PTable<OutT> AsJoin(TableImpl* ptr,
+                             std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories);
 };
+
+using StringTable = PTable<std::string>;
 
 template <typename OutT>
 template <typename MapType>
@@ -181,10 +197,24 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
   new_op.set_op_name(name);
   new_op.set_type(pb::Operator::MAP);
 
-  auto ptr = impl_->template CloneAs<NewOutType>(std::move(new_op));
-  ptr->template MapWith<OutT, MapType>();
+  detail::TableBase* ptr = new detail::TableBase(std::move(new_op), impl_->pipeline());
 
-  return PTable<NewOutType>(ptr);
+  return PTable<NewOutType>::template AsMap<OutT, MapType>(ptr);
+}
+
+template <typename OutT>
+template <typename JoinerType>
+PTable<OutT> PTable<OutT>::AsJoin(TableImpl* ptr,
+                                  std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
+  PTable<OutT> res(ptr);
+  ptr->SetHandlerFactory([o = &res.out_, factories = std::move(factories)](RawContext* raw_ctxt) {
+    auto* ptr = new detail::HandlerWrapper<JoinerType, OutT>(*o, raw_ctxt);
+    for (const auto& m : factories) {
+      ptr->AddFromFactory(m);
+    }
+    return ptr;
+  });
+  return res;
 }
 
 template <> class RecordTraits<rapidjson::Document> {
