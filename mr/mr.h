@@ -151,7 +151,6 @@ template <typename OutT> class PTable {
   using TableImpl = detail::TableBase;
 
   PTable(TableImpl* ptr) : impl_(ptr) {}
-  PTable(TableImpl::PtrType ptr) : impl_(ptr) {}
 
   static PTable<OutT> AsIdentity(TableImpl* ptr) {
     PTable<OutT> res(ptr);
