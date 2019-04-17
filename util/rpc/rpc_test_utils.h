@@ -26,6 +26,11 @@ class TestBridge final : public ConnectionBridge {
  public:
   TestBridge(bool clear) : clear_(clear) {
   }
+
+  ~TestBridge();
+
+  void Join() final;
+
   // header and letter are input/output parameters.
   // HandleEnvelope reads first the input and if everything is parsed fine, it sends
   // back another header, letter pair.

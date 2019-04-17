@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
+#include "util/fibers/fibers_ext.h"
 
 namespace util {
 
@@ -73,11 +74,20 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
   CHECK(wrapper->io_context.InContextThread());
 
-  ConnectionHandler::ListType clist;
-
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
 
-  fibers_ext::condition_variable_any clist_empty_cnd;
+  struct SharedCList {
+    ConnectionHandler::ListType clist;
+    fibers_ext::condition_variable_any clist_empty_cnd;
+    fibers::mutex mu;
+
+    void wait(std::unique_lock<fibers::mutex>& lk) {
+      clist_empty_cnd.wait(lk, [&] { return clist.empty(); });
+    }
+  };
+
+  std::shared_ptr<SharedCList> clist_ptr = std::make_shared<SharedCList>();
+
   system::error_code ec;
   util::ConnectionHandler* handler = nullptr;
 
@@ -85,10 +95,14 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
   // Please note that since we update clist in the same thread, we do not need mutex
   // to protect the state.
   auto clean_cb = [&, &accpt_cntxt = wrapper->io_context](ConnectionHandler::ptr_t p) {
-    accpt_cntxt.Async([&, p = std::move(p)]() mutable {
-      p.reset();
-      if (clist.empty()) {
-        clist_empty_cnd.notify_one();
+    accpt_cntxt.AsyncFiber([&, clist_ptr, p = std::move(p)]() mutable {
+      std::lock_guard<fibers::mutex> lk(clist_ptr->mu);
+
+      // This runs in our AcceptServer::RunInIOThread thread.
+      p.reset();   // Possible interrupt point, we do not know what ~ConnectionHandler() does.
+
+      if (clist_ptr->clist.empty()) {
+        clist_ptr->clist_empty_cnd.notify_one();
       }
     });
   };
@@ -104,15 +118,17 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
         break;  // TODO: To refine it.
       } else {
         CHECK_NOTNULL(handler);
-        clist.push_front(*handler);
+        clist_ptr->clist.push_front(*handler);
 
-        DCHECK(!clist.empty());
+        DCHECK(!clist_ptr->clist.empty());
         DCHECK(handler->hook_.is_linked());
 
+        // handler->context() does not necessary equals to wrapper->io_context
+        // and we possibly launching the connection in a different thread.
         handler->context().AsyncFiber(
-            [clean_cb](ConnectionHandler::ptr_t guard) {
-              guard->RunInIOThread();
-              clean_cb(std::move(guard));
+            [&](ConnectionHandler::ptr_t conn_ptr) {
+              conn_ptr->RunInIOThread();
+              clean_cb(std::move(conn_ptr));  // signal our thread that we want to dispose it.
             }, handler);
       }
     }
@@ -122,15 +138,23 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
 
   wrapper->listener->PreShutdown();
 
-  if (!clist.empty()) {
+  if (!clist_ptr->clist.empty()) {
     VLOG(1) << "Starting closing connections";
-    auto it = clist.begin();
     unsigned cnt = 0;
-    while (it != clist.end()) {
+
+    std::unique_lock<fibers::mutex> lk(clist_ptr->mu);
+    auto it = clist_ptr->clist.begin();
+
+    // We do not remove connections from clist_ptr->clist, we just signal them to stop.
+    while (it != clist_ptr->clist.end()) {
       // guarding the current item, preserving it for getting the next item.
       // The reason for this is it->Close() is interruptable.
       ConnectionHandler::ptr_t guard(&*it);
+
+      // it->Close() can preempt and meanwhile *it connection can finish and be deleted in
+      // clean_cb. That will invalidate
       it->Close();
+
       ++it;
       ++cnt;
     }
@@ -139,9 +163,7 @@ void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
 
     // lk is really redundant but is required by cv-interface:
     // We update clist only in this thread so the protection is not needed.
-    fibers::mutex empty_mu;
-    std::unique_lock<fibers::mutex> lk(empty_mu);
-    clist_empty_cnd.wait(lk, [&] { return clist.empty(); });
+    clist_ptr->wait(lk);
   }
 
   wrapper->listener->PostShutdown();

@@ -21,6 +21,13 @@ DEFINE_uint32(rpc_test_io_pool, 0, "Number of IO loops");
 namespace util {
 namespace rpc {
 
+TestBridge::~TestBridge() {
+}
+
+void TestBridge::Join() {
+  this_fiber::sleep_for(milliseconds(10));
+}
+
 void TestBridge::HandleEnvelope(uint64_t rpc_id, Envelope* envelope, EnvelopeWriter writer) {
   VLOG(1) << "Got " << rpc_id << ", hs=" << envelope->header.size()
           << ", ls=" << envelope->letter.size();
