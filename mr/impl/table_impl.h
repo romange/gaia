@@ -98,8 +98,6 @@ template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
 
 class TableBase {
  public:
-  using PtrType = ::boost::intrusive_ptr<TableBase>;
-
   TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
 
   TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
@@ -109,7 +107,7 @@ class TableBase {
   const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
 
-  friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
+  /*friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
     tbl->use_count_.fetch_add(1, std::memory_order_relaxed);
   }
 
@@ -120,7 +118,7 @@ class TableBase {
       std::atomic_thread_fence(std::memory_order_acquire);
       delete tbl;
     }
-  }
+  }*/
 
   Pipeline* pipeline() const { return pipeline_; }
 
