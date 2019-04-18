@@ -100,6 +100,13 @@ void Pipeline::Run(Runner* runner) {
   runner->Shutdown();
 }
 
+pb::Input* Pipeline::mutable_input(const std::string& name) {
+  auto it = inputs_.find(name);
+  CHECK(it != inputs_.end());
+
+  return it->second->mutable_msg();
+}
+
 Runner::~Runner() {}
 
 }  // namespace mr3

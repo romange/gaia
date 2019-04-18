@@ -7,7 +7,6 @@
 #include "base/init.h"
 #include "base/logging.h"
 
-#include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "mr/pipeline.h"

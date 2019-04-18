@@ -40,6 +40,7 @@ message Input {
 
   // In case of sharded input, each file_spec corresponds to a shard.
   repeated FileSpec file_spec = 4;
+  optional uint32 skip_header = 5;
 }
 
 message Output {

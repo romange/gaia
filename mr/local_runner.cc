@@ -6,6 +6,7 @@
 #include <fcntl.h>
 
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "base/logging.h"
 
 #include "file/fiber_file.h"
@@ -62,6 +63,7 @@ class LocalContext : public RawContext {
 
   const pb::Output& output_;
   DestFileSet* mgr_;
+  std::string tmp_shard_name_;
 };
 
 BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
@@ -90,13 +92,21 @@ LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(ou
 }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
-  CHECK(absl::holds_alternative<string>(shard_id));
+  const string* shard_name = nullptr;
+  if (absl::holds_alternative<string>(shard_id)) {
+    shard_name = &absl::get<string>(shard_id);
+  } else {
+    CHECK(absl::holds_alternative<uint32_t>(shard_id));
+    tmp_shard_name_.clear();
+    uint32_t index = absl::get<uint32_t>(shard_id);
+    absl::StrAppendFormat(&tmp_shard_name_, "shard-%04d", index);
+    shard_name = &tmp_shard_name_;
+  }
 
-  const string& shard_name = absl::get<string>(shard_id);
 
-  auto it = custom_shard_files_.find(shard_name);
+  auto it = custom_shard_files_.find(*shard_name);
   if (it == custom_shard_files_.end()) {
-    auto res = mgr_->Get(shard_name, output_);
+    auto res = mgr_->Get(*shard_name, output_);
     StringPiece key = res.first;
 
     it = custom_shard_files_.emplace(key, new BufferedWriter{res.second}).first;

@@ -147,21 +147,26 @@ void MapperExecutor::ProcessInputFiles() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    cnt += runner_->ProcessInputFile(
-        file_input.first, file_input.second->format().type(),
-        [trd_local](auto&& s) { trd_local->record_q.Push(std::move(s)); });
+    auto cb = [trd_local, skip = file_input.second->skip_header(),
+               record_num = uint64_t{0}](auto&& s) mutable {
+      if (record_num++ < skip)
+        return;
+      trd_local->record_q.Push(std::move(s));
+    };
+
+    cnt += runner_->ProcessInputFile(file_input.first, file_input.second->format().type(), cb);
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 }
 
-void MapperExecutor::MapFiber(detail::TableBase* sb) {
-  VLOG(1) << "Starting MapFiber";
+void MapperExecutor::MapFiber(detail::TableBase* tb) {
+  VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
 
   auto& record_q = per_io_->record_q;
   string record;
   uint64_t record_num = 0;
 
-  std::unique_ptr<detail::HandlerWrapperBase> handler{sb->CreateHandler(per_io_->do_context.get())};
+  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(per_io_->do_context.get())};
   CHECK_EQ(1, handler->Size());
 
   RawSinkCb cb = handler->Get(0);

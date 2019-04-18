@@ -43,6 +43,7 @@ class Pipeline {
   PTable<Out> Join(const std::string& name,
                    std::initializer_list<detail::HandlerBinding<JoinerType, Out>> args);
 
+  pb::Input* mutable_input(const std::string&);
  private:
   const InputBase* CheckedInput(const std::string& name) const;
 

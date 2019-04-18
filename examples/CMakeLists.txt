@@ -23,3 +23,6 @@ cxx_link(mr_demo fiber_file base asio_fiber_lib)
 add_executable(mr3 mr3.cc)
 cxx_link(mr3 fiber_file asio_fiber_lib mr3_lib absl_hash absl_str_format http_v2)
 
+
+add_executable(gsod_group gsod_group.cc)
+cxx_link(gsod_group mr3_lib absl_hash absl_str_format http_v2)
