@@ -61,6 +61,11 @@ class GsodMapper {
   }
 };
 
+class GsodJoiner {
+ public:
+  void Group(GsodRecord record, mr3::DoContext<GsodRecord>* context) {}
+};
+
 int main(int argc, char** argv) {
   PipelineMain pm(&argc, &argv);
 
@@ -72,20 +77,26 @@ int main(int argc, char** argv) {
 
   LocalRunner runner(file_util::ExpandPath(FLAGS_dest_dir));
 
-  Pipeline& p = *pm.pipeline();
+  Pipeline& pipeline = *pm.pipeline();
   pm.accept_server()->TriggerOnBreakSignal([&] {
-    p.Stop();
+    pipeline.Stop();
     runner.Stop();
   });
 
-  StringTable ss = p.ReadText("gsod", inputs);
-  p.mutable_input("gsod")->set_skip_header(1);
+  StringTable ss = pipeline.ReadText("gsod", inputs);
+  pipeline.mutable_input("gsod")->set_skip_header(1);
   PTable<GsodRecord> records = ss.Map<GsodMapper>("MapToGsod");
   records.Write("gsod_map", pb::WireFormat::TXT)
       .WithModNSharding(10, [](const GsodRecord& r) { return r.year; })
       .AndCompress(pb::Output::GZIP);
 
-  p.Run(&runner);
+  PTable<GsodRecord> joined =
+      pipeline.Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
+  joined.Write("joined_table", pb::WireFormat::TXT)
+      .WithModNSharding(10, [](const GsodRecord& r) { return r.year; })
+      .AndCompress(pb::Output::GZIP);
+
+  pipeline.Run(&runner);
   LOG(INFO) << "After pipeline run";
 
   return 0;

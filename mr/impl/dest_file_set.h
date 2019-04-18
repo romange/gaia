@@ -7,14 +7,13 @@
 #include "mr/mr3.pb.h"
 
 #include "file/file.h"
+#include "mr/mr_types.h"
 #include "strings/unique_strings.h"
 #include "util/fibers/fiberqueue_threadpool.h"
-#include "util/fibers/fibers_ext.h"
-#include "util/sinksource.h"
 #include "util/zlib_source.h"
 
 namespace mr3 {
-namespace impl {
+namespace detail {
 
 class DestHandle;
 
@@ -22,23 +21,25 @@ class DestFileSet {
   const std::string root_dir_;
 
   util::fibers_ext::FiberQueueThreadPool* fq_;
-  typedef google::dense_hash_map<StringPiece, DestHandle*> HandleMap;
-
-  HandleMap dest_files_;
   UniqueStrings str_db_;
   ::boost::fibers::mutex mu_;
 
  public:
-  using Result = std::pair<StringPiece, DestHandle*>;
+  using Result = DestHandle*;
 
   DestFileSet(const std::string& root_dir, util::fibers_ext::FiberQueueThreadPool* fq);
   ~DestFileSet();
 
   void Flush();
 
-  Result Get(StringPiece key, const pb::Output& out);
+  Result Get(const ShardId& key, const pb::Output& out);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
+
+  void GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const;
+ private:
+  typedef google::dense_hash_map<ShardId, DestHandle*> HandleMap;
+  HandleMap dest_files_;
 };
 
 class DestHandle {
@@ -51,15 +52,17 @@ class DestHandle {
 
   friend class DestFileSet;
 
-  DestHandle(::file::WriteFile* wf, unsigned index, util::fibers_ext::FiberQueueThreadPool* fq);
+  DestHandle(StringPiece path, ::file::WriteFile* wf, util::fibers_ext::FiberQueueThreadPool* fq);
   DestHandle(const DestHandle&) = delete;
 
  public:
   void Write(std::string str);
+  StringPiece path() const { return full_path_; }
 
  private:
+  StringPiece full_path_;
   boost::fibers::mutex zmu_;
 };
 
-}  // namespace impl
+}  // namespace detail
 }  // namespace mr3

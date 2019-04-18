@@ -36,3 +36,11 @@ struct ShardId : public absl::variant<uint32_t, std::string> {
 }  // namespace mr3
 
 std::ostream& operator<<(std::ostream& os, const mr3::ShardId& sid);
+
+namespace std {
+
+template <> struct hash<mr3::ShardId> {
+  size_t operator()(const mr3::ShardId& sid) const { return hash<mr3::ShardId::Parent>{}(sid); }
+};
+
+}  // namespace std

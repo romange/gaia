@@ -25,12 +25,12 @@ DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
 using namespace util;
 using namespace boost;
 using namespace std;
-using impl::DestFileSet;
-
+using detail::DestFileSet;
+using detail::DestHandle;
 namespace {
 
 class BufferedWriter {
-  impl::DestHandle* dh_;
+  DestHandle* dh_;
   std::string buffer_;
 
   size_t writes = 0, flushes = 0;
@@ -39,7 +39,7 @@ class BufferedWriter {
   void operator=(const BufferedWriter&) = delete;
 
  public:
-  explicit BufferedWriter(impl::DestHandle* dh) : dh_(dh) {}
+  explicit BufferedWriter(DestHandle* dh) : dh_(dh) {}
 
   BufferedWriter(const BufferedWriter&) = delete;
   ~BufferedWriter();
@@ -59,11 +59,9 @@ class LocalContext : public RawContext {
  private:
   void WriteInternal(const ShardId& shard_id, std::string&& record) final;
 
-  google::dense_hash_map<StringPiece, BufferedWriter*> custom_shard_files_;
-
+  google::dense_hash_map<ShardId, BufferedWriter*> custom_shard_files_;
   const pb::Output& output_;
   DestFileSet* mgr_;
-  std::string tmp_shard_name_;
 };
 
 BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
@@ -88,28 +86,14 @@ void BufferedWriter::Write(StringPiece src) {
 }
 
 LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(out), mgr_(mgr) {
-  custom_shard_files_.set_empty_key(StringPiece{});
+  custom_shard_files_.set_empty_key(ShardId{kuint32max});
 }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
-  const string* shard_name = nullptr;
-  if (absl::holds_alternative<string>(shard_id)) {
-    shard_name = &absl::get<string>(shard_id);
-  } else {
-    CHECK(absl::holds_alternative<uint32_t>(shard_id));
-    tmp_shard_name_.clear();
-    uint32_t index = absl::get<uint32_t>(shard_id);
-    absl::StrAppendFormat(&tmp_shard_name_, "shard-%04d", index);
-    shard_name = &tmp_shard_name_;
-  }
-
-
-  auto it = custom_shard_files_.find(*shard_name);
+  auto it = custom_shard_files_.find(shard_id);
   if (it == custom_shard_files_.end()) {
-    auto res = mgr_->Get(*shard_name, output_);
-    StringPiece key = res.first;
-
-    it = custom_shard_files_.emplace(key, new BufferedWriter{res.second}).first;
+    DestHandle* res = mgr_->Get(shard_id, output_);
+    it = custom_shard_files_.emplace(shard_id, new BufferedWriter{res}).first;
   }
   record.append("\n");
   it->second->Write(record);
@@ -189,8 +173,11 @@ RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
-  // TODO: to return files.
   impl_->dest_mgr->Flush();
+
+  impl_->dest_mgr->GatherAll([out_files](const ShardId& sid, DestHandle* dh) {
+    out_files->emplace(sid, dh->path());
+  });
   impl_->dest_mgr.reset();
 }
 

@@ -81,11 +81,3 @@ Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned le
 }
 
 }  // namespace mr3
-
-namespace std {
-
-template <> struct hash<mr3::ShardId> {
-  size_t operator()(const mr3::ShardId& sid) const { return hash<mr3::ShardId::Parent>{}(sid); }
-};
-
-}  // namespace std
