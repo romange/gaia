@@ -46,6 +46,8 @@ class HandlerWrapperBase {
 
   size_t Size() const { return raw_fn_.size(); }
 
+  virtual void SetOutputShard(ShardId sid) = 0;
+
  protected:
   template <typename F> void AddFn(F&& f) { raw_fn_.emplace_back(std::forward<F>(f)); }
 
@@ -70,6 +72,8 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
  public:
   HandlerWrapper(const Output<ToType>& out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
 
+  void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
+
   template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
     AddFn([this, ptr, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
       ParseAndDo(&h_, &rt, &do_ctx_, ptr, std::move(rr));
@@ -92,6 +96,8 @@ template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
       }
     });
   }
+
+  void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
 };
 
 class TableBase {

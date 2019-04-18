@@ -104,7 +104,8 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   pool_->AwaitOnAll([&](IoContext&) {
     parse_errs.fetch_add(per_io_->do_context->parse_errors, std::memory_order_relaxed);
   });
-  LOG_IF(WARNING, parse_errs > 0) << tb->op().op_name() << " had " << parse_errs << " errors";
+  LOG_IF(WARNING, parse_errs > 0) << tb->op().op_name() << " had " << parse_errs.load()
+                                  << " errors";
   file_name_q_->close();
 
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.

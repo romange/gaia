@@ -72,6 +72,8 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   runner_->OperatorStart();
 
   for (auto& k_v : shard_inputs) {
+    VLOG(1) << "Pushing shard " << k_v.first;
+
     ShardInput si{k_v.first, std::move(k_v.second)};
     channel_op_status st = input_q_.push(std::move(si));
     CHECK_EQ(channel_op_status::success, st);
@@ -123,6 +125,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
+    handler->SetOutputShard(shard_input.first);
+    VLOG(1) << "Processing shard " << shard_input.first;
 
     for (const IndexedInput& ii : shard_input.second) {
       CHECK_LT(ii.index, handler->Size());

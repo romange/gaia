@@ -5,17 +5,17 @@
 
 #include <string>
 
-#include "mr/output.h"
 #include "mr/mr_types.h"
+#include "mr/output.h"
 
 namespace mr3 {
 
 template <typename T> class DoContext;
 
 namespace detail {
-  template <typename Handler, typename ToType> class HandlerWrapper;
-  template <typename U> class IdentityHandlerWrapper;
-}
+template <typename Handler, typename ToType> class HandlerWrapper;
+template <typename U> class IdentityHandlerWrapper;
+}  // namespace detail
 
 // User facing interfaces
 template <typename Record> struct RecordTraits {
@@ -60,6 +60,7 @@ template <typename T> class DoContext {
 
   // C'tor is private, only the framework can create this object.
   DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
+
  public:
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);
@@ -68,6 +69,8 @@ template <typename T> class DoContext {
   }
 
   RawContext* raw_context() { return context_; }
+
+  void SetConstantShard(ShardId sid) { out_.SetConstantShard(sid); }
 
  private:
   bool ParseRaw(RawRecord&& rr, T* res) { return context_->ParseInto(std::move(rr), &rt_, res); }

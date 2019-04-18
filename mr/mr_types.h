@@ -34,3 +34,5 @@ struct ShardId : public absl::variant<uint32_t, std::string> {
 };
 
 }  // namespace mr3
+
+std::ostream& operator<<(std::ostream& os, const mr3::ShardId& sid);

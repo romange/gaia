@@ -53,23 +53,23 @@ class MrTest : public testing::Test {
 
   auto MatchShard(const string& sh_name, const vector<string>& elems) {
     // matcher references the array, so we must to store it in case we pass a temporary rvalue.
-    tmp_.push_back(elems);
+    tmp_.emplace_back(new vector<string>{elems});
 
-    return Pair(ShardId{sh_name}, UnorderedElementsAreArray(tmp_.back()));
+    return Pair(ShardId{sh_name}, UnorderedElementsAreArray(*tmp_.back()));
   }
 
   auto MatchShard(unsigned index, const vector<string>& elems) {
     // matcher references the array, so we must to store it in case we pass a temporary rvalue.
-    tmp_.push_back(elems);
+    tmp_.emplace_back(new vector<string>{elems});
 
-    return Pair(ShardId{index}, UnorderedElementsAreArray(tmp_.back()));
+    return Pair(ShardId{index}, UnorderedElementsAreArray(*tmp_.back()));
   }
 
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<Pipeline> pipeline_;
   TestRunner runner_;
 
-  vector<vector<string>> tmp_;
+  vector<std::unique_ptr<vector<string>>> tmp_;
 };
 
 TEST_F(MrTest, Basic) {
@@ -228,7 +228,8 @@ TEST_F(MrTest, Join) {
 
   pipeline_->Run(&runner_);
   vector<string> expected({"101", "102", "103", "104", "202", "203"});
-  EXPECT_THAT(runner_.Table("joinw"), ElementsAre(MatchShard(0, expected)));
+  EXPECT_THAT(runner_.Table("joinw"), UnorderedElementsAre(MatchShard(1, {"101"}),
+    MatchShard(2, {"102", "202"}), MatchShard(3, {"103", "203"}), MatchShard(4, {"104"})));
 }
 
 }  // namespace mr3

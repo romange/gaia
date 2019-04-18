@@ -36,13 +36,18 @@ void PrintTo(const ShardId& src, std::ostream* os);
 
 using ShardedOutput = std::unordered_map<ShardId, std::vector<std::string>>;
 
+struct OutputShardSet {
+  ShardedOutput s_out;
+  bool is_finished = false;
+  ::boost::fibers::mutex mu;
+};
+
 
 class TestContext : public RawContext {
-  ShardedOutput& outp_;
-  ::boost::fibers::mutex& mu_;
+  OutputShardSet& outp_ss_;
 
  public:
-  TestContext(ShardedOutput* outp, ::boost::fibers::mutex* mu) : outp_(*outp), mu_(*mu) {}
+  TestContext(OutputShardSet* outp) : outp_ss_(*outp) {}
 
   void WriteInternal(const ShardId& shard_id, std::string&& record);
 };
@@ -73,10 +78,8 @@ class TestRunner : public Runner {
 
  private:
   absl::flat_hash_map<std::string, std::vector<std::string>> input_fs_;
-  absl::flat_hash_map<std::string, ShardedOutput> out_fs_;
+  absl::flat_hash_map<std::string, std::unique_ptr<OutputShardSet>> out_fs_;
   std::string last_out_name_;
-
-  ::boost::fibers::mutex mu_;
 };
 
 }  // namespace mr3

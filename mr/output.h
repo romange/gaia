@@ -69,9 +69,7 @@ template <typename T> class Output : public OutputBase {
     return absl::get<ShardId>(shard_op_);
   }
 
-  void SetConstanShard(ShardId sid) {
-    shard_op_ = sid;
-  }
+  void SetConstantShard(ShardId sid) { shard_op_ = sid; }
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 };

@@ -12,8 +12,9 @@
 
 #include "base/logging.h"
 
-namespace mr3 {
 using namespace std;
+
+namespace mr3 {
 namespace rj = rapidjson;
 
 RawContext::~RawContext() {}
@@ -63,11 +64,9 @@ HandlerWrapperBase* TableBase::CreateHandler(RawContext* context) {
   return handler_factory_(context);
 }
 
-void TableBase::CheckFailIdentity() {
-  CHECK(defined() && is_identity_);
-}
+void TableBase::CheckFailIdentity() { CHECK(defined() && is_identity_); }
 
-}
+}  // namespace detail
 
 std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
@@ -114,3 +113,12 @@ bool RecordTraits<rj::Document>::Parse(std::string&& tmp, rj::Document* res) {
 }
 
 }  // namespace mr3
+
+ostream& operator<<(ostream& os, const mr3::ShardId& sid) {
+  if (absl::holds_alternative<string>(sid)) {
+    os << absl::get<string>(sid);
+  } else {
+    os << absl::get<uint32_t>(sid);
+  }
+  return os;
+}
