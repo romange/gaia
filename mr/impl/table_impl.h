@@ -42,7 +42,6 @@ class HandlerWrapperBase {
  public:
   virtual ~HandlerWrapperBase() {}
 
-  void Do(size_t index, RawRecord&& s) { raw_fn_[index](std::move(s)); }
   RawSinkCb Get(size_t index) const { return raw_fn_[index]; }
 
   size_t Size() const { return raw_fn_.size(); }

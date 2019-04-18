@@ -33,8 +33,10 @@ template <typename T> class Output : public OutputBase {
   friend class detail::TableImpl<T>;  // To allow the instantiation of Output<T>;
 
   // TODO: to make it variant.
-  std::function<std::string(const T&)> shard_op_;
-  std::function<unsigned(const T&)> modn_op_;
+  using CustomShardingFunc = std::function<std::string(const T&)>;
+  using ModNShardingFunc = std::function<unsigned(const T&)>;
+
+  absl::variant<ShardId, ModNShardingFunc, CustomShardingFunc> shard_op_;
 
  public:
   Output() : OutputBase(nullptr) {}
@@ -49,7 +51,7 @@ template <typename T> class Output : public OutputBase {
 
   template <typename U> Output& WithModNSharding(unsigned modn, U&& func) {
     static_assert(base::is_invocable_r<unsigned, U, const T&>::value, "");
-    modn_op_ = std::forward<U>(func);
+    shard_op_ = std::forward<U>(func);
     SetShardSpec(pb::ShardSpec::MODN, modn);
 
     return *this;
@@ -58,14 +60,18 @@ template <typename T> class Output : public OutputBase {
   Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
 
   ShardId Shard(const T& t) const {
-    if (shard_op_)
-      return shard_op_(t);
-    else if (modn_op_)
-      return modn_op_(t) % out_->shard_spec().modn();
+    if (absl::holds_alternative<ModNShardingFunc>(shard_op_))
+      return absl::get<ModNShardingFunc>(shard_op_)(t) %  out_->shard_spec().modn();
 
-    return ShardId{0};
+    if (absl::holds_alternative<CustomShardingFunc>(shard_op_))
+      return absl::get<CustomShardingFunc>(shard_op_)(t);
+
+    return absl::get<ShardId>(shard_op_);
   }
 
+  void SetConstanShard(ShardId sid) {
+    shard_op_ = sid;
+  }
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 };
