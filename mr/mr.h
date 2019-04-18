@@ -63,6 +63,8 @@ template <typename OutT> class PTable {
   using TableImpl = detail::TableImpl<OutT>;
   friend class Pipeline;
 
+  // apparently template classes of different type can not access own private members.
+  template <typename T> friend class PTable;
  public:
   PTable() {}
   PTable(PTable&&) = default;
@@ -90,15 +92,6 @@ template <typename OutT> class PTable {
 
   // Dangerous convenience method. Consider remove it.
   explicit PTable(detail::TableBase* tb) : PTable{TableImpl::AsIdentity(tb)} {}
-
-  template <typename JoinerType>
-  static PTable<OutT> AsJoin(detail::TableBase* ptr,
-                             std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
-    return PTable{TableImpl::template AsJoin<JoinerType>(ptr, std::move(factories))};
-  }
-
-  // apparently PTable of different type can not access this members.
-  template <typename T> friend class PTable;
 
   std::unique_ptr<TableImpl> impl_;
 };

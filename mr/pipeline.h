@@ -72,7 +72,8 @@ PTable<OutT> Pipeline::Join(const std::string& name,
     factories.push_back(a.factory());
   }
 
-  return PTable<OutT>::template AsJoin<JoinerType>(ptr, std::move(factories));
+  auto* res = detail::TableImpl<OutT>::template AsJoin<JoinerType>(ptr, std::move(factories));
+  return PTable<OutT>{res};
 }
 
 }  // namespace mr3
