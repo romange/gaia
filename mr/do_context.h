@@ -77,12 +77,4 @@ template <typename T> class DoContext {
   RecordTraits<T> rt_;
 };
 
-template <> class RecordTraits<rapidjson::Document> {
-  std::string tmp_;
-
- public:
-  static std::string Serialize(rapidjson::Document&& doc);
-  bool Parse(std::string&& tmp, rapidjson::Document* res);
-};
-
 }  // namespace mr3

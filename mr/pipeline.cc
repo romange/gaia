@@ -35,7 +35,7 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
   detail::TableBase* ptr = CreateTableImpl(name);
   ptr->mutable_op()->add_input_name(name);
 
-  return StringTable{PTable<string>::AsIdentity(ptr)};
+  return StringTable(ptr);
 }
 
 void Pipeline::Stop() {

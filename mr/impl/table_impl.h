@@ -3,7 +3,6 @@
 //
 #pragma once
 
-#include <boost/intrusive_ptr.hpp>
 #include <functional>
 
 #include "base/type_traits.h"
@@ -102,23 +101,8 @@ class TableBase {
 
   TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
 
-  pb::Operator GetDependeeOp() const;
-
   const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
-
-  /*friend void intrusive_ptr_add_ref(TableBase* tbl) noexcept {
-    tbl->use_count_.fetch_add(1, std::memory_order_relaxed);
-  }
-
-  friend void intrusive_ptr_release(TableBase* tbl) noexcept {
-    if (1 == tbl->use_count_.fetch_sub(1, std::memory_order_release)) {
-      // See connection_handler.h {intrusive_ptr_release} implementation
-      // for memory barriers explanation.
-      std::atomic_thread_fence(std::memory_order_acquire);
-      delete tbl;
-    }
-  }*/
 
   Pipeline* pipeline() const { return pipeline_; }
 
@@ -139,21 +123,24 @@ class TableBase {
   TableBase* Clone() { return new TableBase(op_, pipeline_); }
   HandlerWrapperBase* CreateHandler(RawContext* context);
 
+  TableBase* MappedTableFromMe(const std::string& name) const;
   void CheckFailIdentity();
- private:
-  bool is_identity() const { return is_identity_; }
-  bool defined() const { return bool(handler_factory_); }
 
+ private:
   TableBase(const TableBase&) = delete;
   void operator=(const TableBase&) = delete;
 
+  pb::Operator GetDependeeOp() const;
+
+  bool is_identity() const { return is_identity_; }
+  bool defined() const { return bool(handler_factory_); }
+
   pb::Operator op_;
   Pipeline* pipeline_;
-  // std::atomic<std::uint32_t> use_count_{0};
+
   std::function<HandlerWrapperBase*(RawContext* context)> handler_factory_;
   bool is_identity_ = true;
 };
-
 
 template <typename Handler, typename ToType> class HandlerBinding {
   HandlerBinding(const TableBase* from) : tbase_(from) {}
@@ -166,7 +153,7 @@ template <typename Handler, typename ToType> class HandlerBinding {
     HandlerBinding<Handler, ToType> res(from);
     res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
       return [=, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
-        detail::ParseAndDo(handler, &rt, context, ptr, std::move(rr));
+        ParseAndDo(handler, &rt, context, ptr, std::move(rr));
       };
     };
     return res;
@@ -180,6 +167,70 @@ template <typename Handler, typename ToType> class HandlerBinding {
   RawSinkMethodFactory<Handler, ToType> setup_func_;
 };
 
+// I need this class because I bind TableBase functions to output object contained in the class.
+// Therefore TableBase and Output must be moved together.
+template <typename OutT> class TableImpl {
+  // apparently classes of different types can not access own members.
+  template <typename T> friend class TableImpl;
+
+ public:
+  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
+    table_->SetOutput(name, type);
+    output_ = Output<OutT>{table_->mutable_op()->mutable_output()};
+    return output_;
+  }
+
+  // Identity Factory
+  static TableImpl<OutT>* AsIdentity(TableBase* tb) {
+    TableImpl* res = new TableImpl(tb);
+    tb->SetIdentity(&res->output_);
+    return res;
+  }
+
+  // Map factory
+  template <typename MapType, typename FromType>
+  static TableImpl<OutT>* AsMapFrom(const std::string& name, const TableImpl<FromType>* ptr) {
+    TableBase* new_tb = ptr->table_->MappedTableFromMe(name);
+    TableImpl* res = new TableImpl(new_tb);
+    new_tb->SetHandlerFactory([res](RawContext* raw_ctxt) {
+      auto* ptr = new HandlerWrapper<MapType, OutT>(res->output_, raw_ctxt);
+      ptr->template Add<FromType>(&MapType::Do);
+      return ptr;
+    });
+
+    return res;
+  }
+
+  template <typename U> TableImpl<U>* As() const {
+    table_->CheckFailIdentity();
+    return TableImpl<U>::AsIdentity(table_->Clone());
+  }
+
+  template <typename Handler, typename ToType, typename U>
+  HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
+    return HandlerBinding<Handler, ToType>::template Create<OutT>(table_.get(), ptr);
+  }
+
+  template <typename JoinerType>
+  static TableImpl<OutT>* AsJoin(TableBase* ptr,
+                                 std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
+    TableImpl* res = new TableImpl(ptr);
+    ptr->SetHandlerFactory([res, factories = std::move(factories)](RawContext* raw_ctxt) {
+      auto* ptr = new HandlerWrapper<JoinerType, OutT>(res->output_, raw_ctxt);
+      for (const auto& m : factories) {
+        ptr->AddFromFactory(m);
+      }
+      return ptr;
+    });
+    return res;
+  }
+
+ private:
+  TableImpl(TableBase* tb) : table_(tb) {}
+
+  Output<OutT> output_;
+  std::unique_ptr<TableBase> table_;
+};
 
 }  // namespace detail
 }  // namespace mr3

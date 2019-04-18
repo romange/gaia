@@ -18,7 +18,9 @@ namespace rj = rapidjson;
 
 RawContext::~RawContext() {}
 
-void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
+namespace detail {
+
+void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(!name.empty());
 
   if (!op_.has_output()) {
@@ -34,7 +36,15 @@ void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type 
   CHECK(res.second) << "Input '" << name << "' already exists";
 }
 
-pb::Operator detail::TableBase::GetDependeeOp() const {
+TableBase* TableBase::MappedTableFromMe(const string& name) const {
+  pb::Operator new_op = GetDependeeOp();
+  new_op.set_op_name(name);
+  new_op.set_type(pb::Operator::MAP);
+
+  return new TableBase(std::move(new_op), pipeline());
+}
+
+pb::Operator TableBase::GetDependeeOp() const {
   pb::Operator res;
 
   if (!is_identity_) {
@@ -47,14 +57,16 @@ pb::Operator detail::TableBase::GetDependeeOp() const {
   return res;
 }
 
-detail::HandlerWrapperBase* detail::TableBase::CreateHandler(RawContext* context) {
+HandlerWrapperBase* TableBase::CreateHandler(RawContext* context) {
   CHECK(defined());
 
   return handler_factory_(context);
 }
 
-void detail::TableBase::CheckFailIdentity() {
+void TableBase::CheckFailIdentity() {
   CHECK(defined() && is_identity_);
+}
+
 }
 
 std::string ShardId::ToString(absl::string_view basename) const {

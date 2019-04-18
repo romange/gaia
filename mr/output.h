@@ -11,7 +11,9 @@
 
 namespace mr3 {
 
-template <typename T> class PTable;
+namespace detail {
+  template <typename OutT> class TableImpl;
+}
 
 class OutputBase {
  public:
@@ -28,7 +30,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class PTable<T>;  // To allow the instantiation of Output<T>;
+  friend class detail::TableImpl<T>;  // To allow the instantiation of Output<T>;
 
   // TODO: to make it variant.
   std::function<std::string(const T&)> shard_op_;
