@@ -34,10 +34,10 @@ void detail::TableBase::SetOutput(const std::string& name, pb::WireFormat::Type 
   CHECK(res.second) << "Input '" << name << "' already exists";
 }
 
-pb::Operator detail::TableBase::CreateLink(bool from_output) const {
+pb::Operator detail::TableBase::GetDependeeOp() const {
   pb::Operator res;
 
-  if (from_output) {
+  if (!is_identity_) {
     CHECK(!op_.output().name().empty());
     res.add_input_name(op_.output().name());
   } else {

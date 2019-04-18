@@ -65,7 +65,7 @@ template <typename T> class Output : public OutputBase {
 
   Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
 
-  ShardId Shard(const T& t) {
+  ShardId Shard(const T& t) const {
     if (shard_op_)
       return shard_op_(t);
     else if (modn_op_)

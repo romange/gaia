@@ -118,13 +118,23 @@ template <typename T> class DoContext {
 };
 
 template <typename OutT> class PTable {
-  Output<OutT> out_;
+  struct Impl {
+    Output<OutT> output;
+    std::unique_ptr<detail::TableBase> table;
+
+    Impl(detail::TableBase* tb) : table(tb) {}
+  };
 
  public:
+  PTable() {}
+  PTable(PTable&&) = default;
+
+  ~PTable() {}
+
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
-    impl_->SetOutput(name, type);
-    out_ = Output<OutT>{impl_->mutable_op()->mutable_output()};
-    return out_;
+    impl_->table->SetOutput(name, type);
+    impl_->output = Output<OutT>{impl_->table->mutable_op()->mutable_output()};
+    return impl_->output;
   }
 
   template <typename MapType>
@@ -132,12 +142,12 @@ template <typename OutT> class PTable {
 
   template <typename Handler, typename ToType, typename U>
   detail::HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
-    return detail::HandlerBinding<Handler, ToType>::template Create<OutT>(impl_.get(), ptr);
+    return detail::HandlerBinding<Handler, ToType>::template Create<OutT>(impl_->table.get(), ptr);
   }
 
   template <typename U> PTable<U> As() const {
-    impl_->CheckFailIdentity();
-    return PTable<U>::AsIdentity(impl_->Clone());
+    impl_->table->CheckFailIdentity();
+    return PTable<U>::AsIdentity(impl_->table->Clone());
   }
 
   PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
@@ -149,18 +159,18 @@ template <typename OutT> class PTable {
   template <typename T> friend class PTable;
   using TableImpl = detail::TableBase;
 
-  PTable(TableImpl* ptr) : impl_(ptr) {}
+  PTable(TableImpl* ptr) : impl_(new Impl{ptr}) {}
 
   static PTable<OutT> AsIdentity(TableImpl* ptr) {
     PTable<OutT> res(ptr);
-    res.impl_->SetIdentity(&res.out_);
+    res.impl_->table->SetIdentity(&res.impl_->output);
     return res;
   }
 
   // Map c'tor
   template <typename FromType, typename MapType> static PTable<OutT> AsMap(TableImpl* ptr) {
     PTable<OutT> res(ptr);
-    ptr->SetHandlerFactory([o = &res.out_](RawContext* raw_ctxt) {
+    ptr->SetHandlerFactory([o = &res.impl_->output](RawContext* raw_ctxt) {
       auto* ptr = new detail::HandlerWrapper<MapType, OutT>(*o, raw_ctxt);
       ptr->template Add<FromType>(&MapType::Do);
       return ptr;
@@ -169,7 +179,7 @@ template <typename OutT> class PTable {
     return res;
   }
 
-  std::unique_ptr<detail::TableBase> impl_;
+  std::unique_ptr<Impl> impl_;
 
  private:
   template <typename JoinerType>
@@ -190,12 +200,11 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
                 "MapperType::Do() first argument "
                 "should be constructed from PTable element type");
 
-  bool read_from_input = impl_->is_identity();
-  pb::Operator new_op = impl_->CreateLink(!read_from_input);
+  pb::Operator new_op = impl_->table->GetDependeeOp();
   new_op.set_op_name(name);
   new_op.set_type(pb::Operator::MAP);
 
-  detail::TableBase* ptr = new detail::TableBase(std::move(new_op), impl_->pipeline());
+  detail::TableBase* ptr = new detail::TableBase(std::move(new_op), impl_->table->pipeline());
 
   return PTable<NewOutType>::template AsMap<OutT, MapType>(ptr);
 }
@@ -205,13 +214,14 @@ template <typename JoinerType>
 PTable<OutT> PTable<OutT>::AsJoin(TableImpl* ptr,
                                   std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
   PTable<OutT> res(ptr);
-  ptr->SetHandlerFactory([o = &res.out_, factories = std::move(factories)](RawContext* raw_ctxt) {
-    auto* ptr = new detail::HandlerWrapper<JoinerType, OutT>(*o, raw_ctxt);
-    for (const auto& m : factories) {
-      ptr->AddFromFactory(m);
-    }
-    return ptr;
-  });
+  ptr->SetHandlerFactory(
+      [o = &res.impl_->output, factories = std::move(factories)](RawContext* raw_ctxt) {
+        auto* ptr = new detail::HandlerWrapper<JoinerType, OutT>(*o, raw_ctxt);
+        for (const auto& m : factories) {
+          ptr->AddFromFactory(m);
+        }
+        return ptr;
+      });
   return res;
 }
 

@@ -102,7 +102,7 @@ class TableBase {
 
   TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
 
-  pb::Operator CreateLink(bool from_output) const;
+  pb::Operator GetDependeeOp() const;
 
   const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
@@ -129,8 +129,6 @@ class TableBase {
     is_identity_ = false;
   }
 
-  bool is_identity() const { return is_identity_; }
-
   template <typename OutT> void SetIdentity(const Output<OutT>* outp) {
     handler_factory_ = [outp](RawContext* raw_ctxt) {
       return new IdentityHandlerWrapper<OutT>(*outp, raw_ctxt);
@@ -143,6 +141,7 @@ class TableBase {
 
   void CheckFailIdentity();
  private:
+  bool is_identity() const { return is_identity_; }
   bool defined() const { return bool(handler_factory_); }
 
   TableBase(const TableBase&) = delete;
@@ -150,7 +149,7 @@ class TableBase {
 
   pb::Operator op_;
   Pipeline* pipeline_;
-  std::atomic<std::uint32_t> use_count_{0};
+  // std::atomic<std::uint32_t> use_count_{0};
   std::function<HandlerWrapperBase*(RawContext* context)> handler_factory_;
   bool is_identity_ = true;
 };
