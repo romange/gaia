@@ -4,24 +4,14 @@
 
 #pragma once
 
-#include "absl/strings/string_view.h"
-#include "absl/types/variant.h"
 #include "base/type_traits.h"
+
 #include "mr/mr3.pb.h"
+#include "mr/mr_types.h"
 
 namespace mr3 {
 
 template <typename T> class PTable;
-
-struct ShardId : public absl::variant<uint32_t, std::string> {
-  using Parent = absl::variant<uint32_t, std::string>;
-
-  using Parent::Parent;
-
-  ShardId() = default;
-
-  std::string ToString(absl::string_view basename) const;
-};
 
 class OutputBase {
  public:

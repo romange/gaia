@@ -6,8 +6,8 @@
 #include <boost/intrusive_ptr.hpp>
 #include <functional>
 
-#include "mr/mr_types.h"
-#include "mr/output.h"
+#include "base/type_traits.h"
+#include "mr/do_context.h"
 
 namespace mr3 {
 class Pipeline;
