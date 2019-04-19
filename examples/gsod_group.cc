@@ -24,7 +24,7 @@ struct GsodRecord {
   int year;
 };
 
-template <> class RecordTraits<GsodRecord> {
+template <> class mr3::RecordTraits<GsodRecord> {
   std::vector<char*> cols_;
 
  public:

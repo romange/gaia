@@ -3,6 +3,7 @@
 //
 #pragma once
 
+#include <boost/fiber/mutex.hpp>
 #include "mr/mr.h"
 
 #include "absl/container/flat_hash_map.h"
@@ -56,7 +57,8 @@ class Pipeline {
   std::vector<detail::TableBase*> tables_;
 
   ::boost::fibers::mutex mu_;
-  std::unique_ptr<OperatorExecutor> executor_;
+  std::unique_ptr<OperatorExecutor> executor_;  // guarded by mu_
+  std::atomic_bool stopped_{false};
 };
 
 template <typename JoinerType, typename OutT>

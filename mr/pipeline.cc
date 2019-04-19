@@ -39,6 +39,9 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
 }
 
 void Pipeline::Stop() {
+  stopped_ = true;
+  LOG(INFO) << "Breaking the run";
+
   std::lock_guard<fibers::mutex> lk(mu_);
 
   if (executor_)
@@ -56,6 +59,10 @@ void Pipeline::Run(Runner* runner) {
       continue;
     }
 
+    if (stopped_) {
+      break;
+    }
+
     std::unique_lock<fibers::mutex> lk(mu_);
     switch (op.type()) {
       case pb::Operator::HASH_JOIN:
@@ -69,16 +76,17 @@ void Pipeline::Run(Runner* runner) {
     lk.unlock();
 
     std::vector<const InputBase*> inputs;
-
+    string input_names;
     for (const auto& input_name : op.input_name()) {
+      absl::StrAppend(&input_names, input_name, ",");
       inputs.push_back(CheckedInput(input_name));
     }
+    input_names.pop_back();
 
+    LOG(INFO) << op.op_name() << " started on inputs [" << input_names << "]";
     ShardFileMap out_files;
     executor_->Run(inputs, ptr, &out_files);
-
-    VLOG(1) << "Executor finished running on " << op.op_name() << ", wrote to " << out_files.size()
-            << " output files";
+    LOG(INFO) << op.op_name() << " finished run with " << out_files.size() << " output files";
 
     // Fill the corresponsing input with sharded files.
     auto it = inputs_.find(op.output().name());

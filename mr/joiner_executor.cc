@@ -138,6 +138,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
     }
   }
   VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
+  raw_context->Flush();
 }
 
 }  // namespace mr3

@@ -35,6 +35,8 @@ class RawContext {
  public:
   virtual ~RawContext();
 
+  // Flushes pending written data before closing the context. Must be called before destroying
+  // the context.
   virtual void Flush() {}
 
   size_t parse_errors = 0;

@@ -20,8 +20,6 @@
 #include "mr/mr_types.h"
 #include "mr/output.h"
 
-#include "util/fibers/simple_channel.h"
-
 namespace mr3 {
 
 class Pipeline;
@@ -33,7 +31,6 @@ struct MapperTraits : public EmitFuncTraits<decltype(&MapperType::Do)> {};
 
 }  // namespace detail
 
-using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
 
 // Planning interfaces.
 class InputBase {

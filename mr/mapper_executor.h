@@ -8,12 +8,14 @@
 #include <functional>
 
 #include "mr/operator_executor.h"
+#include "util/fibers/simple_channel.h"
 
 namespace mr3 {
 
-class MapperExecutor  : public OperatorExecutor {
+class MapperExecutor : public OperatorExecutor {
   using FileInput = std::pair<std::string, const pb::Input*>;
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
+  using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
 
   struct PerIoStruct;
 
@@ -23,8 +25,8 @@ class MapperExecutor  : public OperatorExecutor {
 
   void Init() final;
 
-  void Run(const std::vector<const InputBase*>& inputs,
-           detail::TableBase* ss, ShardFileMap* out_files) final;
+  void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* ss,
+           ShardFileMap* out_files) final;
 
   // Stops the executor in the middle.
   void Stop() final;
@@ -34,11 +36,13 @@ class MapperExecutor  : public OperatorExecutor {
 
   // Input managing fiber that reads files from disk and pumps data into record_q.
   // One per IO thread.
-  void ProcessInputFiles();
+  void ProcessInputFiles(detail::TableBase* tb);
 
-  void MapFiber(detail::TableBase* sb);
+  static void MapFiber(RecordQueue* record_q, RawSinkCb cb);
 
   std::unique_ptr<FileNameQueue> file_name_q_;
+  std::atomic<uint64_t> parse_errors_{0};
+
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 

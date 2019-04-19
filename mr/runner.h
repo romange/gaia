@@ -5,7 +5,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "mr/mr3.pb.h"
-#include "mr/output.h"
 #include "mr/mr_types.h"
 
 namespace mr3 {

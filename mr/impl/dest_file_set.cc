@@ -82,7 +82,7 @@ auto DestFileSet::Get(const ShardId& sid, const pb::Output& pb_out) -> Result {
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(sid);
   if (it == dest_files_.end()) {
-    string shard_name = sid.ToString("shard");
+    string shard_name = sid.ToString(absl::StrCat(pb_out.name(), "-", "shard"));
     string file_name = FileName(shard_name, pb_out);
     string full_path = file_util::JoinPath(root_dir_, file_name);
     StringPiece fp_sp = str_db_.Get(full_path);

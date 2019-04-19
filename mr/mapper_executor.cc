@@ -22,11 +22,8 @@ using fibers::channel_op_status;
 
 struct MapperExecutor::PerIoStruct {
   unsigned index;
-  ::boost::fibers::fiber map_fd;
-  ::boost::fibers::fiber process_fd[1];
+  ::boost::fibers::fiber process_fd;
 
-  RecordQueue record_q;
-  std::unique_ptr<RawContext> do_context;
   bool stop_early = false;
 
   PerIoStruct(unsigned i);
@@ -34,63 +31,49 @@ struct MapperExecutor::PerIoStruct {
   void Shutdown();
 };
 
-MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i), record_q(256) {}
+MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {}
 
 thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
 void MapperExecutor::PerIoStruct::Shutdown() {
-  for (auto& f : process_fd)
-    f.join();
-
-  // Must follow process_fd because we need first to push all the records to the queue and
-  // then to signal it's closing.
-  record_q.StartClosing();
-
-  if (map_fd.joinable()) {
-    map_fd.join();
-  }
-  do_context->Flush();
+  process_fd.join();
 }
 
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
 
 MapperExecutor::~MapperExecutor() {
-  VLOG(1) << "Executor::~Executor";
   CHECK(!file_name_q_);
 }
 
 void MapperExecutor::Init() { runner_->Init(); }
 
 void MapperExecutor::Stop() {
-  VLOG(1) << "PipelineExecutor StopStart";
+  VLOG(1) << "MapperExecutor Stop[";
 
+  // small race condition at the end, not important since this function called only on SIGTERM
   if (file_name_q_) {
     file_name_q_->close();
     pool_->AwaitOnAll([&](IoContext&) {
-      per_io_->stop_early = true;
+      if (per_io_) {  // "file_name_q_->close();"" might cause per_io be already freed.
+        per_io_->stop_early = true;
+      }
       VLOG(1) << "StopEarly";
     });
   }
-  VLOG(1) << "PipelineExecutor StopEnd";
+  VLOG(1) << "MapperExecutor Stop]";
 }
 
 void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
                          ShardFileMap* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
-
   file_name_q_.reset(new FileNameQueue{16});
   runner_->OperatorStart();
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-
-    for (auto& f : per_io_->process_fd)
-      f = fibers::fiber{&MapperExecutor::ProcessInputFiles, this};
-
-    per_io_->do_context.reset(runner_->CreateContext(tb->op()));
-    per_io_->map_fd = fibers::fiber(&MapperExecutor::MapFiber, this, tb);
+    per_io_->process_fd = fibers::fiber{&MapperExecutor::ProcessInputFiles, this, tb};
   });
 
   for (const auto& input : inputs) {
@@ -100,12 +83,6 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
       break;
   }
 
-  atomic<uint64_t> parse_errs{0};
-  pool_->AwaitOnAll([&](IoContext&) {
-    parse_errs.fetch_add(per_io_->do_context->parse_errors, std::memory_order_relaxed);
-  });
-  LOG_IF(WARNING, parse_errs > 0) << tb->op().op_name() << " had " << parse_errs.load()
-                                  << " errors";
   file_name_q_->close();
 
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.
@@ -113,6 +90,8 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     per_io_->Shutdown();
     per_io_.reset();
   });
+  LOG_IF(WARNING, parse_errors_ > 0)
+      << tb->op().op_name() << " had " << parse_errors_.load() << " errors";
 
   runner_->OperatorEnd(out_files);
   file_name_q_.reset();
@@ -136,10 +115,20 @@ void MapperExecutor::PushInput(const InputBase* input) {
   }
 }
 
-void MapperExecutor::ProcessInputFiles() {
+void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
   PerIoStruct* trd_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
+
+  std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
+  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(raw_context.get())};
+  CHECK_EQ(1, handler->Size());
+
+  RecordQueue record_q(256);
+
+  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler->Get(0));
+
+  VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
 
   while (!trd_local->stop_early) {
     channel_op_status st = file_name_q_->pop(file_input);
@@ -147,49 +136,43 @@ void MapperExecutor::ProcessInputFiles() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    auto cb = [trd_local, skip = file_input.second->skip_header(),
+    auto cb = [&record_q, skip = file_input.second->skip_header(),
                record_num = uint64_t{0}](auto&& s) mutable {
       if (record_num++ < skip)
         return;
-      trd_local->record_q.Push(std::move(s));
+      record_q.Push(std::move(s));
     };
 
     cnt += runner_->ProcessInputFile(file_input.first, file_input.second->format().type(), cb);
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
+
+  // Must follow process_fd because we need first to push all the records to the queue and
+  // then to signal it's closing.
+  record_q.StartClosing();
+
+  map_fd.join();
+  raw_context->Flush();
+  parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
 }
 
-void MapperExecutor::MapFiber(detail::TableBase* tb) {
-  VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
-
-  auto& record_q = per_io_->record_q;
+void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
   string record;
   uint64_t record_num = 0;
 
-  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(per_io_->do_context.get())};
-  CHECK_EQ(1, handler->Size());
-
-  RawSinkCb cb = handler->Get(0);
-
   while (true) {
-    bool is_open = record_q.Pop(record);
+    bool is_open = record_q->Pop(record);
     if (!is_open)
       break;
 
     ++record_num;
 
+    // TODO: to pass it as argument to Runner::ProcessInputFile.
     if (FLAGS_map_limit && record_num > FLAGS_map_limit) {
       continue;
     }
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
-
-    // record is a binary input.
-    // TODO: to implement binary to type to binary flow:
-    // out_cntx-Deserialize<T>(record) -> T -> UDF(T) -> (Shard, U) -> Serialize(U)->string.
-    // TODO: we should hold local map for sharded files.
-    // if a new shard is needed, locks and accesses a central repository.
-    // each sharded file is fiber-safe file.
 
     // We should have here Shard/string(out_record).
     cb(std::move(record));
