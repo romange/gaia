@@ -4,7 +4,7 @@
 #ifndef _UTIL_SP_TASK_POOL_H
 #define _UTIL_SP_TASK_POOL_H
 
-#error "Deprecated!"
+// Used by pprint_utils.
 
 #include <atomic>
 #include <memory>

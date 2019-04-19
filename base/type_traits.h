@@ -42,7 +42,6 @@ constexpr auto invoke(F&& f, Args&&... args) noexcept(
 
 #endif
 
-#if 0
 // based on https://functionalcpp.wordpress.com/2013/08/05/function-traits/
 template <typename F> struct DecayedTupleFromParams;
 
@@ -62,7 +61,8 @@ struct DecayedTupleFromParams<R (C::*)(Args...) const> {
 
 template <typename C>
 struct DecayedTupleFromParams : public DecayedTupleFromParams<decltype(&C::operator())> {};
-#endif
+
+
 
 template <typename RType, typename... Args> struct FunctionSig {
   //! arity is the number of arguments.
@@ -128,7 +128,7 @@ template <typename T> struct function_traits<T&&> : function_traits<T> {};
 #define PROPAGATE_POD_FROM_TEMPLATE_ARGUMENT(TemplateName) \
   typedef int Dummy_Type_For_PROPAGATE_POD_FROM_TEMPLATE_ARGUMENT
 
-#if 0
+#if 1
 #define GENERATE_TYPE_MEMBER_WITH_DEFAULT(Type, member, def_type)                \
   template <typename T, typename = void> struct Type { using type = def_type; }; \
                                                                                  \
