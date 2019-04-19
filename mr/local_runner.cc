@@ -86,6 +86,7 @@ void BufferedWriter::Write(StringPiece src) {
 }
 
 LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(out), mgr_(mgr) {
+  CHECK(mgr_);
   custom_shard_files_.set_empty_key(ShardId{kuint32max});
 }
 

@@ -1,6 +1,8 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+// Example MR that processes GSOD weather dataset:
+// https://cloud.google.com/bigquery/public-data/
 
 #include "base/init.h"
 #include "base/logging.h"
@@ -62,8 +64,19 @@ class GsodMapper {
 };
 
 class GsodJoiner {
+  absl::flat_hash_map<unsigned, uint32_t> cnt_;
  public:
-  void Group(GsodRecord record, mr3::DoContext<GsodRecord>* context) {}
+  void Group(GsodRecord record, mr3::DoContext<string>* context) {
+    cnt_[record.year]++;
+  }
+
+  void OnShardFinish(DoContext<string>* cntx) {
+    cntx->Write("year,count");
+    for (const auto& k_v : cnt_) {
+      cntx->Write(absl::StrCat(k_v.first, ",", k_v.second));
+    }
+    cnt_.clear();
+  }
 };
 
 int main(int argc, char** argv) {
@@ -90,10 +103,9 @@ int main(int argc, char** argv) {
       .WithModNSharding(10, [](const GsodRecord& r) { return r.year; })
       .AndCompress(pb::Output::GZIP);
 
-  PTable<GsodRecord> joined =
+  StringTable joined =
       pipeline.Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
   joined.Write("joined_table", pb::WireFormat::TXT)
-      .WithModNSharding(10, [](const GsodRecord& r) { return r.year; })
       .AndCompress(pb::Output::GZIP);
 
   pipeline.Run(&runner);

@@ -52,6 +52,9 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     return;
   CheckInputs(inputs);
 
+  // ProcessInputQ uses runner_ immediately when starts.
+  runner_->OperatorStart();
+
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
 
@@ -66,7 +69,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
       shard_inputs[sid].emplace_back(IndexedInput{i, &fspec, &input.format()});
     }
   }
-  runner_->OperatorStart();
 
   for (auto& k_v : shard_inputs) {
     VLOG(1) << "Pushing shard " << k_v.first;
