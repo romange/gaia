@@ -38,21 +38,34 @@ template <typename Func> struct EmitFuncTraits {
   using OutputType = typename DoCtxResolver<second_arg_t>::OutType;
 };
 
+// int serves as a dummy argument to create overload precedence.
+template <typename Handler, typename ToType>
+base::void_t<decltype(&Handler::OnShardFinish)> FinishCallMaybe(Handler* h, DoContext<ToType>* cntx,
+                                                                int) {
+  h->OnShardFinish(cntx);
+};
+
+// 2nd priority overload when passing 0 intp char.
+template <typename Handler, typename ToType>
+void FinishCallMaybe(Handler* h, DoContext<ToType>* cntx, char){};
+
+
 class HandlerWrapperBase {
  public:
   virtual ~HandlerWrapperBase() {}
 
-  RawSinkCb Get(size_t index) const { return raw_fn_[index]; }
+  RawSinkCb Get(size_t index) const { return raw_fn_vec_[index]; }
 
-  size_t Size() const { return raw_fn_.size(); }
+  size_t Size() const { return raw_fn_vec_.size(); }
 
   virtual void SetOutputShard(ShardId sid) = 0;
+  virtual void OnShardFinish() {}
 
  protected:
-  template <typename F> void AddFn(F&& f) { raw_fn_.emplace_back(std::forward<F>(f)); }
+  template <typename F> void AddFn(F&& f) { raw_fn_vec_.emplace_back(std::forward<F>(f)); }
 
  private:
-  std::vector<RawSinkCb> raw_fn_;
+  std::vector<RawSinkCb> raw_fn_vec_;
 };
 
 template <typename Handler, typename FromType, typename ToType, typename U>
@@ -73,6 +86,9 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   HandlerWrapper(const Output<ToType>& out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
 
   void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
+
+  // We pass 0 into 3rd argument so compiler will prefer 'int' resolution if possible.
+  void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
 
   template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
     AddFn([this, ptr, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {

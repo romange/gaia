@@ -36,10 +36,7 @@ struct JoinerExecutor::PerIoStruct {
 
 thread_local std::unique_ptr<JoinerExecutor::PerIoStruct> JoinerExecutor::per_io_;
 
-
-void JoinerExecutor::PerIoStruct::Shutdown() {
-  process_fd.join();
-}
+void JoinerExecutor::PerIoStruct::Shutdown() { process_fd.join(); }
 
 JoinerExecutor::JoinerExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
@@ -117,7 +114,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   uint64_t cnt = 0;
 
   std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
-  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(raw_context.get())};
+  std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context.get())};
 
   while (true) {
     channel_op_status st = input_q_.pop(shard_input);
@@ -125,17 +122,16 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    handler->SetOutputShard(shard_input.first);
+    handler_wrapper->SetOutputShard(shard_input.first);
     VLOG(1) << "Processing shard " << shard_input.first;
 
     for (const IndexedInput& ii : shard_input.second) {
-      CHECK_LT(ii.index, handler->Size());
-      auto emit_cb = handler->Get(ii.index);
+      CHECK_LT(ii.index, handler_wrapper->Size());
+      auto emit_cb = handler_wrapper->Get(ii.index);
 
-      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(),
-        emit_cb);
-      // TODO: Mark end of input
+      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
     }
+    handler_wrapper->OnShardFinish();
   }
   VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
   raw_context->Flush();

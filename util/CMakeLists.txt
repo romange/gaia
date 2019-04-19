@@ -11,10 +11,10 @@ add_library(pb2json pb2json.cc)
 cxx_link(pb2json strings status TRDP::protobuf absl_variant)
 add_dependencies(pb2json rapidjson_project)
 
-add_library(threads sp_task_pool.cc)
-cxx_link(threads base)
+# add_library(threads sp_task_pool.cc)
+# cxx_link(threads base)
 
-cxx_test(sp_task_pool_test base threads util LABELS CI)
+# cxx_test(sp_task_pool_test base threads util LABELS CI)
 
 add_library(proc_stats proc_stats.cc spawn.cc)
 cxx_link(proc_stats strings)

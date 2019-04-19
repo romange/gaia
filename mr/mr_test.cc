@@ -196,11 +196,18 @@ class StrJoiner {
 
  public:
   void On1(IntVal&& iv, DoContext<string>* out) {
-    out->Write(std::to_string(100 + iv.val));
+    counts_[iv.val]++;
   }
 
   void On2(IntVal&& iv, DoContext<string>* out) {
-    out->Write(std::to_string(200 + iv.val));
+    counts_[iv.val]+=10;
+  }
+
+  void OnShardFinish(DoContext<string>* cntx) {
+    for (const auto& k_v : counts_) {
+      cntx->Write(absl::StrCat(k_v.first, ":", k_v.second));
+    }
+    counts_.clear();
   }
 };
 
@@ -212,11 +219,11 @@ TEST_F(MrTest, Join) {
 
   PTable<IntVal> itable1 = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
   PTable<IntVal> itable2 = pipeline_->ReadText("read2", "stream2.txt").As<IntVal>();
-  itable1.Write("ss1", pb::WireFormat::TXT).WithModNSharding(5, [](const IntVal& iv) {
+  itable1.Write("ss1", pb::WireFormat::TXT).WithModNSharding(3, [](const IntVal& iv) {
     return iv.val;
   });
 
-  itable2.Write("ss2", pb::WireFormat::TXT).WithModNSharding(5, [](const IntVal& iv) {
+  itable2.Write("ss2", pb::WireFormat::TXT).WithModNSharding(3, [](const IntVal& iv) {
     return iv.val;
   });
 
@@ -227,9 +234,8 @@ TEST_F(MrTest, Join) {
   res.Write("joinw", pb::WireFormat::TXT);
 
   pipeline_->Run(&runner_);
-  vector<string> expected({"101", "102", "103", "104", "202", "203"});
-  EXPECT_THAT(runner_.Table("joinw"), UnorderedElementsAre(MatchShard(1, {"101"}),
-    MatchShard(2, {"102", "202"}), MatchShard(3, {"103", "203"}), MatchShard(4, {"104"})));
+  EXPECT_THAT(runner_.Table("joinw"), UnorderedElementsAre(MatchShard(0, {"3:11"}),
+    MatchShard(1, {"1:1", "4:1"}), MatchShard(2, {"2:11"})));
 }
 
 }  // namespace mr3

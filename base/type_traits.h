@@ -2,8 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#ifndef BEERI_BASE_TYPE_TRAITS_H_
-#define BEERI_BASE_TYPE_TRAITS_H_
+#pragma once
 
 #include <functional>
 #include <type_traits>
@@ -43,6 +42,7 @@ constexpr auto invoke(F&& f, Args&&... args) noexcept(
 
 #endif
 
+#if 0
 // based on https://functionalcpp.wordpress.com/2013/08/05/function-traits/
 template <typename F> struct DecayedTupleFromParams;
 
@@ -62,8 +62,9 @@ struct DecayedTupleFromParams<R (C::*)(Args...) const> {
 
 template <typename C>
 struct DecayedTupleFromParams : public DecayedTupleFromParams<decltype(&C::operator())> {};
+#endif
 
-template <typename RType, typename... Args> struct ReturnArgs {
+template <typename RType, typename... Args> struct FunctionSig {
   //! arity is the number of arguments.
   static constexpr size_t arity = sizeof...(Args);
 
@@ -92,7 +93,7 @@ template <typename T> struct function_traits : public function_traits<decltype(&
 
 //! specialize for pointers to const member function
 template <typename C, typename RType, typename... Args>
-struct function_traits<RType (C::*)(Args...) const> : public ReturnArgs<RType, Args...> {
+struct function_traits<RType (C::*)(Args...) const> : public FunctionSig<RType, Args...> {
   using is_const = std::true_type;
   using ClassType = C;
   using is_member = std::true_type;
@@ -100,7 +101,7 @@ struct function_traits<RType (C::*)(Args...) const> : public ReturnArgs<RType, A
 
 //! specialize for pointers to mutable member function
 template <typename C, typename RType, typename... Args>
-struct function_traits<RType (C::*)(Args...)> : public ReturnArgs<RType, Args...> {
+struct function_traits<RType (C::*)(Args...)> : public FunctionSig<RType, Args...> {
   using is_const = std::false_type;
   using ClassType = C;
   using is_member = std::true_type;
@@ -108,7 +109,7 @@ struct function_traits<RType (C::*)(Args...)> : public ReturnArgs<RType, Args...
 
 //! specialize for function pointers
 template <typename RType, typename... Args>
-struct function_traits<RType(Args...)> : public ReturnArgs<RType, Args...> {};
+struct function_traits<RType(Args...)> : public FunctionSig<RType, Args...> {};
 
 template <typename R, typename... Args>
 struct function_traits<R (*)(Args...)> : public function_traits<R(Args...)> {};
@@ -127,6 +128,7 @@ template <typename T> struct function_traits<T&&> : function_traits<T> {};
 #define PROPAGATE_POD_FROM_TEMPLATE_ARGUMENT(TemplateName) \
   typedef int Dummy_Type_For_PROPAGATE_POD_FROM_TEMPLATE_ARGUMENT
 
+#if 0
 #define GENERATE_TYPE_MEMBER_WITH_DEFAULT(Type, member, def_type)                \
   template <typename T, typename = void> struct Type { using type = def_type; }; \
                                                                                  \
@@ -165,4 +167,4 @@ template <typename T> struct function_traits<T&&> : function_traits<T> {};
     static Signature Get() { return Internal<T>(0); }                                   \
   }
 
-#endif  // BEERI_BASE_TYPE_TRAITS_H_
+#endif

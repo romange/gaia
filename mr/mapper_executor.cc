@@ -152,6 +152,8 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
   record_q.StartClosing();
 
   map_fd.join();
+  handler->OnShardFinish();
+
   raw_context->Flush();
   parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
 }

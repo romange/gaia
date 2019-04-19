@@ -4,6 +4,8 @@
 #ifndef _UTIL_SP_TASK_POOL_H
 #define _UTIL_SP_TASK_POOL_H
 
+#error "Deprecated!"
+
 #include <atomic>
 #include <memory>
 #include <mutex>
