@@ -4,7 +4,7 @@
 #pragma once
 
 #include <boost/fiber/mutex.hpp>
-#include "mr/mr.h"
+#include "mr/ptable.h"
 
 #include "absl/container/flat_hash_map.h"
 

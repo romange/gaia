@@ -6,7 +6,8 @@
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
 #include "mr/impl/table_impl.h"
-#include "mr/mr.h"
+#include "mr/ptable.h"
+
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fibers_ext.h"
 
@@ -35,16 +36,12 @@ MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {}
 
 thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
-void MapperExecutor::PerIoStruct::Shutdown() {
-  process_fd.join();
-}
+void MapperExecutor::PerIoStruct::Shutdown() { process_fd.join(); }
 
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
 
-MapperExecutor::~MapperExecutor() {
-  CHECK(!file_name_q_);
-}
+MapperExecutor::~MapperExecutor() { CHECK(!file_name_q_); }
 
 void MapperExecutor::Init() { runner_->Init(); }
 

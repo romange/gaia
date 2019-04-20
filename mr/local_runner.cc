@@ -12,11 +12,11 @@
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
-#include "mr/mr.h"
+#include "mr/do_context.h"
+#include "mr/impl/dest_file_set.h"
+
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/zlib_source.h"
-
-#include "mr/impl/dest_file_set.h"
 
 namespace mr3 {
 
@@ -176,9 +176,8 @@ void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
   impl_->dest_mgr->Flush();
 
-  impl_->dest_mgr->GatherAll([out_files](const ShardId& sid, DestHandle* dh) {
-    out_files->emplace(sid, dh->path());
-  });
+  impl_->dest_mgr->GatherAll(
+      [out_files](const ShardId& sid, DestHandle* dh) { out_files->emplace(sid, dh->path()); });
   impl_->dest_mgr.reset();
 }
 

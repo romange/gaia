@@ -1,16 +1,14 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include "mr/mr.h"
-
 #include <rapidjson/error/en.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
 #include "absl/strings/str_format.h"
-#include "mr/pipeline.h"
-
 #include "base/logging.h"
+
+#include "mr/pipeline.h"
 
 using namespace std;
 

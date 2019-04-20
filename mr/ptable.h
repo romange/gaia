@@ -1,10 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-
 #pragma once
-
-#include <boost/smart_ptr/intrusive_ptr.hpp>
 
 // I do not enable SSE42 for rapidjson because it may go out of boundaries, they assume
 // all the inputs are aligned at the end.
@@ -14,7 +11,6 @@
 #include <rapidjson/document.h>
 
 #include "base/type_traits.h"
-
 #include "mr/do_context.h"
 #include "mr/impl/table_impl.h"
 #include "mr/mr_types.h"
