@@ -49,7 +49,6 @@ base::void_t<decltype(&Handler::OnShardFinish)> FinishCallMaybe(Handler* h, DoCo
 template <typename Handler, typename ToType>
 void FinishCallMaybe(Handler* h, DoContext<ToType>* cntx, char){};
 
-
 class HandlerWrapperBase {
  public:
   virtual ~HandlerWrapperBase() {}
@@ -68,13 +67,20 @@ class HandlerWrapperBase {
   std::vector<RawSinkCb> raw_fn_vec_;
 };
 
-template <typename Handler, typename FromType, typename ToType, typename U>
-void ParseAndDo(Handler* h, RecordTraits<FromType>* rt, DoContext<ToType>* context,
-                EmitMemberFn<U, Handler, ToType> ptr, RawRecord&& rr) {
+template <typename T> class DefaultParser {
+  RecordTraits<T> rt_;
+
+ public:
+  bool operator()(RawRecord&& rr, T* res) { return rt_.Parse(std::move(rr), res); }
+};
+
+template <typename FromType, typename Parser, typename DoFn, typename ToType>
+void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRecord&& rr) {
   FromType tmp_rec;
-  bool parse_ok = context->raw_context()->ParseInto(std::move(rr), rt, &tmp_rec);
+  bool parse_ok = (*parser)(std::move(rr), &tmp_rec);
+
   if (parse_ok) {
-    (h->*ptr)(std::move(tmp_rec), context);
+    do_fn(std::move(tmp_rec), context);
   }
 }
 
@@ -91,23 +97,29 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
 
   template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
-    AddFn([this, ptr, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
-      ParseAndDo(&h_, &rt, &do_ctx_, ptr, std::move(rr));
+    AddFn([this, ptr, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
+      ParseAndDo<FromType>(&parser, &do_ctx_,
+                           [this, ptr](FromType&& val, DoContext<ToType>* cntx) {
+                             return (h_.*ptr)(std::move(val), cntx);
+                           },
+                           std::move(rr));
     });
   }
 
   void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) { AddFn(f(&h_, &do_ctx_)); }
 };
 
-template <typename T> class IdentityHandlerWrapper : public HandlerWrapperBase {
+template <typename T, typename Parser = DefaultParser<T>>
+class IdentityHandlerWrapper : public HandlerWrapperBase {
   DoContext<T> do_ctx_;
+  Parser parser_;
 
  public:
-  IdentityHandlerWrapper(const Output<T>& out, RawContext* raw_context)
-      : do_ctx_(out, raw_context) {
+  IdentityHandlerWrapper(const Output<T>& out, const Parser& parser, RawContext* raw_context)
+      : do_ctx_(out, raw_context), parser_(parser) {
     AddFn([this](RawRecord&& rr) {
       T val;
-      if (do_ctx_.ParseRaw(std::move(rr), &val)) {
+      if (parser_(std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
       }
     });
@@ -134,9 +146,10 @@ class TableBase {
     is_identity_ = false;
   }
 
-  template <typename OutT> void SetIdentity(const Output<OutT>* outp) {
-    handler_factory_ = [outp](RawContext* raw_ctxt) {
-      return new IdentityHandlerWrapper<OutT>(*outp, raw_ctxt);
+  template <typename OutT, typename Parser>
+  void SetIdentity(const Output<OutT>* outp, const Parser& parser) {
+    handler_factory_ = [outp, parser](RawContext* raw_ctxt) {
+      return new IdentityHandlerWrapper<OutT, Parser>(*outp, parser, raw_ctxt);
     };
     is_identity_ = true;
   }
@@ -173,8 +186,12 @@ template <typename Handler, typename ToType> class HandlerBinding {
                                                 EmitMemberFn<U, Handler, ToType> ptr) {
     HandlerBinding<Handler, ToType> res(from);
     res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
-      return [=, rt = RecordTraits<FromType>{}](RawRecord&& rr) mutable {
-        ParseAndDo(handler, &rt, context, ptr, std::move(rr));
+      return [=, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
+        ParseAndDo<FromType>(&parser, context,
+                             [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
+                               return (handler->*ptr)(std::move(val), cntx);
+                             },
+                             std::move(rr));
       };
     };
     return res;
@@ -204,7 +221,7 @@ template <typename OutT> class TableImpl {
   // Identity Factory
   static TableImpl<OutT>* AsIdentity(TableBase* tb) {
     TableImpl* res = new TableImpl(tb);
-    tb->SetIdentity(&res->output_);
+    tb->SetIdentity(&res->output_, DefaultParser<OutT>{});
     return res;
   }
 

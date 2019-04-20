@@ -14,7 +14,6 @@ template <typename T> class DoContext;
 
 namespace detail {
 template <typename Handler, typename ToType> class HandlerWrapper;
-template <typename U> class IdentityHandlerWrapper;
 }  // namespace detail
 
 // User facing interfaces
@@ -42,8 +41,8 @@ class RawContext {
   size_t parse_errors = 0;
 
   // Returns true if succeeded.
-  template <typename U> bool ParseInto(RawRecord&& rr, RecordTraits<U>* rt, U* res) {
-    bool parse_res = rt->Parse(std::move(rr), res);
+  template <typename Func, typename Val> bool ParseWith(RawRecord&& rr, Func&& f, Val* res) {
+    bool parse_res = f(std::move(rr), res);
     if (!parse_res)
       ++parse_errors;
 
@@ -58,12 +57,9 @@ class RawContext {
 template <typename T> class DoContext {
   template <typename Handler, typename ToType> friend class detail::HandlerWrapper;
 
-  template <typename U> friend class detail::IdentityHandlerWrapper;
-
-  // C'tor is private, only the framework can create this object.
+ public:
   DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
 
- public:
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);
     std::string dest = rt_.Serialize(std::move(t));
@@ -75,7 +71,11 @@ template <typename T> class DoContext {
   void SetConstantShard(ShardId sid) { out_.SetConstantShard(sid); }
 
  private:
-  bool ParseRaw(RawRecord&& rr, T* res) { return context_->ParseInto(std::move(rr), &rt_, res); }
+  bool ParseRaw(RawRecord&& rr, T* res) {
+    return context_->ParseWith(std::move(rr), [this](RawRecord&& rr, T* res) {
+      return rt_.Parse(std::move(rr), res);
+    }, res);
+  }
 
   Output<T> out_;
   RawContext* context_;
