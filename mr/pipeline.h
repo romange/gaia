@@ -16,11 +16,21 @@ namespace mr3 {
 class Runner;
 class OperatorExecutor;
 
-template <typename U, typename Joiner, typename Out, typename S>
-detail::HandlerBinding<Joiner, Out> JoinInput(const PTable<U>& tbl,
-                                              EmitMemberFn<S, Joiner, Out> ptr) {
-  return tbl.BindWith(ptr);
-}
+template <typename T> class PInput : public PTable<T> {
+  friend class Pipeline;
+
+  PInput(detail::TableBase* ptr, InputBase* ib)
+      : PTable<T>(detail::TableImpl<T>::AsIdentity(ptr)), input_(ib) {}
+
+ public:
+  PInput<T>& set_skip_header(unsigned num_records) {
+    input_->mutable_msg()->set_skip_header(num_records);
+    return *this;
+  }
+
+ private:
+  InputBase* input_;
+};
 
 class Pipeline {
   friend class detail::TableBase;
@@ -29,9 +39,9 @@ class Pipeline {
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
 
-  StringTable ReadText(const std::string& name, const std::vector<std::string>& globs);
+  PInput<std::string> ReadText(const std::string& name, const std::vector<std::string>& globs);
 
-  StringTable ReadText(const std::string& name, const std::string& glob) {
+  PInput<std::string> ReadText(const std::string& name, const std::string& glob) {
     return ReadText(name, std::vector<std::string>{glob});
   }
 
@@ -45,6 +55,7 @@ class Pipeline {
                    std::initializer_list<detail::HandlerBinding<JoinerType, Out>> args);
 
   pb::Input* mutable_input(const std::string&);
+
  private:
   const InputBase* CheckedInput(const std::string& name) const;
 
@@ -77,6 +88,12 @@ PTable<OutT> Pipeline::Join(const std::string& name,
 
   auto* res = detail::TableImpl<OutT>::template AsJoin<JoinerType>(ptr, std::move(factories));
   return PTable<OutT>{res};
+}
+
+template <typename U, typename Joiner, typename Out, typename S>
+detail::HandlerBinding<Joiner, Out> JoinInput(const PTable<U>& tbl,
+                                              EmitMemberFn<S, Joiner, Out> ptr) {
+  return tbl.BindWith(ptr);
 }
 
 }  // namespace mr3

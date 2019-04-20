@@ -7,7 +7,6 @@
 #include "base/init.h"
 #include "base/logging.h"
 
-#include "file/file_util.h"
 #include "mr/local_runner.h"
 #include "mr/mr_main.h"
 
@@ -65,10 +64,9 @@ class GsodMapper {
 
 class GsodJoiner {
   absl::flat_hash_map<unsigned, uint32_t> cnt_;
+
  public:
-  void Group(GsodRecord record, mr3::DoContext<string>* context) {
-    cnt_[record.year]++;
-  }
+  void Group(GsodRecord record, mr3::DoContext<string>* context) { cnt_[record.year]++; }
 
   void OnShardFinish(DoContext<string>* cntx) {
     cntx->Write("year,count");
@@ -88,27 +86,23 @@ int main(int argc, char** argv) {
   }
   CHECK(!inputs.empty());
 
-  LocalRunner runner(file_util::ExpandPath(FLAGS_dest_dir));
+  Pipeline* pipeline = pm.pipeline();
 
-  Pipeline& pipeline = *pm.pipeline();
-  pm.accept_server()->TriggerOnBreakSignal([&] {
-    pipeline.Stop();
-    runner.Stop();
-  });
+  // TODO: to make pipeline runnable even when tables go out of scope.
+  StringTable ss = pipeline->ReadText("gsod", inputs).set_skip_header(1);
 
-  StringTable ss = pipeline.ReadText("gsod", inputs);
-  pipeline.mutable_input("gsod")->set_skip_header(1);
   PTable<GsodRecord> records = ss.Map<GsodMapper>("MapToGsod");
   records.Write("gsod_map", pb::WireFormat::TXT)
       .WithModNSharding(10, [](const GsodRecord& r) { return r.year; })
       .AndCompress(pb::Output::GZIP);
 
   StringTable joined =
-      pipeline.Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
-  joined.Write("joined_table", pb::WireFormat::TXT)
-      .AndCompress(pb::Output::GZIP);
+      pipeline->Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
+  joined.Write("joined_table", pb::WireFormat::TXT).AndCompress(pb::Output::GZIP);
 
-  pipeline.Run(&runner);
+  LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
+  pipeline->Run(runner);
+
   LOG(INFO) << "After pipeline run";
 
   return 0;

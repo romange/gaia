@@ -57,15 +57,12 @@ class InputBase {
 };
 
 template <typename OutT> class PTable {
-  using TableImpl = detail::TableImpl<OutT>;
   friend class Pipeline;
 
   // apparently template classes of different type can not access own private members.
   template <typename T> friend class PTable;
  public:
   PTable() {}
-  PTable(PTable&&) = default;
-
   ~PTable() {}
 
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
@@ -84,13 +81,12 @@ template <typename OutT> class PTable {
 
   PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
 
- private:
+ protected:
+  using TableImpl = detail::TableImpl<OutT>;
+
   explicit PTable(TableImpl* impl) : impl_(impl) {}
 
-  // Dangerous convenience method. Consider remove it.
-  explicit PTable(detail::TableBase* tb) : PTable{TableImpl::AsIdentity(tb)} {}
-
-  std::unique_ptr<TableImpl> impl_;
+  std::shared_ptr<TableImpl> impl_;
 };
 
 using StringTable = PTable<std::string>;

@@ -22,7 +22,7 @@ const InputBase* Pipeline::CheckedInput(const std::string& name) const {
   return it->second.get();
 }
 
-StringTable Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {
+PInput<std::string> Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {
   auto res = inputs_.emplace(name, nullptr);
   CHECK(res.second) << "Input " << name << " already exists";
 
@@ -35,7 +35,7 @@ StringTable Pipeline::ReadText(const string& name, const std::vector<std::string
   detail::TableBase* ptr = CreateTableImpl(name);
   ptr->mutable_op()->add_input_name(name);
 
-  return StringTable(ptr);
+  return PInput<std::string>(ptr, inp_ptr.get());
 }
 
 void Pipeline::Stop() {

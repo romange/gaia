@@ -6,6 +6,9 @@
 
 #include "base/init.h"
 
+#include "file/file_util.h"
+
+#include "mr/local_runner.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 
@@ -16,7 +19,7 @@ DEFINE_int32(http_port, 8080, "Port number.");
 using namespace util;
 
 PipelineMain::PipelineMain(int* argc, char*** argv)
-  : guard_(new MainInitGuard{argc, argv}), pool_(new IoContextPool) {
+    : guard_(new MainInitGuard{argc, argv}), pool_(new IoContextPool) {
   pool_->Run();
   pipeline_.reset(new Pipeline(pool_.get()));
 
@@ -31,6 +34,18 @@ PipelineMain::PipelineMain(int* argc, char*** argv)
 PipelineMain::~PipelineMain() {
   acc_server_->Stop(true);
   pool_->Stop();
+}
+
+LocalRunner* PipelineMain::StartLocalRunner(const std::string& root_dir, bool stop_on_break) {
+  CHECK(!runner_);
+  runner_.reset(new LocalRunner(file_util::ExpandPath(root_dir)));
+  if (stop_on_break) {
+    acc_server_->TriggerOnBreakSignal([this] {
+      pipeline_->Stop();
+      runner_->Stop();
+    });
+  }
+  return runner_.get();
 }
 
 }  // namespace mr3
