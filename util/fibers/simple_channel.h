@@ -45,14 +45,12 @@ template <typename T> class SimpleChannel {
   // Non blocking
   template <typename... Args> bool TryPush(Args&&... args) noexcept {
     if (q_.write(std::forward<Args>(args)...)) {
-      if (true || ++quiet_pushes_ > q_.capacity() / 3) {
+      if (++throttled_pushes_ > q_.capacity() / 3) {
         pop_ec_.notify();
-        quiet_pushes_ = 0;
+        throttled_pushes_ = 0;
       }
       return true;
     }
-    pop_ec_.notify();
-    quiet_pushes_ = 0;
     return false;
   }
 
@@ -67,7 +65,7 @@ template <typename T> class SimpleChannel {
   bool IsClosing() const { return is_closing_.load(std::memory_order_relaxed); }
 
  private:
-  unsigned quiet_pushes_ = 0;
+  unsigned throttled_pushes_ = 0;
 
   folly::ProducerConsumerQueue<T> q_;
   std::atomic_bool is_closing_{false};

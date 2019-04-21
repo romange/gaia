@@ -70,7 +70,7 @@ std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
     return absl::get<string>(*this);
   }
-  return absl::StrFormat("%s-%04d", basename, absl::get<uint32_t>(*this));
+  return absl::StrCat(basename, "-", absl::Dec(absl::get<uint32_t>(*this), absl::kZeroPad4));
 }
 
 void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
