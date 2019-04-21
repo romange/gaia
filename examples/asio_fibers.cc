@@ -91,13 +91,15 @@ void RunClient(util::IoContext& context, unsigned msg_count) {
   LOG(INFO) << ": echo-client started";
   {
     std::unique_ptr<Channel> client(new Channel(FLAGS_connect, "9999", &context));
-    system::error_code ec = client->Connect(100);
+    system::error_code ec = client->Connect(9000);
     CHECK(!ec) << ec.message();
 
+    LOG(INFO) << "RunClient connected";
     std::vector<fibers::fiber> drivers(FLAGS_num_connections);
     for (size_t i = 0; i < drivers.size(); ++i) {
       drivers[i] = fibers::fiber(&Driver, client.get(), i, msg_count);
     }
+    VLOG(1) << "RunClient launched drivers";
     for (auto& f : drivers)
       f.join();
 

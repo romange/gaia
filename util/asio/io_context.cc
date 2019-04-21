@@ -191,10 +191,10 @@ void AsioScheduler::WaitTillFibersSuspend() {
   // or when  AsioScheduler::suspend_until() has been called or awaken() decided to resume it.
   mask_ |= MAIN_LOOP_SUSPEND;
 
-  switch_cnt_ = 0;
   DVLOG(2) << "WaitTillFibersSuspend:Start";
   main_loop_ctx_->suspend();
   mask_ &= ~MAIN_LOOP_SUSPEND;
+  switch_cnt_ = 0;
   DVLOG(2) << "WaitTillFibersSuspend:End";
 }
 
@@ -225,7 +225,8 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
     // of awakened before pick_next resumed it.
     if (nice > MAIN_NICE_LEVEL && switch_cnt_ > MAIN_SWITCH_LIMIT &&
         !main_loop_ctx_->ready_is_linked()) {
-      DVLOG(2) << "Wake MAIN_LOOP_SUSPEND, r/s: " << ready_cnt_ << "/" << switch_cnt_;
+      DVLOG(2) << "Wake MAIN_LOOP_SUSPEND " << fibers_ext::short_id(main_loop_ctx_)
+               << ", r/s: " << ready_cnt_ << "/" << switch_cnt_;
 
       switch_cnt_ = 0;
       ++ready_cnt_;
@@ -260,6 +261,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
 
     DVLOG(2) << "Switching from " << short_id() << " to " << short_id(ctx) << " switch_cnt("
              << switch_cnt_ << ")";
+    DCHECK(ctx != fibers::context::active());
 
     // Checking if we want to resume to main loop prematurely to preserve responsiveness
     // of IO loop. MAIN_NICE_LEVEL is reserved for the main loop so we count only
