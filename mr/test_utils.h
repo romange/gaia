@@ -8,8 +8,8 @@
 #include <boost/fiber/mutex.hpp>
 
 #include "absl/container/flat_hash_map.h"
-#include "mr/runner.h"
 #include "mr/pipeline.h"
+#include "mr/runner.h"
 
 namespace other {
 struct StrVal {
@@ -42,7 +42,6 @@ struct OutputShardSet {
   ::boost::fibers::mutex mu;
 };
 
-
 class TestContext : public RawContext {
   OutputShardSet& outp_ss_;
 
@@ -51,7 +50,6 @@ class TestContext : public RawContext {
 
   void WriteInternal(const ShardId& shard_id, std::string&& record);
 };
-
 
 class TestRunner : public Runner {
  public:
@@ -80,6 +78,32 @@ class TestRunner : public Runner {
   absl::flat_hash_map<std::string, std::vector<std::string>> input_fs_;
   absl::flat_hash_map<std::string, std::unique_ptr<OutputShardSet>> out_fs_;
   std::string last_out_name_;
+};
+
+class EmptyRunner : public Runner {
+ public:
+  std::function<bool(std::string* val)> gen_fn;
+
+  class Context : public RawContext {
+    public:
+    void WriteInternal(const ShardId& shard_id, std::string&& record) {}
+  };
+
+  void Init() final {}
+
+  void Shutdown() final {}
+
+  RawContext* CreateContext(const pb::Operator& op) final { return new Context; }
+
+  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final {
+    cb(glob);
+  }
+
+  void OperatorStart() final {}
+  void OperatorEnd(ShardFileMap* out_files) final  {}
+
+  size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
+                          std::function<void(std::string&&)> cb) final;
 };
 
 }  // namespace mr3

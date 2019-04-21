@@ -87,8 +87,11 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     per_io_->Shutdown();
     per_io_.reset();
   });
+
+  const string& op_name = tb->op().op_name();
+  LOG(INFO) << op_name << " had " << map_calls_.load() << " calls";
   LOG_IF(WARNING, parse_errors_ > 0)
-      << tb->op().op_name() << " had " << parse_errors_.load() << " errors";
+      << op_name << " had " << parse_errors_.load() << " errors";
 
   runner_->OperatorEnd(out_files);
   file_name_q_.reset();
@@ -153,6 +156,7 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 
   raw_context->Flush();
   parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
+  map_calls_.fetch_add(cnt, std::memory_order_relaxed);
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {

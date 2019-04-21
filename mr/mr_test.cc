@@ -195,13 +195,9 @@ class StrJoiner {
   absl::flat_hash_map<int, int> counts_;
 
  public:
-  void On1(IntVal&& iv, DoContext<string>* out) {
-    counts_[iv.val]++;
-  }
+  void On1(IntVal&& iv, DoContext<string>* out) { counts_[iv.val]++; }
 
-  void On2(IntVal&& iv, DoContext<string>* out) {
-    counts_[iv.val]+=10;
-  }
+  void On2(IntVal&& iv, DoContext<string>* out) { counts_[iv.val] += 10; }
 
   void OnShardFinish(DoContext<string>* cntx) {
     for (const auto& k_v : counts_) {
@@ -234,8 +230,29 @@ TEST_F(MrTest, Join) {
   res.Write("joinw", pb::WireFormat::TXT);
 
   pipeline_->Run(&runner_);
-  EXPECT_THAT(runner_.Table("joinw"), UnorderedElementsAre(MatchShard(0, {"3:11"}),
-    MatchShard(1, {"1:1", "4:1"}), MatchShard(2, {"2:11"})));
+  EXPECT_THAT(runner_.Table("joinw"),
+              UnorderedElementsAre(MatchShard(0, {"3:11"}), MatchShard(1, {"1:1", "4:1"}),
+                                   MatchShard(2, {"2:11"})));
 }
+
+static void BM_ShardAndWrite(benchmark::State& state) {
+  IoContextPool pool(1);
+  pool.Run();
+
+  std::unique_ptr<Pipeline> pipeline(new Pipeline(&pool));
+  PTable<IntVal> itable = pipeline->ReadText("bench_intval", "intval.txt").As<IntVal>();
+  itable.Write("out_intval.txt",  pb::WireFormat::TXT).WithModNSharding(7, [](const IntVal& iv) {
+    return iv.val;
+  });
+
+  EmptyRunner er;
+  er.gen_fn = [&](string* val) {
+    *val = "42";
+
+    return state.KeepRunning();
+  };
+  pipeline->Run(&er);
+}
+BENCHMARK(BM_ShardAndWrite);
 
 }  // namespace mr3

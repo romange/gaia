@@ -28,7 +28,7 @@ void TestRunner::Shutdown() {}
 
 RawContext* TestRunner::CreateContext(const pb::Operator& op) {
   CHECK(!op.output().name().empty());
-  last_out_name_= op.output().name();
+  last_out_name_ = op.output().name();
   auto& res = out_fs_[last_out_name_];
   if (!res)
     res.reset(new OutputShardSet);
@@ -74,6 +74,18 @@ const ShardedOutput& TestRunner::Table(const std::string& tb_name) const {
   CHECK(it != out_fs_.end()) << "Missing table file " << tb_name;
 
   return it->second->s_out;
+}
+
+size_t EmptyRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
+                                     std::function<void(std::string&&)> cb) {
+  CHECK(gen_fn);
+  string val;
+  unsigned cnt = 0;
+  while (gen_fn(&val)) {
+    cb(std::move(val));
+    ++cnt;
+  }
+  return cnt;
 }
 
 }  // namespace mr3
