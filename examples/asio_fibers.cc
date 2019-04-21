@@ -34,13 +34,10 @@ VarzQps qps("echo-qps");
 
 class PingBridge final : public rpc::ConnectionBridge {
  public:
-  // header and letter are input/output parameters.
-  // HandleEnvelope reads first the input and if everything is parsed fine, it sends
-  // back another header, letter pair.
   void HandleEnvelope(uint64_t rpc_id, rpc::Envelope* input, EnvelopeWriter writer) override {
     qps.Inc();
     VLOG(1) << "RpcId: " << rpc_id;
-    writer(std::move(*input));
+    writer(std::move(*input));   // Just write back the envelope we received.
   }
 };
 
