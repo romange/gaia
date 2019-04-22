@@ -22,12 +22,13 @@ const InputBase* Pipeline::CheckedInput(const std::string& name) const {
   return it->second.get();
 }
 
-PInput<std::string> Pipeline::ReadText(const string& name, const std::vector<std::string>& globs) {
+PInput<std::string> Pipeline::Read(const std::string& name, pb::WireFormat::Type format,
+                                   const std::vector<std::string>& globs) {
   auto res = inputs_.emplace(name, nullptr);
   CHECK(res.second) << "Input " << name << " already exists";
 
   auto& inp_ptr = res.first->second;
-  inp_ptr.reset(new InputBase(name, pb::WireFormat::TXT));
+  inp_ptr.reset(new InputBase(name, format));
   for (const auto& s : globs) {
     inp_ptr->mutable_msg()->add_file_spec()->set_url_glob(s);
   }

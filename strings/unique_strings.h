@@ -34,6 +34,11 @@ public:
     return arena_.MemoryUsage() +  db_.get_allocator().bytes_allocated(); // db_.size()*sizeof(StringPiece);
   }
 
+  void Clear() {
+    db_.clear();
+    base::Arena().Swap(arena_);
+  }
+
   const_iterator begin() { return db_.begin(); }
   const_iterator end() { return db_.end(); }
 

@@ -18,7 +18,7 @@ template <typename Handler, typename ToType> class HandlerWrapper;
 
 // User facing interfaces
 template <typename Record> struct RecordTraits {
-  static_assert(sizeof(Record) > 0, "Please specify RecordTraits<> for this type");
+  static_assert(sizeof(base::void_t<Record>) == 0, "Please specify RecordTraits<> for this type");
 };
 
 template <> struct RecordTraits<std::string> {

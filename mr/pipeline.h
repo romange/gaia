@@ -39,10 +39,20 @@ class Pipeline {
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
 
-  PInput<std::string> ReadText(const std::string& name, const std::vector<std::string>& globs);
+  PInput<std::string> ReadText(const std::string& name, const std::vector<std::string>& globs) {
+    return Read(name, pb::WireFormat::TXT, globs);
+  }
 
   PInput<std::string> ReadText(const std::string& name, const std::string& glob) {
     return ReadText(name, std::vector<std::string>{glob});
+  }
+
+  PInput<std::string> ReadLst(const std::string& name, const std::vector<std::string>& globs) {
+    return Read(name, pb::WireFormat::LST, globs);
+  }
+
+  PInput<std::string> ReadLst(const std::string& name, const std::string& glob) {
+    return ReadLst(name, std::vector<std::string>{glob});
   }
 
   void Run(Runner* runner);
@@ -57,6 +67,9 @@ class Pipeline {
   pb::Input* mutable_input(const std::string&);
 
  private:
+  PInput<std::string> Read(const std::string& name, pb::WireFormat::Type format,
+                           const std::vector<std::string>& globs);
+
   const InputBase* CheckedInput(const std::string& name) const;
 
   typename detail::TableBase* CreateTableImpl(const std::string& name) {
