@@ -106,8 +106,8 @@ template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;
 
  public:
-  static std::string Serialize(rapidjson::Document&& doc);
-  bool Parse(std::string&& tmp, rapidjson::Document* res);
+  static std::string Serialize(bool is_binary, rapidjson::Document&& doc);
+  bool Parse(bool is_binary, std::string&& tmp, rapidjson::Document* res);
 };
 
 }  // namespace mr3

@@ -27,7 +27,7 @@ class LocalRunner : public Runner {
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          std::function<void(std::string&&)> cb) final;
+                          RawSinkCb cb) final;
 
   void Stop();
 

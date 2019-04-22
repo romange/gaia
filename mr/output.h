@@ -20,6 +20,8 @@ class OutputBase {
   pb::Output* mutable_msg() { return out_; }
   const pb::Output& msg() const { return *out_; }
 
+  bool is_binary() const { return out_->format().type() == pb::WireFormat::LST; }
+
  protected:
   pb::Output* out_;
 

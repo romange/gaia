@@ -16,15 +16,16 @@ namespace detail {
 template <typename Handler, typename ToType> class HandlerWrapper;
 }  // namespace detail
 
-// User facing interfaces
-template <typename Record> struct RecordTraits {
+// User facing interfaces. void tag for dispatching per class of types
+// (i.e. derived from protobuf::Message etc).
+template <typename Record, typename = void> struct RecordTraits {
   static_assert(sizeof(base::void_t<Record>) == 0, "Please specify RecordTraits<> for this type");
 };
 
 template <> struct RecordTraits<std::string> {
-  static std::string Serialize(std::string&& r) { return std::string(std::move(r)); }
+  static std::string Serialize(bool is_binary, std::string&& r) { return std::move(r); }
 
-  static bool Parse(std::string&& tmp, std::string* res) {
+  static bool Parse(bool is_binary, std::string&& tmp, std::string* res) {
     *res = std::move(tmp);
     return true;
   }
@@ -57,7 +58,7 @@ template <typename T> class DoContext {
 
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);
-    std::string dest = rt_.Serialize(std::move(t));
+    std::string dest = rt_.Serialize(out_.is_binary(), std::move(t));
     context_->WriteInternal(shard_id, std::move(dest));
   }
 

@@ -49,9 +49,11 @@ struct IntVal {
 
 template <> class RecordTraits<IntVal> {
  public:
-  static std::string Serialize(IntVal&& doc) { return absl::StrCat(doc.val); }
+  static std::string Serialize(bool is_binary, IntVal&& doc) { return absl::StrCat(doc.val); }
 
-  bool Parse(std::string&& tmp, IntVal* res) { return safe_strto32(tmp, &res->val); }
+  bool Parse(bool is_binary, std::string&& tmp, IntVal* res) {
+    return safe_strto32(tmp, &res->val);
+  }
 };
 
 class MrTest : public testing::Test {

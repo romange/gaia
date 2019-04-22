@@ -24,9 +24,9 @@ namespace mr3 {
 // https://stackoverflow.com/questions/25594644/warning-specialization-of-template-in-different-namespace
 template <> class RecordTraits<other::StrVal> {
  public:
-  static std::string Serialize(other::StrVal&& doc) { return std::move(doc.val); }
+  static std::string Serialize(bool is_binary, other::StrVal&& doc) { return std::move(doc.val); }
 
-  bool Parse(std::string&& tmp, other::StrVal* res) {
+  bool Parse(bool is_binary, std::string&& tmp, other::StrVal* res) {
     res->val = tmp;
     return true;
   }
@@ -67,7 +67,7 @@ class TestRunner : public Runner {
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          std::function<void(std::string&&)> cb) final;
+                          RawSinkCb cb) final;
 
   void OperatorStart() final {}
   void OperatorEnd(ShardFileMap* out_files) final;
@@ -109,7 +109,7 @@ class EmptyRunner : public Runner {
   void OperatorEnd(ShardFileMap* out_files) final  {}
 
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                          std::function<void(std::string&&)> cb) final;
+                          RawSinkCb cb) final;
 };
 
 }  // namespace mr3

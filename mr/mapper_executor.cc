@@ -136,14 +136,15 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    auto cb = [&record_q, skip = file_input.second->skip_header(),
-               record_num = uint64_t{0}](auto&& s) mutable {
+    const pb::Input* pb_input = file_input.second;
+    auto cb = [&record_q, skip = pb_input->skip_header(),
+               record_num = uint64_t{0}](bool is_binary, auto&& s) mutable {
       if (record_num++ < skip)
         return;
-      record_q.Push(std::move(s));
+      record_q.Push(is_binary, std::move(s));
     };
 
-    cnt += runner_->ProcessInputFile(file_input.first, file_input.second->format().type(), cb);
+    cnt += runner_->ProcessInputFile(file_input.first, pb_input->format().type(), cb);
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 
@@ -160,7 +161,7 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
-  string record;
+  std::pair<bool, string> record;
   uint64_t record_num = 0;
 
   while (true) {
@@ -177,7 +178,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    cb(std::move(record));
+    cb(record.first, std::move(record.second));
 
     if (++record_num % 1000 == 0) {
       this_fiber::yield();

@@ -12,7 +12,7 @@ namespace mr3 {
 class Pipeline;
 class RawContext;
 
-template <typename Record> struct RecordTraits;
+template <typename, typename> struct RecordTraits;
 
 namespace detail {
 
@@ -71,13 +71,16 @@ template <typename T> class DefaultParser {
   RecordTraits<T> rt_;
 
  public:
-  bool operator()(RawRecord&& rr, T* res) { return rt_.Parse(std::move(rr), res); }
+  bool operator()(bool is_binary, RawRecord&& rr, T* res) {
+    return rt_.Parse(is_binary, std::move(rr), res);
+  }
 };
 
 template <typename FromType, typename Parser, typename DoFn, typename ToType>
-void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRecord&& rr) {
+void ParseAndDo(bool is_binary, Parser* parser, DoContext<ToType>* context, DoFn&& do_fn,
+                RawRecord&& rr) {
   FromType tmp_rec;
-  bool parse_ok = (*parser)(std::move(rr), &tmp_rec);
+  bool parse_ok = (*parser)(is_binary, std::move(rr), &tmp_rec);
 
   if (parse_ok) {
     do_fn(std::move(tmp_rec), context);
@@ -99,8 +102,8 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
 
   template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
-    AddFn([this, ptr, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
-      ParseAndDo<FromType>(&parser, &do_ctx_,
+    AddFn([this, ptr, parser = DefaultParser<FromType>{}](bool is_binary, RawRecord&& rr) mutable {
+      ParseAndDo<FromType>(is_binary, &parser, &do_ctx_,
                            [this, ptr](FromType&& val, DoContext<ToType>* cntx) {
                              return (h_.*ptr)(std::move(val), cntx);
                            },
@@ -119,9 +122,9 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
  public:
   IdentityHandlerWrapper(const Output<T>& out, const Parser& parser, RawContext* raw_context)
       : do_ctx_(out, raw_context), parser_(parser) {
-    AddFn([this](RawRecord&& rr) {
+    AddFn([this](bool is_binary, RawRecord&& rr) {
       T val;
-      if (parser_(std::move(rr), &val)) {
+      if (parser_(is_binary, std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
       } else {
         ++do_ctx_.raw_context()->parse_errors;
@@ -191,11 +194,11 @@ template <typename Handler, typename ToType> class HandlerBinding {
     HandlerBinding<Handler, ToType> res(from);
     res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
       auto do_fn = [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
-                        return (handler->*ptr)(std::move(val), cntx);
-                    };
-      return [=, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
-        ParseAndDo<FromType>(&parser, context, std::move(do_fn),
-                             std::move(rr));
+        return (handler->*ptr)(std::move(val), cntx);
+      };
+      return [do_fn, context, parser = DefaultParser<FromType>{}](
+		bool is_binary, RawRecord&& rr) mutable {
+        ParseAndDo<FromType>(is_binary, &parser, context, std::move(do_fn), std::move(rr));
       };
     };
     return res;

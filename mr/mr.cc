@@ -91,7 +91,7 @@ void OutputBase::SetShardSpec(pb::ShardSpec::Type st, unsigned modn) {
   }
 }
 
-std::string RecordTraits<rj::Document>::Serialize(rj::Document&& doc) {
+std::string RecordTraits<rj::Document>::Serialize(bool is_binary, rj::Document&& doc) {
   rj::StringBuffer s;
   rj::Writer<rj::StringBuffer> writer(s);
   doc.Accept(writer);
@@ -99,7 +99,7 @@ std::string RecordTraits<rj::Document>::Serialize(rj::Document&& doc) {
   return s.GetString();
 }
 
-bool RecordTraits<rj::Document>::Parse(std::string&& tmp, rj::Document* res) {
+bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Document* res) {
   tmp_ = std::move(tmp);
 
   constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;

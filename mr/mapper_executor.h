@@ -15,7 +15,7 @@ namespace mr3 {
 class MapperExecutor : public OperatorExecutor {
   using FileInput = std::pair<std::string, const pb::Input*>;
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
-  using RecordQueue = util::fibers_ext::SimpleChannel<std::string>;
+  using RecordQueue = util::fibers_ext::SimpleChannel<std::pair<bool, std::string>>;
 
   struct PerIoStruct;
 

@@ -126,8 +126,8 @@ struct LocalRunner::Impl {
 
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
 
-  uint64_t ProcessText(file::ReadonlyFile* fd, std::function<void(string&&)> cb);
-  uint64_t ProcessLst(file::ReadonlyFile* fd, std::function<void(string&&)> cb);
+  uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
+  uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
   void SetupDestFileSet() {
     CHECK(!dest_mgr);
@@ -135,7 +135,7 @@ struct LocalRunner::Impl {
   }
 };
 
-uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, std::function<void(string&&)> cb) {
+uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -151,13 +151,13 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, std::function<vo
     if (cnt % 1000 == 0) {
       this_fiber::yield();
     }
-    cb(std::move(tmp));
+    cb(false, std::move(tmp));
   }
   VLOG(1) << "ProcessText Read " << cnt << " items";
   return cnt;
 }
 
-uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, std::function<void(string&&)> cb) {
+uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
   file::ListReader::CorruptionReporter error_fn = [] (size_t bytes, const util::Status& status) {
     LOG(FATAL) << "Lost " << bytes << " bytes, status: " << status;
   };
@@ -167,7 +167,7 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, std::function<voi
   StringPiece record;
   uint64_t cnt = 0;
   while (list_reader.ReadRecord(&record, &scratch)) {
-    cb(string(record));
+    cb(true, string(record));
     ++cnt;
     if (cnt % 1000 == 0) {
       this_fiber::yield();
@@ -223,7 +223,7 @@ ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
 
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
-                                     std::function<void(string&&)> cb) {
+                                     RawSinkCb cb) {
   file::FiberReadOptions::Stats stats;
   file::FiberReadOptions opts;
 
