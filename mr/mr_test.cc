@@ -41,6 +41,19 @@ class StrValMapper {
   }
 };
 
+struct IntVal {
+  int val;
+
+  operator string() const { return std::to_string(val); }
+};
+
+template <> class RecordTraits<IntVal> {
+ public:
+  static std::string Serialize(IntVal&& doc) { return absl::StrCat(doc.val); }
+
+  bool Parse(std::string&& tmp, IntVal* res) { return safe_strto32(tmp, &res->val); }
+};
+
 class MrTest : public testing::Test {
  protected:
   void SetUp() final {
@@ -124,6 +137,17 @@ TEST_F(MrTest, InvalidJson) {
   LOG(INFO) << s.GetString();
 }
 
+TEST_F(MrTest, ParseError) {
+  runner_.AddInputRecords("bar.txt", {"a", "b", "c", "d"});
+  PTable<IntVal> itable = pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();
+  itable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const IntVal& iv) {
+    return iv.val;
+  });
+  pipeline_->Run(&runner_);
+  EXPECT_EQ(0, runner_.write_calls);
+  EXPECT_EQ(4, runner_.parse_errors);
+}
+
 TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
   PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1");
@@ -140,19 +164,6 @@ TEST_F(MrTest, Map) {
 
   EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
 }
-
-struct IntVal {
-  int val;
-
-  operator string() const { return std::to_string(val); }
-};
-
-template <> class RecordTraits<IntVal> {
- public:
-  static std::string Serialize(IntVal&& doc) { return absl::StrCat(doc.val); }
-
-  bool Parse(std::string&& tmp, IntVal* res) { return safe_strto32(tmp, &res->val); }
-};
 
 class IntMapper {
  public:
@@ -241,7 +252,7 @@ static void BM_ShardAndWrite(benchmark::State& state) {
 
   std::unique_ptr<Pipeline> pipeline(new Pipeline(&pool));
   PTable<IntVal> itable = pipeline->ReadText("bench_intval", "intval.txt").As<IntVal>();
-  itable.Write("out_intval.txt",  pb::WireFormat::TXT).WithModNSharding(7, [](const IntVal& iv) {
+  itable.Write("out_intval.txt", pb::WireFormat::TXT).WithModNSharding(7, [](const IntVal& iv) {
     return iv.val;
   });
 

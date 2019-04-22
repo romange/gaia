@@ -35,6 +35,7 @@ template <> class RecordTraits<other::StrVal> {
 void PrintTo(const ShardId& src, std::ostream* os);
 
 using ShardedOutput = std::unordered_map<ShardId, std::vector<std::string>>;
+class TestRunner;
 
 struct OutputShardSet {
   ShardedOutput s_out;
@@ -43,12 +44,15 @@ struct OutputShardSet {
 };
 
 class TestContext : public RawContext {
+  TestRunner* runner_;
   OutputShardSet& outp_ss_;
 
+  unsigned write_calls_ = 0;
  public:
-  TestContext(OutputShardSet* outp) : outp_ss_(*outp) {}
+  TestContext(TestRunner* runner, OutputShardSet* outp) : runner_(runner), outp_ss_(*outp) {}
 
   void WriteInternal(const ShardId& shard_id, std::string&& record);
+  void Flush() final;
 };
 
 class TestRunner : public Runner {
@@ -73,6 +77,8 @@ class TestRunner : public Runner {
   }
 
   const ShardedOutput& Table(const std::string& tb_name) const;
+
+  std::atomic_int parse_errors{0}, write_calls{0};
 
  private:
   absl::flat_hash_map<std::string, std::vector<std::string>> input_fs_;

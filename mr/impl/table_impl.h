@@ -81,6 +81,8 @@ void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRec
 
   if (parse_ok) {
     do_fn(std::move(tmp_rec), context);
+  } else {
+    ++context->raw_context()->parse_errors;
   }
 }
 
@@ -121,6 +123,8 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
       T val;
       if (parser_(std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
+      } else {
+        ++do_ctx_.raw_context()->parse_errors;
       }
     });
   }
@@ -186,11 +190,11 @@ template <typename Handler, typename ToType> class HandlerBinding {
                                                 EmitMemberFn<U, Handler, ToType> ptr) {
     HandlerBinding<Handler, ToType> res(from);
     res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
+      auto do_fn = [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
+                        return (handler->*ptr)(std::move(val), cntx);
+                    };
       return [=, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
-        ParseAndDo<FromType>(&parser, context,
-                             [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
-                               return (handler->*ptr)(std::move(val), cntx);
-                             },
+        ParseAndDo<FromType>(&parser, context, std::move(do_fn),
                              std::move(rr));
       };
     };
