@@ -177,7 +177,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    // We should have here Shard/string(out_record).
     cb(std::move(record));
 
     if (++record_num % 1000 == 0) {
