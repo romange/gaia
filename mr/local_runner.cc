@@ -12,6 +12,8 @@
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
+#include "file/list_file_reader.h"
+
 #include "mr/do_context.h"
 #include "mr/impl/dest_file_set.h"
 
@@ -125,6 +127,7 @@ struct LocalRunner::Impl {
   Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, std::function<void(string&&)> cb);
+  uint64_t ProcessLst(file::ReadonlyFile* fd, std::function<void(string&&)> cb);
 
   void SetupDestFileSet() {
     CHECK(!dest_mgr);
@@ -151,6 +154,28 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, std::function<vo
     cb(std::move(tmp));
   }
   VLOG(1) << "ProcessText Read " << cnt << " items";
+  return cnt;
+}
+
+uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, std::function<void(string&&)> cb) {
+  file::ListReader::CorruptionReporter error_fn = [] (size_t bytes, const util::Status& status) {
+    LOG(FATAL) << "Lost " << bytes << " bytes, status: " << status;
+  };
+
+  file::ListReader list_reader(fd, TAKE_OWNERSHIP, true, error_fn);
+  string scratch;
+  StringPiece record;
+  uint64_t cnt = 0;
+  while (list_reader.ReadRecord(&record, &scratch)) {
+    cb(string(record));
+    ++cnt;
+    if (cnt % 1000 == 0) {
+      this_fiber::yield();
+      if (stop_signal_.load(std::memory_order_relaxed)) {
+        break;
+      }
+    }
+  }
   return cnt;
 }
 
@@ -218,7 +243,9 @@ size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
     case pb::WireFormat::TXT:
       cnt = impl_->ProcessText(read_file.release(), cb);
       break;
-
+    case pb::WireFormat::LST:
+      cnt = impl_->ProcessLst(read_file.release(), cb);
+      break;
     default:
       LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
       break;
