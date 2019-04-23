@@ -102,7 +102,7 @@ TEST_F(FibersTest, SimpleChannelDone) {
 
   for (unsigned i = 0; i < 100; ++i) {
     Done done;
-    s.Push([&] { done.Notify();});
+    s.Push([done] () mutable { done.Notify();});
     done.Wait();
   }
   s.StartClosing();
