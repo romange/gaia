@@ -3,6 +3,8 @@
 //
 #pragma once
 
+#include <boost/fiber/mutex.hpp>
+
 #include "mr/impl/table_impl.h"
 #include "mr/runner.h"
 
@@ -27,9 +29,16 @@ class OperatorExecutor {
 
   // Stops the executor in the middle.
   virtual void Stop() = 0;
+
  protected:
+  void FinalizeContext(long items_cnt, RawContext* context);
+
   util::IoContextPool* pool_;
   Runner* runner_;
+
+  ::boost::fibers::mutex mu_;
+  absl::flat_hash_map<std::string, long> counter_map_;
+  std::atomic<uint64_t> parse_errors_{0}, do_fn_calls_{0};
 };
 
 }  // namespace mr3

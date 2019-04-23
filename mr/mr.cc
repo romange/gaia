@@ -8,14 +8,14 @@
 #include "absl/strings/str_format.h"
 #include "base/logging.h"
 
+#include "mr/operator_executor.h"
 #include "mr/pipeline.h"
 
+using namespace boost;
 using namespace std;
 
 namespace mr3 {
 namespace rj = rapidjson;
-
-RawContext::~RawContext() {}
 
 namespace detail {
 
@@ -66,6 +66,11 @@ void TableBase::CheckFailIdentity() { CHECK(defined() && is_identity_); }
 
 }  // namespace detail
 
+RawContext::RawContext() { counter_map_.set_empty_key(StringPiece{}); }
+
+RawContext::~RawContext() {}
+
+
 std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
     return absl::get<string>(*this);
@@ -108,6 +113,17 @@ bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Do
   bool has_error = res->HasParseError();
   LOG_IF(INFO, has_error) << rj::GetParseError_En(res->GetParseError()) << " for string " << tmp_;
   return !has_error;
+}
+
+void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
+  raw_context->Flush();
+  parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
+  do_fn_calls_.fetch_add(items_cnt, std::memory_order_relaxed);
+
+  std::lock_guard<fibers::mutex> lk(mu_);
+  for (const auto& k_v : raw_context->counter_map()) {
+    counter_map_[k_v.first] += k_v.second;
+  }
 }
 
 }  // namespace mr3

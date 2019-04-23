@@ -136,7 +136,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
     handler_wrapper->OnShardFinish();
   }
   VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
-  raw_context->Flush();
+
+  FinalizeContext(cnt, raw_context.get());
 }
 
 }  // namespace mr3

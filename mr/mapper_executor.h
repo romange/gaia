@@ -41,7 +41,6 @@ class MapperExecutor : public OperatorExecutor {
   static void MapFiber(RecordQueue* record_q, RawSinkCb cb);
 
   std::unique_ptr<FileNameQueue> file_name_q_;
-  std::atomic<uint64_t> parse_errors_{0}, map_calls_{0};
 
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };

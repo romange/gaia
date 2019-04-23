@@ -89,9 +89,12 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   });
 
   const string& op_name = tb->op().op_name();
-  LOG(INFO) << op_name << " had " << map_calls_.load() << " calls";
+  LOG(INFO) << op_name << " had " << do_fn_calls_.load() << " calls";
   LOG_IF(WARNING, parse_errors_ > 0)
       << op_name << " had " << parse_errors_.load() << " errors";
+  for (const auto& k_v : counter_map_) {
+    LOG(INFO) << op_name << "-" << k_v.first << ": " << k_v.second;
+  }
 
   runner_->OperatorEnd(out_files);
   file_name_q_.reset();
@@ -154,10 +157,7 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 
   map_fd.join();
   handler->OnShardFinish();
-
-  raw_context->Flush();
-  parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
-  map_calls_.fetch_add(cnt, std::memory_order_relaxed);
+  FinalizeContext(cnt, raw_context.get());
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {

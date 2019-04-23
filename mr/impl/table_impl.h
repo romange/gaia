@@ -85,7 +85,7 @@ void ParseAndDo(bool is_binary, Parser* parser, DoContext<ToType>* context, DoFn
   if (parse_ok) {
     do_fn(std::move(tmp_rec), context);
   } else {
-    ++context->raw_context()->parse_errors;
+    ++context->raw()->parse_errors;
   }
 }
 
@@ -127,7 +127,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
       if (parser_(is_binary, std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
       } else {
-        ++do_ctx_.raw_context()->parse_errors;
+        ++do_ctx_.raw()->parse_errors;
       }
     });
   }
