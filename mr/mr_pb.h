@@ -22,11 +22,11 @@ template <typename PB>
 class RecordTraits<PB, std::enable_if_t<std::is_base_of<google::protobuf::Message, PB>::value>>
     : public PB_Serializer {
  public:
-  static std::string Serialize(bool is_binary, PB&& doc) {
+  static std::string Serialize(bool is_binary, const PB& doc) {
     return PB_Serializer::To(is_binary, &doc);
   }
 
-  static bool Parse(bool is_binary, std::string&& tmp, PB* res) {
+  static bool Parse(bool is_binary, const std::string& tmp, PB* res) {
     return PB_Serializer::From(is_binary, tmp, res);
   }
 };

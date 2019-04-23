@@ -31,6 +31,7 @@ using detail::DestFileSet;
 using detail::DestHandle;
 namespace {
 
+// Thread-local buffered writer, owned by LocalContext.
 class BufferedWriter {
   DestHandle* dh_;
   std::string buffer_;
@@ -41,6 +42,7 @@ class BufferedWriter {
   void operator=(const BufferedWriter&) = delete;
 
  public:
+  // dh not owned by BufferedWriter.
   explicit BufferedWriter(DestHandle* dh) : dh_(dh) {}
 
   BufferedWriter(const BufferedWriter&) = delete;
@@ -56,12 +58,15 @@ class LocalContext : public RawContext {
   explicit LocalContext(const pb::Output& output, DestFileSet* mgr);
   ~LocalContext();
 
-  void Flush();
+  void Flush() final;
+
+  void CloseShard(const ShardId& sid) final;
 
  private:
   void WriteInternal(const ShardId& shard_id, std::string&& record) final;
 
-  google::dense_hash_map<ShardId, BufferedWriter*> custom_shard_files_;
+  absl::flat_hash_map<ShardId, BufferedWriter*> custom_shard_files_;
+
   const pb::Output& output_;
   DestFileSet* mgr_;
 };
@@ -89,13 +94,12 @@ void BufferedWriter::Write(StringPiece src) {
 
 LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(out), mgr_(mgr) {
   CHECK(mgr_);
-  custom_shard_files_.set_empty_key(ShardId{kuint32max});
 }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   auto it = custom_shard_files_.find(shard_id);
   if (it == custom_shard_files_.end()) {
-    DestHandle* res = mgr_->Get(shard_id, output_);
+    DestHandle* res = mgr_->GetOrCreate(shard_id, output_);
     it = custom_shard_files_.emplace(shard_id, new BufferedWriter{res}).first;
   }
   record.append("\n");
@@ -106,6 +110,17 @@ void LocalContext::Flush() {
   for (auto& k_v : custom_shard_files_) {
     k_v.second->Flush();
   }
+}
+
+void LocalContext::CloseShard(const ShardId& shard_id) {
+  auto it = custom_shard_files_.find(shard_id);
+  if (it == custom_shard_files_.end()) {
+    LOG(ERROR) << "Could not find shard " << shard_id.ToString("shard");
+    return;
+  }
+  BufferedWriter* bw = it->second;
+  bw->Flush();
+  mgr_->CloseHandle(shard_id);
 }
 
 LocalContext::~LocalContext() {
@@ -158,7 +173,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
 }
 
 uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
-  file::ListReader::CorruptionReporter error_fn = [] (size_t bytes, const util::Status& status) {
+  file::ListReader::CorruptionReporter error_fn = [](size_t bytes, const util::Status& status) {
     LOG(FATAL) << "Lost " << bytes << " bytes, status: " << status;
   };
 
@@ -199,10 +214,9 @@ RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
-  impl_->dest_mgr->Flush();
-
   impl_->dest_mgr->GatherAll(
       [out_files](const ShardId& sid, DestHandle* dh) { out_files->emplace(sid, dh->path()); });
+  impl_->dest_mgr->CloseAllHandles();
   impl_->dest_mgr.reset();
 }
 

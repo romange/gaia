@@ -34,14 +34,14 @@ template <> struct RecordTraits<std::string> {
 // This class is created per IO Context thread. In other words, RawContext is thread-local but
 // not fiber local.
 class RawContext {
-  template <typename T> friend class DoContext;
-
+  template<typename T> friend class DoContext;
  public:
   virtual ~RawContext();
 
   // Flushes pending written data before closing the context. Must be called before destroying
   // the context.
   virtual void Flush() {}
+  virtual void CloseShard(const ShardId& sid) = 0;
 
   size_t parse_errors = 0;
 

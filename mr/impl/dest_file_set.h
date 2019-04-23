@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "absl/container/flat_hash_map.h"
 #include "mr/mr3.pb.h"
 
 #include "file/file.h"
@@ -17,6 +18,8 @@ namespace detail {
 
 class DestHandle;
 
+// designed to be process central data structure holding all the destination files during
+// the operator execution.
 class DestFileSet {
   const std::string root_dir_;
 
@@ -30,15 +33,21 @@ class DestFileSet {
   DestFileSet(const std::string& root_dir, util::fibers_ext::FiberQueueThreadPool* fq);
   ~DestFileSet();
 
-  void Flush();
+  // Closes and deletes all the handles.
+  void CloseAllHandles();
 
-  Result Get(const ShardId& key, const pb::Output& out);
+  Result GetOrCreate(const ShardId& key, const pb::Output& out);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 
   void GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const;
+
+  // Closes the handle but leave it in the map.
+  // GatherAll will still return it. 
+  void CloseHandle(const ShardId& key);
+
  private:
-  typedef google::dense_hash_map<ShardId, DestHandle*> HandleMap;
+  typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
   HandleMap dest_files_;
 };
 
@@ -58,6 +67,7 @@ class DestHandle {
  public:
   void Write(std::string str);
   StringPiece path() const { return full_path_; }
+  void Close();
 
  private:
   StringPiece full_path_;

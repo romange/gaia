@@ -75,14 +75,15 @@ file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
 
 DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq)
     : root_dir_(root_dir), fq_(fq) {
-  dest_files_.set_empty_key(ShardId{kuint32max});
 }
 
-auto DestFileSet::Get(const ShardId& sid, const pb::Output& pb_out) -> Result {
+auto DestFileSet::GetOrCreate(const ShardId& sid, const pb::Output& pb_out) -> Result {
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(sid);
   if (it == dest_files_.end()) {
     string shard_name = sid.ToString(absl::StrCat(pb_out.name(), "-", "shard"));
+    VLOG(1) << "Creating file " << shard_name;
+
     string file_name = FileName(shard_name, pb_out);
     string full_path = file_util::JoinPath(root_dir_, file_name);
     StringPiece fp_sp = str_db_.Get(full_path);
@@ -105,37 +106,36 @@ auto DestFileSet::Get(const ShardId& sid, const pb::Output& pb_out) -> Result {
     it = res.first;
   }
 
-  return Result(it->second);
+  return Result(it->second.get());
 }
 
-void DestFileSet::Flush() {
+void DestFileSet::CloseAllHandles() {
   for (auto& k_v : dest_files_) {
-    DestHandle* dh = k_v.second;
-    if (dh->zlib_sink) {
-      CHECK_STATUS(dh->zlib_sink->Flush());
-
-      if (!dh->str_sink->contents().empty()) {
-        fq_->Add(dh->fq_index_, WriteCb(std::move(dh->str_sink->contents()), dh->wf_));
-      }
-    }
-    VLOG(1) << "Closing file " << k_v.first;
-
-    bool res = fq_->Await(dh->fq_index_, [wf = dh->wf_] { return wf->Close(); });
-    CHECK(res);
-    dh->wf_ = nullptr;
+    k_v.second->Close();
   }
+  dest_files_.clear();
+}
+
+void DestFileSet::CloseHandle(const ShardId& sid) {
+  DestHandle* dh = nullptr;
+
+  std::unique_lock<fibers::mutex> lk(mu_);
+  auto it = dest_files_.find(sid);
+  CHECK(it != dest_files_.end());
+  dh = it->second.get();
+  lk.unlock();
+  VLOG(1) << "Closing handle " << dh->path();
+
+  dh->Close();
 }
 
 void DestFileSet::GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const {
   for (const auto& k_v : dest_files_) {
-    cb(k_v.first, k_v.second);
+    cb(k_v.first, k_v.second.get());
   }
 }
 
 DestFileSet::~DestFileSet() {
-  for (auto& k_v : dest_files_) {
-    delete k_v.second;
-  }
 }
 
 DestHandle::DestHandle(StringPiece path, ::file::WriteFile* wf,
@@ -158,6 +158,24 @@ void DestHandle::Write(string str) {
     return;
   }
   fq_->Add(fq_index_, WriteCb(std::move(str), wf_));
+}
+
+void DestHandle::Close() {
+  if (!wf_)
+    return;
+
+  if (zlib_sink) {
+    CHECK_STATUS(zlib_sink->Flush());
+
+    if (!str_sink->contents().empty()) {
+      fq_->Add(fq_index_, WriteCb(std::move(str_sink->contents()), wf_));
+    }
+  }
+  VLOG(1) << "Closing file " << path();
+
+  bool res = fq_->Await(fq_index_, [this] { return wf_->Close(); });
+  CHECK(res);
+  wf_ = nullptr;
 }
 
 }  // namespace detail

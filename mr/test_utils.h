@@ -53,6 +53,7 @@ class TestContext : public RawContext {
 
   void WriteInternal(const ShardId& shard_id, std::string&& record);
   void Flush() final;
+  void CloseShard(const ShardId& sid) {}
 };
 
 class TestRunner : public Runner {
@@ -93,6 +94,7 @@ class EmptyRunner : public Runner {
   class Context : public RawContext {
     public:
     void WriteInternal(const ShardId& shard_id, std::string&& record) {}
+    void CloseShard(const ShardId& sid) {}
   };
 
   void Init() final {}
