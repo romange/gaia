@@ -196,18 +196,18 @@ auto AcceptServer::AcceptConnection(ListenerWrapper* wrapper) -> AcceptResult {
 }
 
 void AcceptServer::Run() {
-  CHECK(!listeners_.empty());
+  if (!listeners_.empty()) {
+    ref_bc_.Add(listeners_.size());
 
-  ref_bc_.Add(listeners_.size());
+    for (auto& listener : listeners_) {
+      ListenerWrapper* ptr = &listener;
+      io_context& io_cntx = ptr->acceptor.get_executor().context();
 
-  for (auto& listener : listeners_) {
-    ListenerWrapper* ptr = &listener;
-    io_context& io_cntx = ptr->acceptor.get_executor().context();
-
-    asio::post(io_cntx, [this, ptr] {
-      fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this, ptr);
-      srv_fb.detach();
-    });
+      asio::post(io_cntx, [this, ptr] {
+        fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this, ptr);
+        srv_fb.detach();
+      });
+    }
   }
   was_run_ = true;
 }
