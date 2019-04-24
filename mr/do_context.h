@@ -62,6 +62,7 @@ class RawContext {
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
+// It's thread-local.
 template <typename T> class DoContext {
   template <typename Handler, typename ToType> friend class detail::HandlerWrapper;
 

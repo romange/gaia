@@ -97,11 +97,11 @@ void OutputBase::SetShardSpec(pb::ShardSpec::Type st, unsigned modn) {
 }
 
 std::string RecordTraits<rj::Document>::Serialize(bool is_binary, rj::Document&& doc) {
-  rj::StringBuffer s;
-  rj::Writer<rj::StringBuffer> writer(s);
+  sb_.Clear();
+  rj::Writer<rj::StringBuffer> writer(sb_);
   doc.Accept(writer);
 
-  return s.GetString();
+  return string(sb_.GetString(), sb_.GetLength());
 }
 
 bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Document* res) {

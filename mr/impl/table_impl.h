@@ -69,6 +69,10 @@ class HandlerWrapperBase {
 
 template <typename T> class DefaultParser {
   RecordTraits<T> rt_;
+  static_assert(std::is_copy_constructible<RecordTraits<T>>::value,
+                "RecordTraits must be copyable");
+  static_assert(std::is_default_constructible<RecordTraits<T>>::value,
+                "RecordTraits must be default constractable");
 
  public:
   bool operator()(bool is_binary, RawRecord&& rr, T* res) {
@@ -120,8 +124,8 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
   Parser parser_;
 
  public:
-  IdentityHandlerWrapper(const Output<T>& out, const Parser& parser, RawContext* raw_context)
-      : do_ctx_(out, raw_context), parser_(parser) {
+  IdentityHandlerWrapper(const Output<T>& out, Parser parser, RawContext* raw_context)
+      : do_ctx_(out, raw_context), parser_(std::move(parser)) {
     AddFn([this](bool is_binary, RawRecord&& rr) {
       T val;
       if (parser_(is_binary, std::move(rr), &val)) {
@@ -154,8 +158,8 @@ class TableBase {
   }
 
   template <typename OutT, typename Parser>
-  void SetIdentity(const Output<OutT>* outp, const Parser& parser) {
-    handler_factory_ = [outp, parser](RawContext* raw_ctxt) {
+  void SetIdentity(const Output<OutT>* outp, Parser parser) {
+    handler_factory_ = [outp, parser = std::move(parser)](RawContext* raw_ctxt) {
       return new IdentityHandlerWrapper<OutT, Parser>(*outp, parser, raw_ctxt);
     };
     is_identity_ = true;

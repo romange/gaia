@@ -9,6 +9,7 @@
 // #define RAPIDJSON_SSE42
 
 #include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
 
 #include "base/type_traits.h"
 #include "mr/do_context.h"
@@ -104,9 +105,13 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
 
 template <> class RecordTraits<rapidjson::Document> {
   std::string tmp_;
+  rapidjson::StringBuffer sb_;  // Used by serialize.
 
  public:
-  static std::string Serialize(bool is_binary, rapidjson::Document&& doc);
+  RecordTraits(const RecordTraits& r) {}  // we do not copy temporary fields.
+  RecordTraits() {}
+
+  std::string Serialize(bool is_binary, rapidjson::Document&& doc);
   bool Parse(bool is_binary, std::string&& tmp, rapidjson::Document* res);
 };
 
