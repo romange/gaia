@@ -66,8 +66,9 @@ template <typename OutT> class PTable {
     return impl_->Write(name, type);
   }
 
-  template <typename MapType>
-  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name) const;
+  template <typename MapType, typename... Args>
+  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(
+        const std::string& name, Args&&... args) const;
 
   template <typename Handler, typename ToType, typename U>
   detail::HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
@@ -89,9 +90,9 @@ template <typename OutT> class PTable {
 using StringTable = PTable<std::string>;
 
 template <typename OutT>
-template <typename MapType>
+template <typename MapType, typename... Args>
 PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
-    const std::string& name) const {
+    const std::string& name, Args&&... args) const {
   using mapper_traits_t = detail::MapperTraits<MapType>;
   using NewOutType = typename mapper_traits_t::OutputType;
 
@@ -99,7 +100,8 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
                 "MapperType::Do() first argument "
                 "should be constructed from PTable element type");
 
-  auto* res = detail::TableImpl<NewOutType>::template AsMapFrom<MapType>(name, impl_.get());
+  auto* res = detail::TableImpl<NewOutType>::template AsMapFrom<MapType>(
+      name, impl_.get(), std::forward<Args>(args)...);
   return PTable<NewOutType>{res};
 }
 

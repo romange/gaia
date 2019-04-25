@@ -98,7 +98,9 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   DoContext<ToType> do_ctx_;
 
  public:
-  HandlerWrapper(const Output<ToType>& out, RawContext* raw_context) : do_ctx_(out, raw_context) {}
+  template<typename... Args>
+    HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
+     : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
 
   void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
 
@@ -237,12 +239,13 @@ template <typename OutT> class TableImpl {
   }
 
   // Map factory
-  template <typename MapType, typename FromType>
-  static TableImpl<OutT>* AsMapFrom(const std::string& name, const TableImpl<FromType>* ptr) {
+  template <typename MapType, typename FromType, typename... Args>
+  static TableImpl<OutT>* AsMapFrom(const std::string& name, const TableImpl<FromType>* ptr,
+                                    Args&&... args) {
     TableBase* new_tb = ptr->table_->MappedTableFromMe(name);
     TableImpl* res = new TableImpl(new_tb);
-    new_tb->SetHandlerFactory([res](RawContext* raw_ctxt) {
-      auto* ptr = new HandlerWrapper<MapType, OutT>(res->output_, raw_ctxt);
+    new_tb->SetHandlerFactory([res, args...](RawContext* raw_ctxt) {
+      auto* ptr = new HandlerWrapper<MapType, OutT>(res->output_, raw_ctxt, args...);
       ptr->template Add<FromType>(&MapType::Do);
       return ptr;
     });
