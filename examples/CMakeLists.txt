@@ -1,9 +1,6 @@
 add_executable(file_read file_read.cc)
 cxx_link(file_read base TRDP::folly dl)
 
-add_executable(boost_fibers boost_fibers.cc)
-cxx_link(boost_fibers fibers base dl ${Boost_LIBRARIES})
-
 add_executable(asio_fibers asio_fibers.cc)
 cxx_link(asio_fibers base http_v2 rpc sentry strings)
 
