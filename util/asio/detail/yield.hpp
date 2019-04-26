@@ -139,7 +139,8 @@ class yield_handler_base {
 // an instance of yield_t as an asio completion token, asio selects
 // yield_handler<> as the actual handler class.
 template <typename T> class yield_handler : public yield_handler_base {
-  friend class ::boost::asio::async_result<util::fibers_ext::detail::yield_handler<T>, void>;
+  friend class ::boost::asio::async_result<util::fibers_ext::yield_t,
+                                           void(boost::system::error_code, T)>;
 
  public:
   // asio passes the completion token to the handler constructor
@@ -187,7 +188,7 @@ template <> class yield_handler<void> : public yield_handler_base {
 
 // Specialize asio_handler_invoke hook to ensure that any exceptions thrown
 // from the handler are propagated back to the caller
-template <typename Fn, typename T> void asio_handler_invoke(Fn&& fn, yield_handler<T>*) { fn(); }
+// template <typename Fn, typename T> void asio_handler_invoke(Fn&& fn, yield_handler<T>*) { fn(); }
 
 //[fibers_asio_async_result_base
 // Factor out commonality between async_result<yield_handler<T>> and
@@ -232,13 +233,14 @@ namespace asio {
 // yield_handler, constructs this async_result specialization from it, then
 // returns the result of calling its get() method.
 template <typename T>
-class async_result<util::fibers_ext::detail::yield_handler<T>, void>
+class async_result<util::fibers_ext::yield_t, void(boost::system::error_code, T)>
     : public util::fibers_ext::detail::async_result_base {
  public:
   // type returned by get()
-  typedef T type;
+  typedef T return_type;
+  typedef util::fibers_ext::detail::yield_handler<T> completion_handler_type;
 
-  explicit async_result(util::fibers_ext::detail::yield_handler<T>& h)
+  explicit async_result(completion_handler_type& h)
       : util::fibers_ext::detail::async_result_base{h} {
     // Inject ptr to our value_ member into yield_handler<>: result will
     // be stored here.
@@ -246,13 +248,13 @@ class async_result<util::fibers_ext::detail::yield_handler<T>, void>
   }
 
   // asio async method returns result of calling get()
-  type get() {
+  return_type get() {
     util::fibers_ext::detail::async_result_base::get();
     return std::move(value_);
   }
 
  private:
-  type value_{};
+  return_type value_{};
 };
 //]
 
@@ -260,52 +262,16 @@ class async_result<util::fibers_ext::detail::yield_handler<T>, void>
 // Without the need to handle a passed value, our yield_handler<void>
 // specialization is just like async_result_base.
 template <>
-class async_result<util::fibers_ext::detail::yield_handler<void>, void>
+class async_result<util::fibers_ext::yield_t, void(boost::system::error_code)>
     : public util::fibers_ext::detail::async_result_base {
  public:
-  typedef void type;
+  typedef void return_type;
+  typedef util::fibers_ext::detail::yield_handler<void> completion_handler_type;
 
-  explicit async_result(util::fibers_ext::detail::yield_handler<void>& h)
+  explicit async_result(completion_handler_type& h)
       : util::fibers_ext::detail::async_result_base{h} {}
 };
 //]
-
-// Handler type specialisation for fibers::asio::yield.
-// When 'yield' is passed as a completion handler which accepts no parameters,
-// use yield_handler<void>.
-template <typename ReturnType> struct handler_type<util::fibers_ext::yield_t, ReturnType()> {
-  typedef util::fibers_ext::detail::yield_handler<void> type;
-};
-
-// Handler type specialisation for fibers::asio::yield.
-// When 'yield' is passed as a completion handler which accepts a data
-// parameter, use yield_handler<parameter type> to return that parameter to
-// the caller.
-template <typename ReturnType, typename Arg1>
-struct handler_type<util::fibers_ext::yield_t, ReturnType(Arg1)> {
-  typedef util::fibers_ext::detail::yield_handler<Arg1> type;
-};
-
-//[asio_handler_type
-// Handler type specialisation for fibers::asio::yield.
-// When 'yield' is passed as a completion handler which accepts only
-// error_code, use yield_handler<void>. yield_handler will take care of the
-// error_code one way or another.
-template <typename ReturnType>
-struct handler_type<util::fibers_ext::yield_t, ReturnType(boost::system::error_code)> {
-  typedef util::fibers_ext::detail::yield_handler<void> type;
-};
-//]
-
-// Handler type specialisation for fibers::asio::yield.
-// When 'yield' is passed as a completion handler which accepts a data
-// parameter and an error_code, use yield_handler<parameter type> to return
-// just the parameter to the caller. yield_handler will take care of the
-// error_code one way or another.
-template <typename ReturnType, typename Arg2>
-struct handler_type<util::fibers_ext::yield_t, ReturnType(boost::system::error_code, Arg2)> {
-  typedef util::fibers_ext::detail::yield_handler<Arg2> type;
-};
 
 }  // namespace asio
 }  // namespace boost

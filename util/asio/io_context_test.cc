@@ -169,7 +169,7 @@ class IoContextTest : public testing::Test {
 TEST_F(IoContextTest, Basic) {
   io_context cntx(1);  // no locking
   int i = 0;
-  cntx.post([&i] { ++i; });
+  asio::post(cntx, [&i] { ++i; });
   EXPECT_EQ(0, i);
   EXPECT_EQ(1, cntx.run_one());
   EXPECT_EQ(1, i);
@@ -180,10 +180,10 @@ TEST_F(IoContextTest, Stop) {
   io_context cntx;
   int i = 0;
   auto inc = [&i] { ++i; };
-  cntx.post(inc);
+  asio::post(cntx, inc);
   EXPECT_EQ(1, cntx.poll_one());
   EXPECT_EQ(1, i);
-  cntx.post(inc);
+  asio::post(cntx, inc);
   cntx.stop();
   EXPECT_EQ(0, cntx.poll_one());
   EXPECT_EQ(1, i);
@@ -382,7 +382,7 @@ static void BM_RunOneNoLock(benchmark::State& state) {
 
   int i = 0;
   while (state.KeepRunning()) {
-    cntx.post([&i] { ++i; });
+    asio::post(cntx, [&i] { ++i; });
     cntx.run_one();
   }
 }
