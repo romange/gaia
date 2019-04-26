@@ -65,6 +65,22 @@ TEST_F(SocketTest, Normal) {
   FiberSyncSocket fss("localhost", std::to_string(port_), &pool_->GetNextContext());
 }
 
+TEST_F(SocketTest, Move) {
+  std::unique_ptr<FiberSyncSocket> local_socket;
+  system::error_code ec;
+  h2::request<h2::string_body> req{h2::verb::get, "/", 11};
+
+  sock_->context().AwaitSafe([&] {
+    local_socket.reset(new FiberSyncSocket(std::move(*sock_)));
+    ASSERT_FALSE(sock_->is_open());
+
+    size_t written = h2::write(*local_socket, req, ec);
+    EXPECT_GT(written, 0);
+  });
+  
+
+}
+
 TEST_F(SocketTest, StarvedRead) {
   fibers_ext::Done done;
   listener_.RegisterCb("/null", false,  // does not send anything.
