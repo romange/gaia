@@ -273,8 +273,10 @@ add_third_party(
   LIB libdouble-conversion.a
 )
 
+# set(Boost_DEBUG ON)
 set(Boost_USE_MULTITHREADED ON)
 SET(Boost_NO_SYSTEM_PATHS ON)
+SET(Boost_NO_BOOST_CMAKE ON)
 
 set(BOOST_ROOT /usr/local)
 find_package(Boost 1.68.0 QUIET COMPONENTS coroutine fiber context system thread)
