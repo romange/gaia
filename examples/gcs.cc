@@ -34,18 +34,44 @@ using asio::ip::tcp;
 
 using SslStream = asio::ssl::stream<FiberSyncSocket>;
 
-util::Status SslConnect(SslStream* stream, unsigned ms) {
+static util::Status ToStatus(const ::boost::system::error_code& ec) {
+  return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+}
+
+static util::Status SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
   if (ec) {
-    return Status(absl::StrCat("Could not connect to google: ", ec.message()));
+    return ToStatus(ec);
   }
 
   stream->handshake(asio::ssl::stream_base::client, ec);
   if (ec) {
-    return Status(absl::StrCat("Error with ssl handshake: ", ec.message()));
+    return ToStatus(ec);
   }
 
   return Status::OK;
+}
+
+static ::boost::system::error_code WriteAndRead(SslStream* stream,
+                                                h2::request<h2::string_body>* req,
+                                                h2::response<h2::dynamic_body>* resp) {
+  ::boost::system::error_code ec;
+  h2::write(*stream, *req, ec);
+  if (ec) {
+    return ec;
+  }
+
+  beast::flat_buffer buffer;
+
+  h2::read(*stream, buffer, *resp, ec);
+  return ec;
+}
+
+static std::string Stringify(const rj::Value& value) {
+  rj::StringBuffer buffer;
+  rj::Writer<rj::StringBuffer> writer(buffer);
+  value.Accept(writer);
+  return std::string(buffer.GetString(), buffer.GetLength());
 }
 
 class GCE {
@@ -209,51 +235,54 @@ class GCS {
   IoContext& io_context_;
 
  public:
+  using ListBucketResult = util::StatusObject<std::vector<std::string>>;
+  using ReadObjectResult = util::StatusObject<size_t>;
+
   GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
 
-  void ListBuckets();
+  util::Status Connect(unsigned msec);
+
+  ListBucketResult ListBuckets();
+
+  ReadObjectResult Read(const std::string& bucket, const std::string& path, size_t ofs,
+                        const strings::MutableByteRange& range);
 
  private:
+  util::Status RefreshTokenIfNeeded();
+
+  static constexpr char kDomain[] = "www.googleapis.com";
+
   std::string access_token_;
+  std::unique_ptr<SslStream> client_;
 };
 
-static ::boost::system::error_code WriteAndRead(SslStream* stream,
-                                                h2::request<h2::string_body>* req,
-                                                h2::response<h2::dynamic_body>* resp) {
-  ::boost::system::error_code ec;
-  h2::write(*stream, *req, ec);
-  if (ec) {
-    return ec;
-  }
+constexpr char GCS::kDomain[];
 
-  beast::flat_buffer buffer;
+util::Status GCS::Connect(unsigned msec) {
+  client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
-  h2::read(*stream, buffer, *resp, ec);
-  return ec;
+  return SslConnect(client_.get(), msec);
 }
 
+util::Status GCS::RefreshTokenIfNeeded() {
+  if (!access_token_.empty())
+    return Status::OK;
+  auto res = gce_.GetAccessToken(&io_context_);
+  if (!res.ok())
+    return res.status;
 
-std::string Stringify(const rj::Value& value) {
-  rj::StringBuffer buffer;
-  rj::Writer<rj::StringBuffer> writer(buffer);
-  value.Accept(writer);
-  return std::string(buffer.GetString(), buffer.GetLength());
+  access_token_ = res.obj;
+  return Status::OK;
 }
 
-void GCS::ListBuckets() {
-  const char kDomain[] = "www.googleapis.com";
+auto GCS::ListBuckets() -> ListBucketResult {
+  CHECK(client_);
 
-  if (access_token_.empty()) {
-    auto res = gce_.GetAccessToken(&io_context_);
-    CHECK_STATUS(res.status);
-    access_token_ = res.obj;
-    LOG(INFO) << "Access token: " << access_token_;
-  }
-
-  SslStream stream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context());
-  CHECK_STATUS(SslConnect(&stream, 2000));
+  RETURN_IF_ERROR(RefreshTokenIfNeeded());
 
   string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
+  absl::StrAppend(&url, "&fields=items,nextPageToken");
+
   h2::request<h2::string_body> req{h2::verb::get, url, 11};
 
   req.set(h2::field::host, kDomain);
@@ -261,9 +290,9 @@ void GCS::ListBuckets() {
 
   VLOG(1) << "Req: " << req;
   h2::response<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(&stream, &req, &resp);
+  auto ec = WriteAndRead(client_.get(), &req, &resp);
   if (ec) {
-    LOG(FATAL) << "Error communicating with google: " + ec.message();
+    return ToStatus(ec);
   }
 
   string str = beast::buffers_to_string(resp.body().data());
@@ -273,7 +302,8 @@ void GCS::ListBuckets() {
   doc.ParseInsitu<kFlags>(&str.front());
 
   if (doc.HasParseError()) {
-    LOG(FATAL) << rj::GetParseError_En(doc.GetParseError());
+    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << str;
+    return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
   }
 
   auto it = doc.FindMember("items");
@@ -281,8 +311,51 @@ void GCS::ListBuckets() {
   const auto& val = it->value;
   CHECK(val.IsArray());
   auto array = val.GetArray();
+
+  vector<string> results;
+  it = doc.FindMember("nextPageToken");
+  CHECK(it == doc.MemberEnd()) << "TBD - to support pagination";
+
   for (size_t i = 0; i < array.Size(); ++i) {
-    LOG(INFO) << i << ": " << Stringify(array[i]);
+    const auto& item = array[i];
+    auto it = item.FindMember("id");
+    if (it != item.MemberEnd()) {
+      results.emplace_back(it->value.GetString(), it->value.GetStringLength());
+    }
+  }
+  return results;
+}
+
+auto GCS::Read(const std::string& bucket, const std::string& path, size_t ofs,
+               const strings::MutableByteRange& range)
+    -> ReadObjectResult {
+  CHECK(client_);
+
+  RETURN_IF_ERROR(RefreshTokenIfNeeded());
+  string url = absl::StrCat("/storage/v1/b/", bucket, "/", path);
+  absl::StrAppend(&url, "&alt=media");
+
+  h2::request<h2::string_body> req{h2::verb::get, url, 11};
+
+  req.set(h2::field::host, kDomain);
+  req.set(h2::field::authorization, absl::StrCat("Bearer ", access_token_));
+
+  VLOG(1) << "Req: " << req;
+  h2::response<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(client_.get(), &req, &resp);
+  if (ec) {
+    return ToStatus(ec);
+  }
+  return Status::OK;
+}
+
+void Run(const GCE& gce, IoContext* context) {
+  GCS gcs(gce, context);
+  CHECK_STATUS(gcs.Connect(2000));
+  auto res = gcs.ListBuckets();
+  CHECK_STATUS(res.status);
+  for (const auto& s : res.obj) {
+    cout << s << endl;
   }
 }
 
@@ -296,9 +369,7 @@ int main(int argc, char** argv) {
 
   IoContext& io_context = pool.GetNextContext();
 
-  GCS gcs(gce, &io_context);
-
-  io_context.AwaitSafe([&] { gcs.ListBuckets(); });
+  io_context.AwaitSafe([&] { Run(gce, &io_context); });
 
   return 0;
 }
