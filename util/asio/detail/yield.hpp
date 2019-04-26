@@ -7,7 +7,6 @@
 
 #include <boost/asio/async_result.hpp>
 #include <boost/asio/detail/config.hpp>
-#include <boost/asio/handler_type.hpp>
 #include <boost/assert.hpp>
 #include <boost/atomic.hpp>
 #include <boost/intrusive_ptr.hpp>
