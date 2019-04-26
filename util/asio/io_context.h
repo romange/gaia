@@ -5,6 +5,8 @@
 #pragma once
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+
 #include <thread>
 
 #include "util/fibers/fibers_ext.h"
@@ -40,7 +42,7 @@ namespace asio_ext {
 // Runs `f` asynchronously in io-context fiber. `f` should not block, lock on mutexes or Await.
 // Spinlocks are ok but might cause performance degradation.
 template <typename Func> void Async(::boost::asio::io_context& cntx, Func&& f) {
-  cntx.post(std::forward<Func>(f));
+  ::boost::asio::post(cntx, std::forward<Func>(f));
 }
 
 // Similarly to Async(), runs 'f' in io_context thread, but waits for it to finish by blocking
