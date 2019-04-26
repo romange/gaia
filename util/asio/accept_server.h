@@ -48,7 +48,7 @@ class AcceptServer {
   using endpoint = ::boost::asio::ip::tcp::endpoint;
   struct ListenerWrapper;
 
-  void RunInIOThread(ListenerWrapper* listener);
+  void AcceptInIOThread(ListenerWrapper* listener);
 
   // Should really be std::expected or std::experimental::fundamental_v3::expected
   // when upgrade the compiler.

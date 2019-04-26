@@ -71,7 +71,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   return listener.port;
 }
 
-void AcceptServer::RunInIOThread(ListenerWrapper* wrapper) {
+void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
   CHECK(wrapper->io_context.InContextThread());
 
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
@@ -201,10 +201,9 @@ void AcceptServer::Run() {
 
     for (auto& listener : listeners_) {
       ListenerWrapper* ptr = &listener;
-      io_context& io_cntx = ptr->acceptor.get_executor().context();
-
+      io_context& io_cntx = listener.io_context.raw_context();
       asio::post(io_cntx, [this, ptr] {
-        fibers::fiber srv_fb(&AcceptServer::RunInIOThread, this, ptr);
+        fibers::fiber srv_fb(&AcceptServer::AcceptInIOThread, this, ptr);
         srv_fb.detach();
       });
     }
