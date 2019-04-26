@@ -16,6 +16,7 @@ class FiberSyncSocket {
  public:
   using error_code = ::boost::system::error_code;
   using next_layer_type = ::boost::asio::ip::tcp::socket;
+  using lowest_layer_type = next_layer_type::lowest_layer_type;
 
   // C'tor can be called from any thread.
   FiberSyncSocket(next_layer_type&& sock, size_t rbuf_size = 1 << 12)
@@ -75,8 +76,9 @@ class FiberSyncSocket {
 
   error_code status() const { return impl_->status(); }
 
-  // For debugging.
+  // To support socket requirements.
   next_layer_type& next_layer() { return impl_->next_layer(); }
+  lowest_layer_type& lowest_layer() { return impl_->next_layer().lowest_layer(); }
 
   // For debugging/testing.
   IoContext& context() { return impl_->context(); }

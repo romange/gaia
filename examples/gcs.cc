@@ -41,10 +41,7 @@ void Run(IoContext& io_context) {
   ctx.add_certificate_authority(asio::buffer(cert), error_code);
   CHECK(!error_code) << error_code.message();
 
-  tcp::resolver resolver(io_context.raw_context());
-  auto endpoints = resolver.resolve(kDomain, kService);
-
-  asio::ssl::stream<tcp::socket> stream(io_context.raw_context(), ctx);
+  asio::ssl::stream<FiberSyncSocket> stream(FiberSyncSocket{kDomain, kService, &io_context}, ctx);
 
 #if 0
   // Set SNI Hostname (many hosts need this to handshake successfully)
@@ -52,9 +49,8 @@ void Run(IoContext& io_context) {
     LOG(FATAL) << "boo";
   }
 #endif
-
-  asio::connect(stream.next_layer(), endpoints, error_code);
-  CHECK(!error_code);
+  error_code = stream.next_layer().ClientWaitToConnect(2000);
+  CHECK(!error_code) << error_code.message();
 
   stream.handshake(asio::ssl::stream_base::client, error_code);
   CHECK(!error_code) << error_code.message();
