@@ -3,6 +3,7 @@
 //
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/string_body.hpp>
@@ -10,6 +11,8 @@
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -29,8 +32,21 @@ namespace h2 = beast::http;
 namespace rj = rapidjson;
 using asio::ip::tcp;
 
-const char kDomain[] = "oauth2.googleapis.com";
-const char kService[] = "443";
+using SslStream = asio::ssl::stream<FiberSyncSocket>;
+
+util::Status SslConnect(SslStream* stream, unsigned ms) {
+  auto ec = stream->next_layer().ClientWaitToConnect(ms);
+  if (ec) {
+    return Status(absl::StrCat("Could not connect to google: ", ec.message()));
+  }
+
+  stream->handshake(asio::ssl::stream_base::client, ec);
+  if (ec) {
+    return Status(absl::StrCat("Error with ssl handshake: ", ec.message()));
+  }
+
+  return Status::OK;
+}
 
 class GCE {
  public:
@@ -43,6 +59,10 @@ class GCE {
   const std::string& client_secret() const { return client_secret_; }
   const std::string& account_id() const { return account_id_; }
   const std::string& refresh_token() const { return refresh_token_; }
+
+  asio::ssl::context& ssl_context() const { return *ssl_ctx_; }
+
+  util::StatusObject<std::string> GetAccessToken(IoContext* context) const;
 
  private:
   util::Status ParseDefaultConfig();
@@ -92,6 +112,7 @@ util::Status GCE::Init() {
   if (ec) {
     return Status(ec.message());
   }
+
   RETURN_IF_ERROR(ParseDefaultConfig());
   LOG(INFO) << "Found account " << account_id_ << "/" << project_id_;
 
@@ -125,69 +146,144 @@ util::Status GCE::Init() {
   return Status::OK;
 }
 
-void Run(IoContext& io_context, GCE& gce) {
-  string cert;
-  file_util::ReadFileToStringOrDie("/etc/ssl/certs/ca-certificates.crt", &cert);
-  asio::ssl::context ctx(asio::ssl::context::tlsv12_client);
-  ctx.set_verify_mode(asio::ssl::verify_peer);
+util::StatusObject<std::string> GCE::GetAccessToken(IoContext* context) const {
+  const char kDomain[] = "oauth2.googleapis.com";
+  const char kService[] = "443";
 
-  system::error_code error_code;
-  ctx.add_certificate_authority(asio::buffer(cert), error_code);
-  CHECK(!error_code) << error_code.message();
-
-  asio::ssl::stream<FiberSyncSocket> stream(FiberSyncSocket{kDomain, kService, &io_context}, ctx);
-
-#if 0
-  // Set SNI Hostname (many hosts need this to handshake successfully)
-  if (!SSL_set_tlsext_host_name(stream.native_handle(), kDomain)) {
-    LOG(FATAL) << "boo";
-  }
-#endif
-  error_code = stream.next_layer().ClientWaitToConnect(2000);
-  CHECK(!error_code) << error_code.message();
-
-  stream.handshake(asio::ssl::stream_base::client, error_code);
-  CHECK(!error_code) << error_code.message();
+  SslStream stream(FiberSyncSocket{kDomain, kService, context}, *ssl_ctx_);
+  RETURN_IF_ERROR(SslConnect(&stream, 2000));
 
   h2::request<h2::string_body> req{h2::verb::post, "/token", 11};
   req.set(h2::field::host, kDomain);
   req.set(h2::field::content_type, "application/x-www-form-urlencoded");
 
-  string body;
+  string body{"grant_type=refresh_token"};
 
-  absl::StrAppend(&body, "client_secret=", gce.client_secret(), "&grant_type=refresh_token",
-                  "&refresh_token=", gce.refresh_token());
-  absl::StrAppend(&body, "&client_id=", gce.client_id());
+  absl::StrAppend(&body, "&client_secret=", client_secret(), "&refresh_token=", refresh_token());
+  absl::StrAppend(&body, "&client_id=", client_id());
 
-  /*http::Client client(&io_context);
-
-  auto ec = client.Connect("oauth2.googleapis.com", "80");
-  CHECK(!ec) << ec.message();
-
-  client.AddHeader("Content-Type", "application/x-www-form-urlencoded");
-  string body("grant_type=refresh_token");
-  absl::StrAppend(&body, "&client_secret=", FLAGS_client_secret,
-                  "&refresh_token=", FLAGS_gs_oauth2_refresh_token);
-  absl::StrAppend(&body, "client_id=", FLAGS_client_id);
-
-  ec = client.Send(http::Client::Verb::post, "/token", body, &resp);
-  CHECK(!ec) << ec.message();
-*/
   req.body().assign(body.begin(), body.end());
   req.prepare_payload();
-  LOG(INFO) << "Req: " << req;
+  VLOG(1) << "Req: " << req;
 
-  h2::write(stream, req);
+  ::boost::system::error_code ec;
+  h2::write(stream, req, ec);
+  if (ec) {
+    return Status(absl::StrCat("Error sending access token request: ", ec.message()));
+  }
 
   beast::flat_buffer buffer;
 
-  // http::Client::Response resp;
   h2::response<h2::dynamic_body> resp;
 
-  h2::read(stream, buffer, resp, error_code);
-  CHECK(!error_code);
+  h2::read(stream, buffer, resp, ec);
+  if (ec) {
+    return Status(absl::StrCat("Error reading access token request: ", ec.message()));
+  }
+  string str = beast::buffers_to_string(resp.body().data());
 
-  LOG(INFO) << "Resp: " << resp;
+  rj::Document doc;
+  constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
+  doc.ParseInsitu<kFlags>(&str.front());
+
+  if (doc.HasParseError()) {
+    return Status(rj::GetParseError_En(doc.GetParseError()));
+  }
+
+  string access_token, token_type;
+  for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
+    if (it->name == "access_token") {
+      access_token = it->value.GetString();
+    } else if (it->name == "token_type") {
+      token_type = it->value.GetString();
+    }
+  }
+  if (token_type != "Bearer" || access_token.empty()) {
+    return Status(absl::StrCat("Bad json response: ", doc.GetString()));
+  }
+  return access_token;
+}
+
+class GCS {
+  const GCE& gce_;
+  IoContext& io_context_;
+
+ public:
+  GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
+
+  void ListBuckets();
+
+ private:
+  std::string access_token_;
+};
+
+static ::boost::system::error_code WriteAndRead(SslStream* stream,
+                                                h2::request<h2::string_body>* req,
+                                                h2::response<h2::dynamic_body>* resp) {
+  ::boost::system::error_code ec;
+  h2::write(*stream, *req, ec);
+  if (ec) {
+    return ec;
+  }
+
+  beast::flat_buffer buffer;
+
+  h2::read(*stream, buffer, *resp, ec);
+  return ec;
+}
+
+
+std::string Stringify(const rj::Value& value) {
+  rj::StringBuffer buffer;
+  rj::Writer<rj::StringBuffer> writer(buffer);
+  value.Accept(writer);
+  return std::string(buffer.GetString(), buffer.GetLength());
+}
+
+void GCS::ListBuckets() {
+  const char kDomain[] = "www.googleapis.com";
+
+  if (access_token_.empty()) {
+    auto res = gce_.GetAccessToken(&io_context_);
+    CHECK_STATUS(res.status);
+    access_token_ = res.obj;
+    LOG(INFO) << "Access token: " << access_token_;
+  }
+
+  SslStream stream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context());
+  CHECK_STATUS(SslConnect(&stream, 2000));
+
+  string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
+  h2::request<h2::string_body> req{h2::verb::get, url, 11};
+
+  req.set(h2::field::host, kDomain);
+  req.set(h2::field::authorization, absl::StrCat("Bearer ", access_token_));
+
+  VLOG(1) << "Req: " << req;
+  h2::response<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(&stream, &req, &resp);
+  if (ec) {
+    LOG(FATAL) << "Error communicating with google: " + ec.message();
+  }
+
+  string str = beast::buffers_to_string(resp.body().data());
+
+  rj::Document doc;
+  constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
+  doc.ParseInsitu<kFlags>(&str.front());
+
+  if (doc.HasParseError()) {
+    LOG(FATAL) << rj::GetParseError_En(doc.GetParseError());
+  }
+
+  auto it = doc.FindMember("items");
+  CHECK(it != doc.MemberEnd()) << str;
+  const auto& val = it->value;
+  CHECK(val.IsArray());
+  auto array = val.GetArray();
+  for (size_t i = 0; i < array.Size(); ++i) {
+    LOG(INFO) << i << ": " << Stringify(array[i]);
+  }
 }
 
 int main(int argc, char** argv) {
@@ -199,7 +295,10 @@ int main(int argc, char** argv) {
   pool.Run();
 
   IoContext& io_context = pool.GetNextContext();
-  io_context.AwaitSafe([&] { Run(io_context, gce); });
+
+  GCS gcs(gce, &io_context);
+
+  io_context.AwaitSafe([&] { gcs.ListBuckets(); });
 
   return 0;
 }
