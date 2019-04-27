@@ -5,6 +5,7 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>  // for operator<<
@@ -32,6 +33,9 @@ namespace h2 = beast::http;
 namespace rj = rapidjson;
 using asio::ip::tcp;
 
+DEFINE_string(bucket, "", "");
+DEFINE_string(read_path, "", "");
+
 using SslStream = asio::ssl::stream<FiberSyncSocket>;
 
 static util::Status ToStatus(const ::boost::system::error_code& ec) {
@@ -52,9 +56,40 @@ static util::Status SslConnect(SslStream* stream, unsigned ms) {
   return Status::OK;
 }
 
-static ::boost::system::error_code WriteAndRead(SslStream* stream,
-                                                h2::request<h2::string_body>* req,
-                                                h2::response<h2::dynamic_body>* resp) {
+inline bool IsValidUrlChar(char ch) {
+  return absl::ascii_isalnum(ch) || strchr("-_.!~*'()", ch);
+}
+
+size_t InternalUrlEncode(absl::string_view src, char* dest) {
+  static const char digits[] = "0123456789ABCDEF";
+
+  char* start = dest;
+  for (char ch_c : src) {
+    unsigned char ch = static_cast<unsigned char>(ch_c);
+    if (IsValidUrlChar(ch)) {
+      *dest++ = ch_c;
+    } else {
+      *dest++ = '%';
+      *dest++ = digits[(ch >> 4) & 0x0F];
+      *dest++ = digits[ch & 0x0F];
+    }
+  }
+  *dest = 0;
+
+  return static_cast<size_t>(dest - start);
+}
+
+void AppendEncodedUrl(const absl::string_view src, string* dest) {
+  size_t sz = dest->size();
+  dest->resize(dest->size() + src.size() * 3 + 1);
+  char* next = &dest->front() + sz;
+  size_t written = InternalUrlEncode(src, next);
+  dest->resize(sz + written);
+}
+
+template <typename ReqBody, typename RespBody>
+::boost::system::error_code WriteAndRead(SslStream* stream, h2::request<ReqBody>* req,
+                                         h2::response_parser<RespBody>* resp) {
   ::boost::system::error_code ec;
   h2::write(*stream, *req, ec);
   if (ec) {
@@ -246,13 +281,22 @@ class GCS {
 
   ReadObjectResult Read(const std::string& bucket, const std::string& path, size_t ofs,
                         const strings::MutableByteRange& range);
+  util::Status ReadToString(const std::string& bucket, const std::string& path, std::string* dest);
 
  private:
   util::Status RefreshTokenIfNeeded();
 
+  h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url) {
+    h2::request<h2::empty_body> req(req_verb, url, 11);
+    req.set(h2::field::host, kDomain);
+    req.set(h2::field::authorization, access_token_header_);
+
+    return req;
+  }
+
   static constexpr char kDomain[] = "www.googleapis.com";
 
-  std::string access_token_;
+  std::string access_token_, access_token_header_;
   std::unique_ptr<SslStream> client_;
 };
 
@@ -272,6 +316,8 @@ util::Status GCS::RefreshTokenIfNeeded() {
     return res.status;
 
   access_token_ = res.obj;
+  access_token_header_ = absl::StrCat("Bearer ", access_token_);
+
   return Status::OK;
 }
 
@@ -283,19 +329,16 @@ auto GCS::ListBuckets() -> ListBucketResult {
   string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
   absl::StrAppend(&url, "&fields=items,nextPageToken");
 
-  h2::request<h2::string_body> req{h2::verb::get, url, 11};
+  auto http_req = PrepareRequest(h2::verb::get, url);
 
-  req.set(h2::field::host, kDomain);
-  req.set(h2::field::authorization, absl::StrCat("Bearer ", access_token_));
-
-  VLOG(1) << "Req: " << req;
-  h2::response<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(client_.get(), &req, &resp);
+  VLOG(1) << "Req: " << http_req;
+  h2::response_parser<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(client_.get(), &http_req, &resp);
   if (ec) {
     return ToStatus(ec);
   }
 
-  string str = beast::buffers_to_string(resp.body().data());
+  string str = beast::buffers_to_string(resp.get().body().data());
 
   rj::Document doc;
   constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
@@ -327,24 +370,52 @@ auto GCS::ListBuckets() -> ListBucketResult {
 }
 
 auto GCS::Read(const std::string& bucket, const std::string& path, size_t ofs,
-               const strings::MutableByteRange& range)
-    -> ReadObjectResult {
+               const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(client_);
 
   RETURN_IF_ERROR(RefreshTokenIfNeeded());
   string url = absl::StrCat("/storage/v1/b/", bucket, "/", path);
-  absl::StrAppend(&url, "&alt=media");
+  absl::StrAppend(&url, "?alt=media");
 
-  h2::request<h2::string_body> req{h2::verb::get, url, 11};
-
-  req.set(h2::field::host, kDomain);
-  req.set(h2::field::authorization, absl::StrCat("Bearer ", access_token_));
+  auto req = PrepareRequest(h2::verb::get, url);
 
   VLOG(1) << "Req: " << req;
-  h2::response<h2::dynamic_body> resp;
+  h2::response_parser<h2::dynamic_body> resp;
   auto ec = WriteAndRead(client_.get(), &req, &resp);
   if (ec) {
     return ToStatus(ec);
+  }
+  return Status::OK;
+}
+
+util::Status GCS::ReadToString(const std::string& bucket, const std::string& path,
+                               std::string* dest) {
+  CHECK(client_);
+
+  RETURN_IF_ERROR(RefreshTokenIfNeeded());
+
+  string url{"/storage/v1/b/"};
+  absl::StrAppend(&url, bucket, "/o/");
+  AppendEncodedUrl(path, &url);
+  absl::StrAppend(&url, "?alt=media");
+  auto req = PrepareRequest(h2::verb::get, url);
+  VLOG(1) << "Req: " << req;
+
+  h2::response_parser<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(client_.get(), &req, &resp);
+  if (ec) {
+    return ToStatus(ec);
+  }
+  auto msg = resp.release();
+  VLOG(1) << msg;
+
+  beast::multi_buffer mb = msg.body();
+  const auto& cdata = mb.data();
+
+  dest->reserve(beast::buffer_bytes(cdata));
+  dest->clear();
+  for (auto const buffer : beast::buffers_range_ref(cdata)) {
+    dest->append(static_cast<char const*>(buffer.data()), buffer.size());
   }
   return Status::OK;
 }
@@ -356,6 +427,14 @@ void Run(const GCE& gce, IoContext* context) {
   CHECK_STATUS(res.status);
   for (const auto& s : res.obj) {
     cout << s << endl;
+  }
+
+  if (!FLAGS_read_path.empty()) {
+    CHECK(!FLAGS_bucket.empty());
+    string contents;
+    CHECK_STATUS(gcs.ReadToString(FLAGS_bucket, FLAGS_read_path, &contents));
+    cout << FLAGS_read_path << ":\n";
+    cout << contents << "\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n";
   }
 }
 
