@@ -94,10 +94,11 @@ auto GCS::ListBuckets() -> ListBucketResult {
   }
 
   auto msg = resp.release();
-  http::InsituBufSeqStream is(msg.body().data());
-  rj::Document doc;
+  http::RjBufSequenceStream is(msg.body().data());
 
-  doc.ParseStream <rj::kParseInsituFlag>(is);
+  // TODO: to have a handler extracting what we need.
+  rj::Document doc;
+  doc.ParseStream<rj::kParseDefaultFlags>(is);
 
   if (doc.HasParseError()) {
     LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << msg;
@@ -116,7 +117,7 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
   for (size_t i = 0; i < array.Size(); ++i) {
     const auto& item = array[i];
-    auto it = item.FindMember("id");
+    auto it = item.FindMember("name");
     if (it != item.MemberEnd()) {
       results.emplace_back(it->value.GetString(), it->value.GetStringLength());
     }
@@ -124,25 +125,56 @@ auto GCS::ListBuckets() -> ListBucketResult {
   return results;
 }
 
-void GCS::List(absl::string_view bucket, absl::string_view prefix) {
+auto GCS::List(absl::string_view bucket, absl::string_view prefix,
+               std::function<void(absl::string_view)> cb) -> ListObjectResult {
   CHECK(client_ && !bucket.empty());
 
-  CHECK_STATUS(RefreshTokenIfNeeded());
+  RETURN_IF_ERROR(RefreshTokenIfNeeded());
 
   string url = "/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?prefix=");
   strings::AppendEncodedUrl(prefix, &url);
   auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
 
-  h2::response_parser<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(client_.get(), &http_req, &resp);
-  if (ec) {
-    LOG(FATAL) << ec;
-    // return ToStatus(ec);
-  }
+  // TODO: to have a handler extracting what we need.
+  rj::Document doc;
+  while (true) {
+    h2::response_parser<h2::dynamic_body> resp;
+    auto ec = WriteAndRead(client_.get(), &http_req, &resp);
+    if (ec) {
+      return ToStatus(ec);
+    }
 
-  string str = beast::buffers_to_string(resp.get().body().data());
-  LOG(INFO) << str;
+    auto msg = resp.release();
+    http::RjBufSequenceStream is(msg.body().data());
+
+    doc.ParseStream<rj::kParseDefaultFlags>(is);
+
+    if (doc.HasParseError()) {
+      LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << msg;
+      return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
+    }
+
+    auto it = doc.FindMember("items");
+    CHECK(it != doc.MemberEnd()) << msg;
+    const auto& val = it->value;
+    CHECK(val.IsArray());
+    auto array = val.GetArray();
+
+    for (size_t i = 0; i < array.Size(); ++i) {
+      const auto& item = array[i];
+      auto it = item.FindMember("name");
+      CHECK(it != item.MemberEnd());
+      cb(absl::string_view(it->value.GetString(), it->value.GetStringLength()));
+    }
+    it = doc.FindMember("nextPageToken");
+    if (it == doc.MemberEnd()) {
+      break;
+    }
+    string page_token = string(it->value.GetString(), it->value.GetStringLength());
+    http_req.target(absl::StrCat(url, "&pageToken=", page_token));
+  }
+  return Status::OK;
 }
 
 auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t ofs,

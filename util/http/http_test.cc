@@ -78,12 +78,10 @@ TEST_F(HttpTest, JsonParse) {
   AddToMB(kPart2, &mb);
   AddToMB(kPart3, &mb);
 
-  InsituBufSeqStream is(mb.data());
+  RjBufSequenceStream is(mb.data());
 
   rj::Document doc;
-  constexpr unsigned kFlags =
-      rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag | rj::kParseInsituFlag;
-  doc.ParseStream<kFlags>(is);
+  doc.ParseStream<rj::kParseDefaultFlags>(is);
   ASSERT_FALSE(doc.HasParseError()) << rj::GetParseError_En(doc.GetParseError());
   EXPECT_STREQ("val1", doc["key1"].GetString());
   EXPECT_STREQ("val2", doc["key2"].GetString());

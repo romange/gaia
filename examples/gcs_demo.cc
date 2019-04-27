@@ -53,7 +53,9 @@ void Run(const GCE& gce, IoContext* context) {
   }
 
   if (!FLAGS_prefix.empty()) {
-    gcs.List(FLAGS_bucket, FLAGS_prefix);
+    gcs.List(FLAGS_bucket, FLAGS_prefix, [](absl::string_view name) {
+      cout << "Object: " << name << endl;
+    });
   }
 }
 

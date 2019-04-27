@@ -8,12 +8,14 @@
 namespace util {
 namespace http {
 
-class InsituBufSeqStream {
+// This stream can not be insitu because rapidjson assumes
+// that PutBegin/PutEnd denote continous memory range and not just an abstract stream.
+class RjBufSequenceStream {
  public:
   using Ch = char;
   using multi_buffer = ::boost::beast::multi_buffer;
 
-  InsituBufSeqStream(multi_buffer::mutable_data_type mdata) : end_(mdata.end()) {
+  RjBufSequenceStream(multi_buffer::const_buffers_type mdata) : end_(mdata.end()) {
     src_.it = mdata.begin();
     src_.Setup(end_);
   }
@@ -32,13 +34,16 @@ class InsituBufSeqStream {
   size_t Tell() const {
     size_t res = src_consumed_;
     if (!src_.end) {
-      res += src_.current - reinterpret_cast<char*>((*src_.it).data());
+      res += src_.current - reinterpret_cast<const char*>((*src_.it).data());
     }
-
     return res;
   }
 
-  Ch* PutBegin() {
+  Ch* PutBegin() { assert(0); return nullptr; }
+  size_t PutEnd(Ch* begin) { assert(0); return 0; }
+  void Put(Ch c) { assert(0); }
+
+  /*Ch* PutBegin() {
     assert(*src_.current);
     dst_ = src_;
     dst_consumed_ = 0;
@@ -49,7 +54,9 @@ class InsituBufSeqStream {
     if (dst_consumed_ == 0)
       return dst_.current - begin;
 
-    return dst_consumed_ + (dst_.current - reinterpret_cast<char*>((*dst_.it).data()));
+    size_t res = dst_consumed_ + (dst_.current - reinterpret_cast<char*>((*dst_.it).data()));
+    assert(res < 2000);
+    return res;
   }
 
   void Put(Ch c) {
@@ -57,14 +64,14 @@ class InsituBufSeqStream {
     if (dst_.finish()) {
       dst_consumed_ += dst_.Inc(end_);
     }
-  }
+  }*/
 
  private:
-  using const_iterator = multi_buffer::mutable_data_type::const_iterator;
+  using const_iterator = multi_buffer::const_buffers_type::const_iterator;
 
   struct Item {
     const_iterator it;
-    char *current, *end;
+    const char *current, *end;
 
     Item() : current(nullptr), end(nullptr) {}
 
@@ -82,7 +89,7 @@ class InsituBufSeqStream {
         return;
       }
       const auto& mb = *it;
-      current = reinterpret_cast<char*>(mb.data());
+      current = reinterpret_cast<const char*>(mb.data());
       end = current + mb.size();
     }
 
@@ -90,8 +97,8 @@ class InsituBufSeqStream {
   };
 
   const_iterator end_;
-  Item src_, dst_;
-  size_t src_consumed_ = 0, dst_consumed_ = 0;
+  Item src_;                 //, dst_;
+  size_t src_consumed_ = 0;  //, dst_consumed_ = 0;
 };
 
 }  // namespace http
@@ -100,7 +107,7 @@ class InsituBufSeqStream {
 namespace rapidjson {
 template <typename Stream> struct StreamTraits;
 
-template <> struct StreamTraits<util::http::InsituBufSeqStream> {
+template <> struct StreamTraits<util::http::RjBufSequenceStream> {
   enum { copyOptimization = 1 };
 };
 

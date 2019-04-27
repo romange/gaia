@@ -22,6 +22,7 @@ class GCS {
  public:
   using ListBucketResult = util::StatusObject<std::vector<std::string>>;
   using ReadObjectResult = util::StatusObject<size_t>;
+  using ListObjectResult = util::Status;
 
   GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
 
@@ -29,8 +30,9 @@ class GCS {
 
   ListBucketResult ListBuckets();
 
-  void List(absl::string_view bucket, absl::string_view prefix);
-  
+  ListObjectResult List(absl::string_view bucket, absl::string_view prefix,
+                        std::function<void(absl::string_view)> cb);
+
   ReadObjectResult Read(const std::string& bucket, const std::string& path, size_t ofs,
                         const strings::MutableByteRange& range);
   util::Status ReadToString(const std::string& bucket, const std::string& path, std::string* dest);
