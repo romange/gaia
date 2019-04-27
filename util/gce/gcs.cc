@@ -18,6 +18,7 @@
 #include "base/logging.h"
 #include "strings/escaping.h"
 #include "util/asio/fiber_socket.h"
+#include "util/http/beast_rj_utils.h"
 
 namespace util {
 using namespace std;
@@ -92,19 +93,19 @@ auto GCS::ListBuckets() -> ListBucketResult {
     return ToStatus(ec);
   }
 
-  string str = beast::buffers_to_string(resp.get().body().data());
-
+  auto msg = resp.release();
+  http::InsituBufSeqStream is(msg.body().data());
   rj::Document doc;
-  constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
-  doc.ParseInsitu<kFlags>(&str.front());
+
+  doc.ParseStream <rj::kParseInsituFlag>(is);
 
   if (doc.HasParseError()) {
-    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << str;
+    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << msg;
     return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
   }
 
   auto it = doc.FindMember("items");
-  CHECK(it != doc.MemberEnd()) << str;
+  CHECK(it != doc.MemberEnd()) << msg;
   const auto& val = it->value;
   CHECK(val.IsArray());
   auto array = val.GetArray();

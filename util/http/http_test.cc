@@ -4,6 +4,9 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
 
+#include <rapidjson/document.h>
+#include <rapidjson/error/en.h>
+
 #include "base/gtest.h"
 #include "base/logging.h"
 
@@ -12,11 +15,13 @@
 #include "util/asio/io_context_pool.h"
 #include "util/http/http_client.h"
 #include "util/http/http_testing.h"
+#include "util/http/beast_rj_utils.h"
 
 namespace util {
 namespace http {
 using namespace boost;
 using namespace std;
+namespace rj = rapidjson;
 
 class HttpTest : public HttpBaseTest {
  protected:
@@ -48,9 +53,43 @@ TEST_F(HttpTest, Client) {
   ec = client.Send(h2::verb::get, "/", &res);
   EXPECT_TRUE(ec);
   this_thread::sleep_for(10ms);
-  
+
   EXPECT_FALSE(client.IsConnected());
+}
+
+
+void AddToMB(const char* str, beast::multi_buffer* dest) {
+  size_t sz = strlen(str);
+  size_t req_sz = sz * 2 + 10;
+  auto seq = dest->prepare(req_sz);
+  auto it = seq.begin();
+  CHECK_EQ(req_sz, (*it).size());
+
+  memcpy((*it).data(), str, sz);
+  dest->commit(sz);
+}
+
+TEST_F(HttpTest, JsonParse) {
+  const char kPart1[] = R"({ "key1" : "val1", "key2)";
+  const char kPart2[] = R"(" : "val2", "key)";
+  const char kPart3[] = R"(3" : "val3" })";
+  beast::multi_buffer mb;
+  AddToMB(kPart1, &mb);
+  AddToMB(kPart2, &mb);
+  AddToMB(kPart3, &mb);
+
+  InsituBufSeqStream is(mb.data());
+
+  rj::Document doc;
+  constexpr unsigned kFlags =
+      rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag | rj::kParseInsituFlag;
+  doc.ParseStream<kFlags>(is);
+  ASSERT_FALSE(doc.HasParseError()) << rj::GetParseError_En(doc.GetParseError());
+  EXPECT_STREQ("val1", doc["key1"].GetString());
+  EXPECT_STREQ("val2", doc["key2"].GetString());
+  EXPECT_STREQ("val3", doc["key3"].GetString());
 }
 
 }  // namespace http
 }  // namespace util
+
