@@ -10,8 +10,8 @@ cxx_link(http_client_tool http_client_lib asio_fiber_lib)
 add_executable(mr3 mr3.cc)
 cxx_link(mr3 fiber_file asio_fiber_lib mr3_lib absl_hash absl_str_format http_v2)
 
-add_executable(gcs gcs.cc)
-cxx_link(gcs asio_fiber_lib file http_v2 gce_lib)
+add_executable(gcs_demo gcs_demo.cc)
+cxx_link(gcs_demo gce_lib)
 
 add_executable(gsod_group gsod_group.cc)
 cxx_link(gsod_group mr3_lib absl_hash absl_str_format http_v2)
