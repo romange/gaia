@@ -1,4 +1,4 @@
-add_library(strings  human_readable.cc
+add_library(strings escaping.cc human_readable.cc
             stringpiece.cc range.cc split.cc strcat.cc stringprintf.cc numbers.cc
             unique_strings.cc)
 target_link_libraries(strings base absl_strings)

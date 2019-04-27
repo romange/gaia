@@ -4,3 +4,9 @@
 #pragma once
 
 #include "absl/strings/escaping.h"
+
+namespace strings {
+
+void AppendEncodedUrl(const absl::string_view src, std::string* dest);
+
+}  // namespace strings
