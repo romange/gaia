@@ -29,6 +29,8 @@ class GCS {
 
   ListBucketResult ListBuckets();
 
+  void List(absl::string_view bucket, absl::string_view prefix);
+  
   ReadObjectResult Read(const std::string& bucket, const std::string& path, size_t ofs,
                         const strings::MutableByteRange& range);
   util::Status ReadToString(const std::string& bucket, const std::string& path, std::string* dest);

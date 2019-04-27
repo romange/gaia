@@ -123,6 +123,27 @@ auto GCS::ListBuckets() -> ListBucketResult {
   return results;
 }
 
+void GCS::List(absl::string_view bucket, absl::string_view prefix) {
+  CHECK(client_ && !bucket.empty());
+
+  CHECK_STATUS(RefreshTokenIfNeeded());
+
+  string url = "/storage/v1/b/";
+  absl::StrAppend(&url, bucket, "/o?prefix=");
+  strings::AppendEncodedUrl(prefix, &url);
+  auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
+
+  h2::response_parser<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(client_.get(), &http_req, &resp);
+  if (ec) {
+    LOG(FATAL) << ec;
+    // return ToStatus(ec);
+  }
+
+  string str = beast::buffers_to_string(resp.get().body().data());
+  LOG(INFO) << str;
+}
+
 auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t ofs,
                const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(client_ && !range.empty());

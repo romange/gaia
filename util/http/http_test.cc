@@ -47,6 +47,8 @@ TEST_F(HttpTest, Client) {
 
   ec = client.Send(h2::verb::get, "/", &res);
   EXPECT_TRUE(ec);
+  this_thread::sleep_for(10ms);
+  
   EXPECT_FALSE(client.IsConnected());
 }
 

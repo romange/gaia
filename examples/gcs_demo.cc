@@ -19,6 +19,7 @@ using namespace util;
 
 DEFINE_string(bucket, "", "");
 DEFINE_string(read_path, "", "");
+DEFINE_string(prefix, "", "");
 
 
 /*std::string Stringify(const rj::Value& value) {
@@ -49,6 +50,10 @@ void Run(const GCE& gce, IoContext* context) {
 
     cout << FLAGS_read_path << ": " << res.obj << ":\n";
     cout << contents << "\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n";
+  }
+
+  if (!FLAGS_prefix.empty()) {
+    gcs.List(FLAGS_bucket, FLAGS_prefix);
   }
 }
 
