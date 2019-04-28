@@ -148,6 +148,8 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
     auto msg = resp.release();
     http::RjBufSequenceStream is(msg.body().data());
 
+    VLOG(1) << "List response: " << msg;
+
     doc.ParseStream<rj::kParseDefaultFlags>(is);
 
     if (doc.HasParseError()) {
@@ -156,7 +158,8 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
     }
 
     auto it = doc.FindMember("items");
-    CHECK(it != doc.MemberEnd()) << msg;
+    if (it == doc.MemberEnd())
+      break;
     const auto& val = it->value;
     CHECK(val.IsArray());
     auto array = val.GetArray();
@@ -196,8 +199,13 @@ auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t of
   body.more = false;
 
   auto ec = WriteAndRead(client_.get(), &req, &resp);
+  h2::response<h2::buffer_body> msg = resp.release();
   if (ec) {
     return ToStatus(ec);
+  }
+  VLOG(1) << "Read Response: " << msg.base();
+  if (msg.result() != h2::status::ok) {
+    return Status(StatusCode::IO_ERROR, string(msg.reason()));
   }
 
   auto left_available = body.size;
@@ -225,9 +233,9 @@ util::Status GCS::ReadToString(const std::string& bucket, const std::string& obj
 
   const auto& cdata = msg.body().data();
 
-  dest->reserve(beast::buffer_bytes(cdata));
+  dest->reserve(asio::buffer_size(cdata));
   dest->clear();
-  for (auto const buffer : beast::buffers_range_ref(cdata)) {
+  for (auto const buffer : cdata) {
     dest->append(static_cast<char const*>(buffer.data()), buffer.size());
   }
   return Status::OK;
