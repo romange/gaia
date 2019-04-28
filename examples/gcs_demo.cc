@@ -9,8 +9,8 @@
 #include "util/gce/gce.h"
 #include "util/gce/gcs.h"
 
-#include "util/asio/io_context_pool.h"
 #include "util/asio/accept_server.h"
+#include "util/asio/io_context_pool.h"
 #include "util/http/http_client.h"
 
 using namespace std;
@@ -20,17 +20,63 @@ using namespace util;
 DEFINE_string(bucket, "", "");
 DEFINE_string(read_path, "", "");
 DEFINE_string(prefix, "", "");
+DEFINE_string(download, "", "");
 
+using FileQ = fibers::buffered_channel<string>;
 
-/*std::string Stringify(const rj::Value& value) {
-  rj::StringBuffer buffer;
-  rj::Writer<rj::StringBuffer> writer(buffer);
-  value.Accept(writer);
-  return std::string(buffer.GetString(), buffer.GetLength());
-}*/
+void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
+  constexpr size_t kBufSize = 1 << 16;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  size_t ofs = 0;
+  while (true) {
+    strings::MutableByteRange mbr(buf.get(), kBufSize);
+    auto res = gcs->Read(bucket, obj_path, ofs, mbr);
+    CHECK_STATUS(res.status);
+    ofs += res.obj;
+    if (res.obj < mbr.size()) {
+      break;
+    }
+  }
+  LOG(INFO) << "Read " << ofs << " bytes from " << obj_path;
+}
 
+void DownloadConsumer(const GCE& gce, IoContext* io_context, FileQ* q) {
+  string obj_path;
+  GCS gcs(gce, io_context);
+  CHECK_STATUS(gcs.Connect(2000));
+  while (true) {
+    fibers::channel_op_status st = q->pop(obj_path);
+    if (st == fibers::channel_op_status::closed)
+      break;
+    CHECK_EQ(fibers::channel_op_status::success, st);
 
+    DownloadFile(FLAGS_bucket, obj_path, &gcs);
+  }
+}
 
+void Download(const GCE& gce, IoContextPool* pool) {
+  FileQ file_q(64);
+
+  fibers::future<void> consumer_future = fibers::async([&] {
+    pool->AwaitFiberOnAll(
+        [&](IoContext& io_context) { DownloadConsumer(gce, &io_context, &file_q); });
+  });
+  IoContext& io_context = pool->GetNextContext();
+
+  auto producer = [&] {
+    GCS gcs(gce, &io_context);
+    CHECK_STATUS(gcs.Connect(2000));
+    auto status = gcs.List(FLAGS_bucket, FLAGS_download,
+                           [&](absl::string_view name) {
+                             file_q.push(string(name));
+                            });
+    CHECK_STATUS(status);
+  };
+
+  io_context.AwaitSafe(producer);
+  file_q.close();
+  consumer_future.wait();
+}
 
 void Run(const GCE& gce, IoContext* context) {
   GCS gcs(gce, context);
@@ -47,15 +93,15 @@ void Run(const GCE& gce, IoContext* context) {
     strings::MutableByteRange range(reinterpret_cast<uint8_t*>(&contents.front()), contents.size());
     auto res = gcs.Read(FLAGS_bucket, FLAGS_read_path, 0, range);
     CHECK_STATUS(res.status);
+    contents.resize(res.obj);
 
     cout << FLAGS_read_path << ": " << res.obj << ":\n";
     cout << contents << "\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n";
   }
 
   if (!FLAGS_prefix.empty()) {
-    auto status = gcs.List(FLAGS_bucket, FLAGS_prefix, [](absl::string_view name) {
-      cout << "Object: " << name << endl;
-    });
+    auto status = gcs.List(FLAGS_bucket, FLAGS_prefix,
+                           [](absl::string_view name) { cout << "Object: " << name << endl; });
     CHECK_STATUS(status);
   }
 }
@@ -70,7 +116,10 @@ int main(int argc, char** argv) {
 
   IoContext& io_context = pool.GetNextContext();
 
-  io_context.AwaitSafe([&] { Run(gce, &io_context); });
-
+  if (!FLAGS_download.empty()) {
+    Download(gce, &pool);
+  } else {
+    io_context.AwaitSafe([&] { Run(gce, &io_context); });
+  }
   return 0;
 }

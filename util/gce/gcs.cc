@@ -180,7 +180,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
   return Status::OK;
 }
 
-auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t ofs,
+auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
                const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(client_ && !range.empty());
 
@@ -204,7 +204,7 @@ auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t of
     return ToStatus(ec);
   }
   VLOG(1) << "Read Response: " << msg.base();
-  if (msg.result() != h2::status::ok) {
+  if (msg.result() != h2::status::partial_content) {
     return Status(StatusCode::IO_ERROR, string(msg.reason()));
   }
 
@@ -212,7 +212,7 @@ auto GCS::Read(const std::string& bucket, const std::string& obj_path, size_t of
   return range.size() - left_available;  // how much written
 }
 
-util::Status GCS::ReadToString(const std::string& bucket, const std::string& obj_path,
+util::Status GCS::ReadToString(absl::string_view bucket, absl::string_view obj_path,
                                std::string* dest) {
   CHECK(client_);
 

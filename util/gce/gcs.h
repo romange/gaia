@@ -33,9 +33,9 @@ class GCS {
   ListObjectResult List(absl::string_view bucket, absl::string_view prefix,
                         std::function<void(absl::string_view)> cb);
 
-  ReadObjectResult Read(const std::string& bucket, const std::string& path, size_t ofs,
+  ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
-  util::Status ReadToString(const std::string& bucket, const std::string& path, std::string* dest);
+  util::Status ReadToString(absl::string_view bucket, absl::string_view path, std::string* dest);
 
  private:
   util::Status RefreshTokenIfNeeded();

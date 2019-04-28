@@ -183,7 +183,7 @@ void AsioScheduler::MainLoop() {
   }
   suspend_timer_.reset();  // now we can free suspend_timer_.
 
-  LOG(INFO) << "MainLoopWakes/NotifyCnt: " << main_loop_wakes_ << "/" << notify_cnt_;
+  VLOG(1) << "MainLoopWakes/NotifyCnt: " << main_loop_wakes_ << "/" << notify_cnt_;
 }
 
 void AsioScheduler::WaitTillFibersSuspend() {
