@@ -30,7 +30,7 @@ class GCE {
 
   SslContext& ssl_context() const { return *ssl_ctx_; }
 
-  StatusObject<std::string> GetAccessToken(IoContext* context) const;
+  StatusObject<std::string> GetAccessToken(IoContext* context, bool force_refresh = false) const;
   bool is_prod_env() const { return is_prod_env_; }
 
  private:
@@ -38,6 +38,8 @@ class GCE {
   util::Status ReadDevCreds(const std::string& root_path);
 
   std::string project_id_, client_id_, client_secret_, account_id_, refresh_token_;
+  mutable std::string access_token_;
+
   std::unique_ptr<SslContext> ssl_ctx_;
   bool is_prod_env_ = false;
 };

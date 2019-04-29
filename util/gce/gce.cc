@@ -109,7 +109,6 @@ Status GCE::Init() {
     h2::write(socket, req, ec);
     RETURN_ON_ERROR;
 
-    // Declare a container to hold the response
     h2::read(socket, buffer, resp, ec);
     RETURN_ON_ERROR;
     account_id_ = std::move(resp).body();
@@ -159,13 +158,17 @@ util::Status GCE::ReadDevCreds(const std::string& root_path) {
   return Status::OK;
 }
 
-StatusObject<std::string> GCE::GetAccessToken(IoContext* context) const {
+StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_refresh) const {
   const char kDomain[] = "oauth2.googleapis.com";
   const char kService[] = "443";
+  if (!access_token_.empty() && !force_refresh) {
+    return access_token_;
+  }
 
   h2::response<h2::string_body> resp;
   error_code ec;
   beast::flat_buffer buffer;
+  access_token_.clear();
   if (is_prod_env_) {
     h2::request<h2::empty_body> req{
         h2::verb::get, "/computeMetadata/v1/instance/service-accounts/default/token", 11};
