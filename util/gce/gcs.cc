@@ -4,7 +4,6 @@
 
 #include "util/gce/gcs.h"
 
-#include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -41,27 +40,27 @@ inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast
   return req;
 }
 
-template <typename ReqBody, typename RespBody>
-::boost::system::error_code WriteAndRead(SslStream* stream, h2::request<ReqBody>* req,
-                                         h2::response_parser<RespBody>* resp) {
-  ::boost::system::error_code ec;
-  h2::write(*stream, *req, ec);
-  if (ec) {
-    return ec;
+template <typename Msg> inline bool IsUnauthorized(const Msg& msg) {
+  if (msg.result() != h2::status::unauthorized) {
+    return false;
   }
+  auto it = msg.find("WWW-Authenticate");
 
-  beast::flat_buffer buffer;
+  return it != msg.end();
+}
 
-  h2::read(*stream, buffer, *resp, ec);
-  return ec;
+std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
+  os << msg.reason() << endl;
+  for (const auto& f : msg) {
+    os << f.name() << " : " << f.value() << endl;
+  }
+  return os;
 }
 
 struct GCS::SeqReadFile {
   h2::response_parser<h2::buffer_body> parser;
 
-  SeqReadFile() {
-    parser.body_limit(kuint64max);
-  }
+  SeqReadFile() { parser.body_limit(kuint64max); }
 };
 
 GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
@@ -106,26 +105,24 @@ auto GCS::ListBuckets() -> ListBucketResult {
   auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
 
   VLOG(1) << "Req: " << http_req;
-  h2::response_parser<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(client_.get(), &http_req, &resp);
-  if (ec) {
-    return ToStatus(ec);
-  }
+  h2::response<h2::dynamic_body> resp_msg;
 
-  auto msg = resp.release();
-  http::RjBufSequenceStream is(msg.body().data());
+  RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
+  CHECK_EQ(h2::status::ok, resp_msg.result()) << resp_msg;
+
+  http::RjBufSequenceStream is(resp_msg.body().data());
 
   // TODO: to have a handler extracting what we need.
   rj::Document doc;
   doc.ParseStream<rj::kParseDefaultFlags>(is);
 
   if (doc.HasParseError()) {
-    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << msg;
+    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << resp_msg;
     return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
   }
 
   auto it = doc.FindMember("items");
-  CHECK(it != doc.MemberEnd()) << msg;
+  CHECK(it != doc.MemberEnd()) << resp_msg;
   const auto& val = it->value;
   CHECK(val.IsArray());
   auto array = val.GetArray();
@@ -157,21 +154,18 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
   // TODO: to have a handler extracting what we need.
   rj::Document doc;
   while (true) {
-    h2::response_parser<h2::dynamic_body> resp;
-    auto ec = WriteAndRead(client_.get(), &http_req, &resp);
-    if (ec) {
-      return ToStatus(ec);
-    }
+    h2::response<h2::dynamic_body> resp_msg;
+    RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
+    CHECK_EQ(h2::status::ok, resp_msg.result()) << resp_msg;
 
-    auto msg = resp.release();
-    http::RjBufSequenceStream is(msg.body().data());
+    http::RjBufSequenceStream is(resp_msg.body().data());
 
-    VLOG(1) << "List response: " << msg;
+    VLOG(1) << "List response: " << resp_msg;
 
     doc.ParseStream<rj::kParseDefaultFlags>(is);
 
     if (doc.HasParseError()) {
-      LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << msg;
+      LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << resp_msg;
       return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
     }
 
@@ -209,20 +203,15 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   req.set(h2::field::range, absl::StrCat("bytes=", ofs, "-", ofs + range.size() - 1));
 
   VLOG(1) << "Req: " << req;
-  h2::response_parser<h2::buffer_body> resp;
-  auto& body = resp.get().body();
+  h2::response<h2::buffer_body> resp_msg;
+  auto& body = resp_msg.body();
   body.data = range.data();
   body.size = range.size();
   body.more = false;
 
-  auto ec = WriteAndRead(client_.get(), &req, &resp);
-  h2::response<h2::buffer_body> msg = resp.release();
-  if (ec) {
-    return ToStatus(ec);
-  }
-  VLOG(1) << "Read Response: " << msg.base();
-  if (msg.result() != h2::status::partial_content) {
-    return Status(StatusCode::IO_ERROR, string(msg.reason()));
+  RETURN_IF_ERROR(HttpMessage(&req, &resp_msg));
+  if (resp_msg.result() != h2::status::partial_content) {
+    return Status(StatusCode::IO_ERROR, string(resp_msg.reason()));
   }
 
   auto left_available = body.size;
@@ -239,20 +228,29 @@ util::Status GCS::OpenSequential(absl::string_view bucket, absl::string_view obj
   BuildGetObjUrl(bucket, obj_path);
 
   auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
+  error_code ec;
+  unique_ptr<SeqReadFile> seq_file;
+  for (unsigned i = 0; i < 2; ++i) {
+    h2::write(*client_, req, ec);
+    if (ec) {
+      return ToStatus(ec);
+    }
 
-  ::boost::system::error_code ec;
-  h2::write(*client_, req, ec);
-  if (ec) {
-    return ToStatus(ec);
-  }
+    seq_file.reset(new SeqReadFile);
 
-  unique_ptr<SeqReadFile> seq_file(new SeqReadFile);
-
-  h2::read_header(*client_, tmp_buffer_, seq_file->parser, ec);
-  if (ec) {
-    return ToStatus(ec);
+    h2::read_header(*client_, tmp_buffer_, seq_file->parser, ec);
+    if (ec) {
+      return ToStatus(ec);
+    }
+    if (!IsUnauthorized(seq_file->parser.get())) {
+      const auto& msg = seq_file->parser.get();
+      CHECK_EQ(h2::status::ok, seq_file->parser.get().result()) << msg;
+      break;
+    }
+    RETURN_IF_ERROR(RefreshToken(&req));
   }
   seq_file_ = std::move(seq_file);
+
   return Status::OK;
 }
 
@@ -287,15 +285,12 @@ util::Status GCS::ReadToString(absl::string_view bucket, absl::string_view obj_p
   auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
   VLOG(1) << "Req: " << req;
 
-  h2::response_parser<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(client_.get(), &req, &resp);
+  h2::response<h2::dynamic_body> resp;
+  auto ec = WriteAndRead(&req, &resp);
   if (ec) {
     return ToStatus(ec);
   }
-  auto msg = resp.release();
-  VLOG(1) << msg;
-
-  const auto& cdata = msg.body().data();
+  const auto& cdata = resp.body().data();
 
   dest->reserve(asio::buffer_size(cdata));
   dest->clear();
@@ -314,6 +309,44 @@ void GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
     strings::AppendEncodedUrl(obj_path, &read_obj_url_);
     absl::StrAppend(&read_obj_url_, "?alt=media");
   }
+}
+
+template <typename RespBody>
+auto GCS::WriteAndRead(Request* req, Response<RespBody>* resp) -> error_code {
+  error_code ec;
+  h2::write(*client_, *req, ec);
+  if (ec)
+    return ec;
+
+  h2::read(*client_, tmp_buffer_, *resp, ec);
+  return ec;
+}
+
+Status GCS::RefreshToken(Request* req) {
+  auto res = gce_.GetAccessToken(&io_context_, true);
+  if (!res.ok())
+    return res.status;
+
+  access_token_header_ = absl::StrCat("Bearer ", res.obj);
+  req->set(h2::field::authorization, access_token_header_);
+
+  return Status::OK;
+}
+
+template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<RespBody>* resp) {
+  for (unsigned i = 0; i < 2; ++i) {
+    error_code ec = WriteAndRead(req, resp);
+    if (ec) {
+      return ToStatus(ec);
+    }
+
+    if (!IsUnauthorized(*resp)) {
+      break;
+    }
+    RETURN_IF_ERROR(RefreshToken(req));
+    *resp = Response<RespBody>{};
+  }
+  return Status::OK;
 }
 
 }  // namespace util

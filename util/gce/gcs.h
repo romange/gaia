@@ -6,6 +6,8 @@
 
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/empty_body.hpp>
+
 #include <memory>
 
 #include "strings/stringpiece.h"
@@ -16,6 +18,7 @@ namespace util {
 
 class IoContext;
 
+// Single threaded, fiber blocking class. Should be created 1 instance per http connection.
 class GCS {
   const GCE& gce_;
   IoContext& io_context_;
@@ -44,9 +47,20 @@ class GCS {
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
 
  private:
+   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
+  template <typename Body> using Response = ::boost::beast::http::response<Body>;
+
   util::Status ResetSeqReadState();
+  util::Status RefreshToken(Request* req);
 
   void BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
+
+
+  // Higher level function. Handles token expiration use-cases.
+  template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
+
+  template <typename RespBody> error_code WriteAndRead(Request* req, Response<RespBody>* resp);
+
 
   ::boost::beast::flat_buffer tmp_buffer_;
   std::string access_token_header_;

@@ -21,6 +21,7 @@ DEFINE_string(bucket, "", "");
 DEFINE_string(read_path, "", "");
 DEFINE_string(prefix, "", "");
 DEFINE_string(download, "", "");
+DEFINE_string(access_token, "", "");
 
 using FileQ = fibers::buffered_channel<string>;
 
@@ -121,6 +122,10 @@ int main(int argc, char** argv) {
   pool.Run();
 
   IoContext& io_context = pool.GetNextContext();
+
+  if (!FLAGS_access_token.empty()) {
+    gce.Test_InjectAcessToken(FLAGS_access_token);
+  }
 
   if (!FLAGS_download.empty()) {
     Download(gce, &pool);

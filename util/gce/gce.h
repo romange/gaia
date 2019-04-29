@@ -4,6 +4,7 @@
 #pragma once
 
 #include <boost/asio/ssl.hpp>
+#include <boost/fiber/mutex.hpp>
 #include <memory>
 
 #include "util/status.h"
@@ -33,11 +34,15 @@ class GCE {
   StatusObject<std::string> GetAccessToken(IoContext* context, bool force_refresh = false) const;
   bool is_prod_env() const { return is_prod_env_; }
 
+  void Test_InjectAcessToken(std::string access_token);
+
  private:
   util::Status ParseDefaultConfig();
   util::Status ReadDevCreds(const std::string& root_path);
 
   std::string project_id_, client_id_, client_secret_, account_id_, refresh_token_;
+
+  mutable ::boost::fibers::mutex mu_;
   mutable std::string access_token_;
 
   std::unique_ptr<SslContext> ssl_ctx_;

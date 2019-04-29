@@ -161,8 +161,11 @@ util::Status GCE::ReadDevCreds(const std::string& root_path) {
 StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_refresh) const {
   const char kDomain[] = "oauth2.googleapis.com";
   const char kService[] = "443";
-  if (!access_token_.empty() && !force_refresh) {
-    return access_token_;
+
+  if (!force_refresh) {
+    std::lock_guard<fibers::mutex> lk(mu_);
+    if (!access_token_.empty())
+      return access_token_;
   }
 
   h2::response<h2::string_body> resp;
@@ -239,8 +242,17 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
   if (token_type != "Bearer" || access_token.empty()) {
     return Status(absl::StrCat("Bad json response: ", doc.GetString()));
   }
+
+  std::lock_guard<fibers::mutex> lk(mu_);
+  access_token_ = access_token;
   return access_token;
 }
+
+void GCE::Test_InjectAcessToken(std::string access_token) {
+  std::lock_guard<fibers::mutex> lk(mu_);
+  access_token_.swap(access_token);
+}
+
 
 util::Status SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
@@ -255,5 +267,6 @@ util::Status SslConnect(SslStream* stream, unsigned ms) {
 
   return Status::OK;
 }
+
 
 }  // namespace util
