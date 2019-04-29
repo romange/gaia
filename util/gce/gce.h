@@ -17,6 +17,7 @@ using SslStream = ::boost::asio::ssl::stream<FiberSyncSocket>;
 class GCE {
  public:
   using SslContext = ::boost::asio::ssl::context;
+  using error_code = ::boost::system::error_code;
   GCE() = default;
 
   Status Init();
@@ -30,12 +31,15 @@ class GCE {
   SslContext& ssl_context() const { return *ssl_ctx_; }
 
   StatusObject<std::string> GetAccessToken(IoContext* context) const;
+  bool is_prod_env() const { return is_prod_env_; }
 
  private:
   util::Status ParseDefaultConfig();
+  util::Status ReadDevCreds(const std::string& root_path);
 
   std::string project_id_, client_id_, client_secret_, account_id_, refresh_token_;
   std::unique_ptr<SslContext> ssl_ctx_;
+  bool is_prod_env_ = false;
 };
 
 util::Status SslConnect(SslStream* stream, unsigned msec);
