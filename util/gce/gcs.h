@@ -5,11 +5,12 @@
 #pragma once
 
 #include <boost/asio/ssl.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <memory>
 
+#include "strings/stringpiece.h"
 #include "util/gce/gce.h"
 #include "util/status.h"
-#include "strings/stringpiece.h"
 
 namespace util {
 
@@ -23,8 +24,10 @@ class GCS {
   using ListBucketResult = util::StatusObject<std::vector<std::string>>;
   using ReadObjectResult = util::StatusObject<size_t>;
   using ListObjectResult = util::Status;
+  using error_code = ::boost::system::error_code;
 
-  GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
+  GCS(const GCE& gce, IoContext* context);
+  ~GCS();
 
   util::Status Connect(unsigned msec);
 
@@ -37,15 +40,21 @@ class GCS {
                         const strings::MutableByteRange& range);
   util::Status ReadToString(absl::string_view bucket, absl::string_view path, std::string* dest);
 
+  util::Status OpenSequential(absl::string_view bucket, absl::string_view path);
+  ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
+
  private:
-  util::Status RefreshTokenIfNeeded();
+  util::Status ResetSeqReadState();
 
   void BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
 
-  std::string access_token_, access_token_header_;
+  ::boost::beast::flat_buffer tmp_buffer_;
+  std::string access_token_header_;
   std::unique_ptr<SslStream> client_;
   std::string read_obj_url_, last_obj_;
+
+  struct SeqReadFile;
+  std::unique_ptr<SeqReadFile> seq_file_;
 };
 
 }  // namespace util
-

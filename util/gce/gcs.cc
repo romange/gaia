@@ -5,7 +5,6 @@
 #include "util/gce/gcs.h"
 
 #include <boost/beast/core/buffers_to_string.hpp>
-#include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -57,29 +56,49 @@ template <typename ReqBody, typename RespBody>
   return ec;
 }
 
+struct GCS::SeqReadFile {
+  h2::response_parser<h2::buffer_body> parser;
+
+  SeqReadFile() {
+    parser.body_limit(kuint64max);
+  }
+};
+
+GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
+GCS::~GCS() {}
+
 util::Status GCS::Connect(unsigned msec) {
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
-  return SslConnect(client_.get(), msec);
-}
+  RETURN_IF_ERROR(SslConnect(client_.get(), msec));
 
-util::Status GCS::RefreshTokenIfNeeded() {
-  if (!access_token_.empty())
-    return Status::OK;
   auto res = gce_.GetAccessToken(&io_context_);
   if (!res.ok())
     return res.status;
+  access_token_header_ = absl::StrCat("Bearer ", res.obj);
+  return Status::OK;
+}
 
-  access_token_ = res.obj;
-  access_token_header_ = absl::StrCat("Bearer ", access_token_);
-
+util::Status GCS::ResetSeqReadState() {
+  if (seq_file_) {
+    ReadObjectResult res;
+    uint8_t buf[1024];
+    strings::MutableByteRange mbr(buf, sizeof(buf));
+    while (true) {
+      res = ReadSequential(mbr);
+      if (!res.ok() || res.obj < mbr.size()) {
+        break;
+      }
+    }
+    seq_file_.reset();
+    return res.status;
+  }
   return Status::OK;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
   CHECK(client_);
-
-  RETURN_IF_ERROR(RefreshTokenIfNeeded());
+  RETURN_IF_ERROR(ResetSeqReadState());
 
   string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
   absl::StrAppend(&url, "&fields=items,nextPageToken");
@@ -128,8 +147,7 @@ auto GCS::ListBuckets() -> ListBucketResult {
 auto GCS::List(absl::string_view bucket, absl::string_view prefix,
                std::function<void(absl::string_view)> cb) -> ListObjectResult {
   CHECK(client_ && !bucket.empty());
-
-  RETURN_IF_ERROR(RefreshTokenIfNeeded());
+  RETURN_IF_ERROR(ResetSeqReadState());
 
   string url = "/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?prefix=");
@@ -183,8 +201,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
 auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
                const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(client_ && !range.empty());
-
-  RETURN_IF_ERROR(RefreshTokenIfNeeded());
+  RETURN_IF_ERROR(ResetSeqReadState());
 
   BuildGetObjUrl(bucket, obj_path);
 
@@ -212,11 +229,58 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   return range.size() - left_available;  // how much written
 }
 
+util::Status GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) {
+  CHECK(client_);
+
+  RETURN_IF_ERROR(ResetSeqReadState());
+
+  DCHECK(!seq_file_);
+
+  BuildGetObjUrl(bucket, obj_path);
+
+  auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
+
+  ::boost::system::error_code ec;
+  h2::write(*client_, req, ec);
+  if (ec) {
+    return ToStatus(ec);
+  }
+
+  unique_ptr<SeqReadFile> seq_file(new SeqReadFile);
+
+  h2::read_header(*client_, tmp_buffer_, seq_file->parser, ec);
+  if (ec) {
+    return ToStatus(ec);
+  }
+  seq_file_ = std::move(seq_file);
+  return Status::OK;
+}
+
+auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
+  CHECK(seq_file_ && client_);
+
+  if (seq_file_->parser.is_done()) {
+    return 0;
+  }
+
+  auto& body = seq_file_->parser.get().body();
+  body.data = range.data();
+  auto& left_available = body.size;
+  left_available = range.size();
+
+  error_code ec;
+  h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
+  if (ec == h2::error::need_buffer)
+    ec.clear();
+  else if (ec) {
+    return ToStatus(ec);
+  }
+  return range.size() - left_available;  // how much written
+}
+
 util::Status GCS::ReadToString(absl::string_view bucket, absl::string_view obj_path,
                                std::string* dest) {
   CHECK(client_);
-
-  RETURN_IF_ERROR(RefreshTokenIfNeeded());
 
   BuildGetObjUrl(bucket, obj_path);
 

@@ -24,21 +24,25 @@ DEFINE_string(download, "", "");
 
 using FileQ = fibers::buffered_channel<string>;
 
-// TODO: to provide interface supporting sequential file read:
-// https://www.boost.org/doc/libs/1_70_0/libs/beast/doc/html/beast/using_http/parser_stream_operations/incremental_read.html
 void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
   constexpr size_t kBufSize = 1 << 16;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  CHECK_STATUS(gcs->OpenSequential(bucket, obj_path));
+
   size_t ofs = 0;
+  strings::MutableByteRange mbr(buf.get(), kBufSize);
+
   while (true) {
-    strings::MutableByteRange mbr(buf.get(), kBufSize);
-    auto res = gcs->Read(bucket, obj_path, ofs, mbr);
+    auto res = gcs->ReadSequential(mbr);
     CHECK_STATUS(res.status);
     ofs += res.obj;
     if (res.obj < mbr.size()) {
       break;
     }
   }
+
+  CHECK_EQ(0, gcs->ReadSequential(mbr).obj);
+
   LOG(INFO) << "Read " << ofs << " bytes from " << obj_path;
 }
 
