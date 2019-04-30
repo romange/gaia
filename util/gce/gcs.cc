@@ -104,7 +104,6 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
   auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
 
-  VLOG(1) << "Req: " << http_req;
   h2::response<h2::dynamic_body> resp_msg;
 
   RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
@@ -160,8 +159,6 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
 
     http::RjBufSequenceStream is(resp_msg.body().data());
 
-    VLOG(1) << "List response: " << resp_msg;
-
     doc.ParseStream<rj::kParseDefaultFlags>(is);
 
     if (doc.HasParseError()) {
@@ -202,7 +199,6 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
   req.set(h2::field::range, absl::StrCat("bytes=", ofs, "-", ofs + range.size() - 1));
 
-  VLOG(1) << "Req: " << req;
   h2::response<h2::buffer_body> resp_msg;
   auto& body = resp_msg.body();
   body.data = range.data();
@@ -276,30 +272,6 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   return range.size() - left_available;  // how much written
 }
 
-util::Status GCS::ReadToString(absl::string_view bucket, absl::string_view obj_path,
-                               std::string* dest) {
-  CHECK(client_);
-
-  BuildGetObjUrl(bucket, obj_path);
-
-  auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
-  VLOG(1) << "Req: " << req;
-
-  h2::response<h2::dynamic_body> resp;
-  auto ec = WriteAndRead(&req, &resp);
-  if (ec) {
-    return ToStatus(ec);
-  }
-  const auto& cdata = resp.body().data();
-
-  dest->reserve(asio::buffer_size(cdata));
-  dest->clear();
-  for (auto const buffer : cdata) {
-    dest->append(static_cast<char const*>(buffer.data()), buffer.size());
-  }
-  return Status::OK;
-}
-
 void GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   if (last_obj_ != obj_path) {
     read_obj_url_ = "/storage/v1/b/";
@@ -335,10 +307,13 @@ Status GCS::RefreshToken(Request* req) {
 
 template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<RespBody>* resp) {
   for (unsigned i = 0; i < 2; ++i) {
+    VLOG(1) << "Req: " << *req;
+
     error_code ec = WriteAndRead(req, resp);
     if (ec) {
       return ToStatus(ec);
     }
+    VLOG(1) << "Resp: " << *resp;
 
     if (!IsUnauthorized(*resp)) {
       break;

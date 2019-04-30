@@ -41,7 +41,6 @@ class GCS {
 
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
-  util::Status ReadToString(absl::string_view bucket, absl::string_view path, std::string* dest);
 
   util::Status OpenSequential(absl::string_view bucket, absl::string_view path);
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
