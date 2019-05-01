@@ -67,7 +67,7 @@ class GCS {
 
   util::Status RefreshToken(Request* req);
 
-  void BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
+  std::string BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
 
 
   // Higher level function. Handles token expiration use-cases.
@@ -79,7 +79,6 @@ class GCS {
   ::boost::beast::flat_buffer tmp_buffer_;
   std::string access_token_header_;
   std::unique_ptr<SslStream> client_;
-  std::string read_obj_url_, last_obj_;
 
   struct SeqReadFile;
   std::unique_ptr<SeqReadFile> seq_file_;

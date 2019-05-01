@@ -275,9 +275,9 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   CHECK(client_ && !range.empty());
   RETURN_IF_ERROR(CloseSequential());
 
-  BuildGetObjUrl(bucket, obj_path);
+  string read_obj_url = BuildGetObjUrl(bucket, obj_path);
 
-  auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
+  auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
   req.set(h2::field::range, absl::StrCat("bytes=", ofs, "-", ofs + range.size() - 1));
 
   h2::response<h2::buffer_body> resp_msg;
@@ -302,9 +302,9 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
 
   DCHECK(!seq_file_);
 
-  BuildGetObjUrl(bucket, obj_path);
+  string read_obj_url = BuildGetObjUrl(bucket, obj_path);
 
-  auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
+  auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
   error_code ec;
   unique_ptr<SeqReadFile> tmp_file;
   size_t file_size = 0;
@@ -386,15 +386,13 @@ file::ReadonlyFile* GCS::OpenGcsFile(absl::string_view full_path) {
   return new GcsFile{this, res.obj};
 }
 
-void GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
-  if (last_obj_ != obj_path) {
-    read_obj_url_ = "/storage/v1/b/";
-    last_obj_ = string(obj_path);
+string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
+  string read_obj_url{"/storage/v1/b/"};
+  absl::StrAppend(&read_obj_url, bucket, "/o/");
+  strings::AppendEncodedUrl(obj_path, &read_obj_url);
+  absl::StrAppend(&read_obj_url, "?alt=media");
 
-    absl::StrAppend(&read_obj_url_, bucket, "/o/");
-    strings::AppendEncodedUrl(obj_path, &read_obj_url_);
-    absl::StrAppend(&read_obj_url_, "?alt=media");
-  }
+  return read_obj_url;
 }
 
 template <typename RespBody>
