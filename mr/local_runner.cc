@@ -153,10 +153,8 @@ struct LocalRunner::Impl {
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
-  void SetupDestFileSet() {
-    CHECK(!dest_mgr);
-    dest_mgr.reset(new DestFileSet(data_dir, &fq_pool));
-  }
+  void Start(const pb::Operator* op);
+  void End(ShardFileMap* out_files);
 
   void ExpandGCS(absl::string_view glob, std::function<void(const std::string&)> cb);
 
@@ -170,6 +168,7 @@ struct LocalRunner::Impl {
   fibers_ext::FiberQueueThreadPool fq_pool;
   std::atomic_bool stop_signal_{false};
   std::atomic_ulong file_cache_hit_bytes{0};
+  const pb::Operator* current_op = nullptr;
 
   fibers::mutex gce_mu;
   std::unique_ptr<GCE> gce_handle;
@@ -222,6 +221,24 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
   return cnt;
 }
 
+void LocalRunner::Impl::Start(const pb::Operator* op) {
+  CHECK(!dest_mgr);
+  current_op = op;
+  string out_dir = file_util::JoinPath(data_dir, op->output().name());
+  if (!file::Exists(out_dir)) {
+    CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
+  }
+  dest_mgr.reset(new DestFileSet(out_dir, &fq_pool));
+}
+
+void LocalRunner::Impl::End(ShardFileMap* out_files) {
+  dest_mgr->GatherAll(
+      [out_files](const ShardId& sid, DestHandle* dh) { out_files->emplace(sid, dh->path()); });
+  dest_mgr->CloseAllHandles();
+  dest_mgr.reset();
+  current_op = nullptr;
+}
+
 void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
                                   std::function<void(const std::string&)> cb) {
   absl::string_view bucket, path;
@@ -230,9 +247,7 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
   // Lazy init of gce_handle.
   LazyGcsInit();
 
-  auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) {
-    cb(GCS::ToGcsPath(bucket, s));
-  };
+  auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) { cb(GCS::ToGcsPath(bucket, s)); };
 
   std::lock_guard<fibers::mutex> lk(gcs_handle->mu);
   auto status = gcs_handle->gcs.List(bucket, path, true, cb2);
@@ -277,18 +292,15 @@ void LocalRunner::Shutdown() {
   LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }
 
-void LocalRunner::OperatorStart() { impl_->SetupDestFileSet(); }
+void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
-RawContext* LocalRunner::CreateContext(const pb::Operator& op) {
-  return new LocalContext(op.output(), impl_->dest_mgr.get());
+RawContext* LocalRunner::CreateContext() {
+  return new LocalContext(impl_->current_op->output(), impl_->dest_mgr.get());
 }
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
-  impl_->dest_mgr->GatherAll(
-      [out_files](const ShardId& sid, DestHandle* dh) { out_files->emplace(sid, dh->path()); });
-  impl_->dest_mgr->CloseAllHandles();
-  impl_->dest_mgr.reset();
+  impl_->End(out_files);
 }
 
 void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {

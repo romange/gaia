@@ -62,7 +62,7 @@ class TestRunner : public Runner {
 
   void Shutdown() final;
 
-  RawContext* CreateContext(const pb::Operator& op) final;
+  RawContext* CreateContext() final;
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
 
@@ -70,7 +70,7 @@ class TestRunner : public Runner {
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                           RawSinkCb cb) final;
 
-  void OperatorStart() final {}
+  void OperatorStart(const pb::Operator* op) final { op_ = op; }
   void OperatorEnd(ShardFileMap* out_files) final;
 
   void AddInputRecords(const std::string& fl, const std::vector<std::string>& records) {
@@ -82,6 +82,7 @@ class TestRunner : public Runner {
   std::atomic_int parse_errors{0}, write_calls{0};
 
  private:
+  const pb::Operator* op_ = nullptr;
   absl::flat_hash_map<std::string, std::vector<std::string>> input_fs_;
   absl::flat_hash_map<std::string, std::unique_ptr<OutputShardSet>> out_fs_;
   std::string last_out_name_;
@@ -101,13 +102,13 @@ class EmptyRunner : public Runner {
 
   void Shutdown() final {}
 
-  RawContext* CreateContext(const pb::Operator& op) final { return new Context; }
+  RawContext* CreateContext() final { return new Context; }
 
   void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final {
     cb(glob);
   }
 
-  void OperatorStart() final {}
+  void OperatorStart(const pb::Operator* op) final {}
   void OperatorEnd(ShardFileMap* out_files) final  {}
 
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,

@@ -20,10 +20,10 @@ class LocalRunner : public Runner {
 
   void Shutdown() final;
 
-  void OperatorStart() final;
+  void OperatorStart(const pb::Operator* op) final;
 
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
-  RawContext* CreateContext(const pb::Operator& op) final;
+  RawContext* CreateContext() final;
 
   void OperatorEnd(ShardFileMap* out_files) final;
 

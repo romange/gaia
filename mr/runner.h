@@ -21,10 +21,11 @@ class Runner {
 
   virtual void Shutdown() = 0;
 
-  virtual void OperatorStart() = 0;
+  // It's guaranteed that op will live until OperatorEnd is called.
+  virtual void OperatorStart(const pb::Operator* op) = 0;
 
   // Must be thread-safe. Called from multiple threads in operator_executors.
-  virtual RawContext* CreateContext(const pb::Operator& op) = 0;
+  virtual RawContext* CreateContext() = 0;
 
   virtual void OperatorEnd(ShardFileMap* out_files) = 0;
 

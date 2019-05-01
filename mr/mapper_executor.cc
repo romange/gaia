@@ -65,7 +65,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
                          ShardFileMap* out_files) {
   // CHECK_STATUS(tb->InitializationStatus());
   file_name_q_.reset(new FileNameQueue{16});
-  runner_->OperatorStart();
+  runner_->OperatorStart(&tb->op());
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
@@ -125,7 +125,7 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
   FileInput file_input;
   uint64_t cnt = 0;
 
-  std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
+  std::unique_ptr<RawContext> raw_context(runner_->CreateContext());
   std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(raw_context.get())};
   CHECK_EQ(1, handler->Size());
 

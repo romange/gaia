@@ -33,9 +33,9 @@ void TestRunner::Init() {}
 
 void TestRunner::Shutdown() {}
 
-RawContext* TestRunner::CreateContext(const pb::Operator& op) {
-  CHECK(!op.output().name().empty());
-  last_out_name_ = op.output().name();
+RawContext* TestRunner::CreateContext() {
+  CHECK(!op_->output().name().empty());
+  last_out_name_ = op_->output().name();
   auto& res = out_fs_[last_out_name_];
   if (!res)
     res.reset(new OutputShardSet);
@@ -62,6 +62,7 @@ void TestRunner::OperatorEnd(ShardFileMap* out_files) {
     out_files->emplace(k_v.first, name);
     input_fs_[name] = k_v.second;
   }
+  op_ = nullptr;
 }
 
 // Read file and fill queue. This function must be fiber-friendly.

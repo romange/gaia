@@ -53,7 +53,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   CheckInputs(inputs);
 
   // ProcessInputQ uses runner_ immediately when starts.
-  runner_->OperatorStart();
+  runner_->OperatorStart(&tb->op());
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
@@ -115,7 +115,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   ShardInput shard_input;
   uint64_t cnt = 0;
 
-  std::unique_ptr<RawContext> raw_context(runner_->CreateContext(tb->op()));
+  std::unique_ptr<RawContext> raw_context(runner_->CreateContext());
   std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context.get())};
 
   while (true) {
