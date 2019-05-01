@@ -14,16 +14,15 @@ namespace util {
 
 class Status {
  public:
-  constexpr Status() noexcept : error_detail_(NULL) {}
+  constexpr Status() noexcept {}
 
   // copy c'tor makes copy of error detail so Status can be returned by value
   Status(const Status& status) : error_detail_(
-    status.error_detail_ != NULL ? new ErrorDetail(*status.error_detail_) : NULL) {
+    status.error_detail_ ? new ErrorDetail(*status.error_detail_) : nullptr) {
   }
 
   // Move c'tor.
-  Status(Status&& st) noexcept : error_detail_(st.error_detail_) {
-    st.error_detail_ = nullptr;
+  Status(Status&& st) noexcept : error_detail_(std::move(st.error_detail_)) {
   }
 
   // c'tor for error case - is this useful for anything other than CANCELLED?
@@ -40,17 +39,12 @@ class Status {
   Status(std::string error_msg) : error_detail_(
     new ErrorDetail(StatusCode::INTERNAL_ERROR, std::move(error_msg))) {}
 
-  ~Status() {
-    if (error_detail_ != NULL) delete error_detail_;
-  }
-
   // same as copy c'tor
   Status& operator=(const Status& status) {
-    delete error_detail_;
-    if (LIKELY(status.error_detail_ == NULL)) {
-      error_detail_ = NULL;
+    if (LIKELY(!status.error_detail_)) {
+      error_detail_.reset();
     } else {
-      error_detail_ = new ErrorDetail(*status.error_detail_);
+      error_detail_.reset(new ErrorDetail{*status.error_detail_});
     }
     return *this;
   }
@@ -60,11 +54,10 @@ class Status {
     return *this;
   }
 
-  bool ok() const { return error_detail_ == NULL; }
+  bool ok() const { return !error_detail_; }
 
   bool IsCancelled() const {
-    return error_detail_ != NULL
-        && error_detail_->error_code == StatusCode::CANCELLED;
+    return error_detail_ && error_detail_->error_code == StatusCode::CANCELLED;
   }
 
   // Does nothing if status.ok().
@@ -92,6 +85,7 @@ class Status {
  private:
 
   static Status ByCode(StatusCode::Code code) { return Status(code); }
+
   struct ErrorDetail {
     StatusCode::Code error_code;  // anything other than OK
     std::vector<std::string> error_msgs;
@@ -104,7 +98,7 @@ class Status {
     }
   };
 
-  ErrorDetail* error_detail_;
+  std::unique_ptr<ErrorDetail> error_detail_;
 };
 
 
@@ -127,12 +121,17 @@ template<typename T> struct StatusObject {
   StatusObject(const T& t) : obj(t) {}
   StatusObject(T&& t) : obj(std::move(t)) {}
 
-  StatusObject& operator=(StatusObject&&) noexcept = default;
+  StatusObject& operator=(StatusObject&&) noexcept;
   StatusObject& operator=(const StatusObject&) = default;
 
   std::string ToString() const { return status.ToString(); }
 };
 
+template<typename T> StatusObject<T>& StatusObject<T>::operator=(StatusObject<T>&& o) noexcept {
+  status = std::move(o.status);
+  obj = std::move(o.obj);
+  return *this;
+}
 
 // some generally useful macros
 #define RETURN_IF_ERROR(stmt) \

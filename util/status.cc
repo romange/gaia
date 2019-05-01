@@ -13,8 +13,8 @@ const Status Status::CANCELLED(StatusCode::CANCELLED, "Cancelled");
 const Status Status::OK;
 
 void Status::AddErrorMsg(StatusCode::Code code, const std::string& msg) {
-  if (error_detail_ == NULL) {
-    error_detail_ = new ErrorDetail(code, msg);
+  if (!error_detail_) {
+    error_detail_.reset(new ErrorDetail{code, msg});
   } else {
     error_detail_->error_msgs.push_back(msg);
   }
