@@ -13,9 +13,11 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 
+#include "absl/strings/strip.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
 #include "util/asio/fiber_socket.h"
+#include "util/asio/io_context.h"
 #include "util/http/beast_rj_utils.h"
 
 namespace util {
@@ -29,6 +31,10 @@ static constexpr char kDomain[] = "www.googleapis.com";
 
 inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+}
+
+inline absl::string_view absl_sv(beast::string_view s) {
+  return absl::string_view{s.data(), s.size()};
 }
 
 inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
@@ -67,6 +73,11 @@ GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) 
 GCS::~GCS() {}
 
 util::Status GCS::Connect(unsigned msec) {
+  CHECK(io_context_.InContextThread());
+  if (client_) {
+    return Status::OK;
+  }
+
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
   RETURN_IF_ERROR(SslConnect(client_.get(), msec));
@@ -79,6 +90,8 @@ util::Status GCS::Connect(unsigned msec) {
 }
 
 util::Status GCS::ResetSeqReadState() {
+  CHECK(io_context_.InContextThread());
+
   if (seq_file_) {
     ReadObjectResult res;
     uint8_t buf[1024];
@@ -104,43 +117,50 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
   auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
 
-  h2::response<h2::dynamic_body> resp_msg;
-
-  RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
-  CHECK_EQ(h2::status::ok, resp_msg.result()) << resp_msg;
-
-  http::RjBufSequenceStream is(resp_msg.body().data());
-
   // TODO: to have a handler extracting what we need.
   rj::Document doc;
-  doc.ParseStream<rj::kParseDefaultFlags>(is);
-
-  if (doc.HasParseError()) {
-    LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << resp_msg;
-    return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
-  }
-
-  auto it = doc.FindMember("items");
-  CHECK(it != doc.MemberEnd()) << resp_msg;
-  const auto& val = it->value;
-  CHECK(val.IsArray());
-  auto array = val.GetArray();
-
   vector<string> results;
-  it = doc.FindMember("nextPageToken");
-  CHECK(it == doc.MemberEnd()) << "TBD - to support pagination";
 
-  for (size_t i = 0; i < array.Size(); ++i) {
-    const auto& item = array[i];
-    auto it = item.FindMember("name");
-    if (it != item.MemberEnd()) {
-      results.emplace_back(it->value.GetString(), it->value.GetStringLength());
+  while (true) {
+    h2::response<h2::dynamic_body> resp_msg;
+
+    RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
+    if (resp_msg.result() != h2::status::ok) {
+      return Status(StatusCode::IO_ERROR, absl::StrCat("Http error: ", resp_msg.result_int(), " ",
+                                                       absl_sv(resp_msg.reason())));
     }
+    http::RjBufSequenceStream is(resp_msg.body().data());
+
+    doc.ParseStream<rj::kParseDefaultFlags>(is);
+    if (doc.HasParseError()) {
+      LOG(ERROR) << rj::GetParseError_En(doc.GetParseError()) << resp_msg;
+      return Status(StatusCode::PARSE_ERROR, "Could not parse json response");
+    }
+
+    auto it = doc.FindMember("items");
+    CHECK(it != doc.MemberEnd()) << resp_msg;
+    const auto& val = it->value;
+    CHECK(val.IsArray());
+    auto array = val.GetArray();
+
+    for (size_t i = 0; i < array.Size(); ++i) {
+      const auto& item = array[i];
+      auto it = item.FindMember("name");
+      if (it != item.MemberEnd()) {
+        results.emplace_back(it->value.GetString(), it->value.GetStringLength());
+      }
+    }
+    it = doc.FindMember("nextPageToken");
+    if (it == doc.MemberEnd()) {
+      break;
+    }
+    absl::string_view page_token{it->value.GetString(), it->value.GetStringLength()};
+    http_req.target(absl::StrCat(url, "&pageToken=", page_token));
   }
   return results;
 }
 
-auto GCS::List(absl::string_view bucket, absl::string_view prefix,
+auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
                std::function<void(absl::string_view)> cb) -> ListObjectResult {
   CHECK(client_ && !bucket.empty());
   RETURN_IF_ERROR(ResetSeqReadState());
@@ -148,6 +168,9 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
   string url = "/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?prefix=");
   strings::AppendEncodedUrl(prefix, &url);
+  if (fs_mode) {
+    absl::StrAppend(&url, "&delimiter=%2f");
+  }
   auto http_req = PrepareRequest(h2::verb::get, url, access_token_header_);
 
   // TODO: to have a handler extracting what we need.
@@ -169,6 +192,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
     auto it = doc.FindMember("items");
     if (it == doc.MemberEnd())
       break;
+
     const auto& val = it->value;
     CHECK(val.IsArray());
     auto array = val.GetArray();
@@ -183,7 +207,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix,
     if (it == doc.MemberEnd()) {
       break;
     }
-    string page_token = string(it->value.GetString(), it->value.GetStringLength());
+    absl::string_view page_token{it->value.GetString(), it->value.GetStringLength()};
     http_req.target(absl::StrCat(url, "&pageToken=", page_token));
   }
   return Status::OK;
@@ -264,9 +288,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 
   error_code ec;
   h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
-  if (ec == h2::error::need_buffer)
-    ec.clear();
-  else if (ec) {
+  if (ec && ec != h2::error::need_buffer) {
     return ToStatus(ec);
   }
   return range.size() - left_available;  // how much written
@@ -323,5 +345,24 @@ template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<Resp
   }
   return Status::OK;
 }
+
+constexpr char kGsUrl[] = "gs://";
+
+bool GCS::SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
+                            absl::string_view* path) {
+  if (!absl::ConsumePrefix(&input, kGsUrl))
+    return false;
+
+  auto pos = input.find('/');
+  *bucket = input.substr(0, pos);
+  *path = (pos == absl::string_view::npos) ? absl::string_view{} : input.substr(pos + 1);
+  return true;
+}
+
+std::string GCS::ToGcsPath(absl::string_view bucket, absl::string_view obj_path) {
+  return absl::StrCat(kGsUrl, bucket, "/", obj_path);
+}
+
+bool IsGcsPath(absl::string_view path) { return absl::StartsWith(path, kGsUrl); }
 
 }  // namespace util

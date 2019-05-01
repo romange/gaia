@@ -73,7 +73,7 @@ void Download(const GCE& gce, IoContextPool* pool) {
   auto producer = [&] {
     GCS gcs(gce, &io_context);
     CHECK_STATUS(gcs.Connect(2000));
-    auto status = gcs.List(FLAGS_bucket, FLAGS_download,
+    auto status = gcs.List(FLAGS_bucket, FLAGS_download, true,
                            [&](absl::string_view name) {
                              file_q.push(string(name));
                             });
@@ -107,7 +107,7 @@ void Run(const GCE& gce, IoContext* context) {
   }
 
   if (!FLAGS_prefix.empty()) {
-    auto status = gcs.List(FLAGS_bucket, FLAGS_prefix,
+    auto status = gcs.List(FLAGS_bucket, FLAGS_prefix, true,
                            [](absl::string_view name) { cout << "Object: " << name << endl; });
     CHECK_STATUS(status);
   }

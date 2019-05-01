@@ -17,7 +17,10 @@
 #include "mr/do_context.h"
 #include "mr/impl/dest_file_set.h"
 
+#include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
+#include "util/gce/gcs.h"
+
 #include "util/zlib_source.h"
 
 namespace mr3 {
@@ -29,6 +32,8 @@ using namespace boost;
 using namespace std;
 using detail::DestFileSet;
 using detail::DestHandle;
+
+constexpr size_t kGcsConnectTimeout = 3000;
 namespace {
 
 // Thread-local buffered writer, owned by LocalContext.
@@ -132,14 +137,18 @@ LocalContext::~LocalContext() {
 
 }  // namespace
 
-struct LocalRunner::Impl {
-  string data_dir;
-  std::unique_ptr<DestFileSet> dest_mgr;
-  fibers_ext::FiberQueueThreadPool fq_pool;
-  std::atomic_bool stop_signal_{false};
-  std::atomic_ulong file_cache_hit_bytes{0};
+struct GcsHandle {
+  GCS gcs;
+  IoContext& io_context;
 
-  Impl(const string& d) : data_dir(d), fq_pool(0, 128) {}
+  // Even though we are thread-local we should protect transactions against multiple fiber-accesses.
+  fibers::mutex mu;
+  GcsHandle(const GCE& gce, IoContext* context) : gcs{gce, context}, io_context(*context) {}
+};
+
+struct LocalRunner::Impl {
+ public:
+  Impl(IoContextPool* p, const string& d) : io_pool(p), data_dir(d), fq_pool(0, 128) {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -148,7 +157,26 @@ struct LocalRunner::Impl {
     CHECK(!dest_mgr);
     dest_mgr.reset(new DestFileSet(data_dir, &fq_pool));
   }
+
+  void ExpandGCS(absl::string_view glob, std::function<void(const std::string&)> cb);
+
+  // private:
+
+  void LazyGcsInit();
+
+  IoContextPool* io_pool;
+  string data_dir;
+  std::unique_ptr<DestFileSet> dest_mgr;
+  fibers_ext::FiberQueueThreadPool fq_pool;
+  std::atomic_bool stop_signal_{false};
+  std::atomic_ulong file_cache_hit_bytes{0};
+
+  fibers::mutex gce_mu;
+  std::unique_ptr<GCE> gce_handle;
+  static thread_local std::unique_ptr<GcsHandle> gcs_handle;
 };
+
+thread_local std::unique_ptr<GcsHandle> LocalRunner::Impl::gcs_handle;
 
 uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
@@ -194,7 +222,50 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
   return cnt;
 }
 
-LocalRunner::LocalRunner(const std::string& data_dir) : impl_(new Impl(data_dir)) {}
+void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
+                                  std::function<void(const std::string&)> cb) {
+  absl::string_view bucket, path;
+  CHECK(GCS::SplitToBucketPath(glob, &bucket, &path));
+
+  // Lazy init of gce_handle.
+  LazyGcsInit();
+
+  auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) {
+    cb(GCS::ToGcsPath(bucket, s));
+  };
+
+  std::lock_guard<fibers::mutex> lk(gcs_handle->mu);
+  auto status = gcs_handle->gcs.List(bucket, path, true, cb2);
+  CHECK_STATUS(status);
+}
+
+void LocalRunner::Impl::LazyGcsInit() {
+  {
+    std::lock_guard<fibers::mutex> lk(gce_mu);
+    if (!gce_handle) {
+      gce_handle.reset(new GCE);
+      CHECK_STATUS(gce_handle->Init());
+    }
+  }
+
+  // Lazy init of per-thread gcs handle.
+  if (gcs_handle)
+    return;
+
+  IoContext* io_context = io_pool->GetThisContext();
+  CHECK(io_context) << "Must run from IO context thread";
+  gcs_handle.reset(new GcsHandle{*gce_handle, io_context});
+
+  std::lock_guard<fibers::mutex> lk(gcs_handle->mu);
+  auto status = gcs_handle->gcs.Connect(kGcsConnectTimeout);
+  CHECK_STATUS(status);
+}
+
+/* LocalRunner implementation
+********************************************/
+
+LocalRunner::LocalRunner(IoContextPool* pool, const std::string& data_dir)
+    : impl_(new Impl(pool, data_dir)) {}
 
 LocalRunner::~LocalRunner() {}
 
@@ -221,6 +292,11 @@ void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
 }
 
 void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
+  if (util::IsGcsPath(glob)) {
+    impl_->ExpandGCS(glob, cb);
+    return;
+  }
+
   std::vector<file_util::StatShort> paths = file_util::StatFiles(glob);
   for (const auto& v : paths) {
     if (v.st_mode & S_IFREG) {

@@ -38,7 +38,7 @@ PipelineMain::~PipelineMain() {
 
 LocalRunner* PipelineMain::StartLocalRunner(const std::string& root_dir, bool stop_on_break) {
   CHECK(!runner_);
-  runner_.reset(new LocalRunner(file_util::ExpandPath(root_dir)));
+  runner_.reset(new LocalRunner(pool_.get(), file_util::ExpandPath(root_dir)));
   if (stop_on_break) {
     acc_server_->TriggerOnBreakSignal([this] {
       pipeline_->Stop();

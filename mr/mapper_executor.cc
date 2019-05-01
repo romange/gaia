@@ -105,9 +105,11 @@ void MapperExecutor::PushInput(const InputBase* input) {
   CHECK(input->msg().has_format());
 
   vector<string> files;
-  for (const auto& file_spec : input->msg().file_spec()) {
-    runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
-  }
+  pool_->GetNextContext().AwaitSafe([&] {
+    for (const auto& file_spec : input->msg().file_spec()) {
+      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
+    }
+  });
 
   LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
   for (const auto& fl_name : files) {

@@ -19,6 +19,7 @@ namespace util {
 class IoContext;
 
 // Single threaded, fiber blocking class. Should be created 1 instance per http connection.
+// All IO functions must run from IoContext thread passed to c'tor.
 class GCS {
   const GCE& gce_;
   IoContext& io_context_;
@@ -36,7 +37,9 @@ class GCS {
 
   ListBucketResult ListBuckets();
 
-  ListObjectResult List(absl::string_view bucket, absl::string_view prefix,
+  // fs_mode = true - will return files only without "/" delimiter after the prefix.
+  // fs_mode = false - will return all files recursively containing the prefix.
+  ListObjectResult List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
                         std::function<void(absl::string_view)> cb);
 
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
@@ -45,6 +48,14 @@ class GCS {
   util::Status OpenSequential(absl::string_view bucket, absl::string_view path);
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
 
+
+  // Input: full gcs uri path that starts with "gs://"
+  // returns bucket and object paths accordingly.
+  static bool SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
+                                absl::string_view* path);
+
+  // Inverse function. Returns full gcs URI that starts with "gs://"".
+  static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
  private:
    using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
@@ -69,5 +80,8 @@ class GCS {
   struct SeqReadFile;
   std::unique_ptr<SeqReadFile> seq_file_;
 };
+
+bool IsGcsPath(absl::string_view path);
+
 
 }  // namespace util

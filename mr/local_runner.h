@@ -5,11 +5,15 @@
 
 #include "mr/runner.h"
 
+namespace util {
+class IoContextPool;
+}  // namespace util
+
 namespace mr3 {
 
 class LocalRunner : public Runner {
  public:
-  LocalRunner(const std::string& data_dir);
+  LocalRunner(util::IoContextPool* pool, const std::string& data_dir);
   ~LocalRunner();
 
   void Init() final;
@@ -35,6 +39,5 @@ class LocalRunner : public Runner {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
-
 
 }  // namespace mr3

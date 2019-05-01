@@ -105,4 +105,16 @@ IoContext& IoContextPool::GetNextContext() {
   return io_context;
 }
 
+IoContext* IoContextPool::GetThisContext() {
+  CHECK_EQ(state_, RUN);
+  pthread_t self = pthread_self();
+
+  for (size_t i = 0; i < thread_arr_.size(); ++i) {
+    if (thread_arr_[i].tid == self) {
+      return &context_arr_[i];
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace util

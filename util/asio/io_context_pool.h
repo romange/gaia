@@ -117,6 +117,8 @@ class IoContextPool {
     bc.Wait();
   }
 
+  IoContext* GetThisContext();
+
  private:
   void WrapLoop(size_t index, fibers_ext::BlockingCounter* bc);
 
