@@ -37,7 +37,7 @@ class ReadonlyFile {
   virtual util::StatusObject<size_t>
       Read(size_t offset, const strings::MutableByteRange& range) MUST_USE_RESULT = 0;
 
-  // releases the system handle for this file.
+  // releases the system handle for this file. Does not delete this.
   virtual util::Status Close() = 0;
 
   virtual size_t Size() const = 0;

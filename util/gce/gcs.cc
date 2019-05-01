@@ -29,6 +29,32 @@ namespace rj = rapidjson;
 
 static constexpr char kDomain[] = "www.googleapis.com";
 
+namespace {
+
+class GcsFile : public file::ReadonlyFile {
+ public:
+  // does not own gcs object, only wraps it with ReadonlyFile interface.
+  GcsFile(GCS* gcs, size_t sz) : gcs_(gcs), size_(sz) {}
+  ~GcsFile();
+
+  // Reads upto length bytes and updates the result to point to the data.
+  // May use buffer for storing data. In case, EOF reached sets result.size() < length but still
+  // returns Status::OK.
+  StatusObject<size_t> Read(size_t offset, const strings::MutableByteRange& range) final;
+
+  // releases the system handle for this file.
+  Status Close() final;
+
+  size_t Size() const final { return size_; }
+
+  int Handle() const final { return -1; }
+
+ private:
+  GCS* gcs_;
+  size_t size_;
+  size_t offs_ = 0;
+};
+
 inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
 }
@@ -55,6 +81,37 @@ template <typename Msg> inline bool IsUnauthorized(const Msg& msg) {
   return it != msg.end();
 }
 
+StatusObject<size_t> GcsFile::Read(size_t offset, const strings::MutableByteRange& range) {
+  if (offset != offs_) {
+    return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
+  }
+  auto res = gcs_->ReadSequential(range);
+  if (!res.ok()) {
+    return res.status;
+  }
+
+  offs_ += res.obj;
+  return res.obj;
+}
+
+Status GcsFile::Close() {
+  Status st;
+  if (gcs_) {
+    st = gcs_->CloseSequential();
+    gcs_ = nullptr;
+  }
+  return st;
+}
+
+GcsFile::~GcsFile() {
+  if (gcs_) {
+    LOG(WARNING) << "Close was not called";
+    gcs_->CloseSequential();
+  }
+}
+
+}  // namespace
+
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
   os << msg.reason() << endl;
   for (const auto& f : msg) {
@@ -65,7 +122,6 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
 
 struct GCS::SeqReadFile {
   h2::response_parser<h2::buffer_body> parser;
-
   SeqReadFile() { parser.body_limit(kuint64max); }
 };
 
@@ -89,28 +145,29 @@ util::Status GCS::Connect(unsigned msec) {
   return Status::OK;
 }
 
-util::Status GCS::ResetSeqReadState() {
+util::Status GCS::CloseSequential() {
   CHECK(io_context_.InContextThread());
 
-  if (seq_file_) {
-    ReadObjectResult res;
-    uint8_t buf[1024];
-    strings::MutableByteRange mbr(buf, sizeof(buf));
-    while (true) {
-      res = ReadSequential(mbr);
-      if (!res.ok() || res.obj < mbr.size()) {
-        break;
-      }
-    }
-    seq_file_.reset();
-    return res.status;
+  if (!seq_file_) {
+    return Status::OK;
   }
-  return Status::OK;
+
+  ReadObjectResult res;
+  uint8_t buf[1024];
+  strings::MutableByteRange mbr(buf, sizeof(buf));
+  while (true) {
+    res = ReadSequential(mbr);
+    if (!res.ok() || res.obj < mbr.size()) {
+      break;
+    }
+  }
+  seq_file_.reset();
+  return res.status;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
   CHECK(client_);
-  RETURN_IF_ERROR(ResetSeqReadState());
+  RETURN_IF_ERROR(CloseSequential());
 
   string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
   absl::StrAppend(&url, "&fields=items,nextPageToken");
@@ -163,7 +220,7 @@ auto GCS::ListBuckets() -> ListBucketResult {
 auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
                std::function<void(absl::string_view)> cb) -> ListObjectResult {
   CHECK(client_ && !bucket.empty());
-  RETURN_IF_ERROR(ResetSeqReadState());
+  RETURN_IF_ERROR(CloseSequential());
 
   string url = "/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?prefix=");
@@ -216,7 +273,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
 auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
                const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(client_ && !range.empty());
-  RETURN_IF_ERROR(ResetSeqReadState());
+  RETURN_IF_ERROR(CloseSequential());
 
   BuildGetObjUrl(bucket, obj_path);
 
@@ -238,10 +295,10 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   return range.size() - left_available;  // how much written
 }
 
-util::Status GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) {
+auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
   CHECK(client_);
 
-  RETURN_IF_ERROR(ResetSeqReadState());
+  RETURN_IF_ERROR(CloseSequential());
 
   DCHECK(!seq_file_);
 
@@ -249,29 +306,50 @@ util::Status GCS::OpenSequential(absl::string_view bucket, absl::string_view obj
 
   auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header_);
   error_code ec;
-  unique_ptr<SeqReadFile> seq_file;
+  unique_ptr<SeqReadFile> tmp_file;
+  size_t file_size = 0;
   for (unsigned i = 0; i < 2; ++i) {
+    VLOG(1) << "Req: " << req;
     h2::write(*client_, req, ec);
     if (ec) {
       return ToStatus(ec);
     }
 
-    seq_file.reset(new SeqReadFile);
+    tmp_file.reset(new SeqReadFile);
 
-    h2::read_header(*client_, tmp_buffer_, seq_file->parser, ec);
+    h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
     if (ec) {
       return ToStatus(ec);
     }
-    if (!IsUnauthorized(seq_file->parser.get())) {
-      const auto& msg = seq_file->parser.get();
-      CHECK_EQ(h2::status::ok, seq_file->parser.get().result()) << msg;
+
+    if (!IsUnauthorized(tmp_file->parser.get())) {
+      const auto& msg = tmp_file->parser.get();
+      auto content_len_it = msg.find(h2::field::content_length);
+      if (content_len_it != msg.end()) {
+        absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size);
+      }
+      VLOG(1) << "Resp: " << msg;
+      CHECK_EQ(h2::status::ok, tmp_file->parser.get().result()) << msg;
       break;
     }
-    RETURN_IF_ERROR(RefreshToken(&req));
-  }
-  seq_file_ = std::move(seq_file);
 
-  return Status::OK;
+    RETURN_IF_ERROR(RefreshToken(&req));
+    uint8_t buf[128];
+    auto& body = tmp_file->parser.get().body();
+
+    // Drain pending response completely to allow reusing the current connection.
+    while (!tmp_file->parser.is_done()) {
+      body.data = buf;
+      body.size = sizeof(buf);
+      h2::read(*client_, tmp_buffer_, tmp_file->parser, ec);
+      if (ec) {
+        return ToStatus(ec);
+      }
+    }
+  }
+  seq_file_ = std::move(tmp_file);
+
+  return file_size;
 }
 
 auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
@@ -292,6 +370,20 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
     return ToStatus(ec);
   }
   return range.size() - left_available;  // how much written
+}
+
+file::ReadonlyFile* GCS::OpenGcsFile(absl::string_view full_path) {
+  CHECK(!seq_file_) << "Can not open " << full_path << " before closing the previous one ";
+
+  absl::string_view bucket, obj_path;
+  CHECK(GCS::SplitToBucketPath(full_path, &bucket, &obj_path));
+
+  auto res = OpenSequential(bucket, obj_path);
+  if (!res.ok()) {
+    LOG(ERROR) << "Could not open gcs file " << full_path << " status: " << res.status;
+    return nullptr;
+  }
+  return new GcsFile{this, res.obj};
 }
 
 void GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {

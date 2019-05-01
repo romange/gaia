@@ -28,13 +28,16 @@ using FileQ = fibers::buffered_channel<string>;
 void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
   constexpr size_t kBufSize = 1 << 16;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
-  CHECK_STATUS(gcs->OpenSequential(bucket, obj_path));
+  string full_path = GCS::ToGcsPath(bucket, obj_path);
+
+  file::ReadonlyFile* file = gcs->OpenGcsFile(full_path);
+  CHECK(file) << full_path;
+  LOG(INFO) << "Opened file " << full_path << " with size " << file->Size();
 
   size_t ofs = 0;
   strings::MutableByteRange mbr(buf.get(), kBufSize);
-
   while (true) {
-    auto res = gcs->ReadSequential(mbr);
+    auto res = file->Read(ofs, mbr);
     CHECK_STATUS(res.status);
     ofs += res.obj;
     if (res.obj < mbr.size()) {
@@ -42,7 +45,7 @@ void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
     }
   }
 
-  CHECK_EQ(0, gcs->ReadSequential(mbr).obj);
+  CHECK_EQ(0, file->Read(ofs, mbr).obj);
 
   LOG(INFO) << "Read " << ofs << " bytes from " << obj_path;
 }

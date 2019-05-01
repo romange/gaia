@@ -10,6 +10,7 @@
 
 #include <memory>
 
+#include "file/file.h"
 #include "strings/stringpiece.h"
 #include "util/gce/gce.h"
 #include "util/status.h"
@@ -27,6 +28,7 @@ class GCS {
  public:
   using ListBucketResult = util::StatusObject<std::vector<std::string>>;
   using ReadObjectResult = util::StatusObject<size_t>;
+  using OpenSeqResult = util::StatusObject<size_t>;  // Total size of the object.
   using ListObjectResult = util::Status;
   using error_code = ::boost::system::error_code;
 
@@ -45,9 +47,11 @@ class GCS {
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
 
-  util::Status OpenSequential(absl::string_view bucket, absl::string_view path);
+  OpenSeqResult OpenSequential(absl::string_view bucket, absl::string_view path);
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
+  util::Status CloseSequential();
 
+  file::ReadonlyFile* OpenGcsFile(absl::string_view full_path);
 
   // Input: full gcs uri path that starts with "gs://"
   // returns bucket and object paths accordingly.
@@ -56,11 +60,11 @@ class GCS {
 
   // Inverse function. Returns full gcs URI that starts with "gs://"".
   static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
+
  private:
    using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
 
-  util::Status ResetSeqReadState();
   util::Status RefreshToken(Request* req);
 
   void BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
@@ -82,6 +86,5 @@ class GCS {
 };
 
 bool IsGcsPath(absl::string_view path);
-
 
 }  // namespace util
