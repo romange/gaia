@@ -30,8 +30,10 @@ void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
   string full_path = GCS::ToGcsPath(bucket, obj_path);
 
-  file::ReadonlyFile* file = gcs->OpenGcsFile(full_path);
-  CHECK(file) << full_path;
+  StatusObject<file::ReadonlyFile*> st_file = gcs->OpenGcsFile(full_path);
+  CHECK_STATUS(st_file.status);
+  std::unique_ptr<file::ReadonlyFile> file{st_file.obj};
+
   LOG(INFO) << "Opened file " << full_path << " with size " << file->Size();
 
   size_t ofs = 0;
@@ -46,7 +48,7 @@ void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
   }
 
   CHECK_EQ(0, file->Read(ofs, mbr).obj);
-
+  file->Close();
   LOG(INFO) << "Read " << ofs << " bytes from " << obj_path;
 }
 

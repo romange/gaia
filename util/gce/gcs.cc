@@ -372,7 +372,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   return range.size() - left_available;  // how much written
 }
 
-file::ReadonlyFile* GCS::OpenGcsFile(absl::string_view full_path) {
+util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
   CHECK(!seq_file_) << "Can not open " << full_path << " before closing the previous one ";
 
   absl::string_view bucket, obj_path;
@@ -380,9 +380,9 @@ file::ReadonlyFile* GCS::OpenGcsFile(absl::string_view full_path) {
 
   auto res = OpenSequential(bucket, obj_path);
   if (!res.ok()) {
-    LOG(ERROR) << "Could not open gcs file " << full_path << " status: " << res.status;
-    return nullptr;
+    return res.status;
   }
+
   return new GcsFile{this, res.obj};
 }
 
