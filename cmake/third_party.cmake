@@ -383,20 +383,30 @@ add_third_party(intel_z
   LIB libz.a
 )
 
+
+add_third_party(protozero
+ GIT_REPOSITORY https://github.com/mapbox/protozero
+ GIT_TAG v1.6.7
+ LIB "none"
+)
+
 set(OSMIUM_DIR ${THIRD_PARTY_LIB_DIR}/osmium)
-set(OSMIUM_DIR_INCLUDE_DIR ${OSMIUM_DIR}/include)
+set(OSMIUM_INCLUDE_DIR ${OSMIUM_DIR}/include)
 
 add_third_party(libosmium
+ DEPENDS protozero_project
  GIT_REPOSITORY https://github.com/osmcode/libosmium.git
  GIT_TAG 5c06fbb
- PATCH_COMMAND mkdir -p ${OSMIUM_DIR_INCLUDE_DIR}
+ PATCH_COMMAND mkdir -p ${OSMIUM_INCLUDE_DIR}
  BUILD_IN_SOURCE 1
  CONFIGURE_COMMAND true
  BUILD_COMMAND true
 
- INSTALL_COMMAND sh -c "test -L ${OSMIUM_DIR_INCLUDE_DIR}/osmium || ln -s ${THIRD_PARTY_DIR}/libosmium/include/osmium -t ${OSMIUM_DIR_INCLUDE_DIR}/"
+ INSTALL_COMMAND sh -c "test -L ${OSMIUM_INCLUDE_DIR}/osmium || ln -s ${THIRD_PARTY_DIR}/libosmium/include/osmium -t ${OSMIUM_INCLUDE_DIR}/"
  LIB "none"
 )
+add_library(TRDP::libosmium INTERFACE IMPORTED)
+add_dependencies(TRDP::libosmium protozero_project)
 
 set_property(TARGET TRDP::glog APPEND PROPERTY
              INTERFACE_INCLUDE_DIRECTORIES ${GFLAGS_INCLUDE_DIR}
@@ -411,6 +421,16 @@ set_property(TARGET TRDP::folly APPEND PROPERTY
 set_property(TARGET TRDP::gtest APPEND PROPERTY
              IMPORTED_LINK_INTERFACE_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
 
+set_target_properties(TRDP::libosmium PROPERTIES
+             INTERFACE_INCLUDE_DIRECTORIES "${PROTOZERO_INCLUDE_DIR};${OSMIUM_INCLUDE_DIR}"
+             INTERFACE_LINK_LIBRARIES TRDP::intel_z)
+
+add_library(TRDP::rapidjson INTERFACE IMPORTED)
+add_dependencies(TRDP::rapidjson rapidjson_project)
+set_target_properties(TRDP::rapidjson PROPERTIES
+             INTERFACE_INCLUDE_DIRECTORIES "${RAPIDJSON_INCLUDE_DIR}"
+             )
+
 add_library(fast_malloc SHARED IMPORTED)
 add_dependencies(fast_malloc gperf_project)
 set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
@@ -420,4 +440,4 @@ set_target_properties(fast_malloc PROPERTIES IMPORTED_LOCATION
                       )
 
 link_libraries(${CMAKE_THREAD_LIBS_INIT})
-include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
+include_directories(${SPARSE_HASH_INCLUDE_DIR} ${Boost_INCLUDE_DIR})

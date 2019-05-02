@@ -15,3 +15,6 @@ cxx_link(gcs_demo gce_lib)
 
 add_executable(gsod_group gsod_group.cc)
 cxx_link(gsod_group mr3_lib absl_hash absl_str_format http_v2)
+
+add_executable(osmium_road_length osmium_road_length.cc)
+cxx_link(osmium_road_length base TRDP::libosmium)
