@@ -9,6 +9,10 @@ namespace util {
 class IoContextPool;
 }  // namespace util
 
+namespace file {
+class ReadonlyFile;
+}  // namespace file
+
 namespace mr3 {
 
 class LocalRunner : public Runner {

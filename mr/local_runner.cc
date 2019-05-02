@@ -36,6 +36,8 @@ using detail::DestHandle;
 constexpr size_t kGcsConnectTimeout = 3000;
 namespace {
 
+using namespace intrusive;
+
 // Thread-local buffered writer, owned by LocalContext.
 class BufferedWriter {
   DestHandle* dh_;
@@ -137,12 +139,18 @@ LocalContext::~LocalContext() {
 
 }  // namespace
 
+using slist_hook = slist_member_hook<link_mode<auto_unlink>>;
+
 struct GcsHandle {
   GCS gcs;
   IoContext& io_context;
 
   // Even though we are thread-local we should protect transactions against multiple fiber-accesses.
   fibers::mutex mu;
+  slist_hook hook;
+
+  using member_hook_t = member_hook<GcsHandle, slist_hook, &GcsHandle::hook>;
+
   GcsHandle(const GCE& gce, IoContext* context) : gcs{gce, context}, io_context(*context) {}
 };
 
@@ -158,6 +166,8 @@ struct LocalRunner::Impl {
 
   void ExpandGCS(absl::string_view glob, std::function<void(const std::string&)> cb);
 
+  util::StatusObject<file::ReadonlyFile*> OpenReadFile(const std::string& filename,
+                                                       file::FiberReadOptions::Stats* stats);
   // private:
 
   void LazyGcsInit();
@@ -254,6 +264,21 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
   CHECK_STATUS(status);
 }
 
+util::StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenReadFile(
+    const std::string& filename, file::FiberReadOptions::Stats* stats) {
+  if (util::IsGcsPath(filename)) {
+    LazyGcsInit();
+
+    return gcs_handle->gcs.OpenGcsFile(filename);
+  }
+
+  file::FiberReadOptions opts;
+  opts.prefetch_size = FLAGS_local_runner_prefetch_size;
+  opts.stats = stats;
+
+  return file::OpenFiberReadFile(filename, &fq_pool, opts);
+}
+
 void LocalRunner::Impl::LazyGcsInit() {
   {
     std::lock_guard<fibers::mutex> lk(gce_mu);
@@ -288,6 +313,7 @@ void LocalRunner::Init() { file_util::RecursivelyCreateDir(impl_->data_dir, 0750
 
 void LocalRunner::Shutdown() {
   impl_->fq_pool.Shutdown();
+  impl_->io_pool->AwaitFiberOnAll([this] (IoContext&) { impl_->gcs_handle.reset(); });
 
   LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }
@@ -327,12 +353,7 @@ ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
 size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                                      RawSinkCb cb) {
   file::FiberReadOptions::Stats stats;
-  file::FiberReadOptions opts;
-
-  opts.prefetch_size = FLAGS_local_runner_prefetch_size;
-  opts.stats = &stats;
-
-  auto fl_res = file::OpenFiberReadFile(filename, &impl_->fq_pool, opts);
+  auto fl_res = impl_->OpenReadFile(filename, &stats);
   if (!fl_res.ok()) {
     LOG(DFATAL) << "Skipping " << filename << " with " << fl_res.status;
     return 0;
