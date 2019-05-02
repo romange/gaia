@@ -87,7 +87,8 @@ function(add_third_party name)
 
     CMAKE_GENERATOR "Unix Makefiles"
     BUILD_BYPRODUCTS ${LIB_FILES}
-    LIST_SEPARATOR | # Use the alternate list separator
+    # LIST_SEPARATOR | # Use the alternate list separator.
+    # Can not use | because we use it inside sh/install_cmd
 
     # we need those CMAKE_ARGS for cmake based 3rd party projects.
     CMAKE_ARGS -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY:PATH=${INSTALL_ROOT}
@@ -380,6 +381,21 @@ add_third_party(intel_z
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=-g -O3"
                     <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/intel_z
   LIB libz.a
+)
+
+set(OSMIUM_DIR ${THIRD_PARTY_LIB_DIR}/osmium)
+set(OSMIUM_DIR_INCLUDE_DIR ${OSMIUM_DIR}/include)
+
+add_third_party(libosmium
+ GIT_REPOSITORY https://github.com/osmcode/libosmium.git
+ GIT_TAG 5c06fbb
+ PATCH_COMMAND mkdir -p ${OSMIUM_DIR_INCLUDE_DIR}
+ BUILD_IN_SOURCE 1
+ CONFIGURE_COMMAND true
+ BUILD_COMMAND true
+
+ INSTALL_COMMAND sh -c "test -L ${OSMIUM_DIR_INCLUDE_DIR}/osmium || ln -s ${THIRD_PARTY_DIR}/libosmium/include/osmium -t ${OSMIUM_DIR_INCLUDE_DIR}/"
+ LIB "none"
 )
 
 set_property(TARGET TRDP::glog APPEND PROPERTY

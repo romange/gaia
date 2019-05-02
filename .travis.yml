@@ -57,7 +57,7 @@ script:
   - env
   - mkdir testresults && mkdir -p build-dbg && cd build-dbg
   - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache ..
-  - ninja -j4 base array_test
+  - ninja -j4 base array_test dynasm_project libosmium_project
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
   - ninja -j4 $tests_list asio_fibers -k 10
   - ./http_test --logtostderr --vmodule=http_client=1
