@@ -6,14 +6,15 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/writer.h>
 
-#include "mr/pipeline.h"
-
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "mr/mr_pb.h"
+#include "mr/pipeline.h"
 #include "mr/test_utils.h"
 
 #include "strings/numbers.h"
 #include "util/asio/io_context_pool.h"
+#include "util/plang/addressbook.pb.h"
 
 using namespace std;
 
@@ -246,6 +247,31 @@ TEST_F(MrTest, Join) {
   EXPECT_THAT(runner_.Table("joinw"),
               UnorderedElementsAre(MatchShard(0, {"3:11"}), MatchShard(1, {"1:1", "4:1"}),
                                    MatchShard(2, {"2:11"})));
+}
+
+class AddressMapper {
+ public:
+  void Do(string str, DoContext<tutorial::Address>* out) {
+    tutorial::Address addr;
+    addr.set_street(str);
+    out->Write(std::move(addr));
+  }
+};
+
+TEST_F(MrTest, PbJson) {
+  vector<string> stream1{"1", "2", "3", "4"};
+  runner_.AddInputRecords("stream1.txt", stream1);
+  PTable<tutorial::Address> table =
+      pipeline_->ReadText("read1", "stream1.txt").Map<AddressMapper>("map_address");
+  table.Write("w1", pb::WireFormat::TXT).WithCustomSharding([](const tutorial::Address&) {
+    return "shard";
+  });
+  pipeline_->Run(&runner_);
+  vector<string> expected;
+  for (const auto& s : stream1) {
+    expected.push_back(absl::StrCat(R"({"street":")", s, "\"}"));
+  }
+  EXPECT_THAT(runner_.Table("w1"), UnorderedElementsAre(MatchShard("shard", expected)));
 }
 
 static void BM_ShardAndWrite(benchmark::State& state) {

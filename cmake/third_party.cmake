@@ -392,6 +392,7 @@ add_third_party(protozero
 
 set(OSMIUM_DIR ${THIRD_PARTY_LIB_DIR}/osmium)
 set(OSMIUM_INCLUDE_DIR ${OSMIUM_DIR}/include)
+file(MAKE_DIRECTORY ${OSMIUM_INCLUDE_DIR})
 
 add_third_party(libosmium
  DEPENDS protozero_project

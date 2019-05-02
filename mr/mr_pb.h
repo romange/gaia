@@ -15,7 +15,7 @@ struct PB_Serializer {
 
   static std::string To(bool is_binary, const Message* msg);
 
-  static bool From(bool is_binary, const std::string& tmp, Message* res);
+  static bool From(bool is_binary, std::string tmp, Message* res);
 };
 
 template <typename PB>
@@ -26,8 +26,8 @@ class RecordTraits<PB, std::enable_if_t<std::is_base_of<google::protobuf::Messag
     return PB_Serializer::To(is_binary, &doc);
   }
 
-  static bool Parse(bool is_binary, const std::string& tmp, PB* res) {
-    return PB_Serializer::From(is_binary, tmp, res);
+  static bool Parse(bool is_binary, std::string tmp, PB* res) {
+    return PB_Serializer::From(is_binary, std::move(tmp), res);
   }
 };
 }  // namespace mr3
