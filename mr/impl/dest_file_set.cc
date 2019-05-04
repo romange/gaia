@@ -29,17 +29,23 @@ namespace {
 constexpr size_t kBufLimit = 1 << 16;
 
 string FileName(StringPiece base, const pb::Output& out) {
-  CHECK_EQ(out.format().type(), pb::WireFormat::TXT);
-
   string res(base);
-  absl::StrAppend(&res, ".txt");
-  if (out.has_compress()) {
-    if (out.compress().type() == pb::Output::GZIP) {
-      absl::StrAppend(&res, ".gz");
-    } else {
-      LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
+  if (out.format().type() == pb::WireFormat::TXT) {
+    absl::StrAppend(&res, ".txt");
+    if (out.has_compress()) {
+      if (out.compress().type() == pb::Output::GZIP) {
+        absl::StrAppend(&res, ".gz");
+      } else {
+        LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
+      }
     }
+  } else if (out.format().type() == pb::WireFormat::LST) {
+    CHECK(!out.has_compress()) << "Can not set compression on LST files";
+    absl::StrAppend(&res, ".lst");
+  } else {
+    LOG(FATAL) << "Unsupported format for " << out.ShortDebugString();
   }
+
   return res;
 }
 
@@ -74,8 +80,7 @@ file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
 }  // namespace
 
 DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), fq_(fq) {
-}
+    : root_dir_(root_dir), fq_(fq) {}
 
 auto DestFileSet::GetOrCreate(const ShardId& sid, const pb::Output& pb_out) -> Result {
   std::lock_guard<fibers::mutex> lk(mu_);
@@ -135,8 +140,7 @@ void DestFileSet::GatherAll(std::function<void(const ShardId&, DestHandle*)> cb)
   }
 }
 
-DestFileSet::~DestFileSet() {
-}
+DestFileSet::~DestFileSet() {}
 
 DestHandle::DestHandle(StringPiece path, ::file::WriteFile* wf,
                        fibers_ext::FiberQueueThreadPool* fq)

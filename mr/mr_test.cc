@@ -267,9 +267,29 @@ TEST_F(MrTest, PbJson) {
     return "shard";
   });
   pipeline_->Run(&runner_);
+
   vector<string> expected;
   for (const auto& s : stream1) {
     expected.push_back(absl::StrCat(R"({"street":")", s, "\"}"));
+  }
+  EXPECT_THAT(runner_.Table("w1"), UnorderedElementsAre(MatchShard("shard", expected)));
+}
+
+TEST_F(MrTest, PbLst) {
+  vector<string> stream1{"1", "2"};
+  runner_.AddInputRecords("stream1.txt", stream1);
+  PTable<tutorial::Address> table =
+      pipeline_->ReadText("read1", "stream1.txt").Map<AddressMapper>("map_address");
+  table.Write("w1", pb::WireFormat::LST).WithCustomSharding([](const tutorial::Address&) {
+    return "shard";
+  });
+  pipeline_->Run(&runner_);
+
+  vector<string> expected;
+  for (const auto& s : stream1) {
+    tutorial::Address addr;
+    addr.set_street(s);
+    expected.push_back(addr.SerializeAsString());
   }
   EXPECT_THAT(runner_.Table("w1"), UnorderedElementsAre(MatchShard("shard", expected)));
 }
