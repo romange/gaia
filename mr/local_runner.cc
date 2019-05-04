@@ -321,6 +321,7 @@ void LocalRunner::Shutdown() {
 void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
 RawContext* LocalRunner::CreateContext() {
+  CHECK_NOTNULL(impl_->current_op);
   CHECK_EQ(pb::WireFormat::TXT, impl_->current_op->output().format().type());
 
   return new LocalContext(impl_->current_op->output(), impl_->dest_mgr.get());

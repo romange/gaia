@@ -55,7 +55,14 @@ class RawContext {
 
   const StringPieceDenseMap<long>& counter_map() const { return counter_map_; }
 
+  // Used only in tests.
+  void TEST_Write(const ShardId& shard_id, std::string&& record) {
+    WriteInternal(shard_id, std::move(record));
+  }
+
  private:
+
+  // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
   StringPieceDenseMap<long> counter_map_;
