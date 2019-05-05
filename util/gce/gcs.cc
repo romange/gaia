@@ -312,6 +312,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     VLOG(1) << "Req: " << req;
     h2::write(*client_, req, ec);
     if (ec) {
+      VLOG(1) << "Error " << ec.message();
       return ToStatus(ec);
     }
 
@@ -319,6 +320,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
 
     h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
     if (ec) {
+      VLOG(1) << "Error " << ec.message();
       return ToStatus(ec);
     }
 
