@@ -184,11 +184,14 @@ void WriteStringToFileOrDie(StringPiece contents, StringPiece name) {
 bool CreateDir(StringPiece name, int mode) { return mkdir(name.data(), mode) == 0; }
 
 bool RecursivelyCreateDir(StringPiece path, int mode) {
+  struct stat st;
+  int res = stat(path.data(), &st);
+  if (res == 0 && (st.st_mode & S_IFMT) == S_IFDIR){
+    return true;
+  }
+
   if (CreateDir(path, mode))
     return true;
-
-  if (file::Exists(path))
-    return false;
 
   // Try creating the parent.
   string::size_type slashpos = path.rfind('/');
