@@ -59,6 +59,10 @@ inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
 }
 
+#define RETURN_EC_STATUS(x) do { auto __ec$ = (x); \
+  VLOG(1) << "EC: " << __ec$; \
+  return ToStatus(x); } while (false)
+
 inline absl::string_view absl_sv(beast::string_view s) {
   return absl::string_view{s.data(), s.size()};
 }
@@ -110,6 +114,11 @@ GcsFile::~GcsFile() {
   }
 }
 
+inline bool ShouldRetry(h2::status st) {
+  return st == h2::status::too_many_requests ||
+         h2::to_status_class(st) == h2::status_class::server_error;
+}
+
 }  // namespace
 
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
@@ -123,7 +132,27 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
 struct GCS::SeqReadFile {
   h2::response_parser<h2::buffer_body> parser;
   SeqReadFile() { parser.body_limit(kuint64max); }
+
+  error_code Drain(SslStream* stream, ::boost::beast::flat_buffer* buf);
 };
+
+auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp_buf)
+    -> error_code {
+  uint8_t buf[128];
+  auto& body = parser.get().body();
+  error_code ec;
+
+  // Drain pending response completely to allow reusing the current connection.
+  while (!parser.is_done()) {
+    body.data = buf;
+    body.size = sizeof(buf);
+    h2::read(*stream, *tmp_buf, parser, ec);
+    if (ec) {
+      return ec;
+    }
+  }
+  return ec;
+}
 
 GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
 GCS::~GCS() {}
@@ -308,65 +337,49 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
   error_code ec;
   unique_ptr<SeqReadFile> tmp_file;
   size_t file_size = 0;
-  for (unsigned i = 0; i < 2; ++i) {
+  size_t sleep_sec = 1;
+  unsigned unautharized_iters = 0;
+  unsigned throttle_iters = 0;
+  while (true) {
     VLOG(1) << "Req: " << req;
     h2::write(*client_, req, ec);
-    if (ec) {
-      VLOG(1) << "Error " << ec.message();
-      return ToStatus(ec);
-    }
+    RETURN_EC_STATUS(ec);
 
     tmp_file.reset(new SeqReadFile);
 
     h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
-    if (ec) {
-      VLOG(1) << "Error " << ec.message();
-      return ToStatus(ec);
-    }
+    RETURN_EC_STATUS(ec);
 
-    auto& msg = tmp_file->parser.get();
+    const auto& msg = tmp_file->parser.get();
 
-    // TODO: to retry requests when we get h2::status::too_many_requests or
-    // when  h2::to_status_class(msg.result()) == h2::status_class::server_error
-    // See https://cloud.google.com/storage/docs/request-rate for more details.
-    if (msg.result() == h2::status::service_unavailable) {
-      char buf[128];
-
-      auto& body = msg.body();
-      body.data = reinterpret_cast<uint8_t*>(buf);
-      body.size = sizeof(buf);
-
-      h2::read(*client_, tmp_buffer_, tmp_file->parser, ec);
-      if (ec) {
-        VLOG(1) << "ec: " << ec;
-        return ToStatus(ec);
-      }
-      size_t read = sizeof(buf) - body.size;
-      LOG(FATAL) << "Body: " << StringPiece(buf, read);
-    }
-    if (!IsUnauthorized(msg)) {
+    if (msg.result() == h2::status::ok) {
       auto content_len_it = msg.find(h2::field::content_length);
       if (content_len_it != msg.end()) {
         absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size);
       }
-      VLOG(1) << "Resp: " << msg;
-      CHECK_EQ(h2::status::ok, tmp_file->parser.get().result()) << msg;
       break;
     }
 
-    RETURN_IF_ERROR(RefreshToken(&req));
-    uint8_t buf[128];
-    auto& body = tmp_file->parser.get().body();
-
-    // Drain pending response completely to allow reusing the current connection.
-    while (!tmp_file->parser.is_done()) {
-      body.data = buf;
-      body.size = sizeof(buf);
-      h2::read(*client_, tmp_buffer_, tmp_file->parser, ec);
-      if (ec) {
-        return ToStatus(ec);
-      }
+    if (ShouldRetry(msg.result())) {
+      ++throttle_iters;
+      RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
+      LOG_IF(WARNING, throttle_iters > 2) << "Retrying iteration " << throttle_iters;
+      this_fiber::sleep_for(chrono::seconds(sleep_sec));
+      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
+      continue;
     }
+
+    if (IsUnauthorized(msg)) {
+      if (++unautharized_iters > 1) {
+        return Status(StatusCode::INTERNAL_ERROR, "Access denied");
+      }
+
+      RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
+      RETURN_IF_ERROR(RefreshToken(&req));
+      continue;
+    }
+    LOG(ERROR) << "Unsupported error in response " << msg << "/" << msg.reason();
+    return Status(StatusCode::INTERNAL_ERROR, "HTTP ERROR");
   }
   seq_file_ = std::move(tmp_file);
 
