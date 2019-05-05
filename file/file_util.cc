@@ -193,14 +193,17 @@ bool RecursivelyCreateDir(StringPiece path, int mode) {
   if (CreateDir(path, mode))
     return true;
 
+  string str(path);
+
   // Try creating the parent.
-  string::size_type slashpos = path.rfind('/');
+  string::size_type slashpos = str.rfind('/');
   if (slashpos == string::npos) {
     // No parent given.
     return false;
   }
+  str.resize(slashpos);
 
-  return RecursivelyCreateDir(path.substr(0, slashpos), mode) && CreateDir(path, mode);
+  return RecursivelyCreateDir(str, mode) && CreateDir(path, mode);
 }
 
 void DeleteRecursively(StringPiece name) {
