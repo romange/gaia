@@ -324,8 +324,27 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
       return ToStatus(ec);
     }
 
-    if (!IsUnauthorized(tmp_file->parser.get())) {
-      const auto& msg = tmp_file->parser.get();
+    auto& msg = tmp_file->parser.get();
+
+    // TODO: to retry requests when we get h2::status::too_many_requests or
+    // when  h2::to_status_class(msg.result()) == h2::status_class::server_error
+    // See https://cloud.google.com/storage/docs/request-rate for more details.
+    if (msg.result() == h2::status::service_unavailable) {
+      char buf[128];
+
+      auto& body = msg.body();
+      body.data = reinterpret_cast<uint8_t*>(buf);
+      body.size = sizeof(buf);
+
+      h2::read(*client_, tmp_buffer_, tmp_file->parser, ec);
+      if (ec) {
+        VLOG(1) << "ec: " << ec;
+        return ToStatus(ec);
+      }
+      size_t read = sizeof(buf) - body.size;
+      LOG(FATAL) << "Body: " << StringPiece(buf, read);
+    }
+    if (!IsUnauthorized(msg)) {
       auto content_len_it = msg.find(h2::field::content_length);
       if (content_len_it != msg.end()) {
         absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size);
