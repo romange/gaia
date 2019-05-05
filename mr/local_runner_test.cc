@@ -45,7 +45,7 @@ class LocalRunnerTest : public testing::Test {
 TEST_F(LocalRunnerTest, Basic) {
   ShardFileMap out_files;
   Start(pb::WireFormat::TXT);
-  RawContext* context = runner_->CreateContext();
+  std::unique_ptr<RawContext> context{runner_->CreateContext()};
   context->TEST_Write(ShardId{0}, "foo");
 
   context->Flush();
