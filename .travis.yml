@@ -57,15 +57,14 @@ script:
 jobs:
   fast_finish: true
   include:
-  - compiler: clang
     stage: test
     name: "Unit Tests"
-    env:
-      - MATRIX_EVAL="CC=clang && CXX=clang++"
-  - compiler: gcc
-    stage: test
-    env:
-      - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+    - compiler: clang
+      env:
+        - MATRIX_EVAL="CC=clang && CXX=clang++"
+    - compiler: gcc
+      env:
+        - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
 
 after_failure:
   - pwd
