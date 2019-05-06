@@ -17,7 +17,8 @@
 
 namespace util {
 
-/// A pool of io_context objects.
+/// @brief A pool of io_context objects.
+/// @author Roman Gershman
 class IoContextPool {
   template <typename Func, typename... Args>
   using AcceptArgsCheck =
