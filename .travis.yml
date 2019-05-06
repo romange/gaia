@@ -57,23 +57,24 @@ script:
 jobs:
   fast_finish: true
   include:
-    stage: test
+  - stage: test
     name: "Unit Tests"
-    - compiler: clang
-      env:
-        - MATRIX_EVAL="CC=clang && CXX=clang++"
-    - compiler: gcc
-      env:
-        - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
-    - compiler: gcc
-      addons:
+    env:
+      - MATRIX_EVAL="CC=clang && CXX=clang++"
+  - stage: test
+    name: "Unit Tests"
+    env:
+      - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+  - stage: test
+    name: "Unit Tests"
+    addons:
         apt:
           sources:
             - ubuntu-toolchain-r-test
           packages:
             - g++-7
-      env:
-        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    env:
+      - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
 
 after_failure:
   - pwd
