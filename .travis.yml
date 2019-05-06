@@ -20,7 +20,7 @@ addons:
 
 cache:
   directories:
-  - /opt/boost_1_69_0
+  - /opt/boost_1_70_0
   - build-dbg/third_party  # Relative to $TRAVIS_BUILD_DIR
 
 before_cache:
