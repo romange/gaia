@@ -126,10 +126,12 @@ void FiberSocketImpl::Worker(const std::string& hname, const std::string& servic
       // Direct but non-blocking call since we know we should be able to receive.
       // Since it's direct - we do not context-switch.
       size_t read_cnt = sock_.receive(asio::mutable_buffer(next, read_capacity), 0, status_);
-      if (status_) {
-        VLOG(1) << "SockReceive: " << status_.message();
-      } else {
+      if (!status_) {
         rslice_ = asio::mutable_buffer(rslice_.data(), rslice_.size() + read_cnt);
+      } else if (status_ == system::errc::resource_unavailable_try_again) {
+        status_.clear();
+      } else {
+        VLOG(1) << "SockReceive: " << status_.message();
       }
       continue;
     }
