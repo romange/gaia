@@ -3,10 +3,20 @@ dist: xenial
 language: cpp
 os: linux
 
+branches:
+  only:
+    - master
+
 env:
   global:
     - LSAN_OPTIONS=suppressions=$HOME/supress.txt
     - ASAN_OPTIONS=symbolize=1,abort_on_error=1,detect_leaks=1
+
+addons:
+  apt:
+    packages:
+      - doxygen
+      - graphviz
 
 cache:
   directories:
