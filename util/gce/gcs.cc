@@ -59,9 +59,14 @@ inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
 }
 
-#define RETURN_EC_STATUS(x) do { auto __ec$ = (x); \
-  VLOG(1) << "EC: " << __ec$; \
-  return ToStatus(x); } while (false)
+#define RETURN_EC_STATUS(x)       \
+  do {                            \
+    auto __ec$ = (x);             \
+    if (__ec$) {                  \
+      VLOG(1) << "EC: " << __ec$; \
+      return ToStatus(x);         \
+    }                             \
+  } while (false)
 
 inline absl::string_view absl_sv(beast::string_view s) {
   return absl::string_view{s.data(), s.size()};
@@ -114,8 +119,9 @@ GcsFile::~GcsFile() {
   }
 }
 
-inline bool ShouldRetry(h2::status st) {
-  return st == h2::status::too_many_requests ||
+inline bool ShouldRetry(h2::status st, ::boost::system::error_code ec) {
+  return ec == system::errc::resource_unavailable_try_again ||
+         st == h2::status::too_many_requests ||
          h2::to_status_class(st) == h2::status_class::server_error;
 }
 
@@ -348,9 +354,24 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     tmp_file.reset(new SeqReadFile);
 
     h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
-    RETURN_EC_STATUS(ec);
-
     const auto& msg = tmp_file->parser.get();
+
+    if (ShouldRetry(msg.result(), ec)) {
+      ++throttle_iters;
+      if (!ec) {
+        RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
+      } else {
+        VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
+        ec = client_->next_layer().ClientWaitToConnect(1000);
+        VLOG(1) << "After FiberSocket wait to connect: " << ec;
+      }
+      LOG_IF(WARNING, throttle_iters > 2) << "Retrying iteration " << throttle_iters;
+      VLOG(1) << "Retrying iteration " << throttle_iters;
+      this_fiber::sleep_for(chrono::seconds(sleep_sec));
+      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
+      continue;
+    }
+    RETURN_EC_STATUS(ec);
 
     if (msg.result() == h2::status::ok) {
       auto content_len_it = msg.find(h2::field::content_length);
@@ -358,15 +379,6 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
         absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size);
       }
       break;
-    }
-
-    if (ShouldRetry(msg.result())) {
-      ++throttle_iters;
-      RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
-      LOG_IF(WARNING, throttle_iters > 2) << "Retrying iteration " << throttle_iters;
-      this_fiber::sleep_for(chrono::seconds(sleep_sec));
-      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
-      continue;
     }
 
     if (IsUnauthorized(msg)) {
