@@ -81,7 +81,7 @@ jobs:
     deploy:
       provider: pages
       skip_cleanup: true
-      local_dir: build-dbg/docs/html
+      local_dir: build-dbg/doc/html
       github_token: $GH_REPO_TOKEN
       on:
         branch: master
