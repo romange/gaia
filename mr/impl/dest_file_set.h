@@ -8,6 +8,7 @@
 #include "mr/mr3.pb.h"
 
 #include "file/file.h"
+#include "file/list_file.h"
 #include "mr/mr_types.h"
 #include "strings/unique_strings.h"
 #include "util/fibers/fiberqueue_threadpool.h"
@@ -43,7 +44,7 @@ class DestFileSet {
   void GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const;
 
   // Closes the handle but leave it in the map.
-  // GatherAll will still return it. 
+  // GatherAll will still return it.
   void CloseHandle(const ShardId& key);
 
  private:
@@ -52,26 +53,56 @@ class DestFileSet {
 };
 
 class DestHandle {
-  ::file::WriteFile* wf_;
-  util::StringSink* str_sink = nullptr;
-  std::unique_ptr<util::ZlibSink> zlib_sink;
-  unsigned fq_index_;
-  util::fibers_ext::FiberQueueThreadPool* fq_;
-  size_t start_delta_ = 0;
-
   friend class DestFileSet;
 
+ protected:
+  // Does NOT take ownership over wf and fq.
   DestHandle(StringPiece path, ::file::WriteFile* wf, util::fibers_ext::FiberQueueThreadPool* fq);
   DestHandle(const DestHandle&) = delete;
 
  public:
-  void Write(std::string str);
+  virtual ~DestHandle() {}
+
+  virtual void Write(std::string str);
+  virtual void Close();
+
   StringPiece path() const { return full_path_; }
-  void Close();
+
+ protected:
+  ::file::WriteFile* wf_;
+  util::fibers_ext::FiberQueueThreadPool* fq_;
+  StringPiece full_path_;
+  unsigned fq_index_;
+};
+
+class ZlibHandle : public DestHandle {
+  friend class DestFileSet;
+
+  ZlibHandle(StringPiece path, const pb::Output& out, ::file::WriteFile* wf,
+             util::fibers_ext::FiberQueueThreadPool* fq);
+
+ public:
+  void Write(std::string str) override;
+  void Close() override;
 
  private:
-  StringPiece full_path_;
+  size_t start_delta_ = 0;
+  util::StringSink* str_sink_ = nullptr;
+  std::unique_ptr<util::ZlibSink> zlib_sink_;
+
   boost::fibers::mutex zmu_;
+};
+
+class LstHandle : public DestHandle {
+  LstHandle(StringPiece path, ::file::WriteFile* wf, util::fibers_ext::FiberQueueThreadPool* fq);
+
+ public:
+  void Write(std::string str) override;
+  void Close() override;
+
+ private:
+  std::unique_ptr<file::ListWriter> lst_writer_;
+  boost::fibers::mutex mu_;
 };
 
 }  // namespace detail

@@ -7,6 +7,7 @@
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
 #include "file/file_util.h"
+#include "file/filesource.h"
 #include "file/gzip_file.h"
 
 namespace mr3 {
@@ -92,21 +93,15 @@ auto DestFileSet::GetOrCreate(const ShardId& sid, const pb::Output& pb_out) -> R
     string file_name = FileName(shard_name, pb_out);
     string full_path = file_util::JoinPath(root_dir_, file_name);
     StringPiece fp_sp = str_db_.Get(full_path);
-    DestHandle* dh = new DestHandle{fp_sp, CreateFile(full_path, pb_out, fq_), fq_};
+    file::WriteFile* wf = CreateFile(full_path, pb_out, fq_);
+    std::unique_ptr<DestHandle> dh;
 
     if (FLAGS_local_runner_zsink && pb_out.has_compress()) {
-      CHECK(pb_out.compress().type() == pb::Output::GZIP);
-
-      static std::default_random_engine rnd;
-
-      dh->str_sink = new StringSink;
-      dh->zlib_sink.reset(new ZlibSink(dh->str_sink, pb_out.compress().level()));
-
-      // Randomize when we flush first for each handle. That should define uniform flushing cycle
-      // for all handles.
-      dh->start_delta_ = rnd() % (kBufLimit - 1);
+      dh.reset(new ZlibHandle{fp_sp, pb_out, wf, fq_});
+    } else {
+      dh.reset(new DestHandle{fp_sp, wf, fq_});
     }
-    auto res = dest_files_.emplace(sid, dh);
+    auto res = dest_files_.emplace(sid, std::move(dh));
     CHECK(res.second);
     it = res.first;
   }
@@ -150,36 +145,70 @@ DestHandle::DestHandle(StringPiece path, ::file::WriteFile* wf,
   fq_index_ = base::MurmurHash3_x86_32(ptr, path.size(), 1);
 }
 
-void DestHandle::Write(string str) {
-  if (zlib_sink) {
-    std::unique_lock<fibers::mutex> lk(zmu_);
-    CHECK_STATUS(zlib_sink->Append(strings::ToByteRange(str)));
-    str.clear();
-    if (str_sink->contents().size() >= kBufLimit - start_delta_) {
-      fq_->Add(fq_index_, WriteCb(std::move(str_sink->contents()), wf_));
-      start_delta_ = 0;
-    }
-    return;
-  }
-  fq_->Add(fq_index_, WriteCb(std::move(str), wf_));
-}
+void DestHandle::Write(string str) { fq_->Add(fq_index_, WriteCb(std::move(str), wf_)); }
 
 void DestHandle::Close() {
   if (!wf_)
     return;
 
-  if (zlib_sink) {
-    CHECK_STATUS(zlib_sink->Flush());
-
-    if (!str_sink->contents().empty()) {
-      fq_->Add(fq_index_, WriteCb(std::move(str_sink->contents()), wf_));
-    }
-  }
   VLOG(1) << "Closing file " << path();
 
   bool res = fq_->Await(fq_index_, [this] { return wf_->Close(); });
   CHECK(res);
   wf_ = nullptr;
+}
+
+ZlibHandle::ZlibHandle(StringPiece path, const pb::Output& out, ::file::WriteFile* wf,
+                       util::fibers_ext::FiberQueueThreadPool* fq)
+    : DestHandle(path, wf, fq), str_sink_(new StringSink) {
+  CHECK_EQ(pb::Output::GZIP, out.compress().type());
+
+  static std::default_random_engine rnd;
+
+  zlib_sink_.reset(new ZlibSink(str_sink_, out.compress().level()));
+
+  // Randomize when we flush first for each handle. That should define uniform flushing cycle
+  // for all handles.
+  start_delta_ = rnd() % (kBufLimit - 1);
+}
+
+void ZlibHandle::Write(std::string str) {
+  std::unique_lock<fibers::mutex> lk(zmu_);
+  CHECK_STATUS(zlib_sink_->Append(strings::ToByteRange(str)));
+  str.clear();
+  if (str_sink_->contents().size() >= kBufLimit - start_delta_) {
+    fq_->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+    start_delta_ = 0;
+  }
+}
+
+void ZlibHandle::Close() {
+  CHECK_STATUS(zlib_sink_->Flush());
+
+  if (!str_sink_->contents().empty()) {
+    fq_->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+  }
+
+  DestHandle::Close();
+}
+
+LstHandle::LstHandle(StringPiece path, ::file::WriteFile* wf,
+                     util::fibers_ext::FiberQueueThreadPool* fq)
+    : DestHandle(path, wf, fq) {
+  util::Sink* fs = new file::Sink{wf, DO_NOT_TAKE_OWNERSHIP};
+  lst_writer_.reset(new file::ListWriter{fs});
+  CHECK_STATUS(lst_writer_->Init());
+}
+
+void LstHandle::Write(std::string str) {
+  std::unique_lock<fibers::mutex> lk(mu_);
+  CHECK_STATUS(lst_writer_->AddRecord(str));
+}
+
+void LstHandle::Close() {
+  CHECK_STATUS(lst_writer_->Flush());
+
+  DestHandle::Close();
 }
 
 }  // namespace detail
