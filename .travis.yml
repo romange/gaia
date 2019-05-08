@@ -48,6 +48,7 @@ before_script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
   - cmake --version
   - env
+  - ls build-dbg/third_party || true
 
 script:
   - mkdir testresults && mkdir -p build-dbg && cd build-dbg
