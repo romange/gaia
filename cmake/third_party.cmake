@@ -84,6 +84,8 @@ function(add_third_party name)
     LOG_DOWNLOAD ON
     LOG_CONFIGURE ON
     LOG_BUILD ON
+    LOG_PATCH ON
+    LOG_UPDATE ON
 
     CMAKE_GENERATOR "Unix Makefiles"
     BUILD_BYPRODUCTS ${LIB_FILES}
@@ -192,9 +194,9 @@ add_third_party(
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
     GIT_TAG v3.7.1
     GIT_SHALLOW 1
-    PATCH_COMMAND ./autogen.sh
+    PATCH_COMMAND <SOURCE_DIR>/autogen.sh
 
-    CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib  --with-tests=no
+    CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib=no  --with-tests=no
         "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS} -DPROTOBUF_USE_EXCEPTIONS=0 -DGOOGLE_PROTOBUF_NO_RTTI"
         --prefix=${PROTOBUF_DIR}
     COMMAND make clean
