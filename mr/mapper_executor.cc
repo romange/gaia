@@ -89,7 +89,6 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   });
 
   const string& op_name = tb->op().op_name();
-  LOG(INFO) << op_name << " had " << do_fn_calls_.load() << " calls";
   LOG_IF(WARNING, parse_errors_ > 0)
       << op_name << " had " << parse_errors_.load() << " errors";
   for (const auto& k_v : counter_map_) {

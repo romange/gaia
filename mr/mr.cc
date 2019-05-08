@@ -117,13 +117,14 @@ bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Do
 
 void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
   raw_context->Flush();
-  parse_errors_.fetch_add(raw_context->parse_errors, std::memory_order_relaxed);
-  do_fn_calls_.fetch_add(items_cnt, std::memory_order_relaxed);
+  parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
 
   std::lock_guard<fibers::mutex> lk(mu_);
   for (const auto& k_v : raw_context->counter_map()) {
     counter_map_[k_v.first] += k_v.second;
   }
+  counter_map_["fn-calls"] += items_cnt;
+  counter_map_["fn-writes"] += raw_context->item_writes();
 }
 
 }  // namespace mr3

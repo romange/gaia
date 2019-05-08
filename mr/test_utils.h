@@ -47,7 +47,6 @@ class TestContext : public RawContext {
   TestRunner* runner_;
   OutputShardSet& outp_ss_;
 
-  unsigned write_calls_ = 0;
  public:
   TestContext(TestRunner* runner, OutputShardSet* outp) : runner_(runner), outp_ss_(*outp) {}
 

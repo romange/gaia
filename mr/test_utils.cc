@@ -20,13 +20,11 @@ void TestContext::WriteInternal(const ShardId& shard_id, string&& record) {
   lock_guard<fibers::mutex> lk(outp_ss_.mu);
   CHECK(!outp_ss_.is_finished);
   outp_ss_.s_out[shard_id].push_back(record);
-
-  ++write_calls_;
 }
 
  void TestContext::Flush() {
-   runner_->parse_errors += this->parse_errors;
-   runner_->write_calls += this->write_calls_;
+   runner_->parse_errors += parse_errors();
+   runner_->write_calls += item_writes();
  }
 
 void TestRunner::Init() {}

@@ -50,8 +50,6 @@ class RawContext {
   virtual void Flush() {}
   virtual void CloseShard(const ShardId& sid) = 0;
 
-  size_t parse_errors = 0;
-
   void IncBy(StringPiece name, long delta) { counter_map_[name] += delta; }
 
   void Inc(StringPiece name) { IncBy(name, 1); }
@@ -60,15 +58,25 @@ class RawContext {
 
   // Used only in tests.
   void TEST_Write(const ShardId& shard_id, std::string&& record) {
-    WriteInternal(shard_id, std::move(record));
+    Write(shard_id, std::move(record));
   }
 
+  void EmitParseError() { ++parse_errors_; }
+
+  size_t parse_errors() const { return parse_errors_;}
+  size_t item_writes() const { return item_writes_;}
+
  private:
+  void Write(const ShardId& shard_id, std::string&& record) {
+    ++item_writes_;
+    WriteInternal(shard_id, std::move(record));
+  }
 
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
   StringPieceDenseMap<long> counter_map_;
+  size_t parse_errors_ = 0, item_writes_ = 0;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
@@ -82,7 +90,7 @@ template <typename T> class DoContext {
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);
     std::string dest = rt_.Serialize(out_.is_binary(), std::move(t));
-    context_->WriteInternal(shard_id, std::move(dest));
+    context_->Write(shard_id, std::move(dest));
   }
 
   RawContext* raw() { return context_; }

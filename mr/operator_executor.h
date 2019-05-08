@@ -38,7 +38,7 @@ class OperatorExecutor {
 
   ::boost::fibers::mutex mu_;
   absl::flat_hash_map<std::string, long> counter_map_;
-  std::atomic<uint64_t> parse_errors_{0}, do_fn_calls_{0};
+  std::atomic<uint64_t> parse_errors_{0};
 };
 
 }  // namespace mr3
