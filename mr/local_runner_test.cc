@@ -4,7 +4,7 @@
 
 #include <gmock/gmock.h>
 #include "base/gtest.h"
-
+#include "base/logging.h"
 #include "mr/do_context.h"
 #include "mr/local_runner.h"
 
@@ -54,6 +54,19 @@ TEST_F(LocalRunnerTest, Basic) {
   string contents;
   ASSERT_TRUE(file_util::ReadFileToString(shard_name, &contents));
   EXPECT_EQ("foo\n", contents);
+}
+
+TEST_F(LocalRunnerTest, Lst) {
+  LOG(ERROR) << "TODO: to create context that caches records in the thread-local buffer and"
+             << " then flushes them into central lst writer";
+  return;
+  ShardFileMap out_files;
+  Start(pb::WireFormat::LST);
+  std::unique_ptr<RawContext> context{runner_->CreateContext()};
+  context->TEST_Write(ShardId{0}, "foo");
+
+  context->Flush();
+  runner_->OperatorEnd(&out_files);
 }
 
 }  // namespace mr3
