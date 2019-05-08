@@ -12,6 +12,22 @@ namespace base {
 using benchmark::DoNotOptimize;
 using std::string;
 
+struct EmptyTag {
+
+};
+
+struct HasEmpty1 {
+  EmptyTag t;
+};
+
+struct HasEmpty3 {
+  EmptyTag a1, a2,a3;
+};
+
+static_assert(sizeof(EmptyTag) == 1, "");
+static_assert(sizeof(HasEmpty1) == 1, "");
+static_assert(sizeof(HasEmpty3) == 3, "");
+
 static unsigned LoopSwitch(int val, int cnt) {
   unsigned sum = 0;
   for (int i = 0; i < cnt; ++i) {
