@@ -19,6 +19,9 @@ template <typename Handler, typename ToType> class HandlerWrapper;
 
 // User facing interfaces. void tag for dispatching per class of types
 // (i.e. derived from protobuf::Message etc).
+// TODO: this design is not composable.
+// i.e. I would like to be able to define serializers for basic types and easily compose more
+// complicated ones.
 template <typename Record, typename = void> struct RecordTraits {
   static_assert(sizeof(base::void_t<Record>) == 0, "Please specify RecordTraits<> for this type");
 };

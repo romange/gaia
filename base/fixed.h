@@ -40,6 +40,11 @@ inline uint32 DecodeFixed32(const uint8* buf) {
   return LittleEndian::Load32(reinterpret_cast<const char*>(buf));
 }
 
+inline const uint8* DecodeFixed32(const uint8* buf, uint32* val) {
+  *val = LittleEndian::Load32(reinterpret_cast<const char*>(buf));
+  return buf + sizeof(*val);
+}
+
 inline const uint8* DecodeFixed64(const uint8* buf, uint64* val) {
   *val = LittleEndian::Load64(reinterpret_cast<const char*>(buf));
   return buf + kFixed64Bytes;
