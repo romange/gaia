@@ -359,7 +359,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     if (ShouldRetry(msg.result(), ec)) {
       ++throttle_iters;
       if (!ec) {
-        RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
+        RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
       } else {
         VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
         ec = client_->next_layer().ClientWaitToConnect(1000);
@@ -386,7 +386,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
         return Status(StatusCode::INTERNAL_ERROR, "Access denied");
       }
 
-      RETURN_EC_STATUS(seq_file_->Drain(client_.get(), &tmp_buffer_));
+      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
       RETURN_IF_ERROR(RefreshToken(&req));
       continue;
     }
