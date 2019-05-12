@@ -23,7 +23,7 @@ Source::Source(ReadonlyFile* file)
 }
 
 Source::~Source() {
-  CHECK(file_->Close().ok());
+  CHECK_STATUS(file_->Close());
 }
 
 util::StatusObject<size_t> Source::ReadInternal(const strings::MutableByteRange& range) {
