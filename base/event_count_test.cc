@@ -149,7 +149,7 @@ TEST_F(EventCountTest, SpuriousNotify) {
 
   auto check_positive = [&val]() -> bool { return val > 0; };
   t1_.reset(new std::thread([check_positive, &ec]() {ec.await(check_positive);}));
-  SleepForMilliseconds(1);
+  SleepForMilliseconds(5);
   val = 1;
   ASSERT_TRUE(ec.notify());
   t1_->join();
