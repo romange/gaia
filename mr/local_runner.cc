@@ -358,7 +358,7 @@ size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
   file::FiberReadOptions::Stats stats;
   auto fl_res = impl_->OpenReadFile(filename, &stats);
   if (!fl_res.ok()) {
-    LOG(DFATAL) << "Skipping " << filename << " with " << fl_res.status;
+    LOG(FATAL) << "Skipping " << filename << " with " << fl_res.status;
     return 0;
   }
 
