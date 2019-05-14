@@ -201,6 +201,6 @@ TEST_F(EventCountTest, Futex) {
   EXPECT_EQ(ETIMEDOUT, errno) << strerror(errno);
   MicrosecondsInt64 end = GetMonotonicMicros();
   EXPECT_GT(end - start, 1000);
-  EXPECT_LT(end - start, 2000);
+  EXPECT_LT(end - start, 6000);
 }
 
