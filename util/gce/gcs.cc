@@ -119,9 +119,8 @@ GcsFile::~GcsFile() {
   }
 }
 
-inline bool ShouldRetry(h2::status st, ::boost::system::error_code ec) {
-  return ec == system::errc::resource_unavailable_try_again ||
-         st == h2::status::too_many_requests ||
+inline bool ShouldRetry(h2::status st) {
+  return st == h2::status::too_many_requests ||
          h2::to_status_class(st) == h2::status_class::server_error;
 }
 
@@ -172,6 +171,7 @@ util::Status GCS::Connect(unsigned msec) {
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
   RETURN_IF_ERROR(SslConnect(client_.get(), msec));
+  reconnect_msec_ = msec;
 
   auto res = gce_.GetAccessToken(&io_context_);
   if (!res.ok())
@@ -346,6 +346,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
   size_t sleep_sec = 1;
   unsigned unautharized_iters = 0;
   unsigned throttle_iters = 0;
+  unsigned error_iters = 0;
   while (true) {
     VLOG(1) << "Req: " << req;
     h2::write(*client_, req, ec);
@@ -355,23 +356,27 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
 
     h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
     const auto& msg = tmp_file->parser.get();
-
-    if (ShouldRetry(msg.result(), ec)) {
-      ++throttle_iters;
-      if (!ec) {
-        RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
-      } else {
-        VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
-        ec = client_->next_layer().ClientWaitToConnect(1000);
-        VLOG(1) << "After FiberSocket wait to connect: " << ec;
+    if (ec) {
+      LOG(ERROR) << "Socket iter/error " << error_iters << "/" << ec;
+      VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
+      Status st = SslConnect(client_.get(), reconnect_msec_);
+      if (!st.ok()) {
+        LOG(ERROR) << "Could not reconnect " << st;
+        return st;
       }
+      ++error_iters;
+      continue;
+    }
+
+    if (ShouldRetry(msg.result())) {
+      ++throttle_iters;
+      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
       LOG_IF(WARNING, throttle_iters > 2) << "Retrying iteration " << throttle_iters;
       VLOG(1) << "Retrying iteration " << throttle_iters;
       this_fiber::sleep_for(chrono::seconds(sleep_sec));
       sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
       continue;
     }
-    RETURN_EC_STATUS(ec);
 
     if (msg.result() == h2::status::ok) {
       auto content_len_it = msg.find(h2::field::content_length);

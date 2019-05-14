@@ -82,6 +82,7 @@ class GCS {
 
   struct SeqReadFile;
   std::unique_ptr<SeqReadFile> seq_file_;
+  uint32_t reconnect_msec_ = 1000;
 };
 
 bool IsGcsPath(absl::string_view path);
