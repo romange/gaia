@@ -367,6 +367,8 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
       continue;
     }
 
+    VLOG(1) << "HeaderResp: " << msg;
+
     if (ShouldRetry(msg.result())) {
       ++throttle_iters;
       RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
