@@ -63,7 +63,7 @@ inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   do {                            \
     auto __ec$ = (x);             \
     if (__ec$) {                  \
-      VLOG(1) << "EC: " << __ec$; \
+      VLOG(1) << "EC: " << __ec$ << " " <<  __ec$.message(); \
       return ToStatus(x);         \
     }                             \
   } while (false)
@@ -168,10 +168,8 @@ util::Status GCS::Connect(unsigned msec) {
     return Status::OK;
   }
 
-  client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
-
-  RETURN_IF_ERROR(SslConnect(client_.get(), msec));
   reconnect_msec_ = msec;
+  RETURN_IF_ERROR(InitSslClient());
 
   auto res = gce_.GetAccessToken(&io_context_);
   if (!res.ok())
@@ -357,9 +355,10 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
     const auto& msg = tmp_file->parser.get();
     if (ec) {
-      LOG(ERROR) << "Socket iter/error " << error_iters << "/" << ec;
+      LOG(ERROR) << "Socket iter/error " << error_iters << "/" << ec << " " << ec.message();
       VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
-      Status st = SslConnect(client_.get(), reconnect_msec_);
+
+      Status st = InitSslClient();
       if (!st.ok()) {
         LOG(ERROR) << "Could not reconnect " << st;
         return st;
@@ -445,6 +444,12 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
   absl::StrAppend(&read_obj_url, "?alt=media");
 
   return read_obj_url;
+}
+
+util::Status GCS::InitSslClient() {
+  client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
+
+  return SslConnect(client_.get(), reconnect_msec_);
 }
 
 template <typename RespBody>

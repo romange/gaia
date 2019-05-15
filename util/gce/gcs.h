@@ -62,13 +62,13 @@ class GCS {
   static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
 
  private:
-   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
+  using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
 
   util::Status RefreshToken(Request* req);
 
   std::string BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
-
+  util::Status InitSslClient();
 
   // Higher level function. Handles token expiration use-cases.
   template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
