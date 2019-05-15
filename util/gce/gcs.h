@@ -69,6 +69,7 @@ class GCS {
 
   std::string BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
   util::Status InitSslClient();
+  util::Status PrepareConnection();
 
   // Higher level function. Handles token expiration use-cases.
   template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
@@ -83,6 +84,7 @@ class GCS {
   struct SeqReadFile;
   std::unique_ptr<SeqReadFile> seq_file_;
   uint32_t reconnect_msec_ = 1000;
+  bool reconnect_needed_ = true;
 };
 
 bool IsGcsPath(absl::string_view path);

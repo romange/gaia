@@ -77,6 +77,7 @@ inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast
   h2::request<h2::empty_body> req(req_verb, url, 11);
   req.set(h2::field::host, kDomain);
   req.set(h2::field::authorization, access_token);
+  req.keep_alive(true);
 
   return req;
 }
@@ -115,7 +116,7 @@ Status GcsFile::Close() {
 GcsFile::~GcsFile() {
   if (gcs_) {
     LOG(WARNING) << "Close was not called";
-    gcs_->CloseSequential();
+    Close();
   }
 }
 
@@ -143,7 +144,7 @@ struct GCS::SeqReadFile {
 
 auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp_buf)
     -> error_code {
-  uint8_t buf[128];
+  uint8_t buf[512];
   auto& body = parser.get().body();
   error_code ec;
 
@@ -164,7 +165,7 @@ GCS::~GCS() {}
 
 util::Status GCS::Connect(unsigned msec) {
   CHECK(io_context_.InContextThread());
-  if (client_) {
+  if (!reconnect_needed_) {
     return Status::OK;
   }
 
@@ -184,23 +185,15 @@ util::Status GCS::CloseSequential() {
   if (!seq_file_) {
     return Status::OK;
   }
-
-  ReadObjectResult res;
-  uint8_t buf[1024];
-  strings::MutableByteRange mbr(buf, sizeof(buf));
-  while (true) {
-    res = ReadSequential(mbr);
-    if (!res.ok() || res.obj < mbr.size()) {
-      break;
-    }
-  }
+  CHECK(client_);
+  error_code ec = seq_file_->Drain(client_.get(), &tmp_buffer_);
+  RETURN_EC_STATUS(ec);
   seq_file_.reset();
-  return res.status;
+  return Status::OK;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
-  CHECK(client_);
-  RETURN_IF_ERROR(CloseSequential());
+  RETURN_IF_ERROR(PrepareConnection());
 
   string url = absl::StrCat("/storage/v1/b?project=", gce_.project_id());
   absl::StrAppend(&url, "&fields=items,nextPageToken");
@@ -252,8 +245,8 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
 auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
                std::function<void(absl::string_view)> cb) -> ListObjectResult {
-  CHECK(client_ && !bucket.empty());
-  RETURN_IF_ERROR(CloseSequential());
+  CHECK(!bucket.empty());
+  RETURN_IF_ERROR(PrepareConnection());
 
   string url = "/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?prefix=");
@@ -305,8 +298,8 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
 
 auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
                const strings::MutableByteRange& range) -> ReadObjectResult {
-  CHECK(client_ && !range.empty());
-  RETURN_IF_ERROR(CloseSequential());
+  CHECK(!range.empty());
+  RETURN_IF_ERROR(PrepareConnection());
 
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
 
@@ -329,14 +322,7 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
 }
 
 auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
-  CHECK(client_);
-
-  RETURN_IF_ERROR(CloseSequential());
-
-  DCHECK(!seq_file_);
-
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
-
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
   error_code ec;
   unique_ptr<SeqReadFile> tmp_file;
@@ -346,6 +332,8 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
   unsigned throttle_iters = 0;
   unsigned error_iters = 0;
   while (true) {
+    RETURN_IF_ERROR(PrepareConnection());
+
     VLOG(1) << "Req: " << req;
     h2::write(*client_, req, ec);
     RETURN_EC_STATUS(ec);
@@ -368,7 +356,12 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     }
 
     VLOG(1) << "HeaderResp: " << msg;
-
+    VLOG(1) << "Msg Accessors: KA" << tmp_file->parser.keep_alive() << "/"
+            << tmp_file->parser.need_eof();
+    if (!tmp_file->parser.keep_alive()) {
+      VLOG(1) << "No keep-alive, requested reconnect";
+      reconnect_needed_ = true;
+    }
     if (ShouldRetry(msg.result())) {
       ++throttle_iters;
       RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
@@ -451,7 +444,20 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
 util::Status GCS::InitSslClient() {
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
-  return SslConnect(client_.get(), reconnect_msec_);
+  auto status = SslConnect(client_.get(), reconnect_msec_);
+  if (status.ok()) {
+    reconnect_needed_ = false;
+  }
+  return status;
+}
+
+util::Status GCS::PrepareConnection() {
+  RETURN_IF_ERROR(CloseSequential());
+
+  if (reconnect_needed_) {
+    RETURN_IF_ERROR(InitSslClient());
+  }
+  return Status::OK;
 }
 
 template <typename RespBody>
