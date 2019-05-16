@@ -8,7 +8,10 @@
 #include <boost/fiber/scheduler.hpp>
 
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "util/asio/io_context.h"
+
+#define CHECK_DISPATCH_LATENCY 1
 
 namespace util {
 
@@ -42,6 +45,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
   enum : uint8_t { LOOP_RUN_ONE = 1, MAIN_LOOP_SUSPEND = 2 };
   uint8_t mask_ = 0;
+  int64_t dispatch_start_ = 0;
 
  public:
   //[asio_rr_ctor
@@ -205,6 +209,8 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
   ready_queue_type* rq;
 
   if (ctx->is_context(fibers::type::dispatcher_context)) {
+    dispatch_start_ = base::GetClockMicros<CLOCK_MONOTONIC>();
+
     rq = rqueue_arr_ + DISPATCH_LEVEL;
     DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << " dispatch"
              << ", ready_cnt: " << ready_cnt_;
@@ -278,6 +284,17 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     }
 
     DVLOG(3) << "pick_next: " << short_id(ctx);
+
+#ifdef CHECK_DISPATCH_LATENCY
+    if (!rqueue_arr_[DISPATCH_LEVEL].empty()) {
+      int64_t now = base::GetClockMicros<CLOCK_MONOTONIC>();
+      uint64_t delta = now - dispatch_start_;
+      if (delta > 1000000000UL) {
+        dispatch_start_ = now;
+        LOG(ERROR) << "Delay in dispatching " << delta / 1000000000UL << " seconds";
+      }
+    }
+#endif
     return ctx;
   }
 
