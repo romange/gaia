@@ -53,7 +53,6 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   uint8_t mask_ = 0;
   int64_t dispatch_start_ = 0;
   chrono::steady_clock::time_point suspend_tp_ = STEADY_PT_MAX;
-  bool fired_suspender_ = false;
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
@@ -130,18 +129,17 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       suspend_tp_ = abs_time;
       suspend_timer_->expires_at(abs_time);
       suspend_timer_->async_wait([this, abs_time](const system::error_code& ec) {
-        VLOG(1) << "Fire suspender " << abs_time.time_since_epoch().count() << " " << ec;
-        fired_suspender_ = true;
+        DVLOG(1) << "Fire suspender " << abs_time.time_since_epoch().count() << " " << ec;
         if (abs_time == suspend_tp_) {
           suspend_tp_ = STEADY_PT_MAX;
-          // Switch to dispatch fiber to allow awakening fibers.
+          // Switch to dispatch fiber to awaken fibers.
           this_fiber::yield();
         } else {
           CHECK_EQ(ec, asio::error::operation_aborted);
         }
       });
-      VLOG(1) << "Arm suspender at micros from now " << delta_micros(abs_time) << ", abstime: "
-              << abs_time.time_since_epoch().count();
+      DVLOG(1) << "Arm suspender at micros from now " << delta_micros(abs_time) << ", abstime: "
+               << abs_time.time_since_epoch().count();
     }
     CHECK_EQ(0, mask_ & LOOP_RUN_ONE) << "Deadlock detected";
 
@@ -181,16 +179,12 @@ void AsioScheduler::MainLoop() {
     // if no handler available, blocks this thread
     DVLOG(2) << "MainLoop::RunOneStart";
     mask_ |= LOOP_RUN_ONE;
-    VLOG_IF(1, fired_suspender_) << "RunOneStart, ready_cnt_ " << ready_cnt_;
-
-    fired_suspender_ = false;
     if (!io_cntx->run_one()) {
       mask_ &= ~LOOP_RUN_ONE;
       break;
     }
     DVLOG(2) << "MainLoop::RunOneEnd";
     mask_ &= ~LOOP_RUN_ONE;
-    VLOG_IF(1, fired_suspender_) << "RunOneEnd";
   }
 
   VLOG(1) << "MainLoop exited";
@@ -198,7 +192,8 @@ void AsioScheduler::MainLoop() {
   // We won't run "run_one" anymore therefore we can remove our dependence on suspend_timer_ and
   // asio:context. In fact, we can not use timed-waits from now on using fibers code because we've
   // relied on asio for that.
-  // We guard suspend_timer_ using notify_guard_ with no locks in notify(). However we must block here.
+  // We guard suspend_timer_ using notify_guard_ with no locks in notify().
+  // However we must block here.
   // It's a shutdown phase, so we do not care. We can not rely on fiber scheduling methods since
   // they rely on the loop above. Therefore we just use thread yield.
 
@@ -231,10 +226,7 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
   DCHECK(!ctx->ready_is_linked());
 
   ready_queue_type* rq;
-  VLOG_IF(1, fired_suspender_) << "Ready ctx " << props.name() << " : " << props.nice_level();
-
   if (ctx->is_context(fibers::type::dispatcher_context)) {
-
     dispatch_start_ = base::GetClockMicros<CLOCK_MONOTONIC>();
 
     rq = rqueue_arr_ + DISPATCH_LEVEL;
@@ -267,8 +259,8 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
       ++main_loop_wakes_;
     }
 
-    DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << ", nice/rdc: " << nice << "/"
-             << ready_cnt_;
+    DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << "/" << props.name()
+             << ", nice/rdc: " << nice << "/" << ready_cnt_;
   }
 
   ctx->ready_link(*rq); /*< fiber, enqueue on ready queue >*/
@@ -343,7 +335,8 @@ fibers::context* AsioScheduler::pick_next() noexcept {
 
 void AsioScheduler::notify() noexcept {
   uint32_t seq = notify_guard_.fetch_add(1, std::memory_order_acq_rel);
-  if ((seq >> 16) == 0) {
+
+  if ((seq >> 16) == 0) {  // Test whether are not shuttind down.
     // Something has happened that should wake one or more fibers BEFORE
     // suspend_timer_ expires. Reset the timer to cause it to fire
     // immediately, causing the run_one() call to return. In theory we
@@ -359,7 +352,12 @@ void AsioScheduler::notify() noexcept {
     // a new expiration time. This will cause us to spin the loop twice --
     // once for the operation_aborted handler, once for timer expiration
     // -- but that shouldn't be a big problem.
-    suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
+    VLOG(1) << "AsioScheduler::notify";
+
+    suspend_timer_->async_wait([this](const system::error_code& ec) {
+      VLOG(1) << "Awake suspender, tp: " << suspend_tp_.time_since_epoch().count() << " " << ec;
+      this_fiber::yield();
+    });
     suspend_timer_->expires_at(chrono::steady_clock::now());
     notify_cnt_.fetch_add(1, std::memory_order_relaxed);
   } else {

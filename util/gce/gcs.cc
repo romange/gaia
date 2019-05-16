@@ -410,13 +410,11 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   left_available = range.size();
 
   error_code ec;
-  VLOG(1) << "ReadSequential: " << range.size();
   h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
   if (ec && ec != h2::error::need_buffer) {
     LOG(ERROR) << "ec: " << ec << "/" << ec.message();
     return ToStatus(ec);
   }
-  VLOG(1) << "ReadSequentialEnd: " << range.size() - left_available;
 
   return range.size() - left_available;  // how much written
 }
