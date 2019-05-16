@@ -363,6 +363,39 @@ TEST_F(IoContextTest, FiberWaits) {
   fb.join();
 }
 
+TEST_F(IoContextTest, ThreadsNotify) {
+  constexpr size_t kSz = 2;
+  IoContextPool pool(kSz);
+  pool.Run();
+  fibers_ext::Done done[kSz];
+
+  bool finish = false;
+  auto sleep_cb = [] {
+    for (unsigned i = 0; i < 50; ++i) {
+      this_fiber::sleep_for(2ms);
+    }
+  };
+
+  fibers::fiber sfb[kSz], pingfb[kSz];
+  for (size_t i = 0; i < kSz; ++i) {
+    sfb[i] = pool[i].LaunchFiber(sleep_cb);
+    pingfb[i] = pool[i].LaunchFiber([done, i, &finish] () mutable {
+      while (!finish) {
+        done[i].Wait(AND_RESET);
+        done[1 - i].Notify();
+      }
+    });
+  }
+  done[0].Notify();
+  for (size_t i = 0; i < 2; ++i) {
+    sfb[i].join();
+  }
+  finish = true;
+  for (size_t i = 0; i < 2; ++i) {
+    pingfb[i].join();
+  }
+}
+
 static void BM_RunOneNoLock(benchmark::State& state) {
   io_context cntx(1);  // no locking
 
