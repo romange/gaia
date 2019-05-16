@@ -153,7 +153,7 @@ auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp
     body.data = buf;
     body.size = sizeof(buf);
     h2::read(*stream, *tmp_buf, parser, ec);
-    if (ec) {
+    if (ec && ec != h2::error::need_buffer) {
       return ec;
     }
   }
