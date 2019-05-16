@@ -27,6 +27,11 @@ constexpr unsigned DISPATCH_LEVEL = IoFiberProperties::NUM_NICE_LEVELS;
 constexpr unsigned MAIN_SWITCH_LIMIT = 100;
 constexpr unsigned NOTIFY_GUARD_SHIFT = 16;
 
+inline int64_t delta_micros(const chrono::steady_clock::time_point tp) {
+  static_assert(8 == sizeof(chrono::steady_clock::time_point), "");
+  return chrono::duration_cast<chrono::microseconds>(tp - chrono::steady_clock::now()).count();
+}
+
 class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFiberProperties> {
  private:
   using ready_queue_type = fibers::scheduler::ready_queue_type;
@@ -46,7 +51,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   enum : uint8_t { LOOP_RUN_ONE = 1, MAIN_LOOP_SUSPEND = 2 };
   uint8_t mask_ = 0;
   int64_t dispatch_start_ = 0;
-
+  bool fired_suspender_ = false;
  public:
   //[asio_rr_ctor
   AsioScheduler(const std::shared_ptr<asio::io_context>& io_svc)
@@ -88,7 +93,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
   // suspend_until halts the thread in case there are no active fibers to run on it.
   // This is done by dispatcher fiber.
-  void suspend_until(std::chrono::steady_clock::time_point const& abs_time) noexcept final {
+  void suspend_until(chrono::steady_clock::time_point const& abs_time) noexcept final {
     DVLOG(2) << "suspend_until " << abs_time.time_since_epoch().count();
 
     // Only dispatcher context stops the thread.
@@ -102,7 +107,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
 
     // Set a timer so at least one handler will eventually fire, causing
     // run_one() to eventually return.
-    if ((std::chrono::steady_clock::time_point::max)() != abs_time) {
+    if ((chrono::steady_clock::time_point::max)() != abs_time) {
       // Each expires_at(time_point) call cancels any previous pending
       // call. We could inadvertently spin like this:
       // dispatcher calls suspend_until() with earliest wake time
@@ -120,8 +125,15 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       // run_one() returns to loop()... etc. etc.
       // So only actually set the timer when we're passed a DIFFERENT
       // abs_time value.
+      boost::asio::error::operation_aborted 
       suspend_timer_->expires_at(abs_time);
-      suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
+      suspend_timer_->async_wait([this, abs_time](const system::error_code& ec) {
+        VLOG(1) << "Fire supender " << abs_time.time_since_epoch().count() << " " << ec;
+        fired_suspender_ = true;
+        this_fiber::yield();
+      });
+      VLOG(1) << "Arm suspender at micros from now " << delta_micros(abs_time) << ", abstime: "
+              << abs_time.time_since_epoch().count();
     }
     CHECK_EQ(0, mask_ & LOOP_RUN_ONE) << "Deadlock detected";
 
@@ -161,12 +173,18 @@ void AsioScheduler::MainLoop() {
     // if no handler available, blocks this thread
     DVLOG(2) << "MainLoop::RunOneStart";
     mask_ |= LOOP_RUN_ONE;
+    LOG_IF(INFO, fired_suspender_) << "RunOneStart, ready_cnt_ " << ready_cnt_;
+
+    fired_suspender_ = false;
     if (!io_cntx->run_one()) {
       mask_ &= ~LOOP_RUN_ONE;
       break;
     }
     DVLOG(2) << "MainLoop::RunOneEnd";
     mask_ &= ~LOOP_RUN_ONE;
+    if (fired_suspender_) {
+      LOG(INFO) << "RunOneEnd";
+    }
   }
 
   VLOG(1) << "MainLoop exited";
@@ -207,8 +225,10 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
   DCHECK(!ctx->ready_is_linked());
 
   ready_queue_type* rq;
+  LOG_IF(INFO, fired_suspender_) << "Ready ctx " << props.name() << " : " << props.nice_level();
 
   if (ctx->is_context(fibers::type::dispatcher_context)) {
+
     dispatch_start_ = base::GetClockMicros<CLOCK_MONOTONIC>();
 
     rq = rqueue_arr_ + DISPATCH_LEVEL;
@@ -334,7 +354,7 @@ void AsioScheduler::notify() noexcept {
     // once for the operation_aborted handler, once for timer expiration
     // -- but that shouldn't be a big problem.
     suspend_timer_->async_wait([](system::error_code const&) { this_fiber::yield(); });
-    suspend_timer_->expires_at(std::chrono::steady_clock::now());
+    suspend_timer_->expires_at(chrono::steady_clock::now());
     notify_cnt_.fetch_add(1, std::memory_order_relaxed);
   } else {
     VLOG(1) << "Called during shutdown phase";
