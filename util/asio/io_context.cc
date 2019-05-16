@@ -26,6 +26,7 @@ constexpr unsigned DISPATCH_LEVEL = IoFiberProperties::NUM_NICE_LEVELS;
 // Amount of fiber switches we make before bringing back the main IO loop.
 constexpr unsigned MAIN_SWITCH_LIMIT = 100;
 constexpr unsigned NOTIFY_GUARD_SHIFT = 16;
+constexpr chrono::steady_clock::time_point STEADY_PT_MAX = chrono::steady_clock::time_point::max();
 
 inline int64_t delta_micros(const chrono::steady_clock::time_point tp) {
   static_assert(8 == sizeof(chrono::steady_clock::time_point), "");
@@ -51,6 +52,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   enum : uint8_t { LOOP_RUN_ONE = 1, MAIN_LOOP_SUSPEND = 2 };
   uint8_t mask_ = 0;
   int64_t dispatch_start_ = 0;
+  chrono::steady_clock::time_point suspend_tp_ = STEADY_PT_MAX;
   bool fired_suspender_ = false;
  public:
   //[asio_rr_ctor
@@ -102,12 +104,12 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
     // suspend_until is responsible for THREAD SUSPEND which is not what MAIN_LOOP_SUSPEND for.
     // In fact, we implement THREAD SUSPEND by deferring the control to asio::io_context::run_one.
     // For that to happen we need to resume the MAIN_LOOP_SUSPEND, and that's why we
-    // schedule main_loop_ctx_.
+    // schedule main_loop_ctx_ below.
     DCHECK(fibers::context::active()->is_context(fibers::type::dispatcher_context));
 
     // Set a timer so at least one handler will eventually fire, causing
     // run_one() to eventually return.
-    if ((chrono::steady_clock::time_point::max)() != abs_time) {
+    if (suspend_tp_ != abs_time) {
       // Each expires_at(time_point) call cancels any previous pending
       // call. We could inadvertently spin like this:
       // dispatcher calls suspend_until() with earliest wake time
@@ -125,12 +127,18 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
       // run_one() returns to loop()... etc. etc.
       // So only actually set the timer when we're passed a DIFFERENT
       // abs_time value.
-      boost::asio::error::operation_aborted 
+      suspend_tp_ = abs_time;
       suspend_timer_->expires_at(abs_time);
       suspend_timer_->async_wait([this, abs_time](const system::error_code& ec) {
-        VLOG(1) << "Fire supender " << abs_time.time_since_epoch().count() << " " << ec;
+        VLOG(1) << "Fire suspender " << abs_time.time_since_epoch().count() << " " << ec;
         fired_suspender_ = true;
-        this_fiber::yield();
+        if (abs_time == suspend_tp_) {
+          suspend_tp_ = STEADY_PT_MAX;
+          // Switch to dispatch fiber to allow awakening fibers.
+          this_fiber::yield();
+        } else {
+          CHECK_EQ(ec, asio::error::operation_aborted);
+        }
       });
       VLOG(1) << "Arm suspender at micros from now " << delta_micros(abs_time) << ", abstime: "
               << abs_time.time_since_epoch().count();
@@ -173,7 +181,7 @@ void AsioScheduler::MainLoop() {
     // if no handler available, blocks this thread
     DVLOG(2) << "MainLoop::RunOneStart";
     mask_ |= LOOP_RUN_ONE;
-    LOG_IF(INFO, fired_suspender_) << "RunOneStart, ready_cnt_ " << ready_cnt_;
+    VLOG_IF(1, fired_suspender_) << "RunOneStart, ready_cnt_ " << ready_cnt_;
 
     fired_suspender_ = false;
     if (!io_cntx->run_one()) {
@@ -182,9 +190,7 @@ void AsioScheduler::MainLoop() {
     }
     DVLOG(2) << "MainLoop::RunOneEnd";
     mask_ &= ~LOOP_RUN_ONE;
-    if (fired_suspender_) {
-      LOG(INFO) << "RunOneEnd";
-    }
+    VLOG_IF(1, fired_suspender_) << "RunOneEnd";
   }
 
   VLOG(1) << "MainLoop exited";
@@ -225,7 +231,7 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
   DCHECK(!ctx->ready_is_linked());
 
   ready_queue_type* rq;
-  LOG_IF(INFO, fired_suspender_) << "Ready ctx " << props.name() << " : " << props.nice_level();
+  VLOG_IF(1, fired_suspender_) << "Ready ctx " << props.name() << " : " << props.nice_level();
 
   if (ctx->is_context(fibers::type::dispatcher_context)) {
 
