@@ -120,6 +120,8 @@ void MapperExecutor::PushInput(const InputBase* input) {
 }
 
 void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
+  this_fiber::properties<IoFiberProperties>().set_name("ProcessInput");
+
   PerIoStruct* trd_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
@@ -162,6 +164,8 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
+  this_fiber::properties<IoFiberProperties>().set_name("MapFiber");
+
   std::pair<bool, string> record;
   uint64_t record_num = 0;
 
