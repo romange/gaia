@@ -178,6 +178,13 @@ void DestHandle::Write(string str) {
 
 void DestHandle::Open() {
   VLOG(1) << "Creating file " << full_path_;
+  StringPiece dirname = file_util::DirName(full_path_);
+
+  // TODO: change for all functions expecting null-terminated string to explicitly accept it.
+  // I call again RecursivelyCreateDir because shards may 
+  // have subdirectories specified by the user.
+  file_util::RecursivelyCreateDir(string(dirname), 0755);
+
   wf_ = Await([this] {
     return OpenThreadLocal(owner_->output(), full_path_);
   });
