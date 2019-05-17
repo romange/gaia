@@ -66,53 +66,34 @@ inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
   };
 }
 
-file::WriteFile* CreateFile(const std::string& path, const pb::Output& out,
-                            fibers_ext::FiberQueueThreadPool* fq) {
-  std::function<file::WriteFile*()> cb;
-  if (out.has_compress() && !FLAGS_local_runner_zsink) {
-    if (out.compress().type() == pb::Output::GZIP) {
-      file::WriteFile* gzres{file::GzipFile::Create(path, out.compress().level())};
-      cb = [gzres] {
-        CHECK(gzres->Open());
-        return gzres;
-      };
-    } else {
-      LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
-    }
-  } else {
-    cb = [&] { return file::Open(path); };
-  }
-  file::WriteFile* res = fq->Await(std::move(cb));
-  CHECK(res);
-  return res;
-}
-
 }  // namespace
 
-DestFileSet::DestFileSet(const std::string& root_dir, fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), fq_(fq) {}
+DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
+                         fibers_ext::FiberQueueThreadPool* fq)
+    : root_dir_(root_dir), pb_out_(out), fq_(fq) {}
 
-auto DestFileSet::GetOrCreate(const ShardId& sid, const pb::Output& pb_out) -> Result {
+DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(sid);
   if (it == dest_files_.end()) {
-    string full_path = ShardFilePath(sid, pb_out, 0);
-    VLOG(1) << "Creating file " << full_path;
-
-    file::WriteFile* wf = CreateFile(full_path, pb_out, fq_);
     std::unique_ptr<DestHandle> dh;
 
-    if (FLAGS_local_runner_zsink && pb_out.has_compress()) {
-      dh.reset(new ZlibHandle{full_path, pb_out, wf, fq_});
+    if (FLAGS_local_runner_zsink && pb_out_.has_compress()) {
+      dh.reset(new ZlibHandle{this, sid});
     } else {
-      dh.reset(new DestHandle{full_path, wf, fq_});
+      dh.reset(new DestHandle{this, sid});
     }
+    if (pb_out_.shard_spec().has_max_raw_size_mb()) {
+      dh->set_raw_limit(size_t(1U << 20) * pb_out_.shard_spec().max_raw_size_mb());
+    }
+    dh->Open();
+
     auto res = dest_files_.emplace(sid, std::move(dh));
     CHECK(res.second);
     it = res.first;
   }
 
-  return Result(it->second.get());
+  return it->second.get();
 }
 
 void DestFileSet::CloseAllHandles() {
@@ -122,10 +103,10 @@ void DestFileSet::CloseAllHandles() {
   dest_files_.clear();
 }
 
-std::string DestFileSet::ShardFilePath(const ShardId& key, const pb::Output& pb_out,
-                                       int32 sub_shard) const {
-  string shard_name = key.ToString(absl::StrCat(pb_out.name(), "-", "shard"));
-  string file_name = FileName(shard_name, pb_out, sub_shard);
+std::string DestFileSet::ShardFilePath(const ShardId& key, int32 sub_shard) const {
+  string shard_name = key.ToString(absl::StrCat(pb_out_.name(), "-", "shard"));
+  string file_name = FileName(shard_name, pb_out_, sub_shard);
+
   return file_util::JoinPath(root_dir_, file_name);
 }
 
@@ -153,15 +134,50 @@ std::vector<ShardId> DestFileSet::GetShards() const {
 
 DestFileSet::~DestFileSet() {}
 
-DestHandle::DestHandle(const string& path, ::file::WriteFile* wf,
-                       fibers_ext::FiberQueueThreadPool* fq)
-    : wf_(wf), fq_(fq), full_path_(path) {
-  CHECK(wf && fq_);
-  const uint8_t* ptr = reinterpret_cast<const uint8_t*>(path.data());
-  fq_index_ = base::MurmurHash3_x86_32(ptr, path.size(), 1);
+DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), sid_(sid) {
+  CHECK(owner_);
+
+  full_path_ = owner_->ShardFilePath(sid, 0);
+  fq_index_ = base::Murmur32(full_path_, 120577U);
 }
 
-void DestHandle::Write(string str) { fq_->Add(fq_index_, WriteCb(std::move(str), wf_)); }
+void DestHandle::AppendThreadLocal(const std::string& str) {
+  auto status = wf_->Write(str);
+  CHECK_STATUS(status);
+  if (raw_limit_ < kuint64max) {
+    raw_size_ += str.size();
+    if (raw_size_ >= raw_limit_) {
+      CHECK(wf_->Close());
+      ++sub_shard_;
+      wf_ = nullptr;
+      raw_size_ = 0;
+      full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
+      Open();
+    }
+  }
+}
+
+void DestHandle::Write(string str) {
+  owner_->pool()->Add(fq_index_, [this, str = std::move(str)] { AppendThreadLocal(str); });
+}
+
+void DestHandle::Open() {
+  VLOG(1) << "Creating file " << full_path_;
+
+  const auto& output = owner_->output();
+  if (output.has_compress()) {
+    if (output.compress().type() == pb::Output::GZIP) {
+      file::GzipFile* gzres = file::GzipFile::Create(full_path_, output.compress().level());
+      CHECK(gzres->Open());
+      wf_ = gzres;
+    } else {
+      LOG(FATAL) << "Not supported " << output.compress().ShortDebugString();
+    }
+  } else {
+    wf_ = file::Open(full_path_);
+  }
+  CHECK(wf_);
+}
 
 void DestHandle::Close() {
   if (!wf_)
@@ -169,23 +185,27 @@ void DestHandle::Close() {
 
   VLOG(1) << "Closing file " << path();
 
-  bool res = fq_->Await(fq_index_, [this] { return wf_->Close(); });
+  bool res = Await([this] { return wf_->Close(); });
   CHECK(res);
   wf_ = nullptr;
 }
 
-ZlibHandle::ZlibHandle(const string& path, const pb::Output& out, ::file::WriteFile* wf,
-                       util::fibers_ext::FiberQueueThreadPool* fq)
-    : DestHandle(path, wf, fq), str_sink_(new StringSink) {
-  CHECK_EQ(pb::Output::GZIP, out.compress().type());
+ZlibHandle::ZlibHandle(DestFileSet* owner, const ShardId& sid)
+    : DestHandle(owner, sid), str_sink_(new StringSink) {
+  CHECK_EQ(pb::Output::GZIP, owner->output().compress().type());
 
   static std::default_random_engine rnd;
 
-  zlib_sink_.reset(new ZlibSink(str_sink_, out.compress().level()));
+  zlib_sink_.reset(new ZlibSink(str_sink_, owner->output().compress().level()));
 
   // Randomize when we flush first for each handle. That should define uniform flushing cycle
   // for all handles.
   start_delta_ = rnd() % (kBufLimit - 1);
+}
+
+void ZlibHandle::Open() {
+  wf_ = Await([&] { return file::Open(full_path_); });
+  CHECK(wf_);
 }
 
 void ZlibHandle::Write(std::string str) {
@@ -193,7 +213,7 @@ void ZlibHandle::Write(std::string str) {
   CHECK_STATUS(zlib_sink_->Append(strings::ToByteRange(str)));
   str.clear();
   if (str_sink_->contents().size() >= kBufLimit - start_delta_) {
-    fq_->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
     start_delta_ = 0;
   }
 }
@@ -202,23 +222,27 @@ void ZlibHandle::Close() {
   CHECK_STATUS(zlib_sink_->Flush());
 
   if (!str_sink_->contents().empty()) {
-    fq_->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
   }
 
   DestHandle::Close();
 }
 
-LstHandle::LstHandle(const string& path, ::file::WriteFile* wf,
-                     util::fibers_ext::FiberQueueThreadPool* fq)
-    : DestHandle(path, wf, fq) {
-  util::Sink* fs = new file::Sink{wf, DO_NOT_TAKE_OWNERSHIP};
-  lst_writer_.reset(new file::ListWriter{fs});
-  CHECK_STATUS(lst_writer_->Init());
+LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {
 }
 
 void LstHandle::Write(std::string str) {
   std::unique_lock<fibers::mutex> lk(mu_);
   CHECK_STATUS(lst_writer_->AddRecord(str));
+}
+
+void LstHandle::Open() {
+  CHECK(!owner_->output().has_compress());
+  DestHandle::Open();
+
+  util::Sink* fs = new file::Sink{wf_, DO_NOT_TAKE_OWNERSHIP};
+  lst_writer_.reset(new file::ListWriter{fs});
+  CHECK_STATUS(lst_writer_->Init());
 }
 
 void LstHandle::Close() {

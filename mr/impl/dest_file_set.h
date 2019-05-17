@@ -22,14 +22,14 @@ class DestHandle;
 // the operator execution.
 class DestFileSet {
   const std::string root_dir_;
+  const pb::Output& pb_out_;
 
   util::fibers_ext::FiberQueueThreadPool* fq_;
   ::boost::fibers::mutex mu_;
 
  public:
-  using Result = DestHandle*;
-
-  DestFileSet(const std::string& root_dir, util::fibers_ext::FiberQueueThreadPool* fq);
+  DestFileSet(const std::string& root_dir, const pb::Output& out,
+              util::fibers_ext::FiberQueueThreadPool* fq);
   ~DestFileSet();
 
   // Closes and deletes all the handles.
@@ -37,9 +37,9 @@ class DestFileSet {
 
   // return full file path of the shard.
   // if sub_shard is < 0, returns the glob of all files corresponding to this shard.
-  std::string ShardFilePath(const ShardId& key, const pb::Output& out, int32 sub_shard) const;
+  std::string ShardFilePath(const ShardId& key, int32 sub_shard) const;
 
-  Result GetOrCreate(const ShardId& key, const pb::Output& out);
+  DestHandle* GetOrCreate(const ShardId& key);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 
@@ -49,6 +49,8 @@ class DestFileSet {
   // GatherAll will still return it.
   void CloseHandle(const ShardId& key);
 
+  const pb::Output& output() const { return pb_out_;}
+
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
   HandleMap dest_files_;
@@ -57,38 +59,53 @@ class DestFileSet {
 class DestHandle {
   friend class DestFileSet;
 
+  void AppendThreadLocal(const std::string& val);
+
  protected:
-  // Does NOT take ownership over wf and fq.
-  DestHandle(const std::string& path, ::file::WriteFile* wf,
-             util::fibers_ext::FiberQueueThreadPool* fq);
+  template<typename Func> auto Await(Func&& f) {
+    return owner_->pool()->Await(fq_index_, std::forward<Func>(f));
+  }
+
+  DestHandle(DestFileSet* owner, const ShardId& sid);
   DestHandle(const DestHandle&) = delete;
 
+  virtual void Open();
  public:
   virtual ~DestHandle() {}
 
+  // Thread-safe. Called from multiple threads/do_contexts.
   virtual void Write(std::string str);
+
+  // Thread-safe. Called from multiple threads/do_contexts.
   virtual void Close();
 
   const std::string& path() const { return full_path_; }
+  void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
 
  protected:
-  ::file::WriteFile* wf_;
-  util::fibers_ext::FiberQueueThreadPool* fq_;
+  DestFileSet* owner_;
+  ShardId sid_;
+
+  ::file::WriteFile* wf_ = nullptr;
   std::string full_path_;
-  unsigned fq_index_;
+  size_t raw_size_ = 0;
+  size_t raw_limit_ = kuint64max;
+  uint32_t sub_shard_ = 0;
+  uint32_t fq_index_;
 };
 
 class ZlibHandle : public DestHandle {
   friend class DestFileSet;
 
-  ZlibHandle(const std::string& path, const pb::Output& out, ::file::WriteFile* wf,
-             util::fibers_ext::FiberQueueThreadPool* fq);
+  ZlibHandle(DestFileSet* owner, const ShardId& sid);
 
  public:
   void Write(std::string str) override;
   void Close() override;
 
  private:
+  void Open() override;
+
   size_t start_delta_ = 0;
   util::StringSink* str_sink_ = nullptr;
   std::unique_ptr<util::ZlibSink> zlib_sink_;
@@ -97,14 +114,15 @@ class ZlibHandle : public DestHandle {
 };
 
 class LstHandle : public DestHandle {
-  LstHandle(const std::string& path, ::file::WriteFile* wf,
-            util::fibers_ext::FiberQueueThreadPool* fq);
+  LstHandle(DestFileSet* owner, const ShardId& sid);
 
  public:
   void Write(std::string str) override;
   void Close() override;
 
  private:
+  void Open() override;
+
   std::unique_ptr<file::ListWriter> lst_writer_;
   boost::fibers::mutex mu_;
 };

@@ -62,7 +62,7 @@ class BufferedWriter {
 
 class LocalContext : public RawContext {
  public:
-  explicit LocalContext(const pb::Output& output, DestFileSet* mgr);
+  explicit LocalContext(DestFileSet* mgr);
   ~LocalContext();
 
   void Flush() final;
@@ -74,7 +74,6 @@ class LocalContext : public RawContext {
 
   absl::flat_hash_map<ShardId, BufferedWriter*> custom_shard_files_;
 
-  const pb::Output& output_;
   DestFileSet* mgr_;
 };
 
@@ -99,14 +98,14 @@ void BufferedWriter::Write(StringPiece src) {
   }
 }
 
-LocalContext::LocalContext(const pb::Output& out, DestFileSet* mgr) : output_(out), mgr_(mgr) {
+LocalContext::LocalContext(DestFileSet* mgr) :  mgr_(mgr) {
   CHECK(mgr_);
 }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   auto it = custom_shard_files_.find(shard_id);
   if (it == custom_shard_files_.end()) {
-    DestHandle* res = mgr_->GetOrCreate(shard_id, output_);
+    DestHandle* res = mgr_->GetOrCreate(shard_id);
     it = custom_shard_files_.emplace(shard_id, new BufferedWriter{res}).first;
   }
   record.append("\n");
@@ -238,13 +237,13 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   if (!file::Exists(out_dir)) {
     CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
   }
-  dest_mgr.reset(new DestFileSet(out_dir, &fq_pool));
+  dest_mgr.reset(new DestFileSet(out_dir, op->output(), &fq_pool));
 }
 
 void LocalRunner::Impl::End(ShardFileMap* out_files) {
   auto shards = dest_mgr->GetShards();
   for (const ShardId& sid : shards) {
-    out_files->emplace(sid, dest_mgr->ShardFilePath(sid, current_op->output(), -1));
+    out_files->emplace(sid, dest_mgr->ShardFilePath(sid, -1));
   }
   dest_mgr->CloseAllHandles();
   dest_mgr.reset();
@@ -326,7 +325,7 @@ RawContext* LocalRunner::CreateContext() {
   CHECK_NOTNULL(impl_->current_op);
   CHECK_EQ(pb::WireFormat::TXT, impl_->current_op->output().format().type());
 
-  return new LocalContext(impl_->current_op->output(), impl_->dest_mgr.get());
+  return new LocalContext(impl_->dest_mgr.get());
 }
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {

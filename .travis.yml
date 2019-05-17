@@ -56,7 +56,7 @@ script:
   - ninja -j4 base array_test dynasm_project libosmium_project
   - ninja protobuf_project
   - tests_list=$(ctest -L CI -N | grep "Test.*#" | cut -f2 -d:| sort)
-  - ninja -j4 $tests_list asio_fibers -k 10
+  - ninja -j4 $tests_list asio_fibers gsod_group -k 10
   - echo $tests_list |  xargs -n1 -t ../scripts/run_test.sh -l ../testresults -t 25 --name
 
 jobs:

@@ -15,6 +15,12 @@ inline uint32_t Murmur32(uint64_t val, uint32_t seed = 10) {
   return MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(&val), sizeof val, seed);
 }
 
+inline uint32_t Murmur32(const std::string& str, uint32_t seed = 10) {
+  if (str.empty())
+    return seed;
+  return MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(str.data()), str.size(), seed);
+}
+
 
 uint64_t Fingerprint(const char* str, uint32_t len);
 

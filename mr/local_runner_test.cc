@@ -2,24 +2,23 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include "mr/local_runner.h"
 #include <gmock/gmock.h>
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "mr/do_context.h"
-#include "mr/local_runner.h"
 
 #include "file/file_util.h"
 #include "util/asio/io_context_pool.h"
-
 
 namespace mr3 {
 using namespace util;
 using namespace std;
 
+using testing::EndsWith;
 using testing::Pair;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
-using testing::EndsWith;
 
 class LocalRunnerTest : public testing::Test {
  protected:
@@ -43,9 +42,7 @@ class LocalRunnerTest : public testing::Test {
     runner_->OperatorStart(&op_);
   }
 
-  auto MatchShard(ShardId shard_id, string glob) {
-    return Pair(shard_id, EndsWith(glob));
-  }
+  auto MatchShard(ShardId shard_id, string glob) { return Pair(shard_id, EndsWith(glob)); }
 
   pb::Operator op_;
   std::unique_ptr<IoContextPool> pool_;
@@ -76,8 +73,9 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
   Start(pb::WireFormat::TXT);
   op_.mutable_output()->mutable_compress()->set_type(pb::Output::GZIP);
   op_.mutable_output()->mutable_shard_spec()->set_max_raw_size_mb(1);
+
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
-  for (unsigned i = 0; i < 6000; ++i) {
+  for (unsigned i = 0; i < 2000; ++i) {
     context->TEST_Write(kShard0, string(1000, 'a'));
   }
 
@@ -86,6 +84,10 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
   ShardFileMap out_files;
   runner_->OperatorEnd(&out_files);
   ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "shard-0000-*.txt.gz")));
+  std::vector<string> expanded;
+  runner_->ExpandGlob(out_files.begin()->second, [&](auto& s) { expanded.push_back(s); });
+  EXPECT_THAT(expanded, UnorderedElementsAre(EndsWith("shard-0000-000.txt.gz"),
+                                             EndsWith("shard-0000-001.txt.gz")));
 }
 
 TEST_F(LocalRunnerTest, Lst) {

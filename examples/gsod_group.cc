@@ -29,11 +29,11 @@ template <> class mr3::RecordTraits<GsodRecord> {
   std::vector<char*> cols_;
 
  public:
-  static std::string Serialize(GsodRecord&& rec) {
+  static std::string Serialize(bool is_binary, GsodRecord&& rec) {
     return absl::StrCat(rec.station, ",", rec.year);
   }
 
-  bool Parse(std::string&& tmp, GsodRecord* res) {
+  bool Parse(bool is_binary, std::string&& tmp, GsodRecord* res) {
     cols_.clear();
 
     SplitCSVLineWithDelimiter(&tmp.front(), ',', &cols_);
