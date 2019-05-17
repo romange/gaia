@@ -4,11 +4,11 @@
 #pragma once
 
 #include <boost/fiber/buffered_channel.hpp>
-#include <boost/fiber/fiber.hpp>
 #include <functional>
 
 #include "mr/operator_executor.h"
 #include "util/fibers/simple_channel.h"
+#include "util/stats/varz_value.h"
 
 namespace mr3 {
 
@@ -39,6 +39,7 @@ class MapperExecutor : public OperatorExecutor {
   void ProcessInputFiles(detail::TableBase* tb);
 
   static void MapFiber(RecordQueue* record_q, RawSinkCb cb);
+  util::VarzValue::Map GetStats() const;
 
   std::unique_ptr<FileNameQueue> file_name_q_;
 
