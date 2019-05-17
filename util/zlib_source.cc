@@ -76,12 +76,19 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
   while (true) {
     if (zcontext_.avail_in > 0) {
       int zerror = inflate(&zcontext_, Z_NO_FLUSH);
-      if (zerror != Z_OK && zerror != Z_STREAM_END) {
+
+      // There may be multiple zlib-streams and inflate stops when it encounters
+      // Z_STREAM_END before all the requested data is inflated.
+      if (zerror == Z_STREAM_END)
+        continue;
+
+      if (zerror != Z_OK) {
         return ToStatus(zerror, zcontext_.msg);
       }
 
       if (zcontext_.next_out == range.end())
         break;
+
       DCHECK_EQ(0, zcontext_.avail_in);
     }
 
