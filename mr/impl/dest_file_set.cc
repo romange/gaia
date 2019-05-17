@@ -118,7 +118,7 @@ void DestFileSet::CloseHandle(const ShardId& sid) {
   CHECK(it != dest_files_.end());
   dh = it->second.get();
   lk.unlock();
-  VLOG(1) << "Closing handle " << dh->path();
+  VLOG(1) << "Closing handle " << ShardFilePath(sid, -1);
 
   dh->Close();
 }
@@ -149,13 +149,28 @@ void DestHandle::AppendThreadLocal(const std::string& str) {
     if (raw_size_ >= raw_limit_) {
       CHECK(wf_->Close());
       ++sub_shard_;
-      wf_ = nullptr;
       raw_size_ = 0;
       full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
-      Open();
+      wf_ = OpenThreadLocal(owner_->output(), full_path_);
     }
   }
 }
+
+::file::WriteFile* DestHandle::OpenThreadLocal(const pb::Output& output, const std::string& path) {
+  if (output.has_compress()) {
+    if (output.compress().type() == pb::Output::GZIP) {
+      file::GzipFile* gzres = file::GzipFile::Create(path, output.compress().level());
+      CHECK(gzres->Open());
+      return gzres;
+    }
+    LOG(FATAL) << "Not supported " << output.compress().ShortDebugString();
+  }
+
+  auto* wf = file::Open(path);
+  CHECK(wf);
+  return wf;
+}
+
 
 void DestHandle::Write(string str) {
   owner_->pool()->Add(fq_index_, [this, str = std::move(str)] { AppendThreadLocal(str); });
@@ -163,29 +178,19 @@ void DestHandle::Write(string str) {
 
 void DestHandle::Open() {
   VLOG(1) << "Creating file " << full_path_;
-
-  const auto& output = owner_->output();
-  if (output.has_compress()) {
-    if (output.compress().type() == pb::Output::GZIP) {
-      file::GzipFile* gzres = file::GzipFile::Create(full_path_, output.compress().level());
-      CHECK(gzres->Open());
-      wf_ = gzres;
-    } else {
-      LOG(FATAL) << "Not supported " << output.compress().ShortDebugString();
-    }
-  } else {
-    wf_ = file::Open(full_path_);
-  }
-  CHECK(wf_);
+  wf_ = Await([this] {
+    return OpenThreadLocal(owner_->output(), full_path_);
+  });
 }
 
 void DestHandle::Close() {
   if (!wf_)
     return;
 
-  VLOG(1) << "Closing file " << path();
-
-  bool res = Await([this] { return wf_->Close(); });
+  bool res = Await([this] {
+    VLOG(1) << "Closing file " << wf_->create_file_name();
+    return wf_->Close();
+  });
   CHECK(res);
   wf_ = nullptr;
 }

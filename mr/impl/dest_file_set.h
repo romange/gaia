@@ -60,6 +60,7 @@ class DestHandle {
   friend class DestFileSet;
 
   void AppendThreadLocal(const std::string& val);
+  static ::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path);
 
  protected:
   template<typename Func> auto Await(Func&& f) {
@@ -79,7 +80,6 @@ class DestHandle {
   // Thread-safe. Called from multiple threads/do_contexts.
   virtual void Close();
 
-  const std::string& path() const { return full_path_; }
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
 
  protected:
@@ -88,6 +88,7 @@ class DestHandle {
 
   ::file::WriteFile* wf_ = nullptr;
   std::string full_path_;
+
   size_t raw_size_ = 0;
   size_t raw_limit_ = kuint64max;
   uint32_t sub_shard_ = 0;
