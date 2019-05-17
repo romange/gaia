@@ -79,9 +79,11 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
 
       // There may be multiple zlib-streams and inflate stops when it encounters
       // Z_STREAM_END before all the requested data is inflated.
-      if (zerror == Z_STREAM_END)
+      if (zerror == Z_STREAM_END) {
+        int reset = internalInflateInit2(format_, &zcontext_);
+        CHECK_EQ(Z_OK, reset);
         continue;
-
+      }
       if (zerror != Z_OK) {
         return ToStatus(zerror, zcontext_.msg);
       }
