@@ -10,7 +10,6 @@
 #include "file/file.h"
 #include "file/list_file.h"
 #include "mr/mr_types.h"
-#include "strings/unique_strings.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/zlib_source.h"
 
@@ -25,7 +24,6 @@ class DestFileSet {
   const std::string root_dir_;
 
   util::fibers_ext::FiberQueueThreadPool* fq_;
-  UniqueStrings str_db_;
   ::boost::fibers::mutex mu_;
 
  public:
@@ -37,11 +35,15 @@ class DestFileSet {
   // Closes and deletes all the handles.
   void CloseAllHandles();
 
+  // return full file path of the shard.
+  // if sub_shard is < 0, returns the glob of all files corresponding to this shard.
+  std::string ShardFilePath(const ShardId& key, const pb::Output& out, int32 sub_shard) const;
+
   Result GetOrCreate(const ShardId& key, const pb::Output& out);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 
-  void GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const;
+  std::vector<ShardId> GetShards() const;
 
   // Closes the handle but leave it in the map.
   // GatherAll will still return it.
@@ -57,7 +59,8 @@ class DestHandle {
 
  protected:
   // Does NOT take ownership over wf and fq.
-  DestHandle(StringPiece path, ::file::WriteFile* wf, util::fibers_ext::FiberQueueThreadPool* fq);
+  DestHandle(const std::string& path, ::file::WriteFile* wf,
+             util::fibers_ext::FiberQueueThreadPool* fq);
   DestHandle(const DestHandle&) = delete;
 
  public:
@@ -66,19 +69,19 @@ class DestHandle {
   virtual void Write(std::string str);
   virtual void Close();
 
-  StringPiece path() const { return full_path_; }
+  const std::string& path() const { return full_path_; }
 
  protected:
   ::file::WriteFile* wf_;
   util::fibers_ext::FiberQueueThreadPool* fq_;
-  StringPiece full_path_;
+  std::string full_path_;
   unsigned fq_index_;
 };
 
 class ZlibHandle : public DestHandle {
   friend class DestFileSet;
 
-  ZlibHandle(StringPiece path, const pb::Output& out, ::file::WriteFile* wf,
+  ZlibHandle(const std::string& path, const pb::Output& out, ::file::WriteFile* wf,
              util::fibers_ext::FiberQueueThreadPool* fq);
 
  public:
@@ -94,7 +97,8 @@ class ZlibHandle : public DestHandle {
 };
 
 class LstHandle : public DestHandle {
-  LstHandle(StringPiece path, ::file::WriteFile* wf, util::fibers_ext::FiberQueueThreadPool* fq);
+  LstHandle(const std::string& path, ::file::WriteFile* wf,
+            util::fibers_ext::FiberQueueThreadPool* fq);
 
  public:
   void Write(std::string str) override;

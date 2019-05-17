@@ -242,8 +242,10 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
 }
 
 void LocalRunner::Impl::End(ShardFileMap* out_files) {
-  dest_mgr->GatherAll(
-      [out_files](const ShardId& sid, DestHandle* dh) { out_files->emplace(sid, dh->path()); });
+  auto shards = dest_mgr->GetShards();
+  for (const ShardId& sid : shards) {
+    out_files->emplace(sid, dest_mgr->ShardFilePath(sid, current_op->output(), -1));
+  }
   dest_mgr->CloseAllHandles();
   dest_mgr.reset();
   current_op = nullptr;

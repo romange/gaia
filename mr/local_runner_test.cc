@@ -11,9 +11,15 @@
 #include "file/file_util.h"
 #include "util/asio/io_context_pool.h"
 
+
 namespace mr3 {
 using namespace util;
 using namespace std;
+
+using testing::Pair;
+using testing::UnorderedElementsAre;
+using testing::UnorderedElementsAreArray;
+using testing::EndsWith;
 
 class LocalRunnerTest : public testing::Test {
  protected:
@@ -37,23 +43,49 @@ class LocalRunnerTest : public testing::Test {
     runner_->OperatorStart(&op_);
   }
 
+  auto MatchShard(ShardId shard_id, string glob) {
+    return Pair(shard_id, EndsWith(glob));
+  }
+
   pb::Operator op_;
   std::unique_ptr<IoContextPool> pool_;
   std::unique_ptr<LocalRunner> runner_;
 };
 
 TEST_F(LocalRunnerTest, Basic) {
+  const ShardId kShard0{0};
+
   ShardFileMap out_files;
   Start(pb::WireFormat::TXT);
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
-  context->TEST_Write(ShardId{0}, "foo");
+  context->TEST_Write(kShard0, "foo");
 
   context->Flush();
   runner_->OperatorEnd(&out_files);
+
+  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "shard-0000.txt")));
+
   string shard_name = base::GetTestTempPath("w1/w1-shard-0000.txt");
   string contents;
   ASSERT_TRUE(file_util::ReadFileToString(shard_name, &contents));
   EXPECT_EQ("foo\n", contents);
+}
+
+TEST_F(LocalRunnerTest, MaxShardSize) {
+  const ShardId kShard0{0};
+  Start(pb::WireFormat::TXT);
+  op_.mutable_output()->mutable_compress()->set_type(pb::Output::GZIP);
+  op_.mutable_output()->mutable_shard_spec()->set_max_raw_size_mb(1);
+  std::unique_ptr<RawContext> context{runner_->CreateContext()};
+  for (unsigned i = 0; i < 6000; ++i) {
+    context->TEST_Write(kShard0, string(1000, 'a'));
+  }
+
+  context->Flush();
+
+  ShardFileMap out_files;
+  runner_->OperatorEnd(&out_files);
+  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "shard-0000-*.txt.gz")));
 }
 
 TEST_F(LocalRunnerTest, Lst) {

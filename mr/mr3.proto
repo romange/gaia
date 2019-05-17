@@ -21,6 +21,10 @@ message ShardSpec {
 
   required Type type = 1;
   optional uint32 modn = 2;
+
+  // An approximate limit on raw shard size before file format transformations or compressions.
+  // Can be passed slightly due to internal buffering in the system. In megabytes.
+  optional uint32 max_raw_size_mb = 5;
 }
 
 message Input {

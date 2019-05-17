@@ -5,6 +5,7 @@
 #include "mr/impl/dest_file_set.h"
 
 #include "absl/strings/str_cat.h"
+#include "base/hash.h"
 #include "base/logging.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
@@ -29,22 +30,30 @@ namespace {
 
 constexpr size_t kBufLimit = 1 << 16;
 
-string FileName(StringPiece base, const pb::Output& out) {
+string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
   string res(base);
-  if (out.format().type() == pb::WireFormat::TXT) {
+  if (pb_out.shard_spec().has_max_raw_size_mb()) {
+    if (sub_shard >= 0) {
+      absl::StrAppend(&res, "-", absl::Dec(sub_shard, absl::kZeroPad3));
+    } else {
+      absl::StrAppend(&res, "-*");
+    }
+  }
+
+  if (pb_out.format().type() == pb::WireFormat::TXT) {
     absl::StrAppend(&res, ".txt");
-    if (out.has_compress()) {
-      if (out.compress().type() == pb::Output::GZIP) {
+    if (pb_out.has_compress()) {
+      if (pb_out.compress().type() == pb::Output::GZIP) {
         absl::StrAppend(&res, ".gz");
       } else {
-        LOG(FATAL) << "Not supported " << out.compress().ShortDebugString();
+        LOG(FATAL) << "Not supported " << pb_out.compress().ShortDebugString();
       }
     }
-  } else if (out.format().type() == pb::WireFormat::LST) {
-    CHECK(!out.has_compress()) << "Can not set compression on LST files";
+  } else if (pb_out.format().type() == pb::WireFormat::LST) {
+    CHECK(!pb_out.has_compress()) << "Can not set compression on LST files";
     absl::StrAppend(&res, ".lst");
   } else {
-    LOG(FATAL) << "Unsupported format for " << out.ShortDebugString();
+    LOG(FATAL) << "Unsupported format for " << pb_out.ShortDebugString();
   }
 
   return res;
@@ -87,19 +96,16 @@ auto DestFileSet::GetOrCreate(const ShardId& sid, const pb::Output& pb_out) -> R
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(sid);
   if (it == dest_files_.end()) {
-    string shard_name = sid.ToString(absl::StrCat(pb_out.name(), "-", "shard"));
-    VLOG(1) << "Creating file " << shard_name;
+    string full_path = ShardFilePath(sid, pb_out, 0);
+    VLOG(1) << "Creating file " << full_path;
 
-    string file_name = FileName(shard_name, pb_out);
-    string full_path = file_util::JoinPath(root_dir_, file_name);
-    StringPiece fp_sp = str_db_.Get(full_path);
     file::WriteFile* wf = CreateFile(full_path, pb_out, fq_);
     std::unique_ptr<DestHandle> dh;
 
     if (FLAGS_local_runner_zsink && pb_out.has_compress()) {
-      dh.reset(new ZlibHandle{fp_sp, pb_out, wf, fq_});
+      dh.reset(new ZlibHandle{full_path, pb_out, wf, fq_});
     } else {
-      dh.reset(new DestHandle{fp_sp, wf, fq_});
+      dh.reset(new DestHandle{full_path, wf, fq_});
     }
     auto res = dest_files_.emplace(sid, std::move(dh));
     CHECK(res.second);
@@ -116,6 +122,13 @@ void DestFileSet::CloseAllHandles() {
   dest_files_.clear();
 }
 
+std::string DestFileSet::ShardFilePath(const ShardId& key, const pb::Output& pb_out,
+                                       int32 sub_shard) const {
+  string shard_name = key.ToString(absl::StrCat(pb_out.name(), "-", "shard"));
+  string file_name = FileName(shard_name, pb_out, sub_shard);
+  return file_util::JoinPath(root_dir_, file_name);
+}
+
 void DestFileSet::CloseHandle(const ShardId& sid) {
   DestHandle* dh = nullptr;
 
@@ -129,15 +142,18 @@ void DestFileSet::CloseHandle(const ShardId& sid) {
   dh->Close();
 }
 
-void DestFileSet::GatherAll(std::function<void(const ShardId&, DestHandle*)> cb) const {
-  for (const auto& k_v : dest_files_) {
-    cb(k_v.first, k_v.second.get());
-  }
+std::vector<ShardId> DestFileSet::GetShards() const {
+  std::vector<ShardId> res;
+  res.reserve(dest_files_.size());
+  transform(begin(dest_files_), end(dest_files_), back_inserter(res),
+            [](const auto& pair) { return pair.first; });
+
+  return res;
 }
 
 DestFileSet::~DestFileSet() {}
 
-DestHandle::DestHandle(StringPiece path, ::file::WriteFile* wf,
+DestHandle::DestHandle(const string& path, ::file::WriteFile* wf,
                        fibers_ext::FiberQueueThreadPool* fq)
     : wf_(wf), fq_(fq), full_path_(path) {
   CHECK(wf && fq_);
@@ -158,7 +174,7 @@ void DestHandle::Close() {
   wf_ = nullptr;
 }
 
-ZlibHandle::ZlibHandle(StringPiece path, const pb::Output& out, ::file::WriteFile* wf,
+ZlibHandle::ZlibHandle(const string& path, const pb::Output& out, ::file::WriteFile* wf,
                        util::fibers_ext::FiberQueueThreadPool* fq)
     : DestHandle(path, wf, fq), str_sink_(new StringSink) {
   CHECK_EQ(pb::Output::GZIP, out.compress().type());
@@ -192,7 +208,7 @@ void ZlibHandle::Close() {
   DestHandle::Close();
 }
 
-LstHandle::LstHandle(StringPiece path, ::file::WriteFile* wf,
+LstHandle::LstHandle(const string& path, ::file::WriteFile* wf,
                      util::fibers_ext::FiberQueueThreadPool* fq)
     : DestHandle(path, wf, fq) {
   util::Sink* fs = new file::Sink{wf, DO_NOT_TAKE_OWNERSHIP};

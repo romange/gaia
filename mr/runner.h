@@ -9,6 +9,9 @@
 
 namespace mr3 {
 
+// value.second (string) - is a file glob that corresponds to 1 or more files comprising the shard.
+// i.e can be "shard-0000-*.txt.gz" but can be a single file as well.
+// To get the exact list, call ExpandGlob() on each value.
 using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
 
 class RawContext;
