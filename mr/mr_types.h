@@ -18,7 +18,7 @@ using EmitMemberFn = void (Class::*)(FromType, DoContext<O>*);
 
 using RawRecord = ::std::string;
 
-typedef std::function<void(bool is_binary, RawRecord&& record)> RawSinkCb;
+typedef std::function<void(RawRecord&& record)> RawSinkCb;
 
 template <typename Handler, typename ToType>
 using RawSinkMethodFactory = std::function<RawSinkCb(Handler* handler, DoContext<ToType>* context)>;

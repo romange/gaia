@@ -202,7 +202,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
     if (cnt % 1000 == 0) {
       this_fiber::yield();
     }
-    cb(false, std::move(tmp));
+    cb(std::move(tmp));
   }
   VLOG(1) << "ProcessText Read " << cnt << " items";
   return cnt;
@@ -218,7 +218,7 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
   StringPiece record;
   uint64_t cnt = 0;
   while (list_reader.ReadRecord(&record, &scratch)) {
-    cb(true, string(record));
+    cb(string(record));
     ++cnt;
     if (cnt % 1000 == 0) {
       this_fiber::yield();

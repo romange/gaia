@@ -32,13 +32,18 @@ using testing::UnorderedElementsAreArray;
 namespace rj = rapidjson;
 
 class StrValMapper {
+  set<string>* input_files_;
+
  public:
-  void Do(string val, mr3::DoContext<StrVal>* cnt) {
+  StrValMapper(set<string>* input_files) : input_files_(input_files) {}
+
+  void Do(string val, mr3::DoContext<StrVal>* cntx) {
+    input_files_->insert(cntx->raw()->input_file_name());
     StrVal a;
     val.append("a");
     a.val = std::move(val);
 
-    cnt->Write(std::move(a));
+    cntx->Write(std::move(a));
   }
 };
 
@@ -153,13 +158,16 @@ TEST_F(MrTest, ParseError) {
 
 TEST_F(MrTest, Map) {
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
-  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1");
+  set<string> input_files;
+  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1", &input_files);
 
   str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
   vector<string> elements{"1", "2", "3", "4"};
 
   runner_.AddInputRecords("bar.txt", elements);
   pipeline_->Run(&runner_);
+
+  EXPECT_THAT(input_files, UnorderedElementsAre("bar.txt"));
 
   vector<string> expected;
   for (const auto& e : elements)
@@ -182,11 +190,12 @@ class IntMapper {
 
 TEST_F(MrTest, MapAB) {
   vector<string> elements{"1", "2", "3", "4"};
+  set<string> input_files;
 
   runner_.AddInputRecords("bar.txt", elements);
   PTable<IntVal> itable =
       pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<StrValMapper>("Map1");
-  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1");
+  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1", &input_files);
 
   atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
 
@@ -196,6 +205,7 @@ TEST_F(MrTest, MapAB) {
   });
 
   pipeline_->Run(&runner_);
+  EXPECT_THAT(input_files, UnorderedElementsAre("bar.txt"));
 
   vector<string> expected;
   for (const auto& e : elements)

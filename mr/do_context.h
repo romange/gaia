@@ -12,6 +12,7 @@
 namespace mr3 {
 
 template <typename T> class DoContext;
+class OperatorExecutor;
 
 namespace detail {
 template <typename Handler, typename ToType> class HandlerWrapper;
@@ -39,7 +40,7 @@ template <> struct RecordTraits<std::string> {
 // not fiber local.
 class RawContext {
   template <typename T> friend class DoContext;
-
+  friend class OperatorExecutor;
  public:
   RawContext();
 
@@ -66,6 +67,8 @@ class RawContext {
   size_t parse_errors() const { return parse_errors_;}
   size_t item_writes() const { return item_writes_;}
 
+  const std::string& input_file_name() const { return file_name_;};
+  bool is_binary() const { return is_binary_; }
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
     ++item_writes_;
@@ -77,6 +80,8 @@ class RawContext {
 
   StringPieceDenseMap<long> counter_map_;
   size_t parse_errors_ = 0, item_writes_ = 0;
+  std::string file_name_;
+  bool is_binary_ = false;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.

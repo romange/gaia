@@ -33,6 +33,14 @@ class OperatorExecutor {
  protected:
   void FinalizeContext(long items_cnt, RawContext* context);
 
+  static void SetFileName(const std::string& file_name, RawContext* context) {
+    context->file_name_ = file_name;
+  }
+
+  static void SetIsBinary(bool is_binary, RawContext* context) {
+    context->is_binary_ = is_binary;
+  }
+
   util::IoContextPool* pool_;
   Runner* runner_;
 

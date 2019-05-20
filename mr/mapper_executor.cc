@@ -138,7 +138,7 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 
   RecordQueue record_q(256);
 
-  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler->Get(0));
+  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler.get());
 
   VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
 
@@ -149,12 +149,16 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
 
     CHECK_EQ(channel_op_status::success, st);
     const pb::Input* pb_input = file_input.second;
-    auto cb = [&record_q, aux_local, skip = pb_input->skip_header(), record_num = uint64_t{0}](
-                  bool is_binary, auto&& s) mutable {
+    bool is_binary = pb_input->format().type() == pb::WireFormat::LST;
+    Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
+    record_q.Push(Record{op, file_input.first});
+
+    auto cb = [&record_q, aux_local, skip = pb_input->skip_header(),
+               record_num = uint64_t{0}](string&& s) mutable {
       if (record_num++ < skip)
         return;
       ++aux_local->records_read;
-      record_q.Push(is_binary, std::move(s));
+      record_q.Push(Record{Record::RECORD, std::move(s)});
     };
 
     cnt += runner_->ProcessInputFile(file_input.first, pb_input->format().type(), std::move(cb));
@@ -171,16 +175,37 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
   aux_local->raw_context.reset();
 }
 
-void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
+void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb) {
   this_fiber::properties<IoFiberProperties>().set_name("MapFiber");
+  PerIoStruct* aux_local = per_io_.get();
+  RawContext* raw_context = aux_local->raw_context.get();
+  CHECK(raw_context);
 
-  std::pair<bool, string> record;
+  Record record;
   uint64_t record_num = 0;
-
+  bool is_binary = false;
+  auto cb = hwb->Get(0);
   while (true) {
     bool is_open = record_q->Pop(record);
     if (!is_open)
       break;
+
+    if (record.op != Record::RECORD) {
+      switch (record.op) {
+        case Record::BINARY_FORMAT:
+          is_binary = true;
+          SetFileName(record.data, raw_context);
+          break;
+        case Record::TEXT_FORMAT:
+          is_binary = false;
+          SetFileName(record.data, raw_context);
+          break;
+        default:;
+      }
+      SetIsBinary(is_binary, raw_context);
+      hwb->set_binary_format(is_binary);
+      continue;
+    }
 
     ++record_num;
 
@@ -191,7 +216,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, RawSinkCb cb) {
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    cb(record.first, std::move(record.second));
+    cb(std::move(record.data));
 
     if (++record_num % 1000 == 0) {
       this_fiber::yield();

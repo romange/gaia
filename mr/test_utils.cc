@@ -69,7 +69,7 @@ size_t TestRunner::ProcessInputFile(const std::string& filename, pb::WireFormat:
   auto it = input_fs_.find(filename);
   CHECK(it != input_fs_.end());
   for (const auto& str : it->second) {
-    cb(false, string{str});
+    cb(string{str});
   }
 
   return it->second.size();
@@ -88,7 +88,7 @@ size_t EmptyRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
   string val;
   unsigned cnt = 0;
   while (gen_fn(&val)) {
-    cb(true, std::move(val));
+    cb(std::move(val));
     ++cnt;
   }
   return cnt;

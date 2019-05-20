@@ -15,7 +15,14 @@ namespace mr3 {
 class MapperExecutor : public OperatorExecutor {
   using FileInput = std::pair<std::string, const pb::Input*>;
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
-  using RecordQueue = util::fibers_ext::SimpleChannel<std::pair<bool, std::string>>;
+
+  struct Record {
+    enum Operand { BINARY_FORMAT, TEXT_FORMAT, RECORD} op;
+
+    std::string data;
+  };
+
+  using RecordQueue = util::fibers_ext::SimpleChannel<Record>;
 
   struct PerIoStruct;
 
@@ -38,7 +45,7 @@ class MapperExecutor : public OperatorExecutor {
   // One per IO thread.
   void ProcessInputFiles(detail::TableBase* tb);
 
-  static void MapFiber(RecordQueue* record_q, RawSinkCb cb);
+  static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
   util::VarzValue::Map GetStats() const;
 
   std::unique_ptr<FileNameQueue> file_name_q_;
