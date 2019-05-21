@@ -11,6 +11,8 @@
 namespace util {
 
 inline Status ToStatus(int err, StringPiece msg) {
+  if (msg.empty())   // to overcome https://github.com/abseil/abseil-cpp/issues/315
+    msg = "";
   return Status(StatusCode::IO_ERROR, StrCat("ZLib error ", err, ": ", msg));
 }
 
@@ -31,14 +33,7 @@ static inline int internalInflateInit2(ZlibSource::Format format, z_stream* zcon
 }
 
 static inline void InitCtx(z_stream* zcontext) {
-  zcontext->zalloc = Z_NULL;
-  zcontext->zfree = Z_NULL;
-  zcontext->opaque = Z_NULL;
-  zcontext->total_out = 0;
-  zcontext->next_in = NULL;
-  zcontext->avail_in = 0;
-  zcontext->total_in = 0;
-  zcontext->msg = NULL;
+  memset(zcontext, 0, sizeof(z_stream));
 }
 
 bool ZlibSource::IsZlibSource(Source* source) {
@@ -58,14 +53,11 @@ static constexpr size_t kBufSize = 8192;
 ZlibSource::ZlibSource(Source* sub_stream, Format format)
     : sub_stream_(sub_stream), format_(format) {
   InitCtx(&zcontext_);
-
-  int zerror = internalInflateInit2(format_, &zcontext_);
-  CHECK_EQ(Z_OK, zerror);
   buf_.reset(new uint8_t[kBufSize]);
 }
 
 ZlibSource::~ZlibSource() {
-  inflateEnd(&zcontext_);
+  inflateEnd(&zcontext_);  // might return error because zcontext_ might already be freed.
   delete sub_stream_;
 }
 
@@ -77,14 +69,18 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
     if (zcontext_.avail_in > 0) {
       int zerror = inflate(&zcontext_, Z_NO_FLUSH);
 
-      // There may be multiple zlib-streams and inflate stops when it encounters
-      // Z_STREAM_END before all the requested data is inflated.
-      if (zerror == Z_STREAM_END) {
-        int reset = internalInflateInit2(format_, &zcontext_);
-        CHECK_EQ(Z_OK, reset);
-        continue;
-      }
       if (zerror != Z_OK) {
+        if (zerror == Z_STREAM_END) {
+          // There may be multiple zlib-streams and inflate stops when it encounters
+          // Z_STREAM_END before all the requested data is inflated.
+          CHECK_EQ(0, inflateEnd(&zcontext_));
+          if (zcontext_.avail_in) {
+            int reset = internalInflateInit2(format_, &zcontext_);
+            CHECK_EQ(Z_OK, reset);
+          }
+          continue;
+        }
+
         return ToStatus(zerror, zcontext_.msg);
       }
 
@@ -105,6 +101,10 @@ StatusObject<size_t> ZlibSource::ReadInternal(const strings::MutableByteRange& r
 
     zcontext_.next_in = buf_.get();
     zcontext_.avail_in = res.obj;
+    if (!zcontext_.state) {
+      int reset = internalInflateInit2(format_, &zcontext_);
+      CHECK_EQ(Z_OK, reset);
+    }
   }
 
   if (zcontext_.avail_in > 0) {
@@ -126,9 +126,7 @@ ZlibSink::ZlibSink(Sink* sub, unsigned level, size_t buf_size)
   zcontext_.avail_out = buf_size_;
 }
 
-ZlibSink::~ZlibSink() {
-  deflateEnd(&zcontext_);
-}
+ZlibSink::~ZlibSink() { deflateEnd(&zcontext_); }
 
 Status ZlibSink::Append(const strings::ByteRange& slice) {
   zcontext_.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(slice.data()));
@@ -171,7 +169,5 @@ Status ZlibSink::Flush() {
 
   return sub_->Flush();
 }
-
-
 
 }  // namespace util

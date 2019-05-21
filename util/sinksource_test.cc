@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
+#include <gtest/gtest.h>
 #include <algorithm>
 #include <random>
 #include <string>
@@ -34,39 +34,30 @@ class SourceTest : public testing::Test {
       coding::AppendFixed32(i, &original_);
     }
 
-    EXPECT_EQ(100000 * coding::kFixed32Bytes, original_.size());
+    CHECK_EQ(100000 * coding::kFixed32Bytes, original_.size());
     const uint8* read = reinterpret_cast<const uint8*>(original_.data());
     for (int i = 0; i < 100000; ++i) {
       uint32 val = coding::DecodeFixed32(read);
       read += coding::kFixed32Bytes;
-      EXPECT_EQ(i, val);
+      CHECK_EQ(i, val);
     }
 
-    StringOutputStream compressed_stream(&compressed_);
-    /*GzipOutputStream gstream(&compressed_stream);
-    size_t copied = 0;
-    read = reinterpret_cast<const uint8*>(original_.data());
-    while (copied < original_.size()) {
-      void* data = nullptr;
-      int size = 0;
-      CHECK(gstream.Next(&data, &size));
-      int copy = std::min(size, int(original_.size() - copied));
-      memcpy(data, read, copy);
-      copied += copy;
-      read += copy;
-      if (copy < size) {
-         gstream.BackUp(size - copy);
-      }
+    StringSink* ssink = new StringSink;
+    ZlibSink zsink(ssink);
+    strings::ByteRange br = ToByteRange(original_);
+    while (!br.empty()) {
+      strings::ByteRange prefix = br.substr(0, 1000);
+      br.remove_prefix(1000);
+      CHECK_STATUS(zsink.Append(prefix));
     }
-    EXPECT_EQ(original_.size(), copied);
-    gstream.Flush();*/
+    CHECK_STATUS(zsink.Flush());
+    compressed_.swap(ssink->contents());
   }
 
-protected:
+ protected:
   string original_, compressed_;
 };
 
-#if 0
 TEST_F(SourceTest, Basic) {
   StringSource* ssource = new StringSource(compressed_);
 
@@ -80,7 +71,7 @@ TEST_F(SourceTest, Basic) {
 
   while (compared < original_.size()) {
     auto result = gsource.Read(strings::MutableByteRange(buf));
-    ASSERT_TRUE(result.ok());
+    ASSERT_TRUE(result.ok()) << result.status << ", " << compared << "/" << original_.size();
 
     EXPECT_GT(result.obj, 0) << "compared: " << compared;
     int cmp = memcmp(read, buf.data(), result.obj);
@@ -95,7 +86,7 @@ TEST_F(SourceTest, Basic) {
 TEST_F(SourceTest, MinSize) {
   StringSource* ssource = new StringSource(compressed_);
 
-  ZlibSource gsource(ssource,  ZlibSource::AUTO);
+  ZlibSource gsource(ssource, ZlibSource::AUTO);
   size_t compared = 0;
   const uint8* read = reinterpret_cast<const uint8*>(original_.data());
   std::default_random_engine rd(10);
@@ -119,7 +110,6 @@ TEST_F(SourceTest, MinSize) {
   }
   EXPECT_EQ(original_.size(), compared);
 }
-#endif
 
 TEST_F(SourceTest, Zlib) {
   string buf;
@@ -148,9 +138,24 @@ TEST_F(SourceTest, Zlib) {
   }
 }
 
-class ZstdSourceTest : public testing::Test {
-};
+TEST_F(SourceTest, MultipleStreams) {
+  string mult_compr = compressed_ + compressed_;
+  StringSource* ssource = new StringSource(mult_compr, 1023);
 
+  ZlibSource gsource(ssource, ZlibSource::AUTO);
+  std::array<uint8, 1215> buf;
+  size_t read = 0;
+  while (true) {
+    auto result = gsource.Read(strings::MutableByteRange(buf));
+    ASSERT_TRUE(result.ok()) << result.status;
+    read += result.obj;
+    if (result.obj == 0)
+      break;
+  }
+  EXPECT_EQ(original_.size() * 2, read);
+}
+
+class ZstdSourceTest : public testing::Test {};
 
 TEST_F(ZstdSourceTest, Basic) {
   string buf;
