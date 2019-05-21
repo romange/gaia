@@ -39,12 +39,23 @@ class Pipeline {
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
 
-  PInput<std::string> ReadText(const std::string& name, const std::vector<std::string>& globs) {
-    return Read(name, pb::WireFormat::TXT, globs);
+  class InputSpec {
+    std::vector<pb::Input::FileSpec> file_spec_;
+
+   public:
+    InputSpec(const std::vector<std::string>& globs);
+    InputSpec(const std::string& glob) : InputSpec(std::vector<std::string>{glob}) {}
+    InputSpec(std::vector<pb::Input::FileSpec> globs) : file_spec_{std::move(globs)} {}
+
+    const std::vector<pb::Input::FileSpec>& file_spec() const { return file_spec_; }
+  };
+
+  PInput<std::string> ReadText(const std::string& name, const InputSpec& input_spec) {
+    return Read(name, pb::WireFormat::TXT, input_spec);
   }
 
   PInput<std::string> ReadText(const std::string& name, const std::string& glob) {
-    return ReadText(name, std::vector<std::string>{glob});
+    return ReadText(name, InputSpec{glob});
   }
 
   PInput<std::string> ReadLst(const std::string& name, const std::vector<std::string>& globs) {
@@ -68,7 +79,7 @@ class Pipeline {
 
  private:
   PInput<std::string> Read(const std::string& name, pb::WireFormat::Type format,
-                           const std::vector<std::string>& globs);
+                           const InputSpec& globs);
 
   const InputBase* CheckedInput(const std::string& name) const;
 

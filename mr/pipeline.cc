@@ -12,6 +12,14 @@ using namespace boost;
 using namespace std;
 using namespace util;
 
+Pipeline::InputSpec::InputSpec(const std::vector<std::string>& globs) {
+  for (const auto& s : globs) {
+    pb::Input::FileSpec fspec;
+    fspec.set_url_glob(s);
+    file_spec_.push_back(std::move(fspec));
+  }
+}
+
 Pipeline::Pipeline(IoContextPool* pool) : pool_(pool) {}
 Pipeline::~Pipeline() {}
 
@@ -23,14 +31,14 @@ const InputBase* Pipeline::CheckedInput(const std::string& name) const {
 }
 
 PInput<std::string> Pipeline::Read(const std::string& name, pb::WireFormat::Type format,
-                                   const std::vector<std::string>& globs) {
+                                   const InputSpec& globs) {
   auto res = inputs_.emplace(name, nullptr);
   CHECK(res.second) << "Input " << name << " already exists";
 
   auto& inp_ptr = res.first->second;
   inp_ptr.reset(new InputBase(name, format));
-  for (const auto& s : globs) {
-    inp_ptr->mutable_msg()->add_file_spec()->set_url_glob(s);
+  for (const auto& s : globs.file_spec()) {
+    inp_ptr->mutable_msg()->add_file_spec()->CopyFrom(s);
   }
 
   detail::TableBase* ptr = CreateTableImpl(name);

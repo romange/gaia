@@ -33,12 +33,13 @@ class OperatorExecutor {
  protected:
   void FinalizeContext(long items_cnt, RawContext* context);
 
-  static void SetFileName(const std::string& file_name, RawContext* context) {
+  static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
+    context->is_binary_ = is_binary;
     context->file_name_ = file_name;
   }
 
-  static void SetIsBinary(bool is_binary, RawContext* context) {
-    context->is_binary_ = is_binary;
+  static void SetMetaData(const std::string& metadata, RawContext* context) {
+    context->metadata_ = metadata;
   }
 
   util::IoContextPool* pool_;

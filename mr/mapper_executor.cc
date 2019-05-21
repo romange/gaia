@@ -108,16 +108,20 @@ void MapperExecutor::PushInput(const InputBase* input) {
   CHECK(input && input->msg().file_spec_size() > 0);
   CHECK(input->msg().has_format());
 
-  vector<string> files;
+  vector<FileInput> files;
   pool_->GetNextContext().AwaitSafe([&] {
-    for (const auto& file_spec : input->msg().file_spec()) {
-      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) { files.push_back(str); });
+    const pb::Input* pb_input = &input->msg();
+    for (int i = 0; i < pb_input->file_spec_size(); ++i) {
+      const pb::Input::FileSpec& file_spec = pb_input->file_spec(i);
+      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) {
+        files.push_back(FileInput{pb_input, size_t(i), str});
+      });
     }
   });
 
   LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
   for (const auto& fl_name : files) {
-    channel_op_status st = file_name_q_->push(FileInput{fl_name, &input->msg()});
+    channel_op_status st = file_name_q_->push(fl_name);
     if (st != channel_op_status::closed) {
       CHECK_EQ(channel_op_status::success, st);
     }
@@ -148,10 +152,11 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    const pb::Input* pb_input = file_input.second;
+    const pb::Input* pb_input = file_input.input;
     bool is_binary = pb_input->format().type() == pb::WireFormat::LST;
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
-    record_q.Push(Record{op, file_input.first});
+    record_q.Push(Record{op, file_input.file_name});
+    record_q.Push(Record{Record::METADATA, pb_input->file_spec(file_input.spec_index).metadata()});
 
     auto cb = [&record_q, aux_local, skip = pb_input->skip_header(),
                record_num = uint64_t{0}](string&& s) mutable {
@@ -161,7 +166,8 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
       record_q.Push(Record{Record::RECORD, std::move(s)});
     };
 
-    cnt += runner_->ProcessInputFile(file_input.first, pb_input->format().type(), std::move(cb));
+    cnt +=
+        runner_->ProcessInputFile(file_input.file_name, pb_input->format().type(), std::move(cb));
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 
@@ -193,16 +199,18 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     if (record.op != Record::RECORD) {
       switch (record.op) {
         case Record::BINARY_FORMAT:
-          is_binary = true;
-          SetFileName(record.data, raw_context);
+          SetFileName(true, record.data, raw_context);
           break;
         case Record::TEXT_FORMAT:
-          is_binary = false;
-          SetFileName(record.data, raw_context);
+          SetFileName(false, record.data, raw_context);
           break;
-        default:;
+        case Record::METADATA:
+          SetMetaData(record.data, raw_context);
+          break;
+
+        case Record::RECORD:;
       }
-      SetIsBinary(is_binary, raw_context);
+
       hwb->set_binary_format(is_binary);
       continue;
     }

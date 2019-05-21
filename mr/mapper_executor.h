@@ -13,11 +13,15 @@
 namespace mr3 {
 
 class MapperExecutor : public OperatorExecutor {
-  using FileInput = std::pair<std::string, const pb::Input*>;
+  struct FileInput {
+    const pb::Input* input;
+    size_t spec_index;
+    std::string file_name;
+  };
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
 
   struct Record {
-    enum Operand { BINARY_FORMAT, TEXT_FORMAT, RECORD} op;
+    enum Operand { BINARY_FORMAT, TEXT_FORMAT, METADATA, RECORD} op;
 
     std::string data;
   };

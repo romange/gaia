@@ -33,12 +33,15 @@ namespace rj = rapidjson;
 
 class StrValMapper {
   set<string>* input_files_;
+  set<string>* meta_;
 
  public:
-  StrValMapper(set<string>* input_files) : input_files_(input_files) {}
+  StrValMapper(set<string>* input_files, set<string>* meta)
+      : input_files_(input_files), meta_(meta) {}
 
   void Do(string val, mr3::DoContext<StrVal>* cntx) {
     input_files_->insert(cntx->raw()->input_file_name());
+    meta_->insert(cntx->raw()->meta_data());
     StrVal a;
     val.append("a");
     a.val = std::move(val);
@@ -98,6 +101,7 @@ TEST_F(MrTest, Basic) {
   EXPECT_NE(ShardId{1}, ShardId{"foo"});
 
   StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
+
   str1.Write("new_table", pb::WireFormat::TXT)
       .AndCompress(pb::Output::GZIP, 1)
       .WithCustomSharding([](const std::string& rec) { return "shard1"; });
@@ -157,9 +161,13 @@ TEST_F(MrTest, ParseError) {
 }
 
 TEST_F(MrTest, Map) {
-  StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
-  set<string> input_files;
-  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1", &input_files);
+  pb::Input::FileSpec fspec;
+  fspec.set_url_glob("bar.txt");
+  fspec.set_metadata("42");
+
+  StringTable str1 = pipeline_->ReadText("read_bar", std::vector<pb::Input::FileSpec>{fspec});
+  set<string> input_files, metadata;
+  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1", &input_files, &metadata);
 
   str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
   vector<string> elements{"1", "2", "3", "4"};
@@ -168,6 +176,7 @@ TEST_F(MrTest, Map) {
   pipeline_->Run(&runner_);
 
   EXPECT_THAT(input_files, UnorderedElementsAre("bar.txt"));
+  EXPECT_THAT(metadata, UnorderedElementsAre("42"));
 
   vector<string> expected;
   for (const auto& e : elements)
@@ -190,12 +199,12 @@ class IntMapper {
 
 TEST_F(MrTest, MapAB) {
   vector<string> elements{"1", "2", "3", "4"};
-  set<string> input_files;
+  set<string> input_files, metadata;
 
   runner_.AddInputRecords("bar.txt", elements);
   PTable<IntVal> itable =
       pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<StrValMapper>("Map1");
-  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1", &input_files);
+  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1", &input_files, &metadata);
 
   atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
 
