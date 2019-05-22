@@ -7,7 +7,7 @@ cxx_link(mr3_lib absl_flat_hash_map absl_variant absl_str_format base mr3_impl_l
 add_subdirectory(impl)
 
 add_library(mr_test_lib test_utils.cc)
-cxx_link(mr_test_lib mr3_lib absl_flat_hash_map gtest_main)
+cxx_link(mr_test_lib mr3_lib absl_flat_hash_map gaia_gtest_main)
 
 cxx_test(mr_test mr_test_lib addressbook_proto LABELS CI)
 cxx_test(local_runner_test mr_test_lib addressbook_proto LABELS CI)

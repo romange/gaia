@@ -8,6 +8,6 @@ add_library(http_client_lib http_client.cc)
 cxx_link(http_client_lib strings asio_fiber_lib)
 
 add_library(http_test_lib http_testing.cc)
-cxx_link(http_test_lib http_v2 gtest_main TRDP::rapidjson)
+cxx_link(http_test_lib http_v2 gaia_gtest_main TRDP::rapidjson)
 
 cxx_test(http_test http_v2 http_client_lib http_test_lib LABELS CI)
