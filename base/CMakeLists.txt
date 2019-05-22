@@ -23,6 +23,6 @@ cxx_test(lambda_test base LABELS CI)
 cxx_test(mpmc_bounded_queue_test base LABELS CI)
 
 # Define default gtest_main for tests.
-add_library(gtest_main gtest_main.cc)
-target_link_libraries(gtest_main TRDP::glog TRDP::gflags TRDP::gtest base TRDP::benchmark)
+add_library(gaia_gtest_main gtest_main.cc)
+target_link_libraries(gaia_gtest_main TRDP::glog TRDP::gflags TRDP::gtest base TRDP::benchmark)
 
