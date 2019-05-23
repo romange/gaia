@@ -160,7 +160,7 @@ add_third_party(
 add_third_party(
   benchmark
   GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG 505be96
+  GIT_TAG v1.5
   CMAKE_PASS_FLAGS "-DBENCHMARK_ENABLE_GTEST_TESTS=OFF -DBENCHMARK_ENABLE_TESTING=OFF"
 )
 
@@ -247,7 +247,7 @@ add_third_party(
 add_third_party(
   xxhash
   GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
-  GIT_TAG v0.6.5
+  GIT_TAG v0.7.0
   SOURCE_SUBDIR cmake_unofficial
   CMAKE_PASS_FLAGS "-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF"
 )
@@ -265,7 +265,7 @@ add_third_party(lz4
 
 add_third_party(crc32c
   GIT_REPOSITORY https://github.com/google/crc32c.git
-  GIT_TAG 1.0.6
+  GIT_TAG 1.0.7
   CMAKE_PASS_FLAGS "-DCRC32C_BUILD_TESTS=OFF -DCRC32C_BUILD_BENCHMARKS=OFF"
 )
 
@@ -318,7 +318,7 @@ ExternalProject_Add_Step(folly_project config
 set(ZSTD_DIR ${THIRD_PARTY_LIB_DIR}/zstd)
 add_third_party(zstd
   GIT_REPOSITORY https://github.com/facebook/zstd.git
-  GIT_TAG v1.3.3
+  GIT_TAG v1.4.0
   BUILD_IN_SOURCE 1
   CONFIGURE_COMMAND echo "foo"
 
@@ -378,7 +378,7 @@ add_third_party(cf_z
 
 add_third_party(intel_z
   GIT_REPOSITORY https://github.com/jtkukunas/zlib.git
-
+  GIT_TAG v1.2.11.1_jtkv6.3
   BUILD_IN_SOURCE 1
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env "CFLAGS=-g -O3"
                     <SOURCE_DIR>/configure --64 --static --const --prefix=${THIRD_PARTY_LIB_DIR}/intel_z
