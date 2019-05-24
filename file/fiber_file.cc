@@ -7,7 +7,9 @@
 #include <atomic>
 
 #include "base/hash.h"
+#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 
 namespace file {
 using namespace util;
@@ -80,9 +82,11 @@ class FiberReadFile : public ReadonlyFile {
   fibers_ext::FiberQueueThreadPool* tp_;
   FiberReadOptions::Stats* stats_ = nullptr;
   fibers_ext::Done done_;
+  base::Histogram tp_wait_hist_;
 
   ssize_t prefetch_res_ = 0;
   uint8_t* prefetch_ptr_ = nullptr;
+  int64_t prefetch_start_ts_ = 0;
 };
 
 class WriteFileImpl : public WriteFile {
@@ -121,6 +125,8 @@ Status FiberReadFile::Close() {
     done_.Wait(AND_RESET);
     prefetch_ptr_ = nullptr;
   }
+  VLOG(1) << "Read Histogram: " << tp_wait_hist_.ToString();
+
   return next_->Close();
 }
 
@@ -132,12 +138,13 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
 
   if (prefetch_ptr_ || !prefetch_.empty()) {
     auto res = ReadFromCache(offset, range);
-    if (!res.second)
+    if (!res.second)  // if we should not issue a prefetch request, we return what we read.
       return res.first;
+
     copied = res.first;
     offset += copied;
   }
-  DCHECK(!prefetch_ptr_);
+  DCHECK(!prefetch_ptr_);  // no active pending requests at this point.
 
   // At this point prefetch_ must point at buf_ and might still contained prefetched slice.
   prefetch_.reset(buf_.get(), prefetch_.size());
@@ -145,53 +152,63 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
   iovec io[2] = {{range.data() + copied, range.size() - copied},
                  {buf_.get() + prefetch_.size(), buf_size_ - prefetch_.size()}};
 
-  if (copied < range.size()) {
+  if (copied < range.size()) {  // We need to issue request to fill this read.
+    int64_t start = base::GetMonotonicMicrosFast();
+
     DCHECK(prefetch_.empty());
 
-    ssize_t res;
+    ssize_t total_read = -1;
 
+    // We issue 2 read requests: to fill user buffer and our prefetch buffer.
     tp_->Add([&] {
-      res = read_all(next_->Handle(), io, 2, offset);
+      total_read = read_all(next_->Handle(), io, 2, offset);
       done_.Notify();
     });
     done_.Wait(AND_RESET);
+    if (VLOG_IS_ON(1)) {
+      tp_wait_hist_.Add(base::GetMonotonicMicrosFast() - start);
+    }
+
     if (stats_) {
       ++stats_->preempt_cnt;
       stats_->disk_bytes += io[0].iov_len;
     }
-    if (res < 0)
+    if (total_read < 0)
       return file::StatusFileError();
-    if (static_cast<size_t>(res) <= io[0].iov_len)  // EOF
-      return res + copied;
+    if (static_cast<size_t>(total_read) <= io[0].iov_len)  // EOF
+      return total_read + copied;
 
     file_prefetch_offset_ = offset + io[0].iov_len;
-    res -= io[0].iov_len;
-    prefetch_.reset(buf_.get(), prefetch_.size() + res);
+    total_read -= io[0].iov_len;  // reduce range part.
+
+    prefetch_.reset(buf_.get(), total_read);
     if (stats_) {
-      stats_->cache_bytes += res;
+      stats_->cache_bytes += total_read;
     }
     return range.size();  // Fully read and possibly some prefetched.
   }
 
-  // else: copied >= range.size() and we did not read from disk yet but we want to prefetch 
+  // else: copied >= range.size() and we did not read from disk yet but we want to prefetch
   // data into non blocking storage.
   prefetch_ptr_ = reinterpret_cast<uint8_t*>(io[1].iov_base);
   struct Pending {
     iovec io;
     size_t offs;
-    fibers_ext::Done done;
-  } pending{io[1], file_prefetch_offset_ + prefetch_.size(), done_};
+  } pending{io[1], file_prefetch_offset_ + prefetch_.size()};
 
   // we filled range but we want to issue a readahead fetch.
   // We must keep reference to done_ in pending because of the shutdown flow.
+  prefetch_start_ts_ = base::GetMonotonicMicrosFast();
   tp_->Add([this, pending = std::move(pending)]() mutable {
     prefetch_res_ = read_all(next_->Handle(), &pending.io, 1, pending.offs);
-    pending.done.Notify();
+    done_.Notify();
   });
 
   return range.size();
 }
 
+// Returns how much was read from cache and whether we should issue prefetch request following
+// this read.
 std::pair<size_t, bool> FiberReadFile::ReadFromCache(size_t offset,
                                                      const strings::MutableByteRange& range) {
   bool should_prefetch =
@@ -239,6 +256,10 @@ void FiberReadFile::HandleActivePrefetch() {
     DCHECK_LE(prefetch_.end() - buf_.get(), buf_size_);
     if (stats_) {
       if (preempt) {
+        if (VLOG_IS_ON(1)) {
+          auto delta = base::GetMonotonicMicrosFast() - prefetch_start_ts_;
+          tp_wait_hist_.Add(delta);
+        }
         ++stats_->preempt_cnt;
         stats_->disk_bytes += prefetch_res_;
       } else {
@@ -254,9 +275,9 @@ void FiberReadFile::HandleActivePrefetch() {
 
 StatusObject<size_t> FiberReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
   StatusObject<size_t> res;
-  if (buf_) {
+  if (buf_) {  // prefetch enabled.
     res = ReadAndPrefetch(offset, range);
-    VLOG(1) << "ReadAndPrefetch " << offset << "/" << res.obj;
+    VLOG(2) << "ReadAndPrefetch " << offset << "/" << res.obj;
     return res;
   }
 

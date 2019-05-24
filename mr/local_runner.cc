@@ -7,7 +7,9 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 
 #include "file/fiber_file.h"
 #include "file/file_util.h"
@@ -95,12 +97,11 @@ void BufferedWriter::Write(StringPiece src) {
     VLOG(2) << "Flush " << ++flushes;
 
     dh_->Write(std::move(buffer_));
+    buffer_.clear();
   }
 }
 
-LocalContext::LocalContext(DestFileSet* mgr) :  mgr_(mgr) {
-  CHECK(mgr_);
-}
+LocalContext::LocalContext(DestFileSet* mgr) : mgr_(mgr) { CHECK(mgr_); }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   auto it = custom_shard_files_.find(shard_id);
@@ -167,6 +168,9 @@ struct LocalRunner::Impl {
 
   util::StatusObject<file::ReadonlyFile*> OpenReadFile(const std::string& filename,
                                                        file::FiberReadOptions::Stats* stats);
+
+  void ShutDown();
+
   // private:
 
   void LazyGcsInit();
@@ -181,12 +185,21 @@ struct LocalRunner::Impl {
 
   fibers::mutex gce_mu;
   std::unique_ptr<GCE> gce_handle;
-  static thread_local std::unique_ptr<GcsHandle> gcs_handle;
+
+ private:
+  struct PerThread {
+    absl::optional<GcsHandle> gcs_handle;
+    base::Histogram record_fetch_hist;
+  };
+  static thread_local std::unique_ptr<PerThread> per_thread_;
 };
 
-thread_local std::unique_ptr<GcsHandle> LocalRunner::Impl::gcs_handle;
+thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
 
 uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
+  if (!per_thread_)
+    per_thread_.reset(new PerThread{});
+
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -194,17 +207,24 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
   string scratch;
 
   uint64_t cnt = 0;
+  uint64_t start = base::GetMonotonicMicrosFast();
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
-
+    if (VLOG_IS_ON(1)) {
+      int64_t delta = base::GetMonotonicMicrosFast() - start;
+      if (delta > 5) // Filter out uninteresting fast Next calls.
+        per_thread_->record_fetch_hist.Add(delta);
+    }
     VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
     if (cnt % 1000 == 0) {
       this_fiber::yield();
     }
     cb(std::move(tmp));
+    start = base::GetMonotonicMicrosFast();
   }
   VLOG(1) << "ProcessText Read " << cnt << " items";
+
   return cnt;
 }
 
@@ -260,8 +280,8 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
 
   auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) { cb(GCS::ToGcsPath(bucket, s)); };
 
-  std::lock_guard<fibers::mutex> lk(gcs_handle->mu);
-  auto status = gcs_handle->gcs.List(bucket, path, true, cb2);
+  std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
+  auto status = per_thread_->gcs_handle->gcs.List(bucket, path, true, cb2);
   CHECK_STATUS(status);
 }
 
@@ -270,7 +290,7 @@ util::StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenReadFile(
   if (util::IsGcsPath(filename)) {
     LazyGcsInit();
 
-    return gcs_handle->gcs.OpenGcsFile(filename);
+    return per_thread_->gcs_handle->gcs.OpenGcsFile(filename);
   }
 
   file::FiberReadOptions opts;
@@ -281,6 +301,9 @@ util::StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenReadFile(
 }
 
 void LocalRunner::Impl::LazyGcsInit() {
+  if (!per_thread_) {
+    per_thread_.reset(new PerThread);
+  }
   {
     std::lock_guard<fibers::mutex> lk(gce_mu);
     if (!gce_handle) {
@@ -290,16 +313,24 @@ void LocalRunner::Impl::LazyGcsInit() {
   }
 
   // Lazy init of per-thread gcs handle.
-  if (gcs_handle)
+  if (per_thread_->gcs_handle.has_value())
     return;
 
   IoContext* io_context = io_pool->GetThisContext();
   CHECK(io_context) << "Must run from IO context thread";
-  gcs_handle.reset(new GcsHandle{*gce_handle, io_context});
+  per_thread_->gcs_handle.emplace(*gce_handle, io_context);
 
-  std::lock_guard<fibers::mutex> lk(gcs_handle->mu);
-  auto status = gcs_handle->gcs.Connect(kGcsConnectTimeout);
+  std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
+  auto status = per_thread_->gcs_handle->gcs.Connect(kGcsConnectTimeout);
   CHECK_STATUS(status);
+}
+
+void LocalRunner::Impl::ShutDown() {
+  if (per_thread_) {
+    VLOG(1) << "Histgram Latency: " << per_thread_->record_fetch_hist.ToString();
+
+    per_thread_->gcs_handle.reset();
+  }
 }
 
 /* LocalRunner implementation
@@ -314,7 +345,9 @@ void LocalRunner::Init() { file_util::RecursivelyCreateDir(impl_->data_dir, 0750
 
 void LocalRunner::Shutdown() {
   impl_->fq_pool.Shutdown();
-  impl_->io_pool->AwaitFiberOnAll([this] (IoContext&) { impl_->gcs_handle.reset(); });
+  impl_->io_pool->AwaitFiberOnAll([this](IoContext&) {
+    impl_->ShutDown();
+  });
 
   LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }
