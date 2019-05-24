@@ -20,7 +20,7 @@ using namespace std;
 using namespace boost;
 using namespace util;
 
-DEFINE_bool(compress, false, "");
+DEFINE_string(compress, "gzip", "can be '', 'gzip' or 'zstd'");
 DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
 
@@ -45,8 +45,14 @@ int main(int argc, char** argv) {
 
   StringTable ss = pipeline->ReadText("inp1", inputs);
   auto& outp = ss.Write("outp1", pb::WireFormat::TXT).WithCustomSharding(ShardNameFunc);
-  if (FLAGS_compress) {
-    outp.AndCompress(pb::Output::GZIP);
+  if (!FLAGS_compress.empty()) {
+    if (FLAGS_compress == "gzip")
+      outp.AndCompress(pb::Output::GZIP);
+    else if (FLAGS_compress == "zstd") {
+      outp.AndCompress(pb::Output::ZSTD);
+    } else {
+      LOG(FATAL) << "Unknown compress argument " << FLAGS_compress;
+    }
   }
 
   LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);

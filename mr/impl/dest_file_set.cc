@@ -10,17 +10,19 @@
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "file/gzip_file.h"
+#include "util/zlib_source.h"
+#include "util/zstd_sinksource.h"
 
 namespace mr3 {
 namespace detail {
 
-// For some reason enabling local_runner_zsink as true performs slower than
+// For some reason disabling dest_file_force_gzfile performs slower than
 // using GzipFile in the threadpool. I think there is something to dig here and I think
 // compress operations should not be part of the FiberQueueThreadPool workload but after spending
-// quite some time I am giving up.
+// quite some time I am lowering the priority of this.
 // TODO: to implement compress directly using zlib interface an not using zlibsink/stringsink
 // abstractions.
-DEFINE_bool(local_runner_zsink, false, "");
+DEFINE_bool(dest_file_force_gzfile, true, "");
 
 using namespace boost;
 using namespace std;
@@ -43,9 +45,14 @@ string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
   if (pb_out.format().type() == pb::WireFormat::TXT) {
     absl::StrAppend(&res, ".txt");
     if (pb_out.has_compress()) {
-      if (pb_out.compress().type() == pb::Output::GZIP) {
-        absl::StrAppend(&res, ".gz");
-      } else {
+      switch(pb_out.compress().type()) {
+        case pb::Output::GZIP:
+          absl::StrAppend(&res, ".gz");
+          break;
+        case pb::Output::ZSTD:
+          absl::StrAppend(&res, ".zst");
+          break;
+        default:
         LOG(FATAL) << "Not supported " << pb_out.compress().ShortDebugString();
       }
     }
@@ -66,6 +73,91 @@ inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
   };
 }
 
+class CompressHandle : public DestHandle {
+ public:
+  CompressHandle(DestFileSet* owner, const ShardId& sid);
+
+  void Write(std::string str) override;
+  void Close() override;
+
+ private:
+  void Open() override;
+
+  size_t start_delta_ = 0;
+  util::StringSink* str_sink_ = nullptr;
+  std::unique_ptr<util::Sink> compress_sink_;
+
+  boost::fibers::mutex zmu_;
+};
+
+class LstHandle : public DestHandle {
+ public:
+  LstHandle(DestFileSet* owner, const ShardId& sid);
+
+  void Write(std::string str) override;
+  void Close() override;
+
+ private:
+  void Open() override;
+
+  std::unique_ptr<file::ListWriter> lst_writer_;
+  boost::fibers::mutex mu_;
+};
+
+
+void CompressHandle::Open() {
+  wf_ = Await([&] { return file::Open(full_path_); });
+  CHECK(wf_);
+}
+
+void CompressHandle::Write(std::string str) {
+  std::unique_lock<fibers::mutex> lk(zmu_);
+  CHECK_STATUS(compress_sink_->Append(strings::ToByteRange(str)));
+  if (str_sink_->contents().size() >= kBufLimit - start_delta_) {
+    str.clear();
+    str.swap(str_sink_->contents());
+
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(str), wf_));
+    start_delta_ = 0;
+  }
+}
+
+void CompressHandle::Close() {
+  CHECK_STATUS(compress_sink_->Flush());
+
+  if (!str_sink_->contents().empty()) {
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+  }
+
+  DestHandle::Close();
+}
+
+LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
+
+void LstHandle::Write(std::string str) {
+  std::unique_lock<fibers::mutex> lk(mu_);
+  CHECK_STATUS(lst_writer_->AddRecord(str));
+}
+
+void LstHandle::Open() {
+  CHECK(!owner_->output().has_compress());
+  DestHandle::Open();
+
+  util::Sink* fs = new file::Sink{wf_, DO_NOT_TAKE_OWNERSHIP};
+  lst_writer_.reset(new file::ListWriter{fs});
+  CHECK_STATUS(lst_writer_->Init());
+}
+
+void LstHandle::Close() {
+  CHECK_STATUS(lst_writer_->Flush());
+
+  DestHandle::Close();
+}
+
+bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
+  return !(FLAGS_dest_file_force_gzfile && pb_cmpr.type() == pb::Output::GZIP);
+}
+
 }  // namespace
 
 DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
@@ -78,8 +170,11 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   if (it == dest_files_.end()) {
     std::unique_ptr<DestHandle> dh;
 
-    if (FLAGS_local_runner_zsink && pb_out_.has_compress()) {
-      dh.reset(new ZlibHandle{this, sid});
+    if (pb_out_.format().type() == pb::WireFormat::LST) {
+      dh.reset(new LstHandle{this, sid});
+    } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT
+        && AllowCompressHandle(pb_out_.compress())) {
+      dh.reset(new CompressHandle{this, sid});
     } else {
       dh.reset(new DestHandle{this, sid});
     }
@@ -171,7 +266,6 @@ void DestHandle::AppendThreadLocal(const std::string& str) {
   return wf;
 }
 
-
 void DestHandle::Write(string str) {
   owner_->pool()->Add(fq_index_, [this, str = std::move(str)] { AppendThreadLocal(str); });
 }
@@ -181,13 +275,11 @@ void DestHandle::Open() {
   StringPiece dirname = file_util::DirName(full_path_);
 
   // TODO: change for all functions expecting null-terminated string to explicitly accept it.
-  // I call again RecursivelyCreateDir because shards may 
+  // I call again RecursivelyCreateDir because shards may
   // have subdirectories specified by the user.
   file_util::RecursivelyCreateDir(string(dirname), 0755);
 
-  wf_ = Await([this] {
-    return OpenThreadLocal(owner_->output(), full_path_);
-  });
+  wf_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
 }
 
 void DestHandle::Close() {
@@ -202,65 +294,22 @@ void DestHandle::Close() {
   wf_ = nullptr;
 }
 
-ZlibHandle::ZlibHandle(DestFileSet* owner, const ShardId& sid)
+CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
     : DestHandle(owner, sid), str_sink_(new StringSink) {
-  CHECK_EQ(pb::Output::GZIP, owner->output().compress().type());
 
   static std::default_random_engine rnd;
-
-  zlib_sink_.reset(new ZlibSink(str_sink_, owner->output().compress().level()));
 
   // Randomize when we flush first for each handle. That should define uniform flushing cycle
   // for all handles.
   start_delta_ = rnd() % (kBufLimit - 1);
-}
-
-void ZlibHandle::Open() {
-  wf_ = Await([&] { return file::Open(full_path_); });
-  CHECK(wf_);
-}
-
-void ZlibHandle::Write(std::string str) {
-  std::unique_lock<fibers::mutex> lk(zmu_);
-  CHECK_STATUS(zlib_sink_->Append(strings::ToByteRange(str)));
-  str.clear();
-  if (str_sink_->contents().size() >= kBufLimit - start_delta_) {
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
-    start_delta_ = 0;
+  auto level = owner->output().compress().level();
+  if (owner->output().compress().type() == pb::Output::GZIP) {
+    compress_sink_.reset(new ZlibSink(str_sink_, level));
+  } else if (owner->output().compress().type() == pb::Output::ZSTD) {
+    std::unique_ptr<ZStdSink> zsink{new ZStdSink(str_sink_)};
+    CHECK_STATUS(zsink->Init(level));
+    compress_sink_ = std::move(zsink);
   }
-}
-
-void ZlibHandle::Close() {
-  CHECK_STATUS(zlib_sink_->Flush());
-
-  if (!str_sink_->contents().empty()) {
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
-  }
-
-  DestHandle::Close();
-}
-
-LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {
-}
-
-void LstHandle::Write(std::string str) {
-  std::unique_lock<fibers::mutex> lk(mu_);
-  CHECK_STATUS(lst_writer_->AddRecord(str));
-}
-
-void LstHandle::Open() {
-  CHECK(!owner_->output().has_compress());
-  DestHandle::Open();
-
-  util::Sink* fs = new file::Sink{wf_, DO_NOT_TAKE_OWNERSHIP};
-  lst_writer_.reset(new file::ListWriter{fs});
-  CHECK_STATUS(lst_writer_->Init());
-}
-
-void LstHandle::Close() {
-  CHECK_STATUS(lst_writer_->Flush());
-
-  DestHandle::Close();
 }
 
 }  // namespace detail

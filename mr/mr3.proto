@@ -54,6 +54,7 @@ message Output {
   enum CompressType {
     NONE = 0;
     GZIP = 1;
+    ZSTD = 2;
   }
 
   message Compress {

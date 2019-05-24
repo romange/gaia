@@ -11,7 +11,6 @@
 #include "file/list_file.h"
 #include "mr/mr_types.h"
 #include "util/fibers/fiberqueue_threadpool.h"
-#include "util/zlib_source.h"
 
 namespace mr3 {
 namespace detail {
@@ -95,38 +94,6 @@ class DestHandle {
   uint32_t fq_index_;
 };
 
-class ZlibHandle : public DestHandle {
-  friend class DestFileSet;
-
-  ZlibHandle(DestFileSet* owner, const ShardId& sid);
-
- public:
-  void Write(std::string str) override;
-  void Close() override;
-
- private:
-  void Open() override;
-
-  size_t start_delta_ = 0;
-  util::StringSink* str_sink_ = nullptr;
-  std::unique_ptr<util::ZlibSink> zlib_sink_;
-
-  boost::fibers::mutex zmu_;
-};
-
-class LstHandle : public DestHandle {
-  LstHandle(DestFileSet* owner, const ShardId& sid);
-
- public:
-  void Write(std::string str) override;
-  void Close() override;
-
- private:
-  void Open() override;
-
-  std::unique_ptr<file::ListWriter> lst_writer_;
-  boost::fibers::mutex mu_;
-};
 
 }  // namespace detail
 }  // namespace mr3
