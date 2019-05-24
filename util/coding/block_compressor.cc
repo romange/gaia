@@ -17,7 +17,7 @@ using std::ostream;
 
 ostream& operator<<(ostream& os, const ZSTD_parameters& p) {
   os << "wlog: " << p.cParams.windowLog << ", clog: " << p.cParams.chainLog << ", strategy: "
-     << p.cParams.strategy << ", slen: " << p.cParams.searchLength << ", cntflag: "
+     << p.cParams.strategy << ", slog: " << p.cParams.searchLog << ", cntflag: "
      << p.fParams.contentSizeFlag << ", hashlog: " << p.cParams.hashLog;
   return os;
 }
