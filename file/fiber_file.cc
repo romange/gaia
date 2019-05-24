@@ -84,7 +84,7 @@ class FiberReadFile : public ReadonlyFile {
   fibers_ext::Done done_;
   base::Histogram tp_wait_hist_;
 
-  ssize_t prefetch_res_ = 0;
+  std::atomic<ssize_t> prefetch_res_{0};
   uint8_t* prefetch_ptr_ = nullptr;
   int64_t prefetch_start_ts_ = 0;
 };
@@ -200,7 +200,8 @@ StatusObject<size_t> FiberReadFile::ReadAndPrefetch(size_t offset,
   // We must keep reference to done_ in pending because of the shutdown flow.
   prefetch_start_ts_ = base::GetMonotonicMicrosFast();
   tp_->Add([this, pending = std::move(pending)]() mutable {
-    prefetch_res_ = read_all(next_->Handle(), &pending.io, 1, pending.offs);
+    prefetch_res_.store(read_all(next_->Handle(), &pending.io, 1, pending.offs),
+                        std::memory_order_release);
     done_.Notify();
   });
 
@@ -244,14 +245,15 @@ std::pair<size_t, bool> FiberReadFile::ReadFromCache(size_t offset,
 }
 
 void FiberReadFile::HandleActivePrefetch() {
-  bool preempt = done_.Wait(AND_RESET);
+  bool preempt = done_.Wait(AND_RESET);  // wait for the active prefetch to finish.
+  size_t prefetch_res = prefetch_res_.load(std::memory_order_acquire);
 
-  if (prefetch_res_ > 0) {
+  if (prefetch_res > 0) {
     if (prefetch_.empty()) {
-      prefetch_.reset(prefetch_ptr_, prefetch_res_);
+      prefetch_.reset(prefetch_ptr_, prefetch_res);
     } else {
       CHECK(prefetch_.end() == prefetch_ptr_);
-      prefetch_.reset(prefetch_.data(), prefetch_res_ + prefetch_.size());
+      prefetch_.reset(prefetch_.data(), prefetch_res + prefetch_.size());
     }
     DCHECK_LE(prefetch_.end() - buf_.get(), buf_size_);
     if (stats_) {
@@ -261,9 +263,9 @@ void FiberReadFile::HandleActivePrefetch() {
           tp_wait_hist_.Add(delta);
         }
         ++stats_->preempt_cnt;
-        stats_->disk_bytes += prefetch_res_;
+        stats_->disk_bytes += prefetch_res;
       } else {
-        stats_->cache_bytes += prefetch_res_;
+        stats_->cache_bytes += prefetch_res;
       }
     }
   } else {
