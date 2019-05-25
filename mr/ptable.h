@@ -80,7 +80,7 @@ template <typename OutT> class PTable {
   PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
 
  protected:
-  using TableImpl = detail::TableImpl<OutT>;
+  using TableImpl = detail::TableImplT<OutT>;
 
   explicit PTable(TableImpl* impl) : impl_(impl) {}
 
@@ -100,7 +100,7 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
                 "MapperType::Do() first argument "
                 "should be constructed from PTable element type");
 
-  auto* res = detail::TableImpl<NewOutType>::template AsMapFrom<MapType>(
+  auto* res = detail::TableImplT<NewOutType>::template AsMapFrom<MapType>(
       name, impl_.get(), std::forward<Args>(args)...);
   return PTable<NewOutType>{res};
 }

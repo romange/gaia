@@ -12,7 +12,7 @@
 namespace mr3 {
 
 namespace detail {
-  template <typename OutT> class TableImpl;
+  template <typename OutT> class TableImplT;
 }
 
 class OutputBase {
@@ -32,7 +32,7 @@ class OutputBase {
 };
 
 template <typename T> class Output : public OutputBase {
-  friend class detail::TableImpl<T>;  // To allow the instantiation of Output<T>;
+  friend class detail::TableImplT<T>;  // To allow the instantiation of Output<T>;
 
   using CustomShardingFunc = std::function<std::string(const T&)>;
   using ModNShardingFunc = std::function<unsigned(const T&)>;

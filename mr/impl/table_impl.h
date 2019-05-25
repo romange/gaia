@@ -143,7 +143,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
   void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
 };
 
-class TableBase {
+class TableBase : public std::enable_shared_from_this<TableBase> {
  public:
   TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
 
@@ -169,10 +169,10 @@ class TableBase {
     is_identity_ = true;
   }
 
-  TableBase* Clone() { return new TableBase(op_, pipeline_); }
+  std::shared_ptr<TableBase> Clone() { return std::make_shared<TableBase>(op_, pipeline_); }
   HandlerWrapperBase* CreateHandler(RawContext* context);
 
-  TableBase* MappedTableFromMe(const std::string& name) const;
+  std::shared_ptr<TableBase> MappedTableFromMe(const std::string& name) const;
   void CheckFailIdentity();
 
  private:
@@ -219,11 +219,11 @@ template <typename Handler, typename ToType> class HandlerBinding {
   RawSinkMethodFactory<Handler, ToType> setup_func_;
 };
 
-// I need this class because I bind TableBase functions to output object contained in the class.
+// I need TableImplT because I bind TableBase functions to output object contained in the class.
 // Therefore TableBase and Output must be moved together.
-template <typename OutT> class TableImpl {
+template <typename OutT> class TableImplT {
   // apparently classes of different types can not access own members.
-  template <typename T> friend class TableImpl;
+  template <typename T> friend class TableImplT;
 
  public:
   Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
@@ -233,18 +233,18 @@ template <typename OutT> class TableImpl {
   }
 
   // Identity Factory
-  static TableImpl<OutT>* AsIdentity(TableBase* tb) {
-    TableImpl* res = new TableImpl(tb);
+  static TableImplT<OutT>* AsIdentity(std::shared_ptr<TableBase> tb) {
+    TableImplT* res = new TableImplT(tb);
     tb->SetIdentity(&res->output_, DefaultParser<OutT>{});
     return res;
   }
 
   // Map factory
   template <typename MapType, typename FromType, typename... Args>
-  static TableImpl<OutT>* AsMapFrom(const std::string& name, const TableImpl<FromType>* ptr,
+  static TableImplT<OutT>* AsMapFrom(const std::string& name, const TableImplT<FromType>* ptr,
                                     Args&&... args) {
-    TableBase* new_tb = ptr->table_->MappedTableFromMe(name);
-    TableImpl* res = new TableImpl(new_tb);
+    auto new_tb = ptr->table_->MappedTableFromMe(name);
+    TableImplT* res = new TableImplT(new_tb);
     new_tb->SetHandlerFactory([res, args...](RawContext* raw_ctxt) {
       auto* ptr = new HandlerWrapper<MapType, OutT>(res->output_, raw_ctxt, args...);
       ptr->template Add<FromType>(&MapType::Do);
@@ -254,9 +254,9 @@ template <typename OutT> class TableImpl {
     return res;
   }
 
-  template <typename U> TableImpl<U>* As() const {
+  template <typename U> TableImplT<U>* As() const {
     table_->CheckFailIdentity();
-    return TableImpl<U>::AsIdentity(table_->Clone());
+    return TableImplT<U>::AsIdentity(table_->Clone());
   }
 
   template <typename Handler, typename ToType, typename U>
@@ -265,10 +265,10 @@ template <typename OutT> class TableImpl {
   }
 
   template <typename JoinerType>
-  static TableImpl<OutT>* AsJoin(TableBase* ptr,
+  static TableImplT<OutT>* AsGroup(std::shared_ptr<TableBase> tbase,
                                  std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
-    TableImpl* res = new TableImpl(ptr);
-    ptr->SetHandlerFactory([res, factories = std::move(factories)](RawContext* raw_ctxt) {
+    TableImplT* res = new TableImplT(tbase);
+    tbase->SetHandlerFactory([res, factories = std::move(factories)](RawContext* raw_ctxt) {
       auto* ptr = new HandlerWrapper<JoinerType, OutT>(res->output_, raw_ctxt);
       for (const auto& m : factories) {
         ptr->AddFromFactory(m);
@@ -279,10 +279,10 @@ template <typename OutT> class TableImpl {
   }
 
  private:
-  TableImpl(TableBase* tb) : table_(tb) {}
+  TableImplT(std::shared_ptr<TableBase> tb) : table_(std::move(tb)) {}
 
+  std::shared_ptr<TableBase> table_;
   Output<OutT> output_;
-  std::unique_ptr<TableBase> table_;
 };
 
 }  // namespace detail

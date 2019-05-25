@@ -23,7 +23,7 @@ void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(!name.empty());
 
   if (!op_.has_output()) {
-    pipeline_->tables_.emplace_back(this);
+    pipeline_->tables_.emplace_back(shared_from_this());
   }
 
   auto* out = op_.mutable_output();
@@ -35,12 +35,12 @@ void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(res.second) << "Input '" << name << "' already exists";
 }
 
-TableBase* TableBase::MappedTableFromMe(const string& name) const {
+std::shared_ptr<TableBase> TableBase::MappedTableFromMe(const string& name) const {
   pb::Operator new_op = GetDependeeOp();
   new_op.set_op_name(name);
   new_op.set_type(pb::Operator::MAP);
 
-  return new TableBase(std::move(new_op), pipeline());
+  return make_shared<TableBase>(std::move(new_op), pipeline());
 }
 
 pb::Operator TableBase::GetDependeeOp() const {

@@ -41,7 +41,7 @@ PInput<std::string> Pipeline::Read(const std::string& name, pb::WireFormat::Type
     inp_ptr->mutable_msg()->add_file_spec()->CopyFrom(s);
   }
 
-  detail::TableBase* ptr = CreateTableImpl(name);
+  auto ptr = CreateTableImpl(name);
   ptr->mutable_op()->add_input_name(name);
 
   return PInput<std::string>(ptr, inp_ptr.get());
@@ -60,8 +60,8 @@ void Pipeline::Stop() {
 void Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
 
-  for (auto ptr : tables_) {
-    const pb::Operator& op = ptr->op();
+  for (const auto& sptr : tables_) {
+    const pb::Operator& op = sptr->op();
 
     if (op.input_name_size() == 0) {
       LOG(INFO) << "No inputs for " << op.op_name() << ", skipping";
@@ -94,7 +94,7 @@ void Pipeline::Run(Runner* runner) {
 
     LOG(INFO) << op.op_name() << " started on inputs [" << input_names << "]";
     ShardFileMap out_files;
-    executor_->Run(inputs, ptr, &out_files);
+    executor_->Run(inputs, sptr.get(), &out_files);
     LOG(INFO) << op.op_name() << " finished run with " << out_files.size() << " output files";
 
     // Fill the corresponsing input with sharded files.
