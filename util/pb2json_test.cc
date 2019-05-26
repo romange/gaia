@@ -130,6 +130,10 @@ TEST_F(Pb2JsonTest, Double) {
   p.set_fval(-111.814903f);
   res = Pb2Json(p);
   EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-111.8149})", res);
+
+  p.set_fval(-157.96519);
+  res = Pb2Json(p);
+  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-157.96519})", res);
 }
 
 TEST_F(Pb2JsonTest, Options) {
