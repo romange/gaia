@@ -117,8 +117,8 @@ TEST_F(Pb2JsonTest, EnumAndRepeated) {
 
 TEST_F(Pb2JsonTest, Double) {
   static_assert(26.100000381f == 26.1f, "");
-  absl::AlphaNum al(26.1f);
-  EXPECT_EQ(4, al.size());
+  absl::AlphaNum alnum1(26.1f);
+  EXPECT_EQ(4, alnum1.size());
 
   Person p;
   p.set_fval(26.1f);
@@ -126,6 +126,10 @@ TEST_F(Pb2JsonTest, Double) {
 
   // We use RawValue with AlphaNum internally to allow correct float outputs.
   EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":26.1})", res);
+
+  p.set_fval(-111.814903f);
+  res = Pb2Json(p);
+  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-111.8149})", res);
 }
 
 TEST_F(Pb2JsonTest, Options) {

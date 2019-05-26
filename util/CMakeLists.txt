@@ -8,7 +8,7 @@ add_library(util zlib_source.cc bzip_source.cc
 cxx_link(util strings status TRDP::lz4 TRDP::zstd bz2 TRDP::intel_z)
 
 add_library(pb2json pb2json.cc)
-cxx_link(pb2json strings status TRDP::protobuf TRDP::rapidjson absl_variant)
+cxx_link(pb2json strings status TRDP::protobuf TRDP::rapidjson absl_variant absl_str_format)
 add_dependencies(pb2json rapidjson_project)
 
 add_library(sp_task_pool sp_task_pool.cc)

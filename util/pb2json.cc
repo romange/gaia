@@ -11,6 +11,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/types/optional.h"
 #include "absl/types/variant.h"
 
@@ -74,8 +75,10 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
       res->Uint64(refl->GetUInt64(msg, fd));
       break;
     case FD::CPPTYPE_FLOAT: {
-      absl::AlphaNum al(refl->GetFloat(msg, fd));
-      res->RawValue(al.data(), al.size(), rj::kNumberType);
+      float fval = refl->GetFloat(msg, fd);
+      char buf[32];
+      int sz = absl::SNPrintF(buf, sizeof(buf), "%.7g", fval);
+      res->RawValue(buf, sz, rj::kNumberType);
     } break;
     case FD::CPPTYPE_DOUBLE:
       res->Double(refl->GetDouble(msg, fd));
