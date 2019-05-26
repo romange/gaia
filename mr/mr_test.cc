@@ -316,13 +316,13 @@ TEST_F(MrTest, PbLst) {
 TEST_F(MrTest, Scope) {
   vector<string> stream1{"1", "2", "3", "4"};
   runner_.AddInputRecords("stream1.txt", stream1);
-  LOG(ERROR) << "TBD: this test";
-  return;
   {
     PTable<string> table = pipeline_->ReadText("read1", "stream1.txt");
     table.Write("w1", pb::WireFormat::TXT).WithModNSharding(10, [](const auto&) { return 1;});
   }
   pipeline_->Run(&runner_);
+
+  EXPECT_THAT(runner_.Table("w1"), UnorderedElementsAre(MatchShard(1, stream1)));
 }
 
 static void BM_ShardAndWrite(benchmark::State& state) {

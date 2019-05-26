@@ -191,34 +191,6 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
   bool is_identity_ = true;
 };
 
-template <typename Handler, typename ToType> class HandlerBinding {
-  HandlerBinding(const TableBase* from) : tbase_(from) {}
-
- public:
-  // This C'tor eliminates FromType and U and leaves common types (Joiner and ToType).
-  template <typename FromType, typename U>
-  static HandlerBinding<Handler, ToType> Create(const TableBase* from,
-                                                EmitMemberFn<U, Handler, ToType> ptr) {
-    HandlerBinding<Handler, ToType> res(from);
-    res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
-      auto do_fn = [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
-        return (handler->*ptr)(std::move(val), cntx);
-      };
-      return [do_fn, context, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
-        ParseAndDo<FromType>(&parser, context, std::move(do_fn), std::move(rr));
-      };
-    };
-    return res;
-  }
-
-  const TableBase* tbase() const { return tbase_; }
-  RawSinkMethodFactory<Handler, ToType> factory() const { return setup_func_; }
-
- private:
-  const TableBase* tbase_;
-  RawSinkMethodFactory<Handler, ToType> setup_func_;
-};
-
 // I need TableImplT because I bind TableBase functions to output object contained in the class.
 // Therefore TableBase and Output must be moved together.
 template <typename OutT> class TableImplT : public TableBase {
@@ -298,6 +270,34 @@ template <typename OutT> class TableImplT : public TableBase {
 
  private:
   Output<OutT> output_;
+};
+
+template <typename Handler, typename ToType> class HandlerBinding {
+  HandlerBinding(const TableBase* from) : tbase_(from) {}
+
+ public:
+  // This C'tor eliminates FromType and U and leaves common types (Joiner and ToType).
+  template <typename FromType, typename U>
+  static HandlerBinding<Handler, ToType> Create(const TableBase* from,
+                                                EmitMemberFn<U, Handler, ToType> ptr) {
+    HandlerBinding<Handler, ToType> res(from);
+    res.setup_func_ = [ptr](Handler* handler, DoContext<ToType>* context) {
+      auto do_fn = [handler, ptr](FromType&& val, DoContext<ToType>* cntx) {
+        return (handler->*ptr)(std::move(val), cntx);
+      };
+      return [do_fn, context, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
+        ParseAndDo<FromType>(&parser, context, std::move(do_fn), std::move(rr));
+      };
+    };
+    return res;
+  }
+
+  const TableBase* tbase() const { return tbase_; }
+  RawSinkMethodFactory<Handler, ToType> factory() const { return setup_func_; }
+
+ private:
+  const TableBase* tbase_;
+  RawSinkMethodFactory<Handler, ToType> setup_func_;
 };
 
 }  // namespace detail
