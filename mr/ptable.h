@@ -75,14 +75,14 @@ template <typename OutT> class PTable {
     return impl_->BindWith(ptr);
   }
 
-  template <typename U> PTable<U> As() const { return PTable<U>{impl_->template As<U>()}; }
+  template <typename U> PTable<U> As() const { return PTable<U>{impl_->template Rebind<U>()}; }
 
   PTable<rapidjson::Document> AsJson() const { return As<rapidjson::Document>(); }
 
  protected:
   using TableImpl = detail::TableImplT<OutT>;
 
-  explicit PTable(TableImpl* impl) : impl_(impl) {}
+  explicit PTable(std::shared_ptr<TableImpl> impl) : impl_(std::move(impl)) {}
 
   std::shared_ptr<TableImpl> impl_;
 };
@@ -100,9 +100,9 @@ PTable<typename detail::MapperTraits<MapType>::OutputType> PTable<OutT>::Map(
                 "MapperType::Do() first argument "
                 "should be constructed from PTable element type");
 
-  auto* res = detail::TableImplT<NewOutType>::template AsMapFrom<MapType>(
+  auto res = detail::TableImplT<NewOutType>::template AsMapFrom<MapType>(
       name, impl_.get(), std::forward<Args>(args)...);
-  return PTable<NewOutType>{res};
+  return PTable<NewOutType>{std::move(res)};
 }
 
 template <> class RecordTraits<rapidjson::Document> {

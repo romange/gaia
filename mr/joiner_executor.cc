@@ -47,9 +47,10 @@ void JoinerExecutor::Init() {}
 
 void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
                          ShardFileMap* out_files) {
-  CHECK_EQ(tb->op().type(), pb::Operator::HASH_JOIN);
+  CHECK_EQ(tb->op().type(), pb::Operator::GROUP);
   if (inputs.empty())
     return;
+
   CheckInputs(inputs);
 
   // ProcessInputQ uses runner_ immediately when starts.

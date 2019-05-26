@@ -19,6 +19,8 @@ namespace rj = rapidjson;
 
 namespace detail {
 
+TableBase::~TableBase() {}
+
 void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(!name.empty());
 
@@ -35,12 +37,12 @@ void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(res.second) << "Input '" << name << "' already exists";
 }
 
-std::shared_ptr<TableBase> TableBase::MappedTableFromMe(const string& name) const {
+pb::Operator TableBase::CreateMapOp(const string& name) const {
   pb::Operator new_op = GetDependeeOp();
   new_op.set_op_name(name);
   new_op.set_type(pb::Operator::MAP);
 
-  return make_shared<TableBase>(std::move(new_op), pipeline());
+  return new_op;
 }
 
 pb::Operator TableBase::GetDependeeOp() const {
@@ -57,12 +59,12 @@ pb::Operator TableBase::GetDependeeOp() const {
 }
 
 HandlerWrapperBase* TableBase::CreateHandler(RawContext* context) {
-  CHECK(defined());
+  CHECK(defined()) << op_.DebugString();
 
   return handler_factory_(context);
 }
 
-void TableBase::CheckFailIdentity() { CHECK(defined() && is_identity_); }
+void TableBase::CheckFailIdentity() const { CHECK(defined() && is_identity_); }
 
 }  // namespace detail
 

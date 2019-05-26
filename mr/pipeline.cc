@@ -41,10 +41,15 @@ PInput<std::string> Pipeline::Read(const std::string& name, pb::WireFormat::Type
     inp_ptr->mutable_msg()->add_file_spec()->CopyFrom(s);
   }
 
-  auto ptr = CreateTableImpl(name);
-  ptr->mutable_op()->add_input_name(name);
+  pb::Operator op;
+  op.set_op_name(name);
+  op.add_input_name(name);
 
-  return PInput<std::string>(ptr, inp_ptr.get());
+  using StringImpl = detail::TableImplT<string>;
+
+  shared_ptr<StringImpl> ptr = StringImpl::AsRead(std::move(op), this);
+
+  return PInput<std::string>(std::move(ptr), inp_ptr.get());
 }
 
 void Pipeline::Stop() {
@@ -74,7 +79,7 @@ void Pipeline::Run(Runner* runner) {
 
     std::unique_lock<fibers::mutex> lk(mu_);
     switch (op.type()) {
-      case pb::Operator::HASH_JOIN:
+      case pb::Operator::GROUP:
         executor_.reset(new JoinerExecutor{pool_, runner});
         break;
       default:

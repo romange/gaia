@@ -61,6 +61,7 @@ class HandlerWrapperBase {
   virtual void OnShardFinish() {}
 
   void set_binary_format(bool is_binary) { is_binary_ = is_binary; }
+
  protected:
   template <typename F> void AddFn(F&& f) { raw_fn_vec_.emplace_back(std::forward<F>(f)); }
   bool is_binary_ = false;
@@ -83,8 +84,7 @@ template <typename T> class DefaultParser {
 };
 
 template <typename FromType, typename Parser, typename DoFn, typename ToType>
-void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn,
-                RawRecord&& rr) {
+void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRecord&& rr) {
   FromType tmp_rec;
   bool parse_ok = (*parser)(context->raw()->is_binary(), std::move(rr), &tmp_rec);
 
@@ -100,9 +100,9 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   DoContext<ToType> do_ctx_;
 
  public:
-  template<typename... Args>
-    HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
-     : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
+  template <typename... Args>
+  HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
+      : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
 
   void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
 
@@ -145,10 +145,6 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
 
 class TableBase : public std::enable_shared_from_this<TableBase> {
  public:
-  TableBase(const std::string& nm, Pipeline* owner) : pipeline_(owner) { op_.set_op_name(nm); }
-
-  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
-
   const pb::Operator& op() const { return op_; }
   pb::Operator* mutable_op() { return &op_; }
 
@@ -161,6 +157,12 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
     is_identity_ = false;
   }
 
+  HandlerWrapperBase* CreateHandler(RawContext* context);
+
+ protected:
+  TableBase(pb::Operator op, Pipeline* owner) : op_(std::move(op)), pipeline_(owner) {}
+  virtual ~TableBase() = 0;
+
   template <typename OutT, typename Parser>
   void SetIdentity(const Output<OutT>* outp, Parser parser) {
     handler_factory_ = [outp, parser = std::move(parser)](RawContext* raw_ctxt) {
@@ -169,11 +171,9 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
     is_identity_ = true;
   }
 
-  std::shared_ptr<TableBase> Clone() { return std::make_shared<TableBase>(op_, pipeline_); }
-  HandlerWrapperBase* CreateHandler(RawContext* context);
+  void CheckFailIdentity() const;
 
-  std::shared_ptr<TableBase> MappedTableFromMe(const std::string& name) const;
-  void CheckFailIdentity();
+  pb::Operator CreateMapOp(const std::string& name) const;
 
  private:
   TableBase(const TableBase&) = delete;
@@ -221,67 +221,82 @@ template <typename Handler, typename ToType> class HandlerBinding {
 
 // I need TableImplT because I bind TableBase functions to output object contained in the class.
 // Therefore TableBase and Output must be moved together.
-template <typename OutT> class TableImplT {
+template <typename OutT> class TableImplT : public TableBase {
   // apparently classes of different types can not access own members.
   template <typename T> friend class TableImplT;
 
  public:
-  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
-    table_->SetOutput(name, type);
-    output_ = Output<OutT>{table_->mutable_op()->mutable_output()};
-    return output_;
-  }
+  TableImplT(pb::Operator op, Pipeline* owner) : TableBase(std::move(op), owner) {}
 
-  // Identity Factory
-  static TableImplT<OutT>* AsIdentity(std::shared_ptr<TableBase> tb) {
-    TableImplT* res = new TableImplT(tb);
-    tb->SetIdentity(&res->output_, DefaultParser<OutT>{});
-    return res;
+  ~TableImplT() override {}
+
+  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
+    SetOutput(name, type);
+    output_ = Output<OutT>{mutable_op()->mutable_output()};
+    return output_;
   }
 
   // Map factory
   template <typename MapType, typename FromType, typename... Args>
-  static TableImplT<OutT>* AsMapFrom(const std::string& name, const TableImplT<FromType>* ptr,
-                                    Args&&... args) {
-    auto new_tb = ptr->table_->MappedTableFromMe(name);
-    TableImplT* res = new TableImplT(new_tb);
-    new_tb->SetHandlerFactory([res, args...](RawContext* raw_ctxt) {
-      auto* ptr = new HandlerWrapper<MapType, OutT>(res->output_, raw_ctxt, args...);
+  static std::shared_ptr<TableImplT<OutT>> AsMapFrom(const std::string& name,
+                                                     TableImplT<FromType>* ptr, Args&&... args) {
+    pb::Operator map_op = ptr->CreateMapOp(name);
+    auto result = std::make_shared<TableImplT<OutT>>(std::move(map_op), ptr->pipeline());
+    result->SetHandlerFactory([&out = result->output_, args...](RawContext* raw_ctxt) {
+      auto* ptr = new HandlerWrapper<MapType, OutT>(out, raw_ctxt, args...);
       ptr->template Add<FromType>(&MapType::Do);
       return ptr;
     });
 
-    return res;
+    return result;
   }
 
-  template <typename U> TableImplT<U>* As() const {
-    table_->CheckFailIdentity();
-    return TableImplT<U>::AsIdentity(table_->Clone());
+  static std::shared_ptr<TableImplT<OutT>> AsRead(pb::Operator op, Pipeline* owner) {
+    auto result = std::make_shared<TableImplT<OutT>>(std::move(op), owner);
+    result->SetIdentity(&result->output_, DefaultParser<OutT>{});
+    return result;
+  }
+
+  template <typename U> std::shared_ptr<TableImplT<U>> Rebind() const {
+    CheckFailIdentity();
+    auto result = std::make_shared<TableImplT<U>>(op(), pipeline());
+    result->SetIdentity(&result->output_, DefaultParser<U>{});
+    return result;
   }
 
   template <typename Handler, typename ToType, typename U>
   HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {
-    return HandlerBinding<Handler, ToType>::template Create<OutT>(table_.get(), ptr);
+    return HandlerBinding<Handler, ToType>::template Create<OutT>(this, ptr);
   }
 
-  template <typename JoinerType>
-  static TableImplT<OutT>* AsGroup(std::shared_ptr<TableBase> tbase,
-                                 std::vector<RawSinkMethodFactory<JoinerType, OutT>> factories) {
-    TableImplT* res = new TableImplT(tbase);
-    tbase->SetHandlerFactory([res, factories = std::move(factories)](RawContext* raw_ctxt) {
-      auto* ptr = new HandlerWrapper<JoinerType, OutT>(res->output_, raw_ctxt);
-      for (const auto& m : factories) {
-        ptr->AddFromFactory(m);
-      }
-      return ptr;
-    });
-    return res;
+  template <typename GrouperType>
+  static std::shared_ptr<TableImplT<OutT>> AsGroup(
+      const std::string& name,
+      std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> args, Pipeline* owner) {
+    pb::Operator op;
+    op.set_op_name(name);
+    op.set_type(pb::Operator::GROUP);
+
+    std::vector<RawSinkMethodFactory<GrouperType, OutT>> factories;
+
+    for (auto& arg : args) {
+      op.add_input_name(arg.tbase()->op().output().name());
+      factories.push_back(arg.factory());
+    }
+
+    auto result = std::make_shared<TableImplT<OutT>>(std::move(op), owner);
+    result->SetHandlerFactory(
+        [&out = result->output_, factories = std::move(factories)](RawContext* raw_ctxt) {
+          auto* ptr = new HandlerWrapper<GrouperType, OutT>(out, raw_ctxt);
+          for (const auto& m : factories) {
+            ptr->AddFromFactory(m);
+          }
+          return ptr;
+        });
+    return result;
   }
 
  private:
-  TableImplT(std::shared_ptr<TableBase> tb) : table_(std::move(tb)) {}
-
-  std::shared_ptr<TableBase> table_;
   Output<OutT> output_;
 };
 

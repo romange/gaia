@@ -77,7 +77,7 @@ message Operator {
 
   enum Type {
     MAP = 1;
-    HASH_JOIN = 2;
+    GROUP = 2;
   }
   optional Type type = 4;
 }

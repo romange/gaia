@@ -19,8 +19,8 @@ class OperatorExecutor;
 template <typename T> class PInput : public PTable<T> {
   friend class Pipeline;
 
-  PInput(std::shared_ptr<detail::TableBase> tbase, InputBase* ib)
-      : PTable<T>(detail::TableImplT<T>::AsIdentity(std::move(tbase))), input_(ib) {}
+  PInput(std::shared_ptr<detail::TableImplT<T>> impl, InputBase* ib)
+    : PTable<T>(std::move(impl)), input_(ib) {}
 
  public:
   PInput<T>& set_skip_header(unsigned num_records) {
@@ -82,10 +82,6 @@ class Pipeline {
 
   const InputBase* CheckedInput(const std::string& name) const;
 
-  std::shared_ptr<detail::TableBase> CreateTableImpl(const std::string& name) {
-    return std::make_shared<detail::TableBase>(name, this);
-  }
-
   util::IoContextPool* pool_;
   absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
   std::vector<std::shared_ptr<detail::TableBase>> tables_;
@@ -98,18 +94,7 @@ class Pipeline {
 template <typename GrouperType, typename OutT>
 PTable<OutT> Pipeline::Join(const std::string& name,
                             std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> args) {
-  auto ptr = CreateTableImpl(name);
-  std::for_each(args.begin(), args.end(), [&](const auto& arg) {
-    ptr->mutable_op()->add_input_name(arg.tbase()->op().output().name());
-  });
-  ptr->mutable_op()->set_type(pb::Operator::HASH_JOIN);
-
-  std::vector<RawSinkMethodFactory<GrouperType, OutT>> factories;
-  for (auto& a : args) {
-    factories.push_back(a.factory());
-  }
-
-  auto* res = detail::TableImplT<OutT>::template AsGroup<GrouperType>(ptr, std::move(factories));
+  auto res = detail::TableImplT<OutT>::template AsGroup<GrouperType>(name, args, this);
   return PTable<OutT>{res};
 }
 
