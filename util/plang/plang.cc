@@ -5,8 +5,9 @@
 
 #include <regex>
 
-#include "base/logging.h"
 #include "absl/strings/ascii.h"
+#include "base/logging.h"
+#include "strings/hash.h"
 #include "util/math/mathutil.h"
 
 #include <google/protobuf/message.h>
@@ -37,14 +38,14 @@ static const gpb::Message* AdvanceState(PathState* state) {
   return nullptr;
 }
 
-static void RetrieveNode(
-  const gpb::Message* msg, StringPiece path, std::function<void(const MsgDscrPair&)> cb) {
+static void RetrieveNode(const gpb::Message* msg, StringPiece path,
+                         std::function<void(const MsgDscrPair&)> cb) {
   MsgDscrPair result(msg, nullptr);
   uint32 start = 0;
 
   // path index, array index, msg, fd
   PathState state;
-  while(result.first != nullptr) {
+  while (result.first != nullptr) {
     size_t next = path.find('.', start);
     StringPiece part = path.substr(start, next - start);
     VLOG(2) << "Looking for " << part << " in " << result.first->GetDescriptor()->name()
@@ -58,8 +59,8 @@ static void RetrieveNode(
       }
       continue;
     }
-    CHECK_EQ(result.second->cpp_type(), gpb::FieldDescriptor::CPPTYPE_MESSAGE) << part
-          << " is not a message.";
+    CHECK_EQ(result.second->cpp_type(), gpb::FieldDescriptor::CPPTYPE_MESSAGE)
+        << part << " is not a message.";
     const gpb::Reflection* refl = result.first->GetReflection();
     start = next + 1;
     if (result.second->is_repeated()) {
@@ -78,7 +79,7 @@ static void RetrieveNode(
 }
 
 double ExprValue::PromoteToDouble() const {
-  switch(type) {
+  switch (type) {
     case CPPTYPE_INT64:
       return val.int_val;
     case CPPTYPE_DOUBLE:
@@ -94,7 +95,7 @@ double ExprValue::PromoteToDouble() const {
 bool ExprValue::Equal(const ExprValue& other) const {
   CppType t1 = type, t2 = other.type;
   if (t1 == t2) {
-    switch(t1) {
+    switch (t1) {
       case CPPTYPE_INT64:
         return val.int_val == other.val.int_val;
       case CPPTYPE_STRING:
@@ -108,7 +109,7 @@ bool ExprValue::Equal(const ExprValue& other) const {
     }
   }
   if (t1 == CPPTYPE_ENUM) {
-    switch(t2) {
+    switch (t2) {
       case CPPTYPE_INT64:
         return val.enum_val->number() == other.val.int_val;
       case CPPTYPE_STRING:
@@ -124,7 +125,7 @@ bool ExprValue::Equal(const ExprValue& other) const {
     return other.Equal(*this);
   }
 
-  if (t1 <= 4) { // integer values
+  if (t1 <= 4) {  // integer values
     CHECK_LE(other.type, 4);
     CHECK_EQ(0, t1 % 2);
     CHECK_EQ(0, t2 % 2);
@@ -164,7 +165,7 @@ bool ExprValue::Less(const ExprValue& other) const {
       return false;
     return val.uint_val < uint64(other.val.int_val);
   }
-  switch(t1) {
+  switch (t1) {
     case CPPTYPE_INT64:
       return val.int_val < other.val.int_val;
     case CPPTYPE_UINT64:
@@ -194,26 +195,26 @@ static void EvalField(Expr::ExprValueCb cb, MsgDscrPair msg_dscr) {
 
   typedef gpb::FieldDescriptor FD;
   if (fd->is_repeated()) {
-    switch(fd->cpp_type()) {
+    switch (fd->cpp_type()) {
       case FD::CPPTYPE_INT32: {
-          const auto& arr = refl->GetRepeatedField<int32>(*pmsg, fd);
-          for (int32 val : arr) {
-            cb(ExprValue::fromInt(val));
-          }
+        const auto& arr = refl->GetRepeatedField<int32>(*pmsg, fd);
+        for (int32 val : arr) {
+          cb(ExprValue::fromInt(val));
         }
+      }
         return;
       case FD::CPPTYPE_UINT32: {
-          const auto& arr = refl->GetRepeatedField<uint32>(*pmsg, fd);
-          for (uint32 val : arr) {
-            cb(ExprValue::fromInt(val));
-          }
+        const auto& arr = refl->GetRepeatedField<uint32>(*pmsg, fd);
+        for (uint32 val : arr) {
+          cb(ExprValue::fromInt(val));
         }
+      }
         return;
       default:
         LOG(FATAL) << "Not supported repeated " << fd->cpp_type_name();
     }
   }
-  switch(fd->cpp_type()) {
+  switch (fd->cpp_type()) {
     case FD::CPPTYPE_INT32:
       cb(ExprValue::fromInt(refl->GetInt32(*pmsg, fd)));
       return;
@@ -256,11 +257,12 @@ void StringTerm::eval(const gpb::Message& msg, ExprValueCb cb) const {
   RetrieveNode(&msg, val_, std::bind(&EvalField, cb, _1));
 }
 
-template<typename T, typename U> bool IsOneOf(T&& t, const U&& u) {
-  return t == u;using namespace std::placeholders;
+template <typename T, typename U> bool IsOneOf(T&& t, const U&& u) {
+  return t == u;
+  using namespace std::placeholders;
 }
 
-template<typename T, typename U1, typename... U2> bool IsOneOf(T&& t, U1&& u, U2&&... rest) {
+template <typename T, typename U1, typename... U2> bool IsOneOf(T&& t, U1&& u, U2&&... rest) {
   return t == u || IsOneOf(t, rest...);
 }
 
@@ -269,84 +271,87 @@ void BinOp::eval(const gpb::Message& msg, ExprValueCb cb) const {
   Expr::ExprValueCb local_cb;
   switch (type_) {
     case EQ:
-       local_cb = [this, &res, &msg](const ExprValue& val_left) {
-               right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
-                            if (val_left.Equal(val_right))
-                              res = true;
-                            return !res;
-                            });
-               return !res;
-               };
-    break;
+      local_cb = [this, &res, &msg](const ExprValue& val_left) {
+        right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
+          if (val_left.Equal(val_right))
+            res = true;
+          return !res;
+        });
+        return !res;
+      };
+      break;
     case RLIKE:
       local_cb = [this, &res, &msg](const ExprValue& val_left) {
         right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
-            if (val_left.RLike(val_right))
-              res = true;
-            return !res;
-          });
+          if (val_left.RLike(val_right))
+            res = true;
+          return !res;
+        });
         return !res;
       };
-    break;
+      break;
     case AND:
-        local_cb = [this, &res, &msg](const ExprValue& val_left) {
-               CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
-               if (!val_left.val.bool_val) return true;  // continue
+      local_cb = [this, &res, &msg](const ExprValue& val_left) {
+        CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
+        if (!val_left.val.bool_val)
+          return true;  // continue
 
-               right_->eval(msg, [&res](const ExprValue& val_right) {
-                            CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_right.type);
-                            if (!val_right.val.bool_val) return true;
-                            res = true;
-                            return false;
-                            });
-               return !res;
-               };
-    break;
+        right_->eval(msg, [&res](const ExprValue& val_right) {
+          CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_right.type);
+          if (!val_right.val.bool_val)
+            return true;
+          res = true;
+          return false;
+        });
+        return !res;
+      };
+      break;
     case OR:
-        local_cb = [this, &res, &msg](const ExprValue& val_left) {
-               CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
-               if (val_left.val.bool_val) {
-                res = true;
-                return false;  // continue
-               }
-               right_->eval(msg, [&res](const ExprValue& val_right) {
-                            CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_right.type);
-                            if (!val_right.val.bool_val) return true;
-                            res = true;
-                            return false;
-                            });
-               return !res;
-               };
-    break;
+      local_cb = [this, &res, &msg](const ExprValue& val_left) {
+        CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
+        if (val_left.val.bool_val) {
+          res = true;
+          return false;  // continue
+        }
+        right_->eval(msg, [&res](const ExprValue& val_right) {
+          CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_right.type);
+          if (!val_right.val.bool_val)
+            return true;
+          res = true;
+          return false;
+        });
+        return !res;
+      };
+      break;
     case LT:
-        local_cb = [this, &res, &msg](const ExprValue& val_left) {
-               right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
-                            if (val_left.Less(val_right))
-                              res = true;
-                            return !res;
-                            });
-               return !res;
-               };
-    break;
+      local_cb = [this, &res, &msg](const ExprValue& val_left) {
+        right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
+          if (val_left.Less(val_right))
+            res = true;
+          return !res;
+        });
+        return !res;
+      };
+      break;
     case LE:
-        local_cb = [&](const ExprValue& val_left) {
-               right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
-                            if (val_left.Less(val_right) || val_left.Equal(val_right))
-                              res = true;
-                            return !res;
-                            });
-               return !res;
-               };
-        break;
+      local_cb = [&](const ExprValue& val_left) {
+        right_->eval(msg, [&val_left, &res](const ExprValue& val_right) {
+          if (val_left.Less(val_right) || val_left.Equal(val_right))
+            res = true;
+          return !res;
+        });
+        return !res;
+      };
+      break;
     case NOT:
-         local_cb = [&](const ExprValue& val_left) {
-              CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
-              if (!val_left.val.bool_val) {
-                res = true;
-              }
-              return !res;
-            };
-    break;
+      local_cb = [&](const ExprValue& val_left) {
+        CHECK_EQ(ExprValue::CPPTYPE_BOOL, val_left.type);
+        if (!val_left.val.bool_val) {
+          res = true;
+        }
+        return !res;
+      };
+      break;
   }
   left_->eval(msg, local_cb);
   cb(ExprValue::fromBool(res));
@@ -358,11 +363,24 @@ FunctionTerm::FunctionTerm(const std::string& name, ArgList&& lst)
 }
 
 FunctionTerm::~FunctionTerm() {
-  for (auto e : args_) delete e;
+  for (auto e : args_)
+    delete e;
 }
 
 void FunctionTerm::eval(const gpb::Message& msg, ExprValueCb cb) const {
-  LOG(FATAL) << "Unknown function";
+  if (name_ == "hash") {
+    if (args_.size() != 1)
+      LOG(FATAL) << "hash() accepts a single argument";
+    size_t res;
+    args_[0]->eval(msg, [&res](const ExprValue& val) {
+      CHECK_EQ(ExprValue::CPPTYPE_STRING, val.type);
+      res = std::hash<StringPiece>()(val.val.str);
+      return false;  // This will only work on the first value of a repeated field
+    });
+    cb(ExprValue::fromUInt(res));
+  } else {
+    LOG(FATAL) << "Unknown function";
+  }
 }
 
 static void IsDefField(Expr::ExprValueCb cb, MsgDscrPair msg_dscr) {
@@ -381,10 +399,10 @@ void IsDefFun::eval(const gpb::Message& msg, ExprValueCb cb) const {
 bool EvaluateBoolExpr(const Expr& e, const gpb::Message& msg) {
   bool res = false;
   e.eval(msg, [&res](const plang::ExprValue& val) {
-          CHECK_EQ(ExprValue::CPPTYPE_BOOL, val.type);
-          res = val.val.bool_val;
-          return false;
-         });
+    CHECK_EQ(ExprValue::CPPTYPE_BOOL, val.type);
+    res = val.val.bool_val;
+    return false;
+  });
   return res;
 }
 
