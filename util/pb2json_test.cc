@@ -131,9 +131,11 @@ TEST_F(Pb2JsonTest, Double) {
   res = Pb2Json(p);
   EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-111.8149})", res);
 
+
+  // We round float to 7 digit precision.
   p.set_fval(-157.96519);
   res = Pb2Json(p);
-  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-157.96519})", res);
+  EXPECT_EQ(R"({"name":"","id":0,"dval":0.0,"fval":-157.9652})", res);
 }
 
 TEST_F(Pb2JsonTest, Options) {

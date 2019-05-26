@@ -76,8 +76,8 @@ void PrintValue(const gpb::Message& msg, const Pb2JsonOptions& options,
       break;
     case FD::CPPTYPE_FLOAT: {
       float fval = refl->GetFloat(msg, fd);
-      char buf[32];
-      int sz = absl::SNPrintF(buf, sizeof(buf), "%.8g", fval);
+      char buf[40];
+      int sz = absl::SNPrintF(buf, sizeof(buf), "%.7g", fval);
       res->RawValue(buf, sz, rj::kNumberType);
     } break;
     case FD::CPPTYPE_DOUBLE:
