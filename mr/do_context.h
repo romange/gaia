@@ -94,10 +94,14 @@ template <typename T> class DoContext {
  public:
   DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
 
+  void Write(const ShardId& shard_id, T&& t) {
+    context_->Write(shard_id, rt_.Serialize(out_.is_binary(), std::move(t)));
+  }
+
+
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);
-    std::string dest = rt_.Serialize(out_.is_binary(), std::move(t));
-    context_->Write(shard_id, std::move(dest));
+    Write(shard_id, std::move(t));
   }
 
   RawContext* raw() { return context_; }
