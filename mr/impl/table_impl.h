@@ -47,7 +47,15 @@ base::void_t<decltype(&Handler::OnShardFinish)> FinishCallMaybe(Handler* h, DoCo
 
 // 2nd priority overload when passing 0 intp char.
 template <typename Handler, typename ToType>
-void FinishCallMaybe(Handler* h, DoContext<ToType>* cntx, char){};
+void FinishCallMaybe(Handler* h, DoContext<ToType>* cntx, char c) {}
+
+template <typename Handler>
+base::void_t<decltype(&Handler::OnShardStart)> NotifyShardStartMaybe(Handler* h, const ShardId& sid,
+                                                                     int) {
+  h->OnShardStart(sid);
+}
+
+template <typename Handler> void NotifyShardStartMaybe(Handler*, const ShardId&, char) {}
 
 class HandlerWrapperBase {
  public:
@@ -57,7 +65,8 @@ class HandlerWrapperBase {
 
   size_t Size() const { return raw_fn_vec_.size(); }
 
-  virtual void SetOutputShard(ShardId sid) = 0;
+  // Called by joiner_executor, or sometimes by handler via DoContext.
+  virtual void SetGroupingShard(const ShardId& sid) = 0;
   virtual void OnShardFinish() {}
 
   void set_binary_format(bool is_binary) { is_binary_ = is_binary; }
@@ -104,7 +113,10 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
       : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
 
-  void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
+  void SetGroupingShard(const ShardId& sid) final {
+    do_ctx_.SetConstantShard(sid);
+    NotifyShardStartMaybe(&h_, sid, 0);
+  }
 
   // We pass 0 into 3rd argument so compiler will prefer 'int' resolution if possible.
   void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
@@ -140,7 +152,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
     });
   }
 
-  void SetOutputShard(ShardId sid) final { do_ctx_.SetConstantShard(sid); }
+  void SetGroupingShard(const ShardId& sid) final { do_ctx_.SetConstantShard(sid); }
 };
 
 class TableBase : public std::enable_shared_from_this<TableBase> {
@@ -214,7 +226,7 @@ template <typename OutT> class TableImplT : public TableBase {
                                                      TableImplT<FromType>* ptr, Args&&... args) {
     pb::Operator map_op = ptr->CreateMapOp(name);
     auto result = std::make_shared<TableImplT<OutT>>(std::move(map_op), ptr->pipeline());
-    result->SetHandlerFactory([&out = result->output_, args...](RawContext* raw_ctxt) {
+    result->SetHandlerFactory([& out = result->output_, args...](RawContext* raw_ctxt) {
       auto* ptr = new HandlerWrapper<MapType, OutT>(out, raw_ctxt, args...);
       ptr->template Add<FromType>(&MapType::Do);
       return ptr;
@@ -258,7 +270,7 @@ template <typename OutT> class TableImplT : public TableBase {
 
     auto result = std::make_shared<TableImplT<OutT>>(std::move(op), owner);
     result->SetHandlerFactory(
-        [&out = result->output_, factories = std::move(factories)](RawContext* raw_ctxt) {
+        [& out = result->output_, factories = std::move(factories)](RawContext* raw_ctxt) {
           auto* ptr = new HandlerWrapper<GrouperType, OutT>(out, raw_ctxt);
           for (const auto& m : factories) {
             ptr->AddFromFactory(m);

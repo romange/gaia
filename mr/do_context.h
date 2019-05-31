@@ -106,7 +106,7 @@ template <typename T> class DoContext {
 
   RawContext* raw() { return context_; }
 
-  void SetConstantShard(ShardId sid) { out_.SetConstantShard(sid); }
+  void SetConstantShard(ShardId sid) { out_.SetConstantShard(std::move(sid)); }
   void CloseShard(const ShardId& sid) { raw()->CloseShard(sid); }
 
  private:

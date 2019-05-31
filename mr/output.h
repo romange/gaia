@@ -76,7 +76,7 @@ template <typename T> class Output : public OutputBase {
     return absl::visit(Visitor{t, modn_}, shard_op_);
   }
 
-  void SetConstantShard(ShardId sid) { shard_op_ = sid; }
+  void SetConstantShard(ShardId sid) { shard_op_ = std::move(sid); }
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 };

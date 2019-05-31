@@ -125,7 +125,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    handler_wrapper->SetOutputShard(shard_input.first);
+    handler_wrapper->SetGroupingShard(shard_input.first);
+
     VLOG(1) << "Processing shard " << shard_input.first;
 
     for (const IndexedInput& ii : shard_input.second) {
