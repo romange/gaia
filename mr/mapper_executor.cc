@@ -15,6 +15,7 @@
 namespace mr3 {
 
 DEFINE_uint32(map_limit, 0, "");
+DEFINE_uint32(map_io_read_factor, 1, "");
 
 using namespace std;
 using namespace boost;
@@ -24,7 +25,7 @@ using fibers::channel_op_status;
 
 struct MapperExecutor::PerIoStruct {
   unsigned index;
-  ::boost::fibers::fiber process_fd;
+  std::vector<::boost::fibers::fiber> process_fd;
   std::unique_ptr<RawContext> raw_context;
   size_t records_read = 0;
 
@@ -39,7 +40,10 @@ MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {}
 
 thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
-void MapperExecutor::PerIoStruct::Shutdown() { process_fd.join(); }
+void MapperExecutor::PerIoStruct::Shutdown() {
+  for (auto& f : process_fd)
+    f.join();
+}
 
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
@@ -64,20 +68,31 @@ void MapperExecutor::Stop() {
   VLOG(1) << "MapperExecutor Stop]";
 }
 
+void MapperExecutor::SetupPerIoProcess(unsigned index, detail::TableBase* tb) {
+  auto* ptr = new PerIoStruct(index);
+  ptr->raw_context.reset(runner_->CreateContext());
+  per_io_.reset(ptr);
+
+  CHECK_GT(FLAGS_map_io_read_factor, 0);
+  per_io_->process_fd.resize(FLAGS_map_io_read_factor);
+
+  for (auto& fbr : per_io_->process_fd) {
+    fbr = fibers::fiber{&MapperExecutor::IOReadFiber, this, tb};
+  }
+}
+
 void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
                          ShardFileMap* out_files) {
   const string& op_name = tb->op().op_name();
 
   util::VarzFunction varz_func("mapper-executor", [this] { return GetStats(); });
 
-  // CHECK_STATUS(tb->InitializationStatus());
   file_name_q_.reset(new FileNameQueue{16});
   runner_->OperatorStart(&tb->op());
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
-    per_io_.reset(new PerIoStruct(index));
-    per_io_->process_fd = fibers::fiber{&MapperExecutor::ProcessInputFiles, this, tb};
+    SetupPerIoProcess(index, tb);
   });
 
   for (const auto& input : inputs) {
@@ -92,6 +107,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.
   pool_->AwaitFiberOnAll([&](IoContext&) {
     per_io_->Shutdown();
+    FinalizeContext(per_io_->records_read, per_io_->raw_context.get());
     per_io_.reset();
   });
 
@@ -128,18 +144,18 @@ void MapperExecutor::PushInput(const InputBase* input) {
   }
 }
 
-void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
-  this_fiber::properties<IoFiberProperties>().set_name("ProcessInput");
+void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
+  this_fiber::properties<IoFiberProperties>().set_name("IOReadFiber");
 
   PerIoStruct* aux_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
 
-  aux_local->raw_context.reset(runner_->CreateContext());
   std::unique_ptr<detail::HandlerWrapperBase> handler{
       tb->CreateHandler(aux_local->raw_context.get())};
   CHECK_EQ(1, handler->Size());
 
+  // contains items pushed from the IORead fiber but not yet processed by MapFiber.
   RecordQueue record_q(256);
 
   fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler.get());
@@ -156,9 +172,11 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
     bool is_binary = pb_input->format().type() == pb::WireFormat::LST;
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
     record_q.Push(Record{op, file_input.file_name});
-    record_q.Push(Record{Record::METADATA, pb_input->file_spec(file_input.spec_index).metadata()});
 
-    auto cb = [&record_q, aux_local, skip = pb_input->skip_header(),
+    Record meta{Record::METADATA, pb_input->file_spec(file_input.spec_index).metadata()};
+    record_q.Push(std::move(meta));
+
+    auto cb = [&, skip = pb_input->skip_header(),
                record_num = uint64_t{0}](string&& s) mutable {
       if (record_num++ < skip)
         return;
@@ -171,14 +189,12 @@ void MapperExecutor::ProcessInputFiles(detail::TableBase* tb) {
   }
   VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
 
-  // Must follow process_fd because we need first to push all the records to the queue and
-  // then to signal it's closing.
+  // Must follow process_fd because we need first to push all the records to the queue and then
+  // to signal it's closing.
   record_q.StartClosing();
 
   map_fd.join();
   handler->OnShardFinish();
-  FinalizeContext(cnt, aux_local->raw_context.get());
-  aux_local->raw_context.reset();
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb) {

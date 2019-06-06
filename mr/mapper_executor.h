@@ -47,7 +47,10 @@ class MapperExecutor : public OperatorExecutor {
 
   // Input managing fiber that reads files from disk and pumps data into record_q.
   // One per IO thread.
-  void ProcessInputFiles(detail::TableBase* tb);
+  void IOReadFiber(detail::TableBase* tb);
+
+  // index - io thread index.
+  void SetupPerIoProcess(unsigned index, detail::TableBase* tb);
 
   static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
   util::VarzValue::Map GetStats() const;
