@@ -14,7 +14,7 @@
 #include <boost/system/system_error.hpp>
 #include <boost/throw_exception.hpp>
 
-#include <boost/fiber/all.hpp>
+#include <boost/fiber/mutex.hpp>
 
 #include <mutex>  // std::unique_lock
 

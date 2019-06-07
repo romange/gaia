@@ -41,8 +41,10 @@ MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {}
 thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
 void MapperExecutor::PerIoStruct::Shutdown() {
+  VLOG(1) << "PerIoStruct::ShutdownStart";
   for (auto& f : process_fd)
     f.join();
+  VLOG(1) << "PerIoStruct::ShutdownEnd";
 }
 
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
