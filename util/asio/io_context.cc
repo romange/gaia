@@ -151,9 +151,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
  private:
   void SuspendCb(const system::error_code& ec, chrono::steady_clock::time_point tp) {
     VLOG(1) << "Fire suspender " << tp.time_since_epoch().count() << " " << ec;
-    if (tp == suspend_tp_) {
-      LOG_IF(ERROR, ec) << "Unexpected error " << ec;
-
+    if (!ec) {
       // The timer has successfully finished.
       suspend_tp_ = STEADY_PT_MAX;
 

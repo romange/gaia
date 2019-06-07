@@ -3,6 +3,8 @@
 //
 #pragma once
 
+#include <boost/fiber/future.hpp>
+
 #include "absl/container/flat_hash_map.h"
 
 #include "base/RWSpinLock.h"  //
