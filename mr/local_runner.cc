@@ -140,21 +140,6 @@ LocalContext::~LocalContext() {
 
 }  // namespace
 
-using slist_hook = slist_member_hook<link_mode<auto_unlink>>;
-
-struct GcsHandle {
-  GCS gcs;
-  IoContext& io_context;
-
-  // Even though we are thread-local we should protect transactions against multiple fiber-accesses.
-  fibers::mutex mu;
-
-  // slist_hook hook;
-  // using member_hook_t = member_hook<GcsHandle, slist_hook, &GcsHandle::hook>;
-
-  GcsHandle(const GCE& gce, IoContext* context) : gcs{gce, context}, io_context(*context) {}
-};
-
 struct LocalRunner::Impl {
  public:
   Impl(IoContextPool* p, const string& d) : io_pool(p), data_dir(d), fq_pool(0, 128) {}
@@ -189,18 +174,55 @@ struct LocalRunner::Impl {
 
  private:
   struct PerThread {
-    fibers::fiber_specific_ptr<GcsHandle> fs_gcs_handle;
+    vector<unique_ptr<GCS>> gcs_handles;
+    // fibers::fiber_specific_ptr<> fs_gcs_handle;
     base::Histogram record_fetch_hist;
   };
+
+  struct handle_keeper {
+    PerThread* per_thread;
+
+    handle_keeper(PerThread* pt) : per_thread(pt) {}
+
+    void operator()(GCS* gcs) {
+      per_thread->gcs_handles.emplace_back(gcs);
+    }
+  };
+
+  unique_ptr<GCS, handle_keeper> GetGcsHandle();
+
+
   static thread_local std::unique_ptr<PerThread> per_thread_;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
 
-uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
-  if (!per_thread_)
-    per_thread_.reset(new PerThread{});
+auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
+  auto* pt = per_thread_.get();
+  CHECK(pt);
 
+  for (auto it = pt->gcs_handles.begin(); it != pt->gcs_handles.end(); ++it) {
+    if ((*it)->IsOpenSequential()) {
+      continue;
+    }
+
+    auto res = std::move(*it);
+    it->swap(pt->gcs_handles.back());
+    pt->gcs_handles.pop_back();
+
+    return unique_ptr<GCS, handle_keeper>(res.release(), pt);
+  }
+
+  IoContext* io_context = io_pool->GetThisContext();
+  CHECK(io_context) << "Must run from IO context thread";
+  GCS* gcs = new GCS(*gce_handle, io_context);
+  auto status = gcs->Connect(kGcsConnectTimeout);
+  CHECK_STATUS(status);
+
+  return unique_ptr<GCS, handle_keeper>(gcs, pt);
+}
+
+uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -282,16 +304,22 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
   auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) { cb(GCS::ToGcsPath(bucket, s)); };
 
   // std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
-  auto status = per_thread_->fs_gcs_handle->gcs.List(bucket, path, true, cb2);
+  auto gcs = GetGcsHandle();
+  auto status = gcs->List(bucket, path, true, cb2);
   CHECK_STATUS(status);
 }
 
 util::StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenReadFile(
     const std::string& filename, file::FiberReadOptions::Stats* stats) {
+  if (!per_thread_) {
+    per_thread_.reset(new PerThread);
+  }
+
   if (util::IsGcsPath(filename)) {
     LazyGcsInit();
 
-    return per_thread_->fs_gcs_handle->gcs.OpenGcsFile(filename);
+    auto gcs = GetGcsHandle();
+    return gcs->OpenGcsFile(filename);
   }
 
   file::FiberReadOptions opts;
@@ -312,25 +340,13 @@ void LocalRunner::Impl::LazyGcsInit() {
       CHECK_STATUS(gce_handle->Init());
     }
   }
-
-  // Lazy init of per-thread gcs handle.
-  if (per_thread_->fs_gcs_handle.get())
-    return;
-
-  IoContext* io_context = io_pool->GetThisContext();
-  CHECK(io_context) << "Must run from IO context thread";
-  per_thread_->fs_gcs_handle.reset(new GcsHandle{*gce_handle, io_context});
-
-  std::lock_guard<fibers::mutex> lk(per_thread_->fs_gcs_handle->mu);
-  auto status = per_thread_->fs_gcs_handle->gcs.Connect(kGcsConnectTimeout);
-  CHECK_STATUS(status);
 }
 
 void LocalRunner::Impl::ShutDown() {
   if (per_thread_) {
     VLOG(1) << "Histogram Latency: " << per_thread_->record_fetch_hist.ToString();
 
-    per_thread_->fs_gcs_handle.reset(nullptr);
+    per_thread_->gcs_handles.clear();
   }
 }
 

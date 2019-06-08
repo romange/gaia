@@ -70,7 +70,7 @@ void MapperExecutor::Stop() {
   VLOG(1) << "MapperExecutor Stop]";
 }
 
-void MapperExecutor::SetupPerIoProcess(unsigned index, detail::TableBase* tb) {
+void MapperExecutor::SetupPerIoThread(unsigned index, detail::TableBase* tb) {
   auto* ptr = new PerIoStruct(index);
   ptr->raw_context.reset(runner_->CreateContext());
   per_io_.reset(ptr);
@@ -94,7 +94,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   // As long as we do not block in the function we can use AwaitOnAll.
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
-    SetupPerIoProcess(index, tb);
+    SetupPerIoThread(index, tb);
   });
 
   for (const auto& input : inputs) {
@@ -189,7 +189,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
     cnt +=
         runner_->ProcessInputFile(file_input.file_name, pb_input->format().type(), std::move(cb));
   }
-  VLOG(1) << "ProcessInputFiles closing after processing " << cnt << " items";
+  VLOG(1) << "IOReadFiber closing after processing " << cnt << " items";
 
   // Must follow process_fd because we need first to push all the records to the queue and then
   // to signal it's closing.
@@ -197,6 +197,8 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
 
   map_fd.join();
   handler->OnShardFinish();
+
+  VLOG(1) << "IOReadFiber after OnShardFinish";
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb) {

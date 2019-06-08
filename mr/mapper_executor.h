@@ -50,7 +50,7 @@ class MapperExecutor : public OperatorExecutor {
   void IOReadFiber(detail::TableBase* tb);
 
   // index - io thread index.
-  void SetupPerIoProcess(unsigned index, detail::TableBase* tb);
+  void SetupPerIoThread(unsigned index, detail::TableBase* tb);
 
   static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
   util::VarzValue::Map GetStats() const;

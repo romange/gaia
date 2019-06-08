@@ -161,7 +161,14 @@ auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp
 }
 
 GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
-GCS::~GCS() {}
+
+GCS::~GCS() {
+  if (seq_file_) {
+    LOG(ERROR) << "File was not closed";
+  }
+  VLOG(1) << "GCS::~GCS";
+  client_.reset();
+}
 
 util::Status GCS::Connect(unsigned msec) {
   CHECK(io_context_.InContextThread());
@@ -185,10 +192,13 @@ util::Status GCS::CloseSequential() {
   if (!seq_file_) {
     return Status::OK;
   }
+  VLOG(1) << "CloseSequential - Drain";
   CHECK(client_);
   error_code ec = seq_file_->Drain(client_.get(), &tmp_buffer_);
-  RETURN_EC_STATUS(ec);
   seq_file_.reset();
+
+  RETURN_EC_STATUS(ec);
+
   return Status::OK;
 }
 

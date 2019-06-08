@@ -51,6 +51,8 @@ class GCS {
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
   util::Status CloseSequential();
 
+  bool IsOpenSequential() const { return bool(seq_file_); }
+
   util::StatusObject<file::ReadonlyFile*> OpenGcsFile(absl::string_view full_path);
 
   // Input: full gcs uri path that starts with "gs://"
