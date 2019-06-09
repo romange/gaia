@@ -15,6 +15,7 @@ struct PB_Serializer {
 
   static std::string To(bool is_binary, const Message* msg);
 
+  // Need std::string on stack because of json2pb which requires mutable string for insitu parsing.
   static bool From(bool is_binary, std::string tmp, Message* res);
 };
 

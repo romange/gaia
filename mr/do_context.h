@@ -51,6 +51,7 @@ class RawContext {
   virtual void Flush() {}
   virtual void CloseShard(const ShardId& sid) = 0;
 
+  // Mr Counters
   void IncBy(StringPiece name, long delta) { counter_map_[name] += delta; }
 
   void Inc(StringPiece name) { IncBy(name, 1); }
@@ -94,10 +95,14 @@ template <typename T> class DoContext {
  public:
   DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
 
-  void Write(const ShardId& shard_id, T&& t) {
-    context_->Write(shard_id, rt_.Serialize(out_.is_binary(), std::move(t)));
+  template<typename U> void Write(const ShardId& shard_id, U&& u) {
+    context_->Write(shard_id, rt_.Serialize(out_.is_binary(), std::forward<U>(u)));
   }
 
+  void Write(T& t) {
+    ShardId shard_id = out_.Shard(t);
+    Write(shard_id, t);
+  }
 
   void Write(T&& t) {
     ShardId shard_id = out_.Shard(t);

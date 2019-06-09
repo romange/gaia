@@ -113,7 +113,7 @@ template <> class RecordTraits<rapidjson::Document> {
   RecordTraits(const RecordTraits& r) {}  // we do not copy temporary fields.
   RecordTraits() {}
 
-  std::string Serialize(bool is_binary, rapidjson::Document&& doc);
+  std::string Serialize(bool is_binary, const rapidjson::Document& doc);
   bool Parse(bool is_binary, std::string&& tmp, rapidjson::Document* res);
 };
 

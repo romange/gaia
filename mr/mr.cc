@@ -98,7 +98,7 @@ void OutputBase::SetShardSpec(pb::ShardSpec::Type st, unsigned modn) {
   }
 }
 
-std::string RecordTraits<rj::Document>::Serialize(bool is_binary, rj::Document&& doc) {
+std::string RecordTraits<rj::Document>::Serialize(bool is_binary, const rj::Document& doc) {
   sb_.Clear();
   rj::Writer<rj::StringBuffer> writer(sb_);
   doc.Accept(writer);

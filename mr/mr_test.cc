@@ -58,7 +58,7 @@ struct IntVal {
 
 template <> class RecordTraits<IntVal> {
  public:
-  static std::string Serialize(bool is_binary, IntVal&& doc) { return absl::StrCat(doc.val); }
+  static std::string Serialize(bool is_binary, const IntVal& doc) { return absl::StrCat(doc.val); }
 
   bool Parse(bool is_binary, std::string&& tmp, IntVal* res) {
     return safe_strto32(tmp, &res->val);
@@ -193,7 +193,7 @@ class IntMapper {
 
     IntVal iv;
     CHECK(safe_strto32(a.val, &iv.val)) << a.val;
-    cnt->Write(std::move(iv));
+    cnt->Write(iv);
   }
 };
 
