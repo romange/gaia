@@ -23,11 +23,16 @@ class Pipeline;
 
 namespace detail {
 
+template <typename MapperType, typename = void> struct MapperTraits {
+  static_assert(sizeof(MapperType) == 0,
+                "Must have member function Do(InputType inp, DoContext<OutputType>* context)");
+};
+
 template <typename MapperType>
-struct MapperTraits : public EmitFuncTraits<decltype(&MapperType::Do)> {};
+struct MapperTraits<MapperType, ::base::void_t<decltype(&MapperType::Do)>>
+    : public EmitFuncTraits<decltype(&MapperType::Do)> {};
 
 }  // namespace detail
-
 
 // Planning interfaces.
 class InputBase {
@@ -58,6 +63,7 @@ template <typename OutT> class PTable {
 
   // apparently template classes of different type can not access own private members.
   template <typename T> friend class PTable;
+
  public:
   PTable() {}
   ~PTable() {}
@@ -67,8 +73,8 @@ template <typename OutT> class PTable {
   }
 
   template <typename MapType, typename... Args>
-  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(
-        const std::string& name, Args&&... args) const;
+  PTable<typename detail::MapperTraits<MapType>::OutputType> Map(const std::string& name,
+                                                                 Args&&... args) const;
 
   template <typename Handler, typename ToType, typename U>
   detail::HandlerBinding<Handler, ToType> BindWith(EmitMemberFn<U, Handler, ToType> ptr) const {

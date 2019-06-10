@@ -68,21 +68,3 @@ void SplitCSVLineWithDelimiter(char* line, char delimiter,
     assert(*line == '\0' || *line == delimiter);
   }
 }
-
-void SplitCSVLine(char* line, vector<char*>* cols) {
-  SplitCSVLineWithDelimiter(line, ',', cols);
-}
-
-void SplitCSVLineWithDelimiterForStrings(const string &line,
-                                         char delimiter,
-                                         vector<string> *cols) {
-  // Unfortunately, the interface requires char* instead of const char*
-  // which requires copying the string.
-  string cline(line);
-  vector<char*> v;
-  SplitCSVLineWithDelimiter(&cline.front(), delimiter, &v);
-  for (vector<char*>::const_iterator ci = v.begin(); ci != v.end(); ++ci) {
-    cols->push_back(*ci);
-  }
-}
-
