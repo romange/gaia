@@ -31,7 +31,10 @@ class CreditsMapper {
 
  public:
   CreditsMapper() {
+    // Find all ('key' : value) pairs.
     single_q_re_.emplace("(')[^']+('): (?:(').*?(')(?:,|}))?");
+
+    // Find all (: "str_value") combinations.
     str_val_re_.emplace(R"(": "([^"]+)\")");
   }
 
@@ -41,6 +44,7 @@ class CreditsMapper {
 
   void CleanBadJson(char* b, char* e);
 
+  // RE2 does not have default c'tor.
   absl::optional<RE2> single_q_re_, str_val_re_;
 };
 
@@ -58,18 +62,16 @@ void CreditsMapper::Do(string val, mr3::DoContext<rj::Document>* context) {
   bool has_error = cast.Parse<rj::kParseTrailingCommasFlag>(cols_[0]).HasParseError();
   CHECK(!has_error) << rj::GetParseError_En(cast.GetParseError()) << cols_[0];
   for (auto& value : cast.GetArray()) {
-    // rj::Value v = value.Get
-    value.AddMember("movie_id", rj::Value(movie_id), cast.GetAllocator());
-
     rj::Document d;
     d.CopyFrom(value, d.GetAllocator());
+    d.AddMember("movie_id", rj::Value(movie_id), d.GetAllocator());
+
     context->Write(std::move(d));
   }
-  // cast.AddMember(
 }
 
-// std::regex uses recursion with length of the input string!
-// it can not be used in prod code.
+// std::regex uses recursion with depth of the input string!
+// It's awful and can not be used in prod code. We use old n' robust RE2 from Google.
 void CreditsMapper::CleanBadJson(char* b, char* e) {
   // Clean single quotes for for value strings.
   // Clean single quotes from the keys.
@@ -81,6 +83,8 @@ void CreditsMapper::CleanBadJson(char* b, char* e) {
       if (q[j].size() == 1)
         *const_cast<char*>(q[j].data()) = '"';
     }
+
+    // In case of string values, change their contents to be double quote friendly.
     if (!q[2].empty()) {
       val_b = const_cast<char*>(q[2].data()) + 1;
       val_e = const_cast<char*>(q[3].data());
