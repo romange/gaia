@@ -344,6 +344,10 @@ add_third_party(snappy
   GIT_TAG 1.1.7
 )
 
+add_third_party(re2
+  GIT_REPOSITORY https://github.com/google/re2
+  GIT_TAG 2019-06-01
+)
 
 set(DYNASM_DIR ${THIRD_PARTY_LIB_DIR}/dynasm)
 set(DYNASM_COMPILER ${DYNASM_DIR}/bin/minilua)
