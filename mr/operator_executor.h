@@ -46,7 +46,9 @@ class OperatorExecutor {
   Runner* runner_;
 
   ::boost::fibers::mutex mu_;
-  absl::flat_hash_map<std::string, long> counter_map_;
+
+  // I keep it as std::map to print counters in lexicographic order.
+  std::map<std::string, long> counter_map_;
   std::atomic<uint64_t> parse_errors_{0};
 };
 

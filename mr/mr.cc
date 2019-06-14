@@ -123,7 +123,7 @@ void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) 
 
   std::lock_guard<fibers::mutex> lk(mu_);
   for (const auto& k_v : raw_context->counter_map()) {
-    counter_map_[k_v.first] += k_v.second;
+    counter_map_[string(k_v.first)] += k_v.second;
   }
   counter_map_["fn-calls"] += items_cnt;
   counter_map_["fn-writes"] += raw_context->item_writes();
