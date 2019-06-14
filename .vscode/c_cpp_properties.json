@@ -21,6 +21,7 @@
                 "${workspaceFolder}/third_party/libs/crc32c/include",
                 "${workspaceFolder}/third_party/libs/xxhash/include",
                 "${workspaceFolder}/third_party/libs/lz4/include",
+                "${workspaceFolder}/third_party/libs/re2/include",
                 "${workspaceFolder}",
                 "${workspaceFolder}/genfiles",
                 "${default}"

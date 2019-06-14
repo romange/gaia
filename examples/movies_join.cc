@@ -5,7 +5,7 @@
 // https://www.kaggle.com/rounakbanik/the-movies-dataset/
 
 #include <rapidjson/error/en.h>
-#include <regex>
+#include <re2/re2.h>
 
 #include "base/init.h"
 #include "base/logging.h"
@@ -21,78 +21,27 @@ using namespace mr3;
 using namespace util;
 using namespace std;
 namespace rj = rapidjson;
+using re2::RE2;
 
 DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_string(movie_dir, "", "The movies database directory that contains all the files");
-
-static void CleanBadJson(char* b, char* e) {
-  // Clean single quotes for keys and optionally for value strings.
-  regex re("(')[^']+('): (?:(').*?(')(?:,|}))?");
-  cmatch m;
-
-  char* next = b;
-  while (regex_search(next, m, re)) {
-    VLOG(1) << "Start search " << m.size();
-    for (size_t i = 1; i < m.size(); ++i) {
-      auto& x = m[i];
-      if (x.matched && x.length() == 1) {
-        CHECK_EQ('\'', *x.first);
-
-        VLOG(1) << "Found " << x.str();
-
-        char* val_ptr = next + (x.first - next);
-        *val_ptr++ = '"';
-        if (i == 3) {
-          CHECK(m[4].matched);
-          char* val_end = next + (m[4].second - next);
-          for (char* p = val_ptr; p != val_end; ++p) {
-            if (*p == '\\' && p[1] == '\'') {
-                *p = ' ';
-            } else if (*p == '"') {
-              *p = '\'';
-            }
-          }
-        }
-      }
-    }
-
-    next += (m.position() + m.length());
-  }
-
-  // Remove hex escaping
-  re.assign(R"(": "([^"]*)\")");
-  next = b;
-  while (regex_search(next, m, re)) {
-    CHECK_EQ(2, m.size());
-    auto& x = m[1];
-    char* val_ptr = next + (x.first - next);
-    char* val_end = next + (x.second - next);
-    for (char* p = val_ptr; p != val_end; ++p) {
-      if (*p == '\\' && p[1] == 'x' && val_end - p > 3) {
-        memset(p, ' ', 4);
-      }
-    }
-    next += (m.position() + m.length());
-  }
-
-  constexpr char kBadKey[] = R"("profile_path": None)";
-  constexpr size_t kBadLen = sizeof(kBadKey) - 1;
-
-  next = b;
-  while (true) {
-    next = strstr(next, kBadKey);
-    if (!next)
-      break;
-    memset(next, ' ', kBadLen);
-    next += kBadLen;
-  }
-}
 
 class CreditsMapper {
   std::vector<char*> cols_;
 
  public:
+  CreditsMapper() {
+    single_q_re_.emplace("(')[^']+('): (?:(').*?(')(?:,|}))?");
+    str_val_re_.emplace(R"(": "([^"]+)\")");
+  }
+
   void Do(string val, mr3::DoContext<rj::Document>* context);
+
+ private:
+
+  void CleanBadJson(char* b, char* e);
+
+  absl::optional<RE2> single_q_re_, str_val_re_;
 };
 
 void CreditsMapper::Do(string val, mr3::DoContext<rj::Document>* context) {
@@ -105,10 +54,70 @@ void CreditsMapper::Do(string val, mr3::DoContext<rj::Document>* context) {
   CHECK(absl::SimpleAtoi(cols_[2], &movie_id));
 
   CleanBadJson(cols_[0], cols_[1]);
-  rj::Document doc;
-  bool has_error = doc.Parse<rj::kParseTrailingCommasFlag>(cols_[0]).HasParseError();
-  CHECK(!has_error) << rj::GetParseError_En(doc.GetParseError()) << cols_[0];
-  // cast.AddMember("movie_id", rj::Value(movie_id), cast.GetAllocator());
+  rj::Document cast;
+  bool has_error = cast.Parse<rj::kParseTrailingCommasFlag>(cols_[0]).HasParseError();
+  CHECK(!has_error) << rj::GetParseError_En(cast.GetParseError()) << cols_[0];
+  for (auto& value : cast.GetArray()) {
+    // rj::Value v = value.Get
+    value.AddMember("movie_id", rj::Value(movie_id), cast.GetAllocator());
+
+    rj::Document d;
+    d.CopyFrom(value, d.GetAllocator());
+    context->Write(std::move(d));
+  }
+  // cast.AddMember(
+}
+
+// std::regex uses recursion with length of the input string!
+// it can not be used in prod code.
+void CreditsMapper::CleanBadJson(char* b, char* e) {
+  // Clean single quotes for for value strings.
+  // Clean single quotes from the keys.
+  re2::StringPiece input(b);
+  re2::StringPiece q[4];
+  char* val_b, *val_e;
+  while (RE2::FindAndConsume(&input, *single_q_re_, q, q + 1, q + 2, q + 3)) {
+    for (unsigned j = 0; j < 4; ++j) {
+      if (q[j].size() == 1)
+        *const_cast<char*>(q[j].data()) = '"';
+    }
+    if (!q[2].empty()) {
+      val_b = const_cast<char*>(q[2].data()) + 1;
+      val_e = const_cast<char*>(q[3].data());
+      for (; val_b != val_e; ++val_b) {
+        if (*val_b == '\\' && val_b[1] == '\'') {
+          *val_b = ' ';
+        } else if (*val_b == '"') {
+          *val_b = '\'';
+        }
+      }
+    }
+  }
+
+  input.set(b);
+  // Remove hex escaping from strings.
+  while (RE2::FindAndConsume(&input, *str_val_re_, q)) {
+    CHECK(!q[0].empty());
+    val_b = const_cast<char*>(q[0].data());
+    val_e = val_b + q[0].size();
+    for (; val_b != val_e; ++val_b) {
+      if (*val_b == '\\' && val_b[1] == 'x' && val_e - val_b > 3) {
+        memset(val_b, ' ', 4);
+      }
+    }
+  }
+
+  constexpr char kBadKey[] = R"("profile_path": None)";
+  constexpr size_t kBadLen = sizeof(kBadKey) - 1;
+
+  char* next = b;
+  while (true) {
+    next = strstr(next, kBadKey);
+    if (!next)
+      break;
+    memset(next, ' ', kBadLen);
+    next += kBadLen;
+  }
 }
 
 inline string MoviePath(const string& filename) {
