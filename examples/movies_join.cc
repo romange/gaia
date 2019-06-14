@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
   CHECK(!FLAGS_movie_dir.empty());
 
   Pipeline* pipeline = pm.pipeline();
-  string credit_file = MoviePath("credits.csv");
+  string credit_file = MoviePath("credits*.csv");
   string movies_file = MoviePath("movies_metadata.csv");
   StringTable rc = pipeline->ReadText("read_credits", credit_file).set_skip_header(1);
   StringTable rm = pipeline->ReadText("read_movies", movies_file).set_skip_header(1);
