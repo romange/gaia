@@ -13,7 +13,12 @@ using namespace std;
 namespace base {
 
 static std::vector<std::string> ReadIds() {
-  file::LineReader line_reader(base::ProgramRunfile("testdata/ids.txt.gz"));
+  string filename("testdata/ids.txt.gz");
+  if (std::getenv("BAZEL")) {
+    filename.assign("gaia/base/" + filename);
+  }
+
+  file::LineReader line_reader(base::ProgramRunfile(filename));
   decltype(ReadIds()) res;
 
   StringPiece line;

@@ -19,3 +19,4 @@ build --cxxopt=-g
 build --cxxopt=-O
 build --cxxopt=-Wno-implicit-fallthrough
 build --cxxopt=-Wno-sign-compare
+test --test_env=BAZEL=YES

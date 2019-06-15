@@ -116,7 +116,6 @@ cc_test(
     deps = test_deps,
 )
 
-# TODO: not working, the path for data file is gaia/base/testdata/ids.txt.gz and not testdata/ids.txt.gz
 cc_test(
     name = "hash_test",
     srcs = [
