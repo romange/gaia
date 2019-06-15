@@ -6,8 +6,8 @@
 #include "base/hash.h"
 #include "absl/base/macros.h"
 #include "absl/base/optimization.h"
+#include "xxhash.h"
 #include <string.h>
-#include <xxhash.h>
 
 namespace {
 

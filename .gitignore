@@ -1,9 +1,11 @@
 build/*
 build-*
 .vscode/*.db
+.vscode/ipch
 third_party/*
 genfiles/*
 *.sublime-*
 .tags
 !third_party/include/*
 *.pyc
+bazel-*

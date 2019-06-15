@@ -6,7 +6,7 @@
 #include <cmath>
 #include <numeric>
 
-#include <lz4.h>
+#include "lz4.h"
 #include <shuffle.h>
 
 #include "base/bits.h"

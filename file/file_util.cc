@@ -21,6 +21,7 @@
 
 #include "file/file_util.h"
 
+#include <inttypes.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <glob.h>

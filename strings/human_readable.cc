@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "base/logging.h"
 #include "strings/stringprintf.h"

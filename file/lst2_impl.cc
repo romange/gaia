@@ -7,7 +7,7 @@
 #include "file/list_file_format2.h"
 
 #include <crc32c/crc32c.h>
-#include <lz4.h>
+#include "lz4.h"
 
 #include "base/endian.h"
 #include "base/varint.h"

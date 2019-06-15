@@ -5,7 +5,7 @@
 #include "file/compressors.h"
 
 #include <zlib.h>
-#include <lz4.h>
+#include "lz4.h"
 
 #include "base/logging.h"
 

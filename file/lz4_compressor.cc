@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include <lz4.h>
+#include "lz4.h"
 
 #include "util/compressors.h"
 
