@@ -43,10 +43,63 @@ Third_party packages have `TRDP::` prefix in `CMakeLists.txt`. absl libraries ha
 `absl_...`.
 
 
-## RPC
+## Single node Mapreduce
+GAIA library provides very efficient multi-threaded mapreduce framework for batch processing.
+It supports out of the box json parsing, compressed formats (gzip, zstd),
+local disk IO and GCS (Google Cloud Storage) IO. Using its primitives it's possible to map,
+reshard (partition), join and group multiple sources of data very efficiently.
+Fibers in GAIA allowed to optimize mapreduce execution and distribute IO
+with CPU loads in parallel.The example below shows how to process text files and reshard them
+based on imaginar year column for each row. Please check out [this tutorial](doc/mr3.md)
+to learn more about this mapreduce framework.
 
-In addition to better performance, new RPC supports server streaming API, fully asynchronous
-processing, low-latency service. New RPC uses Boost.ASIO and Boost.Fibers
+~~~~~~~~~~cpp
+#include "absl/strings/str_cat.h"
+#include "mr/local_runner.h"
+#include "mr/mr_main.h"
+#include "strings/split.h"  // For SplitCSVLineWithDelimiter.
+
+using namespace std;
+
+DEFINE_string(dest_dir, "~/mr_output", "");
+
+int main() {
+  // sets up IO threads and optional http console interace via port 8080 by default.
+  PipelineMain pm(&argc, &argv);
+  vector<string> inputs;
+  for (int i = 1; i < argc; ++i) {
+    inputs.push_back(argv[i]);  // could be a local file or "gs://...." url.
+  }
+  CHECK(!inputs.empty()) << Must provide some inputs to run!";
+
+  Pipeline* pipeline = pm.pipeline();
+
+  // Assuming that the first line of each file is csv header.
+  StringTable ss = pipeline->ReadText("read", inputs).set_skip_header(1);
+  auto reshard = [](string str) {
+    vector<char*> cols;
+    SplitCSVLineWithDelimiter(&str.front(), ',', &cols);
+    return absl::StrCat("year-", cols_[0]);
+  };
+
+  // Simplest example: read and repartition by year.
+  ss.Write("write_input", pb::WireFormat::TXT)
+      .WithCustomSharding(reshard).AndCompress(pb::Output::ZSTD);
+
+  // Environment is abstracted away through mr3::Runner class. LocalRunner is an implementation
+  // that comes out of the box.
+  LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
+  pipeline->Run(runner);
+
+  LOG(INFO) << "Pipeline finished";
+
+  return 0;
+}
+~~~~~~~~~~
+
+## RPC
+In addition to great performance, this RPC supports server streaming API, fully asynchronous
+processing, low-latency service. GAIA RPC framework employs Boost.ASIO and Boost.Fibers
 as its core libraries for asynchronous processing.
 
 1. [IoContextPool](https://github.com/romange/gaia/blob/master/util/asio/io_context_pool.h)
