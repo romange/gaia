@@ -46,11 +46,11 @@ Third_party packages have `TRDP::` prefix in `CMakeLists.txt`. absl libraries ha
 ## Single node Mapreduce
 GAIA library provides very efficient multi-threaded mapreduce framework for batch processing.
 It supports out of the box json parsing, compressed formats (gzip, zstd),
-local disk IO and GCS (Google Cloud Storage) IO. Using its primitives it's possible to map,
+local disk and GCS (Google Cloud Storage) IO. Using GAIA MR it's possible to map,
 reshard (partition), join and group multiple sources of data very efficiently.
-Fibers in GAIA allowed to optimize mapreduce execution and distribute IO
-with CPU loads in parallel.The example below shows how to process text files and reshard them
-based on imaginar year column for each row. Please check out [this tutorial](doc/mr3.md)
+Fibers in GAIA allowed to maximize pipeline execution and balance IO
+with CPU workloads in parallel.The example below shows how to process text files and reshard them
+based on imaginary "year" column for each CSV row. Please check out [this tutorial](doc/mr3.md)
 to learn more about this mapreduce framework.
 
 ~~~~~~~~~~cpp
@@ -61,7 +61,7 @@ to learn more about this mapreduce framework.
 
 using namespace std;
 
-DEFINE_string(dest_dir, "~/mr_output", "");
+DEFINE_string(dest_dir, "~/mr_output", "Working dir where the pipeline writes its by products");
 
 int main() {
   // sets up IO threads and optional http console interace via port 8080 by default.

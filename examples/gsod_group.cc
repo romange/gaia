@@ -18,7 +18,7 @@ using namespace mr3;
 using namespace util;
 using namespace std;
 
-DEFINE_string(dest_dir, "~/mr_output", "");
+DEFINE_string(dest_dir, "~/mr_output", "Working dir where the pipeline writes its by products");
 
 struct GsodRecord {
   uint32_t station;
@@ -30,7 +30,7 @@ template <> class RecordTraits<GsodRecord> {
   std::vector<char*> cols_;
 
  public:
-  static std::string Serialize(bool is_binary, GsodRecord&& rec) {
+  static std::string Serialize(bool is_binary, const GsodRecord& rec) {
     return absl::StrCat(rec.station, ",", rec.year);
   }
 
