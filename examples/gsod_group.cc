@@ -90,7 +90,6 @@ int main(int argc, char** argv) {
 
   Pipeline* pipeline = pm.pipeline();
 
-  // TODO: to make pipeline runnable even when tables go out of scope.
   StringTable ss = pipeline->ReadText("gsod", inputs).set_skip_header(1);
 
   PTable<GsodRecord> records = ss.Map<GsodMapper>("MapToGsod");
@@ -100,7 +99,7 @@ int main(int argc, char** argv) {
 
   StringTable joined =
       pipeline->Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
-  joined.Write("joined_table", pb::WireFormat::TXT).AndCompress(pb::Output::GZIP);
+  joined.Write("joined_table", pb::WireFormat::TXT).AndCompress(pb::Output::ZSTD, 1);
 
   LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
   pipeline->Run(runner);
