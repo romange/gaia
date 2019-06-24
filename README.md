@@ -8,7 +8,7 @@ in c++14 on linux systems. The focus is mostly for backend development, data pro
 
 
 1. Dependency on [abseil-cpp](https://github.com/abseil/abseil-cpp/)
-2. Dependency on [Boost 1.68](https://www.boost.org/doc/libs/1_68_0/doc/html/)
+2. Dependency on [Boost 1.69](https://www.boost.org/doc/libs/1_69_0/doc/html/)
 3. Uses ninja-build on top of cmake
 4. Build artifacts are docker-friendly.
 5. Generic RPC implementation.
@@ -44,14 +44,14 @@ Third_party packages have `TRDP::` prefix in `CMakeLists.txt`. absl libraries ha
 
 
 ## Single node Mapreduce
-GAIA library provides very efficient multi-threaded mapreduce framework for batch processing.
+GAIA library provides a very efficient multi-threaded mapreduce framework for batch processing.
 It supports out of the box json parsing, compressed formats (gzip, zstd),
 local disk and GCS (Google Cloud Storage) IO. Using GAIA MR it's possible to map,
-reshard (partition), join and group multiple sources of data very efficiently.
-Fibers in GAIA allowed to maximize pipeline execution and balance IO
-with CPU workloads in parallel.The example below shows how to process text files and reshard them
-based on imaginary "year" column for each CSV row. Please check out [this tutorial](doc/mr3.md)
-to learn more about this mapreduce framework.
+re-shard (partition), join and group multiple sources of data very efficiently.
+Fibers in GAIA allowed maximizing pipeline execution and balance IO
+with CPU workloads in parallel. The example below shows how to process text files and re-shard them
+based on an imaginary "year" column for each CSV row. Please check out [this tutorial](doc/mr3.md)
+to learn more about GAIA MR.
 
 ~~~~~~~~~~cpp
 #include "absl/strings/str_cat.h"
@@ -70,7 +70,7 @@ int main() {
   for (int i = 1; i < argc; ++i) {
     inputs.push_back(argv[i]);  // could be a local file or "gs://...." url.
   }
-  CHECK(!inputs.empty()) << Must provide some inputs to run!";
+  CHECK(!inputs.empty()) << "Must provide some inputs to run!";
 
   Pipeline* pipeline = pm.pipeline();
 
@@ -103,21 +103,23 @@ processing, low-latency service. GAIA RPC framework employs Boost.ASIO and Boost
 as its core libraries for asynchronous processing.
 
 1. [IoContextPool](https://github.com/romange/gaia/blob/master/util/asio/io_context_pool.h)
-is used for managing thread-per-core asynchronous engine based on ASIO.
+is used for managing a thread-per-core asynchronous engine based on ASIO.
 For periodic tasks, look at `asio/period_task.h`.
 
-2. The listening server (AcceptServer) is protocol agnostic and serves both http and RPC.
+2. The listening server (AcceptServer) is protocol agnostic and serves both HTTP and RPC.
 
 3. RPC-service methods run inside a fiber. That fiber belongs to a thread that probably serves
 many other fiber-based connections in the server. Using regular locking mechanisms
-(`std::mutex`, `pthread_mutex`) or calling 3rd party libraries (libmysqlcpp) will block the whole thread and all its connections will be stalled. We need to be mindful about this, and as a policy prohibit thread blocking in fiber-based server code.
+(`std::mutex`, `pthread_mutex`) or calling 3rd party libraries (libmysqlcpp) will block the whole thread and all its connections will be stalled. We need to be mindful of this, and as a policy prohibit thread blocking in fiber-based server code.
 
-4. Nevetheless, RPC service methods might need to issue RPC calls by themselves or block for some other reason.
-To do it correctly, we must use fiber-friendly synchronization routines. But even in this case we will still block the calling fiber (not thread). All other connections will continue processing but this one will stall. By default, there is one dedicated fiber per RPC connection that reads rpc requests and delegates them to the RPC application code. We need to remember that if higher level server-code stalls its fiber during its request processing, it effectively limits total QPS per that socket connection. For spinlock use-cases (i.e. RAM access locking with rw-spinlocks with low contention) having single fiber per rpc-connection is usually good enough to sustain high throughput. For more complicated cases, it's advised to implement fiber-pool (currently not exposed in GAIA).
+4. Nevertheless, RPC service methods might need to issue RPC calls by themselves or block for some other reason.
+To do it correctly, we must use fiber-friendly synchronization routines. But even in this case,
+we will still block the calling fiber (not thread). All other connections will continue processing but this one will stall. By default, there is one dedicated fiber per RPC connection that reads rpc requests and delegates them to the RPC application code. We need to remember that if higher level server-code stalls its fiber during its request processing, it effectively limits total QPS per that socket connection. For spinlock use-cases (i.e. RAM access locking with rw-spinlocks with low contention) having single fiber per rpc-connection is usually good enough to sustain high throughput. For more complicated cases, it's advised to implement fiber-pool (currently not exposed in GAIA).
 
-5. Server-side streaming is needed for responses that can be very large in size. Such responses can easily be represented by
-a stream of smaller responses with identical schema. Think of SQL response for example.
-It may consist of many rows returned by `SELECT`. Instead, of returning all of them as one blob, server-side streaming can send back multiple responses in the context of a single request on a wire. Each small response is propagated to RPC client via callback based interface. As a result, both systems (client and server) are not required to hold the whole response in RAM at the same time.
+5. Server-side streaming is needed for responses that can be very large. Such responses can easily be represented by
+a stream of smaller responses with an identical schema. Think of SQL response for example.
+It may consist of many rows returned by `SELECT`. Instead, of returning all of them as one blob, server-side streaming can send back multiple responses in the context of a single request on a wire. Each small response is propagated to RPC client via a callback based interface.
+As a result, both systems (client and server) are not required to hold the whole response in RAM at the same time.
 
 While GAIA provides very efficient RPC core library, it does not provide higher level RPC bindings.
 It's possible though to build a layer that uses protobuf-based declaration language this RPC library.
