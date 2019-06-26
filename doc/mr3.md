@@ -62,7 +62,8 @@ PTable<GsodRecord> records = ss.Map<GsodMapper>("MapToGsod");
 
 ### Resharding
 In order to cope with large amounts of data that can not be hold in RAM,
-our framework allows to repartition or as we call it 'reshard' the data before applying next transformation.
+our framework allows to repartition or as we call it 're-shard' the data before applying
+next the operator.
 
 ```cpp
 records.Write("gsod_map", pb::WireFormat::TXT)
@@ -73,19 +74,40 @@ records.Write("gsod_map", pb::WireFormat::TXT)
 This line instructs the framework to reshard the mapped table of GsodRecords by year into 10 shards.
 The final shards will also be compressed. Resharding is crucial to bring records of particular
 property together so that we could load them into RAM. Since we used ModN sharding it most likely that
-each file shard will contain multiple years of data but every unique year will be hold by exactly one file shard.
-The developer is expected to choose this number in such way that the input data divided
+each file shard will contain multiple years of data but every unique year will be hold by exactly
+one file shard. The developer is expected to choose shards count in such way that the input data divided
 by number of shards will be less than `total RAM available` / `number of cores on the machine`.
+The number of shards is bounded from above by file limit of the system (
+  it's usually less than 10K though it's customizable). Producing only few shards
+is also not very good, because it might affect the level of parallelism when running the next operator.
 
 ### GroupBy
-TBD
+Finally we apply the operator that processed each shard assuming that entities of the same year
+are located together. Please note that unlike with other frameworks the operator does not get any guarantees
+on the order of the entities inside shard and must handle them by its own. Low guarantees put more
+reponsibility on a developer but provide more performant framework with less I/O.
+
+`Join` operator can read multiple sharded inputs, in case we want to join multiple sources of data.
+In order to bind each input with its own handler function we have `records.BindWith(&GsodJoiner::Group)`
+call that tell the framework that in this case we want that `records` table will be handled by `GsodJoiner::Group`
+handler. In our case we have only one input that we want to process by counting all the records per year.
+
+As we said earlier, each shard might span multiple years of data so we use absl hash table to count
+number of records per year. After a shard is processed, the framework calls
+`void GsodJoiner::OnShardFinish` where our operator outputs the counts per year it processed.
+
 ```cpp
 StringTable joined =
       pipeline->Join<GsodJoiner>("group_by", {records.BindWith(&GsodJoiner::Group)});
 ```
 
 ### Running the pipeline
-TBD
+All the commands above only configure the framework with user-provided operators and bind them
+with the appropriate inputs. The entry point that triggers the run is the call `pipeline->Run(runner);`.
+The framework comes with already implemented `Runner` that provides fiber friendly,
+multi-threaded single machine processing. This `LocalRunner` requires a destination directory to store
+its intermediate and final outputs. Once the run is completed the process finishes.
+
 ```
 LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
 pipeline->Run(runner);
