@@ -41,10 +41,9 @@ new_git_repository(
     tag = "v0.7.0",
 )
 
-git_repository(
+local_repository(
     name = "com_google_absl",
-    commit = "aa468ad75539619b47979911297efbb629c52e44",
-    remote = "https://github.com/abseil/abseil-cpp",
+    path = "abseil-cpp",
 )
 
 git_repository(

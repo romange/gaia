@@ -1,6 +1,4 @@
-build --cxxopt=-Wno-format
 build --cxxopt=-std=c++14
-build --cxxopt=-fdiagnostics-color=always
 build --cxxopt=-Wno-noexcept-type
 build --cxxopt=-Wall
 build --cxxopt=-Wextra
@@ -14,9 +12,6 @@ build --cxxopt=-fno-omit-frame-pointer
 build --cxxopt=-Wno-unused-parameter
 build --cxxopt=-DGOOGLE_PROTOBUF_NO_RTTI
 build --cxxopt=-Wno-unused-result
-build --cxxopt=-DNDEBUG
-build --cxxopt=-g
-build --cxxopt=-O
 build --cxxopt=-Wno-implicit-fallthrough
 build --cxxopt=-Wno-sign-compare
 test --test_env=BAZEL=YES
