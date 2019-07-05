@@ -33,8 +33,8 @@ Minor changes by Roman Gershman (romange@gmail.com)
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <stdexcept>
-#include <vector>
 
 namespace base {
 
@@ -43,9 +43,9 @@ template <typename T> class mpmc_bounded_queue {
   using item_type = T;
 
   explicit mpmc_bounded_queue(size_t buffer_size)
-      : buffer_(buffer_size), buffer_mask_(buffer_size - 1) {
+      : buffer_(new cell_t[buffer_size]), buffer_mask_(buffer_size - 1) {
     // queue size must be power of two
-    if (!((buffer_size >= 2) && ((buffer_size & (buffer_size - 1)) == 0)))
+    if (buffer_size < 2 || (buffer_size & (buffer_size - 1)) != 0)
       throw std::runtime_error("async logger queue size must be power of two");
 
     for (size_t i = 0; i != buffer_size; i += 1)
@@ -72,32 +72,32 @@ template <typename T> class mpmc_bounded_queue {
   }
 
   // It's super important to leave try_enqueue as template function of free type U.
-  // Otherwise, moveable objects of different from V type (i.e. U) that can be
+  // Otherwise, moveable objects of different from T type (i.e. U) that can be
   // moved into V will be moved regardless if try_enqueue succeeds.
   // With this signature it's guaranteed that data is moved only if it's stored in the queue.
   // Added bonus, it seems we do not need the "const T&" version of this function.
-  template<typename U> bool try_enqueue(U&& data) {
+  template <typename U> bool try_enqueue(U&& data) {
     size_t pos;
     cell_t* cell;
 
-    if (!enqueue_internal(pos, cell))
-      return false;
+    while (true) {
+      pos = enqueue_pos_.load(std::memory_order_relaxed);
+      cell = &buffer_[pos & buffer_mask_];
+      size_t seq = cell->sequence.load(std::memory_order_acquire);
+      intptr_t dif = (intptr_t)seq - (intptr_t)(pos);
+      if (dif == 0) {  // available cell.
+        // advance enque index.
+        if (enqueue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed))
+          break;
+      } else if (dif < 0) {
+        return false;  // the queue is full.
+      }
+    }
 
-    new(&cell->storage) T(std::forward<U>(data));
+    new (&cell->storage) T(std::forward<U>(data));
     cell->sequence.store(pos + 1, std::memory_order_release);
     return true;
   }
-
-  /*bool try_enqueue(const T& data) {
-    size_t pos;
-    cell_t* cell;
-    if (!enqueue_internal(pos, cell))
-      return false;
-
-    cell->data_ = data;
-    cell->sequence_.store(pos + 1, std::memory_order_release);
-    return true;
-  }*/
 
   bool try_dequeue(T& data) {
     cell_t* cell;
@@ -112,16 +112,18 @@ template <typename T> class mpmc_bounded_queue {
         if (dequeue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed))
           break;
       } else if (dif < 0) {
-        return false;
+        return false;  // the queue is empty.
       }
     }
 
     data = std::forward<T>(reinterpret_cast<T&>(cell->storage));
+
+    // Commit transaction, free up the cell.
     cell->sequence.store(pos + buffer_mask_ + 1, std::memory_order_release);
     return true;
   }
 
-  size_t capacity() const { return buffer_mask_ + 1;}
+  size_t capacity() const { return buffer_mask_ + 1; }
 
  private:
   struct cell_t {
@@ -129,27 +131,10 @@ template <typename T> class mpmc_bounded_queue {
     std::aligned_storage_t<sizeof(T)> storage;
   };
 
-  bool enqueue_internal(size_t& out, cell_t*& cell) {
-    while (true) {
-      out = enqueue_pos_.load(std::memory_order_relaxed);
-      cell = &buffer_[out & buffer_mask_];
-      size_t seq = cell->sequence.load(std::memory_order_acquire);
-      intptr_t dif = (intptr_t)seq - (intptr_t)(out);
-      if (dif == 0) {
-        if (enqueue_pos_.compare_exchange_weak(out, out + 1, std::memory_order_relaxed))
-          break;
-      } else if (dif < 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  static size_t const cacheline_size = 64;
-  typedef char cacheline_pad_t[cacheline_size];
+  typedef char cacheline_pad_t[64];
 
   cacheline_pad_t pad0_;
-  std::vector<cell_t> buffer_;
+  std::unique_ptr<cell_t[]> buffer_;
   size_t const buffer_mask_;
   cacheline_pad_t pad1_;
   std::atomic<size_t> enqueue_pos_;
