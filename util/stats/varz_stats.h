@@ -29,15 +29,12 @@ class VarzListNode {
   virtual ~VarzListNode();
 
   // New interface. Func is a function accepting 'const char*' and VarzValue&&.
-  template <typename Func>
-  static void Iterate(Func&& f);
+  template <typename Func> static void Iterate(Func&& f);
 
   // Old interface. Appends string representations of each active node in the list to res.
   // Used for outputting the current state.
   static void IterateValues(std::function<void(const std::string&, const std::string&)> cb) {
-    Iterate([&](const char* name, AnyValue&& av) {
-      cb(name, Format(av));
-    });
+    Iterate([&](const char* name, AnyValue&& av) { cb(name, Format(av)); });
   }
 
  protected:
@@ -51,7 +48,7 @@ class VarzListNode {
   // Returns the head to varz linked list. Note that the list becomes invalid after at least one
   // linked list node was destroyed.
   static VarzListNode*& global_list();
-  static std::mutex g_varz_mutex;
+  static folly::RWSpinLock g_varz_lock;
 
   VarzListNode* next_;
   VarzListNode* prev_;
@@ -71,9 +68,7 @@ class VarzMapCount : public VarzListNode {
   // Increments key by delta.
   void IncBy(StringPiece key, int32 delta);
 
-  void Inc(StringPiece key) {
-    IncBy(key, 1);
-  }
+  void Inc(StringPiece key) { IncBy(key, 1); }
   void Set(StringPiece key, int32 value);
 
  private:
@@ -104,15 +99,10 @@ class VarzMapAverage5m : public VarzListNode {
 
 class VarzCount : public VarzListNode {
  public:
-  explicit VarzCount(const char* varname) : VarzListNode(varname) {
-  }
+  explicit VarzCount(const char* varname) : VarzListNode(varname) {}
 
-  void IncBy(int32 delta) {
-    val_ += delta;
-  }
-  void Inc() {
-    IncBy(1);
-  }
+  void IncBy(int32 delta) { val_ += delta; }
+  void Inc() { IncBy(1); }
 
  private:
   virtual AnyValue GetData() const override;
@@ -122,12 +112,9 @@ class VarzCount : public VarzListNode {
 
 class VarzQps : public VarzListNode {
  public:
-  explicit VarzQps(const char* varname) : VarzListNode(varname) {
-  }
+  explicit VarzQps(const char* varname) : VarzListNode(varname) {}
 
-  void Inc() {
-    val_.Inc();
-  }
+  void Inc() { val_.Inc(); }
 
  private:
   virtual AnyValue GetData() const override;
@@ -141,8 +128,7 @@ class VarzFunction : public VarzListNode {
   typedef std::function<KeyValMap()> MapCb;
 
   // cb - function that formats the output either as json or html according to the boolean is_json.
-  explicit VarzFunction(const char* varname, MapCb cb) : VarzListNode(varname), cb_(cb) {
-  }
+  explicit VarzFunction(const char* varname, MapCb cb) : VarzListNode(varname), cb_(cb) {}
 
  private:
   AnyValue GetData() const override;
@@ -153,8 +139,7 @@ class VarzFunction : public VarzListNode {
 // Increments non-trivial key in VarzMapCount described by base and suffix.
 // Does it efficiently and avoids allocations.
 // The caller must make sure that N is large enough to contain the key.
-template <int N>
-class FastVarMapCounter {
+template <int N> class FastVarMapCounter {
   VarzMapCount& map_count_;
 
   char buf_[N];
@@ -166,9 +151,7 @@ class FastVarMapCounter {
     suffix_ = StrAppend(buf_, N, base);
   }
 
-  void Inc(const char* suffix) {
-    IncBy(suffix, 1);
-  }
+  void Inc(const char* suffix) { IncBy(suffix, 1); }
 
   void IncBy(const char* suffix, int32 val) {
     strcpy(suffix_, suffix);
@@ -176,8 +159,8 @@ class FastVarMapCounter {
   }
 };
 
-template<typename Func> void VarzListNode::Iterate(Func&& f) {
-  std::lock_guard<std::mutex> guard(g_varz_mutex);
+template <typename Func> void VarzListNode::Iterate(Func&& f) {
+  folly::RWSpinLock::ReadHolder guard(g_varz_lock);
 
   for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
     if (node->name_ != nullptr) {

@@ -15,12 +15,11 @@ using util::VarzValue;
 
 namespace util {
 
-typedef std::lock_guard<std::mutex> mguard;
-
-std::mutex VarzListNode::g_varz_mutex;
+folly::RWSpinLock VarzListNode::g_varz_lock;
 
 VarzListNode::VarzListNode(const char* name) : name_(name), prev_(nullptr) {
-  mguard guard(g_varz_mutex);
+  folly::RWSpinLock::WriteHolder guard(g_varz_lock);
+
   next_ = global_list();
   if (next_) {
     next_->prev_ = this;
@@ -29,7 +28,7 @@ VarzListNode::VarzListNode(const char* name) : name_(name), prev_(nullptr) {
 }
 
 VarzListNode::~VarzListNode() {
-  mguard guard(g_varz_mutex);
+  folly::RWSpinLock::WriteHolder guard(g_varz_lock);
   if (global_list() == this) {
     global_list() = next_;
   } else {

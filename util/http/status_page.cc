@@ -73,10 +73,15 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
   a += "<div class='styled_border'>\n";
   a += StatusLine("Status", "OK");
 
-  util::ProcessStats stats = util::ProcessStats::Read();
-  time_t now = time(NULL);
-  a += StatusLine("Started on", base::PrintLocalTime(stats.start_time_seconds));
-  a += StatusLine("Uptime", GetTimerString(now - stats.start_time_seconds));
+  static std::atomic<time_t> start_time_cached{0};
+  time_t start_time = start_time_cached.load(std::memory_order_relaxed);
+  if (start_time == 0) {
+    util::ProcessStats stats = util::ProcessStats::Read();
+    start_time = stats.start_time_seconds;
+    start_time_cached.store(stats.start_time_seconds, std::memory_order_seq_cst);
+  }
+  a += StatusLine("Started on", base::PrintLocalTime(start_time));
+  a += StatusLine("Uptime", GetTimerString(time(NULL) - start_time));
 
   a += R"(</div>
 </body>
