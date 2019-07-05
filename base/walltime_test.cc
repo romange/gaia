@@ -32,7 +32,7 @@ TEST_F(WalltimeTest, BasicTimer) {
   Timer timer;
   EXPECT_EQ(0, timer.EvalUsec());
   SleepForMilliseconds(4);
-  EXPECT_LE(timer.EvalUsec(), 8000);
+  EXPECT_GE(timer.EvalUsec(), 3000);
 }
 
 class Dummy {
