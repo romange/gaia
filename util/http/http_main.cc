@@ -28,6 +28,10 @@ int main(int argc, char** argv) {
   auto cb = [](const http::QueryArgs& args, http::HttpHandler::SendFunction* send) {
     http::StringResponse resp = http::MakeStringResponse(h2::status::ok);
     resp.body() = "Bar";
+
+    http::SetMime(http::kTextMime, &resp);
+    resp.set(beast::http::field::server, "GAIA");
+
     return send->Invoke(std::move(resp));
   };
 

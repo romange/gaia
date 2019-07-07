@@ -34,8 +34,28 @@ namespace h2 = beast::http;
 namespace rj = rapidjson;
 using tcp = asio::ip::tcp;
 
-static util::Status ToStatus(const ::boost::system::error_code& ec) {
-  return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+static const char kMetaDataHost[] = "metadata.google.internal";
+
+static Status ToStatus(const system::error_code& ec) {
+  return Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+}
+
+#define RETURN_ON_ERROR \
+  if (ec)               \
+  return ToStatus(ec)
+
+static StatusObject<string> GetHttp(const h2::request<h2::empty_body>& req, tcp::socket* sock) {
+  system::error_code ec;
+  boost::beast::flat_buffer buffer;
+  h2::response<h2::string_body> resp;
+
+  h2::write(*sock, req, ec);
+  RETURN_ON_ERROR;
+
+  h2::read(*sock, buffer, resp, ec);
+  RETURN_ON_ERROR;
+
+  return std::move(resp).body();
 }
 
 Status GCE::ParseDefaultConfig() {
@@ -67,58 +87,61 @@ Status GCE::ParseDefaultConfig() {
   return Status::OK;
 }
 
-#define RETURN_ON_ERROR \
-  if (ec)               \
-  return ToStatus(ec)
-
 Status GCE::Init() {
   string tmp_str;
   if (!file_util::ReadFileToString("/etc/ssl/certs/ca-certificates.crt", &tmp_str)) {
     return Status("Could not find certificates");
   }
-  error_code ec;
+  system::error_code ec;
   ssl_ctx_.reset(new SslContext{asio::ssl::context::tlsv12_client});
   ssl_ctx_->set_verify_mode(asio::ssl::verify_peer);
   ssl_ctx_->add_certificate_authority(asio::buffer(tmp_str), ec);
   RETURN_ON_ERROR;
 
   string root_path = file_util::ExpandPath("~/.config/gcloud/");
+  string gce_file = absl::StrCat(root_path, "gce");
 
-  if (file_util::ReadFileToString(absl::StrCat(root_path, "gce"), &tmp_str)) {
+  asio::io_context io_context;
+  tcp::socket socket(io_context);
+
+  auto connect = [&] {
+    tcp::resolver resolver{io_context};
+    auto const results = resolver.resolve(kMetaDataHost, "80", ec);
+    if (!ec) {
+      asio::connect(socket, results.begin(), results.end(), ec);
+    }
+  };
+
+  if (file::Exists(gce_file)) {
+    CHECK(file_util::ReadFileToString(gce_file, &tmp_str));
     is_prod_env_ = (tmp_str == "True");
+  } else {
+    connect();
+    is_prod_env_ = !ec;
   }
 
   if (is_prod_env_) {
-    asio::io_context io_context;
-    tcp::socket socket(io_context);
-    tcp::resolver resolver{io_context};
-    auto const results = resolver.resolve("metadata.google.internal", "80", ec);
-    RETURN_ON_ERROR;
+    if (!socket.is_open()) {
+      connect();
+      RETURN_ON_ERROR;
+    }
 
-    asio::connect(socket, results.begin(), results.end(), ec);
-    RETURN_ON_ERROR;
-
-    boost::beast::flat_buffer buffer;
-    h2::response<h2::string_body> resp;
     h2::request<h2::empty_body> req{
         h2::verb::get, "/computeMetadata/v1/instance/service-accounts/default/email", 11};
     req.set("Metadata-Flavor", "Google");
-    req.set(h2::field::host, "metadata.google.internal");
+    req.set(h2::field::host, kMetaDataHost);
 
     VLOG(1) << "Req: " << req;
-    h2::write(socket, req, ec);
-    RETURN_ON_ERROR;
-
-    h2::read(socket, buffer, resp, ec);
-    RETURN_ON_ERROR;
-    account_id_ = std::move(resp).body();
+    auto str_res = GetHttp(req, &socket);
+    if (!str_res.ok())
+      return str_res.status;
+    account_id_ = std::move(str_res.obj);
 
     req.target("/computeMetadata/v1/project/project-id");
-    h2::write(socket, req, ec);
-    RETURN_ON_ERROR;
-    h2::read(socket, buffer, resp, ec);
-    RETURN_ON_ERROR;
-    project_id_ = std::move(resp).body();
+    str_res = GetHttp(req, &socket);
+    if (!str_res.ok())
+      return str_res.status;
+    project_id_ = std::move(str_res.obj);
   } else {
     return ReadDevCreds(root_path);
   }
@@ -176,9 +199,9 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
     h2::request<h2::empty_body> req{
         h2::verb::get, "/computeMetadata/v1/instance/service-accounts/default/token", 11};
     req.set("Metadata-Flavor", "Google");
-    req.set(h2::field::host, "metadata.google.internal");
+    req.set(h2::field::host, kMetaDataHost);
 
-    FiberSyncSocket socket{"metadata.google.internal", "80", context};
+    FiberSyncSocket socket{kMetaDataHost, "80", context};
     ec = socket.ClientWaitToConnect(2000);
     RETURN_ON_ERROR;
 
@@ -253,7 +276,6 @@ void GCE::Test_InjectAcessToken(std::string access_token) {
   access_token_.swap(access_token);
 }
 
-
 util::Status SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
   if (ec) {
@@ -267,6 +289,5 @@ util::Status SslConnect(SslStream* stream, unsigned ms) {
 
   return Status::OK;
 }
-
 
 }  // namespace util

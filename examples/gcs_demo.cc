@@ -3,6 +3,8 @@
 //
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/fiber/buffered_channel.hpp>
+#include <boost/fiber/future.hpp>
 
 #include "base/init.h"
 #include "base/logging.h"
@@ -79,9 +81,7 @@ void Download(const GCE& gce, IoContextPool* pool) {
     GCS gcs(gce, &io_context);
     CHECK_STATUS(gcs.Connect(2000));
     auto status = gcs.List(FLAGS_bucket, FLAGS_download, true,
-                           [&](absl::string_view name) {
-                             file_q.push(string(name));
-                            });
+                           [&](absl::string_view name) { file_q.push(string(name)); });
     CHECK_STATUS(status);
   };
 
