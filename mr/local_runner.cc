@@ -3,9 +3,6 @@
 //
 #include "mr/local_runner.h"
 
-#include <fcntl.h>
-#include <boost/fiber/fss.hpp>
-
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/histogram.h"
@@ -18,7 +15,7 @@
 #include "file/list_file_reader.h"
 
 #include "mr/do_context.h"
-#include "mr/impl/dest_file_set.h"
+#include "mr/impl/local_context.h"
 
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
@@ -41,102 +38,6 @@ namespace {
 
 using namespace intrusive;
 
-// Thread-local buffered writer, owned by LocalContext.
-class BufferedWriter {
-  DestHandle* dh_;
-  std::string buffer_;
-
-  size_t writes = 0, flushes = 0;
-  static constexpr size_t kFlushLimit = 1 << 13;
-
-  void operator=(const BufferedWriter&) = delete;
-
- public:
-  // dh not owned by BufferedWriter.
-  explicit BufferedWriter(DestHandle* dh) : dh_(dh) {}
-
-  BufferedWriter(const BufferedWriter&) = delete;
-  ~BufferedWriter();
-
-  void Flush();
-
-  void Write(StringPiece src);
-};
-
-class LocalContext : public RawContext {
- public:
-  explicit LocalContext(DestFileSet* mgr);
-  ~LocalContext();
-
-  void Flush() final;
-
-  void CloseShard(const ShardId& sid) final;
-
- private:
-  void WriteInternal(const ShardId& shard_id, std::string&& record) final;
-
-  absl::flat_hash_map<ShardId, BufferedWriter*> custom_shard_files_;
-
-  DestFileSet* mgr_;
-};
-
-BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
-
-void BufferedWriter::Flush() {
-  if (buffer_.empty())
-    return;
-
-  dh_->Write(std::move(buffer_));
-}
-
-void BufferedWriter::Write(StringPiece src) {
-  buffer_.append(src.data(), src.size());
-
-  VLOG_IF(2, ++writes % 1000 == 0) << "BufferedWrite " << writes;
-
-  if (buffer_.size() >= kFlushLimit) {
-    VLOG(2) << "Flush " << ++flushes;
-
-    dh_->Write(std::move(buffer_));
-    buffer_.clear();
-  }
-}
-
-LocalContext::LocalContext(DestFileSet* mgr) : mgr_(mgr) { CHECK(mgr_); }
-
-void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
-  auto it = custom_shard_files_.find(shard_id);
-  if (it == custom_shard_files_.end()) {
-    DestHandle* res = mgr_->GetOrCreate(shard_id);
-    it = custom_shard_files_.emplace(shard_id, new BufferedWriter{res}).first;
-  }
-  record.append("\n");
-  it->second->Write(record);
-}
-
-void LocalContext::Flush() {
-  for (auto& k_v : custom_shard_files_) {
-    k_v.second->Flush();
-  }
-}
-
-void LocalContext::CloseShard(const ShardId& shard_id) {
-  auto it = custom_shard_files_.find(shard_id);
-  if (it == custom_shard_files_.end()) {
-    LOG(ERROR) << "Could not find shard " << shard_id.ToString("shard");
-    return;
-  }
-  BufferedWriter* bw = it->second;
-  bw->Flush();
-  mgr_->CloseHandle(shard_id);
-}
-
-LocalContext::~LocalContext() {
-  for (auto& k_v : custom_shard_files_) {
-    delete k_v.second;
-  }
-  VLOG(1) << "~LocalContextEnd";
-}
 
 }  // namespace
 
@@ -371,9 +272,8 @@ void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
 RawContext* LocalRunner::CreateContext() {
   CHECK_NOTNULL(impl_->current_op);
-  CHECK_EQ(pb::WireFormat::TXT, impl_->current_op->output().format().type());
 
-  return new LocalContext(impl_->dest_mgr.get());
+  return new detail::LocalContext(impl_->dest_mgr.get());
 }
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {

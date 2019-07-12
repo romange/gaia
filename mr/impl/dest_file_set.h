@@ -5,6 +5,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/types/optional.h"
 #include "mr/mr3.pb.h"
 
 #include "file/file.h"
@@ -48,7 +49,7 @@ class DestFileSet {
   // GatherAll will still return it.
   void CloseHandle(const ShardId& key);
 
-  const pb::Output& output() const { return pb_out_;}
+  const pb::Output& output() const { return pb_out_; }
 
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
@@ -61,20 +62,13 @@ class DestHandle {
   void AppendThreadLocal(const std::string& val);
   static ::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path);
 
- protected:
-  template<typename Func> auto Await(Func&& f) {
-    return owner_->pool()->Await(fq_index_, std::forward<Func>(f));
-  }
-
-  DestHandle(DestFileSet* owner, const ShardId& sid);
-  DestHandle(const DestHandle&) = delete;
-
-  virtual void Open();
  public:
   virtual ~DestHandle() {}
 
   // Thread-safe. Called from multiple threads/do_contexts.
-  virtual void Write(std::string str);
+  using StringGenCb = std::function<absl::optional<std::string>()>;
+
+  virtual void Write(StringGenCb cb);
 
   // Thread-safe. Called from multiple threads/do_contexts.
   virtual void Close();
@@ -82,6 +76,15 @@ class DestHandle {
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
 
  protected:
+  template <typename Func> auto Await(Func&& f) {
+    return owner_->pool()->Await(fq_index_, std::forward<Func>(f));
+  }
+
+  DestHandle(DestFileSet* owner, const ShardId& sid);
+  DestHandle(const DestHandle&) = delete;
+
+  virtual void Open();
+
   DestFileSet* owner_;
   ShardId sid_;
 
@@ -93,7 +96,6 @@ class DestHandle {
   uint32_t sub_shard_ = 0;
   uint32_t fq_index_;
 };
-
 
 }  // namespace detail
 }  // namespace mr3

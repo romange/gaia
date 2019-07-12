@@ -77,14 +77,14 @@ class CompressHandle : public DestHandle {
  public:
   CompressHandle(DestFileSet* owner, const ShardId& sid);
 
-  void Write(std::string str) override;
+  void Write(StringGenCb str) override;
   void Close() override;
 
  private:
   void Open() override;
 
   size_t start_delta_ = 0;
-  util::StringSink* str_sink_ = nullptr;
+  util::StringSink* compress_out_buf_ = nullptr;
   std::unique_ptr<util::Sink> compress_sink_;
 
   boost::fibers::mutex zmu_;
@@ -94,7 +94,7 @@ class LstHandle : public DestHandle {
  public:
   LstHandle(DestFileSet* owner, const ShardId& sid);
 
-  void Write(std::string str) override;
+  void Write(StringGenCb cb) final;
   void Close() override;
 
  private:
@@ -105,28 +105,54 @@ class LstHandle : public DestHandle {
 };
 
 
+CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
+    : DestHandle(owner, sid), compress_out_buf_(new StringSink) {
+
+  static std::default_random_engine rnd;
+
+  // Randomize when we flush first for each handle. That should define uniform flushing cycle
+  // for all handles.
+  start_delta_ = rnd() % (kBufLimit - 1);
+  auto level = owner->output().compress().level();
+  if (owner->output().compress().type() == pb::Output::GZIP) {
+    compress_sink_.reset(new ZlibSink(compress_out_buf_, level));
+  } else if (owner->output().compress().type() == pb::Output::ZSTD) {
+    std::unique_ptr<ZStdSink> zsink{new ZStdSink(compress_out_buf_)};
+    CHECK_STATUS(zsink->Init(level));
+    compress_sink_ = std::move(zsink);
+  }
+}
+
 void CompressHandle::Open() {
   wf_ = Await([&] { return file::Open(full_path_); });
   CHECK(wf_);
 }
 
-void CompressHandle::Write(std::string str) {
+void CompressHandle::Write(StringGenCb cb) {
+  absl::optional<string> tmp_str;
   std::unique_lock<fibers::mutex> lk(zmu_);
-  CHECK_STATUS(compress_sink_->Append(strings::ToByteRange(str)));
-  if (str_sink_->contents().size() >= kBufLimit - start_delta_) {
-    str.clear();
-    str.swap(str_sink_->contents());
 
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(str), wf_));
-    start_delta_ = 0;
+  while (true) {
+    tmp_str = cb();
+    if (!tmp_str)
+      break;
+    strings::ByteRange br = strings::ToByteRange(tmp_str.value());
+    CHECK_STATUS(compress_sink_->Append(br));
+    if (compress_out_buf_->contents().size() >= kBufLimit - start_delta_) {
+      tmp_str->clear();
+      tmp_str->swap(compress_out_buf_->contents());
+
+      owner_->pool()->Add(fq_index_, WriteCb(std::move(*tmp_str), wf_));
+      start_delta_ = 0;
+    }
   }
 }
 
 void CompressHandle::Close() {
   CHECK_STATUS(compress_sink_->Flush());
 
-  if (!str_sink_->contents().empty()) {
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(str_sink_->contents()), wf_));
+  if (!compress_out_buf_->contents().empty()) {
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(compress_out_buf_->contents()), wf_));
   }
 
   DestHandle::Close();
@@ -134,9 +160,15 @@ void CompressHandle::Close() {
 
 LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
 
-void LstHandle::Write(std::string str) {
+void LstHandle::Write(StringGenCb cb) {
+  absl::optional<string> tmp_str;
   std::unique_lock<fibers::mutex> lk(mu_);
-  CHECK_STATUS(lst_writer_->AddRecord(str));
+  while (true) {
+    tmp_str = cb();
+    if (!tmp_str)
+      break;
+    CHECK_STATUS(lst_writer_->AddRecord(*tmp_str));
+  }
 }
 
 void LstHandle::Open() {
@@ -266,8 +298,14 @@ void DestHandle::AppendThreadLocal(const std::string& str) {
   return wf;
 }
 
-void DestHandle::Write(string str) {
-  owner_->pool()->Add(fq_index_, [this, str = std::move(str)] { AppendThreadLocal(str); });
+void DestHandle::Write(StringGenCb cb) {
+  absl::optional<string> tmp_str;
+  while (true) {
+    tmp_str = cb();
+    if (!tmp_str)
+      break;
+    owner_->pool()->Add(fq_index_, [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
+  }
 }
 
 void DestHandle::Open() {
@@ -292,24 +330,6 @@ void DestHandle::Close() {
   });
   CHECK(res);
   wf_ = nullptr;
-}
-
-CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
-    : DestHandle(owner, sid), str_sink_(new StringSink) {
-
-  static std::default_random_engine rnd;
-
-  // Randomize when we flush first for each handle. That should define uniform flushing cycle
-  // for all handles.
-  start_delta_ = rnd() % (kBufLimit - 1);
-  auto level = owner->output().compress().level();
-  if (owner->output().compress().type() == pb::Output::GZIP) {
-    compress_sink_.reset(new ZlibSink(str_sink_, level));
-  } else if (owner->output().compress().type() == pb::Output::ZSTD) {
-    std::unique_ptr<ZStdSink> zsink{new ZStdSink(str_sink_)};
-    CHECK_STATUS(zsink->Init(level));
-    compress_sink_ = std::move(zsink);
-  }
 }
 
 }  // namespace detail

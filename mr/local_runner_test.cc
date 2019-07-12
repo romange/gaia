@@ -49,9 +49,9 @@ class LocalRunnerTest : public testing::Test {
   std::unique_ptr<LocalRunner> runner_;
 };
 
-TEST_F(LocalRunnerTest, Basic) {
-  const ShardId kShard0{0};
+const ShardId kShard0{0};
 
+TEST_F(LocalRunnerTest, Basic) {
   ShardFileMap out_files;
   Start(pb::WireFormat::TXT);
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
@@ -69,7 +69,6 @@ TEST_F(LocalRunnerTest, Basic) {
 }
 
 TEST_F(LocalRunnerTest, MaxShardSize) {
-  const ShardId kShard0{0};
   Start(pb::WireFormat::TXT);
   op_.mutable_output()->mutable_compress()->set_type(pb::Output::GZIP);
   op_.mutable_output()->mutable_shard_spec()->set_max_raw_size_mb(1);
@@ -91,16 +90,14 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
 }
 
 TEST_F(LocalRunnerTest, Lst) {
-  LOG(ERROR) << "TODO: to create context that caches records in the thread-local buffer and"
-             << " then flushes them into central lst writer";
-  return;
   ShardFileMap out_files;
   Start(pb::WireFormat::LST);
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
-  context->TEST_Write(ShardId{0}, "foo");
+  context->TEST_Write(kShard0, "w1");
 
   context->Flush();
   runner_->OperatorEnd(&out_files);
+  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "w1/w1-shard-0000.lst")));
 }
 
 }  // namespace mr3
