@@ -32,6 +32,8 @@ class OperatorExecutor {
 
   void ExtractFreqMap(std::function<void(std::string, FrequencyMap<uint32_t>*)> cb);
  protected:
+  void RegisterContext(RawContext* context);
+
   /// Called from all IO threads once they finished running the operator.
   void FinalizeContext(long items_cnt, RawContext* context);
 
@@ -57,7 +59,7 @@ class OperatorExecutor {
   std::atomic<uint64_t> parse_errors_{0};
 
   RawContext::FreqMapRegistry freq_maps_;
-  const RawContext::FreqMapRegistry* prev_maps_;
+  const RawContext::FreqMapRegistry* finalized_maps_;
 };
 
 }  // namespace mr3

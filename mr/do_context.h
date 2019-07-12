@@ -83,6 +83,9 @@ class RawContext {
   //! map_id must be unique for each map across the whole pipeline run.
   FrequencyMap<uint32_t>&  GetMutableFrequencyMap(const std::string& map_id);
 
+  // Finds the map produced by operators in the previous steps
+  const FrequencyMap<uint32_t>* FindFinalizedMap(const std::string& map_id) const;
+
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
     ++item_writes_;
@@ -98,6 +101,7 @@ class RawContext {
   bool is_binary_ = false;
 
   FreqMapRegistry freq_maps_;
+  const FreqMapRegistry* finalized_maps_ = nullptr;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.

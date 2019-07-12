@@ -7,6 +7,10 @@ namespace mr3 {
 using namespace boost;
 using namespace std;
 
+void OperatorExecutor::RegisterContext(RawContext* context) {
+  context->finalized_maps_ = finalized_maps_;
+}
+
 void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
   raw_context->Flush();
   parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
@@ -40,7 +44,7 @@ void OperatorExecutor::ExtractFreqMap(function<void(string, FrequencyMap<uint32_
 }
 
 void OperatorExecutor::Init(const RawContext::FreqMapRegistry& prev_maps) {
-  prev_maps_ = &prev_maps;
+  finalized_maps_ = &prev_maps;
   InitInternal();
 }
 

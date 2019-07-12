@@ -80,6 +80,15 @@ FrequencyMap<uint32_t>&  RawContext::GetMutableFrequencyMap(const std::string& m
   return *res.first->second;
 }
 
+const FrequencyMap<uint32_t>* RawContext::FindFinalizedMap(const std::string& map_id) const {
+  auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
+  if (it == finalized_maps_->end())
+    return nullptr;
+  else
+    return it->second.get();
+}
+
+
 std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
     return absl::get<string>(*this);

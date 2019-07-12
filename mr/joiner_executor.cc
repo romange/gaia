@@ -117,6 +117,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   uint64_t cnt = 0;
 
   std::unique_ptr<RawContext> raw_context(runner_->CreateContext());
+  RegisterContext(raw_context.get());
+
   std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context.get())};
 
   while (true) {

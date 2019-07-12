@@ -73,6 +73,8 @@ void MapperExecutor::Stop() {
 void MapperExecutor::SetupPerIoThread(unsigned index, detail::TableBase* tb) {
   auto* ptr = new PerIoStruct(index);
   ptr->raw_context.reset(runner_->CreateContext());
+  RegisterContext(ptr->raw_context.get());
+
   per_io_.reset(ptr);
 
   CHECK_GT(FLAGS_map_io_read_factor, 0);
@@ -93,9 +95,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   runner_->OperatorStart(&tb->op());
 
   // As long as we do not block in the function we can use AwaitOnAll.
-  pool_->AwaitOnAll([&](unsigned index, IoContext&) {
-    SetupPerIoThread(index, tb);
-  });
+  pool_->AwaitOnAll([&](unsigned index, IoContext&) { SetupPerIoThread(index, tb); });
 
   for (const auto& input : inputs) {
     PushInput(input);
@@ -178,8 +178,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
     Record meta{Record::METADATA, pb_input->file_spec(file_input.spec_index).metadata()};
     record_q.Push(std::move(meta));
 
-    auto cb = [&, skip = pb_input->skip_header(),
-               record_num = uint64_t{0}](string&& s) mutable {
+    auto cb = [&, skip = pb_input->skip_header(), record_num = uint64_t{0}](string&& s) mutable {
       if (record_num++ < skip)
         return;
       ++aux_local->records_read;
