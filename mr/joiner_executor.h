@@ -24,8 +24,6 @@ class JoinerExecutor : public OperatorExecutor {
   JoinerExecutor(util::IoContextPool* pool, Runner* runner);
   ~JoinerExecutor();
 
-  void Init() final;
-
   void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
            ShardFileMap* out_files) final;
 
@@ -33,6 +31,7 @@ class JoinerExecutor : public OperatorExecutor {
   void Stop() final;
 
  private:
+  void InitInternal() final;
   void CheckInputs(const std::vector<const InputBase*>& inputs);
 
   void ProcessInputQ(detail::TableBase* tb);

@@ -22,7 +22,7 @@ class OperatorExecutor {
 
   virtual ~OperatorExecutor() {}
 
-  virtual void Init() = 0;
+  void Init(const RawContext::FreqMapRegistry& prev_maps);
 
   virtual void Run(const std::vector<const InputBase*>& inputs,
                    detail::TableBase* ss, ShardFileMap* out_files) = 0;
@@ -44,6 +44,8 @@ class OperatorExecutor {
     context->metadata_ = metadata;
   }
 
+  virtual void InitInternal() = 0;
+
   util::IoContextPool* pool_;
   Runner* runner_;
 
@@ -54,7 +56,8 @@ class OperatorExecutor {
   std::map<std::string, long> metric_map_;
   std::atomic<uint64_t> parse_errors_{0};
 
-  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
+  RawContext::FreqMapRegistry freq_maps_;
+  const RawContext::FreqMapRegistry* prev_maps_;
 };
 
 }  // namespace mr3

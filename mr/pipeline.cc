@@ -87,7 +87,7 @@ void Pipeline::Run(Runner* runner) {
         executor_.reset(new MapperExecutor{pool_, runner});
     }
 
-    executor_->Init();
+    executor_->Init(freq_maps_);
     lk.unlock();
     ProcessTable(sptr.get());
   }

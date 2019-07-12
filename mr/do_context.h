@@ -49,6 +49,8 @@ class RawContext {
   template <typename T> friend class DoContext;
   friend class OperatorExecutor;
  public:
+  using FreqMapRegistry = absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>>;
+
   RawContext();
 
   virtual ~RawContext();
@@ -95,7 +97,7 @@ class RawContext {
   std::string file_name_, metadata_;
   bool is_binary_ = false;
 
-  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
+  FreqMapRegistry freq_maps_;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.

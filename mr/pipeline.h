@@ -92,7 +92,7 @@ class Pipeline {
   std::unique_ptr<OperatorExecutor> executor_;  // guarded by mu_
   std::atomic_bool stopped_{false};
 
-  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
+  RawContext::FreqMapRegistry freq_maps_;
 };
 
 template <typename GrouperType, typename OutT>

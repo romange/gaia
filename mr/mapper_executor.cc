@@ -52,7 +52,7 @@ MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
 
 MapperExecutor::~MapperExecutor() { CHECK(!file_name_q_); }
 
-void MapperExecutor::Init() { runner_->Init(); }
+void MapperExecutor::InitInternal() { runner_->Init(); }
 
 void MapperExecutor::Stop() {
   VLOG(1) << "MapperExecutor Stop[";

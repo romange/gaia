@@ -39,4 +39,9 @@ void OperatorExecutor::ExtractFreqMap(function<void(string, FrequencyMap<uint32_
   freq_maps_.clear();
 }
 
+void OperatorExecutor::Init(const RawContext::FreqMapRegistry& prev_maps) {
+  prev_maps_ = &prev_maps;
+  InitInternal();
+}
+
 }  // namespace mr3

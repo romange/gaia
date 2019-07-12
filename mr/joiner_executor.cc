@@ -43,7 +43,7 @@ JoinerExecutor::JoinerExecutor(util::IoContextPool* pool, Runner* runner)
 
 JoinerExecutor::~JoinerExecutor() {}
 
-void JoinerExecutor::Init() {}
+void JoinerExecutor::InitInternal() {}
 
 void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::TableBase* tb,
                          ShardFileMap* out_files) {

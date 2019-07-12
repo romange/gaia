@@ -34,8 +34,6 @@ class MapperExecutor : public OperatorExecutor {
   MapperExecutor(util::IoContextPool* pool, Runner* runner);
   ~MapperExecutor();
 
-  void Init() final;
-
   void Run(const std::vector<const InputBase*>& inputs, detail::TableBase* ss,
            ShardFileMap* out_files) final;
 
@@ -43,6 +41,8 @@ class MapperExecutor : public OperatorExecutor {
   void Stop() final;
 
  private:
+  void InitInternal() final;
+
   void PushInput(const InputBase*);
 
   // Input managing fiber that reads files from disk and pumps data into record_q.
