@@ -77,6 +77,7 @@ void Pipeline::Run(Runner* runner) {
       break;
     }
 
+    // We lock due to protect again Stop() breaks.
     std::unique_lock<fibers::mutex> lk(mu_);
     switch (op.type()) {
       case pb::Operator::GROUP:
@@ -88,38 +89,51 @@ void Pipeline::Run(Runner* runner) {
 
     executor_->Init();
     lk.unlock();
-
-    std::vector<const InputBase*> inputs;
-    string input_names;
-    for (const auto& input_name : op.input_name()) {
-      absl::StrAppend(&input_names, input_name, ",");
-      inputs.push_back(CheckedInput(input_name));
-    }
-    input_names.pop_back();
-
-    LOG(INFO) << op.op_name() << " started on inputs [" << input_names << "]";
-    ShardFileMap out_files;
-    executor_->Run(inputs, sptr.get(), &out_files);
-    LOG(INFO) << op.op_name() << " finished run with " << out_files.size() << " output files";
-
-    // Fill the corresponsing input with sharded files.
-    auto it = inputs_.find(op.output().name());
-    CHECK(it != inputs_.end());
-    auto& inp_ptr = it->second;
-
-    for (const auto& k_v : out_files) {
-      auto* fs = inp_ptr->mutable_msg()->add_file_spec();
-      fs->set_url_glob(k_v.second);
-      if (absl::holds_alternative<uint32_t>(k_v.first)) {
-        fs->set_shard_id(absl::get<uint32_t>(k_v.first));
-      } else {
-        fs->set_custom_shard_id(absl::get<string>(k_v.first));
-      }
-    }
+    ProcessTable(sptr.get());
   }
 
   VLOG(1) << "Before Runner::Shutdown";
   runner->Shutdown();
+}
+
+void Pipeline::ProcessTable(detail::TableBase* tbl) {
+  const pb::Operator& op = tbl->op();
+  std::vector<const InputBase*> inputs;
+  string input_names;
+  for (const auto& input_name : op.input_name()) {
+    absl::StrAppend(&input_names, input_name, ",");
+    inputs.push_back(CheckedInput(input_name));
+  }
+  input_names.pop_back();
+
+  LOG(INFO) << op.op_name() << " started on inputs [" << input_names << "]";
+  ShardFileMap out_files;
+  executor_->Run(inputs, tbl, &out_files);
+
+  LOG(INFO) << op.op_name() << " finished run with " << out_files.size() << " output files";
+
+  // Fill the corresponsing input with sharded files.
+  auto it = inputs_.find(op.output().name());
+  CHECK(it != inputs_.end());
+  auto& inp_ptr = it->second;
+
+  for (const auto& k_v : out_files) {
+    auto* fs = inp_ptr->mutable_msg()->add_file_spec();
+    fs->set_url_glob(k_v.second);
+    if (absl::holds_alternative<uint32_t>(k_v.first)) {
+      fs->set_shard_id(absl::get<uint32_t>(k_v.first));
+    } else {
+      fs->set_custom_shard_id(absl::get<string>(k_v.first));
+    }
+  }
+
+  auto cb = [this](string k, FrequencyMap<uint32_t>* ptr) {
+    auto res = freq_maps_.emplace(std::move(k), ptr);
+    CHECK(res.second) << "Frequency map " << k
+                      << " was created more than once across the pipeline run.";
+  };
+
+  executor_->ExtractFreqMap(cb);
 }
 
 pb::Input* Pipeline::mutable_input(const std::string& name) {
@@ -127,6 +141,13 @@ pb::Input* Pipeline::mutable_input(const std::string& name) {
   CHECK(it != inputs_.end());
 
   return it->second->mutable_msg();
+}
+
+const FrequencyMap<uint32_t>* Pipeline::GetFreqMap(const std::string& map_id) const {
+  auto it = freq_maps_.find(map_id);
+  if (it == freq_maps_.end())
+    return nullptr;
+  return it->second.get();
 }
 
 Runner::~Runner() {}

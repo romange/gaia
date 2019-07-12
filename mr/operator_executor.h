@@ -30,7 +30,9 @@ class OperatorExecutor {
   // Stops the executor in the middle.
   virtual void Stop() = 0;
 
+  void ExtractFreqMap(std::function<void(std::string, FrequencyMap<uint32_t>*)> cb);
  protected:
+  /// Called from all IO threads once they finished running the operator.
   void FinalizeContext(long items_cnt, RawContext* context);
 
   static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
@@ -47,9 +49,12 @@ class OperatorExecutor {
 
   ::boost::fibers::mutex mu_;
 
-  // I keep it as std::map to print counters in lexicographic order.
-  std::map<std::string, long> counter_map_;
+  /// I keep it as std::map to print counters in lexicographic order.
+  /// Performance is negligible since it's used only for final aggregation.
+  std::map<std::string, long> metric_map_;
   std::atomic<uint64_t> parse_errors_{0};
+
+  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
 };
 
 }  // namespace mr3

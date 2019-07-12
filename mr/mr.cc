@@ -68,10 +68,17 @@ void TableBase::CheckFailIdentity() const { CHECK(defined() && is_identity_); }
 
 }  // namespace detail
 
-RawContext::RawContext() { counter_map_.set_empty_key(StringPiece{}); }
+RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 
 RawContext::~RawContext() {}
 
+FrequencyMap<uint32_t>&  RawContext::GetMutableFrequencyMap(const std::string& map_id) {
+  auto res = freq_maps_.emplace(map_id, nullptr);
+  if (res.second) {
+    res.first->second.reset(new FrequencyMap<uint32_t>);
+  }
+  return *res.first->second;
+}
 
 std::string ShardId::ToString(absl::string_view basename) const {
   if (absl::holds_alternative<string>(*this)) {
@@ -115,18 +122,6 @@ bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Do
   bool has_error = res->HasParseError();
   LOG_IF(INFO, has_error) << rj::GetParseError_En(res->GetParseError()) << " for string " << tmp_;
   return !has_error;
-}
-
-void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
-  raw_context->Flush();
-  parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
-
-  std::lock_guard<fibers::mutex> lk(mu_);
-  for (const auto& k_v : raw_context->counter_map()) {
-    counter_map_[string(k_v.first)] += k_v.second;
-  }
-  counter_map_["fn-calls"] += items_cnt;
-  counter_map_["fn-writes"] += raw_context->item_writes();
 }
 
 }  // namespace mr3

@@ -76,11 +76,13 @@ class Pipeline {
 
   pb::Input* mutable_input(const std::string&);
 
+  const FrequencyMap<uint32_t>* GetFreqMap(const std::string& map_id) const;
  private:
   PInput<std::string> Read(const std::string& name, pb::WireFormat::Type format,
                            const InputSpec& globs);
 
   const InputBase* CheckedInput(const std::string& name) const;
+  void ProcessTable(detail::TableBase* tbl);
 
   util::IoContextPool* pool_;
   absl::flat_hash_map<std::string, std::unique_ptr<InputBase>> inputs_;
@@ -89,6 +91,8 @@ class Pipeline {
   ::boost::fibers::mutex mu_;
   std::unique_ptr<OperatorExecutor> executor_;  // guarded by mu_
   std::atomic_bool stopped_{false};
+
+  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
 };
 
 template <typename GrouperType, typename OutT>

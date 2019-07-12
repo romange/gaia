@@ -114,7 +114,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   });
 
   LOG_IF(WARNING, parse_errors_ > 0) << op_name << " had " << parse_errors_.load() << " errors";
-  for (const auto& k_v : counter_map_) {
+  for (const auto& k_v : metric_map_) {
     LOG(INFO) << op_name << "-" << k_v.first << ": " << k_v.second;
   }
 

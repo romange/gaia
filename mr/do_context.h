@@ -5,6 +5,8 @@
 
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "mr/mr_types.h"
 #include "mr/output.h"
 #include "strings/unique_strings.h"
@@ -36,8 +38,13 @@ template <> struct RecordTraits<std::string> {
   }
 };
 
-// This class is created per IO Context thread. In other words, RawContext is thread-local but
-// not fiber local.
+template<typename T> using FrequencyMap = absl::flat_hash_map<T, size_t>;
+
+/** RawContext and its wrapper DoContext<T> provide bidirectional interface from user classes
+ *  to the framework.
+ *  RawContextis created per IO Context thread. In other words, RawContext is thread-local but
+ *  not necessarily fiber local.
+ */
 class RawContext {
   template <typename T> friend class DoContext;
   friend class OperatorExecutor;
@@ -46,17 +53,15 @@ class RawContext {
 
   virtual ~RawContext();
 
-  // Flushes pending written data before closing the context. Must be called before destroying
-  // the context.
+  /// Flushes pending written data before closing the context. Must be called before destroying
+  /// the context.
   virtual void Flush() {}
   virtual void CloseShard(const ShardId& sid) = 0;
 
-  // Mr Counters
-  void IncBy(StringPiece name, long delta) { counter_map_[name] += delta; }
-
+  //! MR metrics - are used for monitoring, exposing statistics via http
+  void IncBy(StringPiece name, long delta) { metric_map_[name] += delta; }
   void Inc(StringPiece name) { IncBy(name, 1); }
-
-  const StringPieceDenseMap<long>& counter_map() const { return counter_map_; }
+  // const StringPieceDenseMap<long>& metric_map() const { return metric_map_; }
 
   // Used only in tests.
   void TEST_Write(const ShardId& shard_id, std::string&& record) {
@@ -72,6 +77,10 @@ class RawContext {
   const std::string& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
+  //! TODO: to make GetFrequencyMap templated to support various keys.
+  //! map_id must be unique for each map across the whole pipeline run.
+  FrequencyMap<uint32_t>&  GetMutableFrequencyMap(const std::string& map_id);
+
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
     ++item_writes_;
@@ -81,10 +90,12 @@ class RawContext {
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
-  StringPieceDenseMap<long> counter_map_;
+  StringPieceDenseMap<long> metric_map_;
   size_t parse_errors_ = 0, item_writes_ = 0;
   std::string file_name_, metadata_;
   bool is_binary_ = false;
+
+  absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>> freq_maps_;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
