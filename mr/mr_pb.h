@@ -30,5 +30,10 @@ class RecordTraits<PB, std::enable_if_t<std::is_base_of<google::protobuf::Messag
   static bool Parse(bool is_binary, std::string tmp, PB* res) {
     return PB_Serializer::From(is_binary, std::move(tmp), res);
   }
+
+  static std::string TypeName() {
+    PB msg;
+    return msg.GetTypeName();
+  }
 };
 }  // namespace mr3

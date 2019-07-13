@@ -64,6 +64,8 @@ message Output {
 
   optional Compress compress = 3;
   optional ShardSpec shard_spec = 4;
+
+  optional string type_name = 5;  // The type name of the record serialized, when applicable.
 }
 
 

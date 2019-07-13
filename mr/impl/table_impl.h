@@ -57,6 +57,13 @@ base::void_t<decltype(&Handler::OnShardStart)> NotifyShardStartMaybe(Handler* h,
 
 template <typename Handler> void NotifyShardStartMaybe(Handler*, const ShardId&, char) {}
 
+/// Optionally set type_name if RecordTraits<OutType>::TypeName() exists.
+template <typename OutType>
+base::void_t<decltype(&RecordTraits<OutType>::TypeName)> WriteTypeNameMaybe(pb::Output* outp, int) {
+  outp->set_type_name(RecordTraits<OutType>::TypeName());
+}
+template <typename OutType> void WriteTypeNameMaybe(pb::Output* outp, char) {}
+
 class HandlerWrapperBase {
  public:
   virtual ~HandlerWrapperBase() {}
@@ -121,7 +128,11 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   // We pass 0 into 3rd argument so compiler will prefer 'int' resolution if possible.
   void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
 
-  template <typename FromType, typename F> void Add(void (Handler::*ptr)(F, DoContext<ToType>*)) {
+  /// Add DoFn into processing pipeline. This DoFn may accept any free FnInputType instead of
+  /// FromType as long as FromType can be moved into it. We create a wrapping handler
+  /// that can accept RawRecord, parse it and apply the supplied DoFn.
+  template <typename FromType, typename FnInputType>
+  void Add(void (Handler::*ptr)(FnInputType, DoContext<ToType>*)) {
     AddFn([this, ptr, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
       ParseAndDo<FromType>(&parser, &do_ctx_,
                            [this, ptr](FromType&& val, DoContext<ToType>* cntx) {
@@ -214,9 +225,11 @@ template <typename OutT> class TableImplT : public TableBase {
 
   ~TableImplT() override {}
 
-  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type type) {
-    SetOutput(name, type);
-    output_ = Output<OutT>{mutable_op()->mutable_output()};
+  Output<OutT>& Write(const std::string& name, pb::WireFormat::Type wire_type) {
+    SetOutput(name, wire_type);
+    auto* pb_out = mutable_op()->mutable_output();
+    WriteTypeNameMaybe<OutT>(pb_out, 0);
+    output_ = Output<OutT>{pb_out};
     return output_;
   }
 
