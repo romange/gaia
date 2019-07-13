@@ -75,6 +75,8 @@ class ListProtoWriter : public BaseProtoWriter {
   Options options_;
 };
 
+std::string GenerateSerializedFdSet(const ::google::protobuf::Descriptor* dscr);
+
 }  // namespace file
 
 #endif  // _PROTO_WRITER_H

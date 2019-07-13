@@ -1,6 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#include <google/protobuf/descriptor.h>
 
 #include "mr/impl/dest_file_set.h"
 
@@ -9,6 +10,7 @@
 #include "base/logging.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
+#include "file/proto_writer.h"
 #include "file/gzip_file.h"
 #include "util/zlib_source.h"
 #include "util/zstd_sinksource.h"
@@ -177,9 +179,20 @@ void LstHandle::Write(StringGenCb cb) {
 void LstHandle::Open() {
   CHECK(!owner_->output().has_compress());
   DestHandle::Open();
+  namespace gpb = google::protobuf;
 
   util::Sink* fs = new file::Sink{wf_, DO_NOT_TAKE_OWNERSHIP};
   lst_writer_.reset(new file::ListWriter{fs});
+  if (!owner_->output().type_name().empty()) {
+    lst_writer_->AddMeta(file::kProtoTypeKey, owner_->output().type_name());
+
+    const gpb::DescriptorPool* gen_pool = gpb::DescriptorPool::generated_pool();
+    const gpb::Descriptor* descr = gen_pool->FindMessageTypeByName(owner_->output().type_name());
+
+    CHECK(descr);  // TODO: should we support more cases besides pb?
+    lst_writer_->AddMeta(file::kProtoSetKey, file::GenerateSerializedFdSet(descr));
+  }
+
   CHECK_STATUS(lst_writer_->Init());
 }
 

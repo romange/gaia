@@ -10,6 +10,7 @@
 
 #include "file/file_util.h"
 #include "util/asio/io_context_pool.h"
+#include "util/plang/addressbook.pb.h"
 
 namespace mr3 {
 using namespace util;
@@ -92,8 +93,12 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
 TEST_F(LocalRunnerTest, Lst) {
   ShardFileMap out_files;
   Start(pb::WireFormat::LST);
+  op_.mutable_output()->set_type_name("tutorial.Address");
+  tutorial::Address addr;
+  addr.set_street("forrest");
+
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
-  context->TEST_Write(kShard0, "w1");
+  context->TEST_Write(kShard0, addr.SerializeAsString());
 
   context->Flush();
   runner_->OperatorEnd(&out_files);

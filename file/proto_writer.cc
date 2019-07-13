@@ -37,26 +37,6 @@ inline static string GetOutputFileName(string base, unsigned index) {
   return base;
 }
 
-string GenerateSerializedFdSet(const gpb::Descriptor* dscr) {
-  const gpb::FileDescriptor* fd = dscr->file();
-  gpb::FileDescriptorSet fd_set;
-  std::unordered_set<const gpb::FileDescriptor*> unique_set({fd});
-  std::vector<const gpb::FileDescriptor*> stack({fd});
-  while (!stack.empty()) {
-    fd = stack.back();
-    stack.pop_back();
-    fd->CopyTo(fd_set.add_file());
-
-    for (int i = 0; i < fd->dependency_count(); ++i) {
-      const gpb::FileDescriptor* child = fd->dependency(i);
-      if (unique_set.insert(child).second) {
-        stack.push_back(child);
-      }
-    }
-  }
-  return fd_set.SerializeAsString();
-}
-
 ListWriter::Options GetListOptions(const ListProtoWriter::Options& src) {
   ListWriter::Options res;
   res.block_size_multiplier = 4;
@@ -124,6 +104,27 @@ void ListProtoWriter::CreateWriter(StringPiece name) {
   writer_.reset(new ListWriter(name, opts));
   writer_->AddMeta(kProtoSetKey, fd_set_str_);
   writer_->AddMeta(kProtoTypeKey, dscr_->full_name());
+}
+
+
+string GenerateSerializedFdSet(const gpb::Descriptor* dscr) {
+  const gpb::FileDescriptor* fd = dscr->file();
+  gpb::FileDescriptorSet fd_set;
+  std::unordered_set<const gpb::FileDescriptor*> unique_set({fd});
+  std::vector<const gpb::FileDescriptor*> stack({fd});
+  while (!stack.empty()) {
+    fd = stack.back();
+    stack.pop_back();
+    fd->CopyTo(fd_set.add_file());
+
+    for (int i = 0; i < fd->dependency_count(); ++i) {
+      const gpb::FileDescriptor* child = fd->dependency(i);
+      if (unique_set.insert(child).second) {
+        stack.push_back(child);
+      }
+    }
+  }
+  return fd_set.SerializeAsString();
 }
 
 }  // namespace file
