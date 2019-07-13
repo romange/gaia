@@ -171,7 +171,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
 
     CHECK_EQ(channel_op_status::success, st);
     const pb::Input* pb_input = file_input.input;
-    bool is_binary = pb_input->format().type() == pb::WireFormat::LST;
+    bool is_binary = detail::IsBinary(pb_input->format().type());
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
     record_q.Push(Record{op, file_input.file_name});
 
@@ -200,7 +200,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
   VLOG(1) << "IOReadFiber after OnShardFinish";
 }
 
-void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb) {
+void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper) {
   this_fiber::properties<IoFiberProperties>().set_name("MapFiber");
   PerIoStruct* aux_local = per_io_.get();
   RawContext* raw_context = aux_local->raw_context.get();
@@ -208,8 +208,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
   Record record;
   uint64_t record_num = 0;
-  bool is_binary = false;
-  auto cb = hwb->Get(0);
+  auto cb = handler_wrapper->Get(0);
   while (true) {
     bool is_open = record_q->Pop(record);
     if (!is_open)
@@ -230,7 +229,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
         case Record::RECORD:;
       }
 
-      hwb->set_binary_format(is_binary);
       continue;
     }
 

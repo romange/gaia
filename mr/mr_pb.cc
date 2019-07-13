@@ -1,6 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+#include "base/logging.h"
 #include "mr/mr_pb.h"
 #include "util/pb2json.h"
 
@@ -13,9 +14,13 @@ std::string PB_Serializer::To(bool is_binary, const Message* msg) {
 }
 
 bool PB_Serializer::From(bool is_binary, std::string tmp, Message* res) {
-  if (is_binary)
+  if (is_binary) {
     return res->ParseFromString(tmp);
-  auto status = util::Json2Pb(std::move(tmp), res);
+  }
+
+  util::Status status = util::Json2Pb(std::move(tmp), res);
+  DVLOG(1) << "Status: " << status;
+
   return status.ok();
 }
 

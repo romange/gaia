@@ -14,6 +14,7 @@ namespace mr3 {
 using namespace boost;
 using fibers::channel_op_status;
 using namespace util;
+using namespace std;
 
 namespace {
 
@@ -85,6 +86,12 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     per_io_.reset();
   });
 
+  const string& op_name = tb->op().op_name();
+  LOG_IF(WARNING, parse_errors_ > 0) << op_name << " had " << parse_errors_.load() << " errors";
+  for (const auto& k_v : metric_map_) {
+    LOG(INFO) << op_name << "-" << k_v.first << ": " << k_v.second;
+  }
+
   runner_->OperatorEnd(out_files);
 }
 
@@ -134,7 +141,10 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
     for (const IndexedInput& ii : shard_input.second) {
       CHECK_LT(ii.index, handler_wrapper->Size());
       auto emit_cb = handler_wrapper->Get(ii.index);
+      bool is_binary = detail::IsBinary(ii.wf->type());
 
+      SetFileName(is_binary, ii.fspec->url_glob(), raw_context.get());
+      SetMetaData(ii.fspec->metadata(), raw_context.get());
       cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
     }
     handler_wrapper->OnShardFinish();

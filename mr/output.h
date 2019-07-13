@@ -13,6 +13,7 @@ namespace mr3 {
 
 namespace detail {
   template <typename OutT> class TableImplT;
+  inline bool IsBinary(pb::WireFormat::Type tp) { return tp == pb::WireFormat::LST; }
 }
 
 class OutputBase {
@@ -20,7 +21,7 @@ class OutputBase {
   pb::Output* mutable_msg() { return out_; }
   const pb::Output& msg() const { return *out_; }
 
-  bool is_binary() const { return out_->format().type() == pb::WireFormat::LST; }
+  bool is_binary() const { return detail::IsBinary(out_->format().type()); }
 
  protected:
   pb::Output* out_;

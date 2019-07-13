@@ -76,11 +76,8 @@ class HandlerWrapperBase {
   virtual void SetGroupingShard(const ShardId& sid) = 0;
   virtual void OnShardFinish() {}
 
-  void set_binary_format(bool is_binary) { is_binary_ = is_binary; }
-
  protected:
   template <typename F> void AddFn(F&& f) { raw_fn_vec_.emplace_back(std::forward<F>(f)); }
-  bool is_binary_ = false;
 
  private:
   std::vector<RawSinkCb> raw_fn_vec_;
@@ -102,7 +99,8 @@ template <typename T> class DefaultParser {
 template <typename FromType, typename Parser, typename DoFn, typename ToType>
 void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRecord&& rr) {
   FromType tmp_rec;
-  bool parse_ok = (*parser)(context->raw()->is_binary(), std::move(rr), &tmp_rec);
+  bool is_binary = context->raw()->is_binary();
+  bool parse_ok = (*parser)(is_binary, std::move(rr), &tmp_rec);
 
   if (parse_ok) {
     do_fn(std::move(tmp_rec), context);
@@ -155,7 +153,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
       : do_ctx_(out, raw_context), parser_(std::move(parser)) {
     AddFn([this](RawRecord&& rr) {
       T val;
-      if (parser_(is_binary_, std::move(rr), &val)) {
+      if (parser_(do_ctx_.raw()->is_binary(), std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
       } else {
         do_ctx_.raw()->EmitParseError();
