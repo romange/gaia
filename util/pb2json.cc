@@ -382,7 +382,7 @@ bool PbHandler::Int(int i) {
   }
 
   if (!field_) {
-    return opts_.skip_unknown_fields;
+    return !key_name_.empty() && opts_.skip_unknown_fields;
   }
 
   using namespace pb;
@@ -430,7 +430,7 @@ bool PbHandler::Uint(unsigned i) {
   }
 
   if (!field_) {
-    return opts_.skip_unknown_fields;
+    return !key_name_.empty() && opts_.skip_unknown_fields;
   }
 
   using namespace pb;
@@ -452,6 +452,8 @@ bool PbHandler::Uint(unsigned i) {
       err_msg = absl::StrCat("Unexpected Uint type ", field_->cpp_type_name());
       return false;
   }
+  key_name_.clear();
+
   return true;
 }
 
@@ -462,7 +464,7 @@ bool PbHandler::Int64(int64_t i) {
   }
 
   if (!field_) {
-    return opts_.skip_unknown_fields;
+    return !key_name_.empty() && opts_.skip_unknown_fields;
   }
 
   using namespace pb;
@@ -474,6 +476,8 @@ bool PbHandler::Int64(int64_t i) {
     default:
       return false;
   }
+  key_name_.clear();
+
   return true;
 }
 
@@ -484,7 +488,7 @@ bool PbHandler::Uint64(uint64_t i) {
   }
 
   if (!field_) {
-    return opts_.skip_unknown_fields;
+    return !key_name_.empty() && opts_.skip_unknown_fields;
   }
 
   using namespace pb;
@@ -496,6 +500,8 @@ bool PbHandler::Uint64(uint64_t i) {
       err_msg = absl::StrCat("Unexpected Uint64 type ", field_->cpp_type_name());
       return false;
   }
+  key_name_.clear();
+
   return true;
 }
 
@@ -506,7 +512,7 @@ bool PbHandler::Double(double i) {
   }
 
   if (!field_) {
-    return opts_.skip_unknown_fields;
+    return !key_name_.empty() && opts_.skip_unknown_fields;
   }
 
   using namespace pb;
@@ -518,6 +524,8 @@ bool PbHandler::Double(double i) {
       err_msg = absl::StrCat("Unexpected Double type ", field_->cpp_type_name());
       return false;
   }
+  key_name_.clear();
+
   return true;
 }
 
@@ -675,6 +683,7 @@ bool PbHandler::EndArray(size_t elementCount) {
     DCHECK(obj.arr_ref);
     obj.arr_ref.reset();
     field_ = nullptr;
+    key_name_.clear();
   }
   return true;
 }

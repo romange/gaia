@@ -239,4 +239,11 @@ TEST_F(Pb2JsonTest, Unknown) {
   EXPECT_EQ(3, person.id());
 }
 
+TEST_F(Pb2JsonTest, Invalid) {
+  JsonParse parse;
+  auto status = Json2Pb("123", &parse);
+  ASSERT_FALSE(status.ok());
+}
+
+
 }  // namespace util
