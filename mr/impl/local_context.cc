@@ -34,14 +34,15 @@ class BufferedWriter {
 
   string buffer_;
   vector<string> items_;
+  size_t buffered_size_ = 0;
 
-  size_t writes = 0, flushes = 0;
+  size_t writes_ = 0, flushes_ = 0;
   DestHandle::StringGenCb str_cb_;
 };
 
 BufferedWriter::BufferedWriter(DestHandle* dh, bool is_binary) : dh_(dh), is_binary_(is_binary) {
   if (is_binary) {
-    str_cb_ = [this]() mutable -> absl::optional<std::string> {
+    str_cb_ = [this]() -> absl::optional<std::string> {
       if (items_.empty()) {
         return absl::nullopt;
       }
@@ -50,36 +51,37 @@ BufferedWriter::BufferedWriter(DestHandle* dh, bool is_binary) : dh_(dh), is_bin
       return val;
     };
   } else {
-    str_cb_ = [ptr = &buffer_]() mutable -> absl::optional<std::string> {
-      string* val = ptr;
-      ptr = nullptr;
-      return val ? absl::optional<std::string>{std::move(*val)} : absl::nullopt;
+    str_cb_ = [this]() -> absl::optional<std::string> {
+      return buffer_.empty() ? absl::nullopt : absl::optional<std::string>{std::move(buffer_)};
     };
   }
 }
 
-BufferedWriter::~BufferedWriter() { CHECK(buffer_.empty()); }
+BufferedWriter::~BufferedWriter() {
+  CHECK_EQ(0, buffered_size_);
+}
 
 void BufferedWriter::Flush() {
-  if (buffer_.empty() && items_.empty())
-    return;
-
-  dh_->Write(str_cb_);
+  if (buffered_size_) {
+    dh_->Write(str_cb_);
+    buffered_size_ = 0;
+  }
 }
 
 void BufferedWriter::Write(string&& val) {
+  buffered_size_ += (val.size() + 1);
   if (is_binary_) {
     items_.push_back(std::move(val));
   } else {
     buffer_.append(val).append("\n");
   }
-  VLOG_IF(2, ++writes % 1000 == 0) << "BufferedWrite " << writes;
 
-  if (buffer_.size() >= kFlushLimit) {
-    VLOG(2) << "Flush " << ++flushes;
+  VLOG_IF(2, ++writes_ % 1000 == 0) << "BufferedWrite " << writes_;
+  if (buffered_size_ >= kFlushLimit) {
+    VLOG(2) << "Flush " << ++flushes_;
 
     dh_->Write(str_cb_);
-    buffer_.clear();
+    buffered_size_ = 0;
   }
 }
 

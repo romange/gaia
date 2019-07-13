@@ -160,6 +160,9 @@ void CompressHandle::Close() {
 
 LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
 
+// TODO: Support lst writing via thread_pool to avoit locks on disk I/O.
+// Instead of StringGenCb we could support vector<string> and with text case it will be 1-cell
+// vector.
 void LstHandle::Write(StringGenCb cb) {
   absl::optional<string> tmp_str;
   std::unique_lock<fibers::mutex> lk(mu_);
