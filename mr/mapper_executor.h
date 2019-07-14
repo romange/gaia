@@ -23,7 +23,7 @@ class MapperExecutor : public OperatorExecutor {
   struct Record {
     enum Operand { BINARY_FORMAT, TEXT_FORMAT, METADATA, RECORD} op;
 
-    std::string data;
+    absl::variant<const pb::Input::FileSpec*, std::string> payload;
   };
 
   using RecordQueue = util::fibers_ext::SimpleChannel<Record>;

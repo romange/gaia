@@ -175,7 +175,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
     record_q.Push(Record{op, file_input.file_name});
 
-    Record meta{Record::METADATA, pb_input->file_spec(file_input.spec_index).metadata()};
+    Record meta{Record::METADATA, &pb_input->file_spec(file_input.spec_index)};
     record_q.Push(std::move(meta));
 
     auto cb = [&, skip = pb_input->skip_header(), record_num = uint64_t{0}](string&& s) mutable {
@@ -217,13 +217,13 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     if (record.op != Record::RECORD) {
       switch (record.op) {
         case Record::BINARY_FORMAT:
-          SetFileName(true, record.data, raw_context);
+          SetFileName(true, absl::get<string>(record.payload), raw_context);
           break;
         case Record::TEXT_FORMAT:
-          SetFileName(false, record.data, raw_context);
+          SetFileName(false, absl::get<string>(record.payload), raw_context);
           break;
         case Record::METADATA:
-          SetMetaData(record.data, raw_context);
+          SetMetaData(*absl::get<const pb::Input::FileSpec*>(record.payload), raw_context);
           break;
 
         case Record::RECORD:;
@@ -241,7 +241,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    cb(std::move(record.data));
+    cb(std::move(absl::get<string>(record.payload)));
 
     if (++record_num % 1000 == 0) {
       this_fiber::yield();

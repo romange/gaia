@@ -42,9 +42,7 @@ class OperatorExecutor {
     context->file_name_ = file_name;
   }
 
-  static void SetMetaData(const std::string& metadata, RawContext* context) {
-    context->metadata_ = metadata;
-  }
+  static void SetMetaData(const pb::Input::FileSpec& fs, RawContext* context);
 
   virtual void InitInternal() = 0;
 

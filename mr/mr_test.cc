@@ -41,7 +41,10 @@ class StrValMapper {
 
   void Do(string val, mr3::DoContext<StrVal>* cntx) {
     input_files_->insert(cntx->raw()->input_file_name());
-    meta_->insert(cntx->raw()->meta_data());
+    if (absl::holds_alternative<int64_t>(cntx->raw()->meta_data())) {
+      meta_->insert(to_string(absl::get<int64_t>(cntx->raw()->meta_data())));
+    }
+
     StrVal a;
     val.append("a");
     a.val = std::move(val);
@@ -163,7 +166,7 @@ TEST_F(MrTest, ParseError) {
 TEST_F(MrTest, Map) {
   pb::Input::FileSpec fspec;
   fspec.set_url_glob("bar.txt");
-  fspec.set_metadata("42");
+  fspec.set_i64val(42);
 
   StringTable str1 = pipeline_->ReadText("read_bar", std::vector<pb::Input::FileSpec>{fspec});
   set<string> input_files, metadata;

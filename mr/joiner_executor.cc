@@ -144,7 +144,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       bool is_binary = detail::IsBinary(ii.wf->type());
 
       SetFileName(is_binary, ii.fspec->url_glob(), raw_context.get());
-      SetMetaData(ii.fspec->metadata(), raw_context.get());
+      SetMetaData(*ii.fspec, raw_context.get());
       cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
     }
     handler_wrapper->OnShardFinish();

@@ -34,11 +34,15 @@ message Input {
 
   message FileSpec {
     required string url_glob = 1;
-    optional string metadata = 2;
 
     oneof shard_id_ref {
-      string custom_shard_id = 3;
-      uint32 shard_id = 4;
+      string custom_shard_id = 2;
+      uint32 shard_id = 3;
+    }
+
+    oneof metadata {
+      int64  i64val = 4;
+      string strval = 5;
     }
   };
 

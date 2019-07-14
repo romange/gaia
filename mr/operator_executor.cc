@@ -3,6 +3,8 @@
 //
 #include "mr/operator_executor.h"
 
+#include "base/logging.h"
+
 namespace mr3 {
 using namespace boost;
 using namespace std;
@@ -46,6 +48,23 @@ void OperatorExecutor::ExtractFreqMap(function<void(string, FrequencyMap<uint32_
 void OperatorExecutor::Init(const RawContext::FreqMapRegistry& prev_maps) {
   finalized_maps_ = &prev_maps;
   InitInternal();
+}
+
+void OperatorExecutor::SetMetaData(const pb::Input::FileSpec& fs, RawContext* context) {
+  using FS = pb::Input::FileSpec;
+  switch (fs.metadata_case()) {
+    case FS::METADATA_NOT_SET:
+      context->metadata_.emplace<absl::monostate>();
+    break;
+    case FS::kStrval:
+      context->metadata_ = fs.strval();
+    break;
+    case FS::kI64Val:
+      context->metadata_ = fs.i64val();
+    break;
+    default:
+      LOG(FATAL) << "Invalid file spec tag " << fs.ShortDebugString();
+  }
 }
 
 }  // namespace mr3

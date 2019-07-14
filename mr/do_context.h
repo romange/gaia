@@ -49,6 +49,8 @@ class RawContext {
   template <typename T> friend class DoContext;
   friend class OperatorExecutor;
  public:
+  //! std/absl monostate is an empty class that gives variant optional semantics.
+  using InputMetaData = absl::variant<absl::monostate, int64_t, std::string>;
   using FreqMapRegistry = absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>>;
 
   RawContext();
@@ -76,7 +78,7 @@ class RawContext {
   size_t item_writes() const { return item_writes_;}
 
   const std::string& input_file_name() const { return file_name_;}
-  const std::string& meta_data() const { return metadata_;}
+  const InputMetaData& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
   //! TODO: to make GetFrequencyMap templated to support various keys.
@@ -97,7 +99,8 @@ class RawContext {
 
   StringPieceDenseMap<long> metric_map_;
   size_t parse_errors_ = 0, item_writes_ = 0;
-  std::string file_name_, metadata_;
+  std::string file_name_;
+  InputMetaData metadata_;
   bool is_binary_ = false;
 
   FreqMapRegistry freq_maps_;
