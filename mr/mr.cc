@@ -72,7 +72,7 @@ RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 
 RawContext::~RawContext() {}
 
-FrequencyMap<uint32_t>&  RawContext::GetMutableFrequencyMap(const std::string& map_id) {
+FrequencyMap<uint32_t>&  RawContext::GetFreqMapStatistic(const std::string& map_id) {
   auto res = freq_maps_.emplace(map_id, nullptr);
   if (res.second) {
     res.first->second.reset(new FrequencyMap<uint32_t>);
@@ -80,7 +80,7 @@ FrequencyMap<uint32_t>&  RawContext::GetMutableFrequencyMap(const std::string& m
   return *res.first->second;
 }
 
-const FrequencyMap<uint32_t>* RawContext::FindFinalizedMap(const std::string& map_id) const {
+const FrequencyMap<uint32_t>* RawContext::FindMaterializedFreqMapStatistic(const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
   if (it == finalized_maps_->end())
     return nullptr;

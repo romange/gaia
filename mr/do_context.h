@@ -81,12 +81,12 @@ class RawContext {
   const InputMetaData& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
-  //! TODO: to make GetFrequencyMap templated to support various keys.
+  //! TODO: to make GetMutableMap templated to support various keys.
   //! map_id must be unique for each map across the whole pipeline run.
-  FrequencyMap<uint32_t>&  GetMutableFrequencyMap(const std::string& map_id);
+  FrequencyMap<uint32_t>&  GetFreqMapStatistic(const std::string& map_id);
 
   // Finds the map produced by operators in the previous steps
-  const FrequencyMap<uint32_t>* FindFinalizedMap(const std::string& map_id) const;
+  const FrequencyMap<uint32_t>* FindMaterializedFreqMapStatistic(const std::string& map_id) const;
 
  private:
   void Write(const ShardId& shard_id, std::string&& record) {

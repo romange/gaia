@@ -197,7 +197,7 @@ class IntMapper {
     IntVal iv;
     CHECK(safe_strto32(a.val, &iv.val)) << a.val;
     cntx->Write(iv);
-    auto& map = cntx->raw()->GetMutableFrequencyMap("int_map");
+    auto& map = cntx->raw()->GetFreqMapStatistic("int_map");
     ++map[iv.val];
   }
 };
