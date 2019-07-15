@@ -43,7 +43,7 @@ RawContext* TestRunner::CreateContext() {
 
 void TestRunner::ExpandGlob(const string& glob, function<void(const string&)> cb) {
   auto it = input_fs_.find(glob);
-  CHECK(it != input_fs_.end());
+  CHECK(it != input_fs_.end()) << "Missing test file " << glob;
 
   if (it != input_fs_.end()) {
     cb(it->first);
