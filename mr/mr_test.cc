@@ -306,8 +306,6 @@ TEST_F(MrTest, JoinAndReshard) {
   });
   pipeline_->Run(&runner_);
 
-  LOG(ERROR) << "TBD: to fix JoinAndReshard test";
-  return;
   EXPECT_THAT(runner_.Table("joinw"),
               UnorderedElementsAre(MatchShard(0, {"2"}), MatchShard(1, {"5", "1", "1"})));
 }

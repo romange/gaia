@@ -119,7 +119,9 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
       : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
 
   void SetGroupingShard(const ShardId& sid) final {
-    do_ctx_.SetConstantShard(sid);
+    if (!do_ctx_.out_.msg().has_shard_spec()) {
+      do_ctx_.out_.SetConstantShard(sid);
+    }
     NotifyShardStartMaybe(&h_, sid, 0);
   }
 
@@ -161,7 +163,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
     });
   }
 
-  void SetGroupingShard(const ShardId& sid) final { do_ctx_.SetConstantShard(sid); }
+  void SetGroupingShard(const ShardId& sid) final {}
 };
 
 class TableBase : public std::enable_shared_from_this<TableBase> {

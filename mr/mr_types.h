@@ -23,8 +23,8 @@ typedef std::function<void(RawRecord&& record)> RawSinkCb;
 template <typename Handler, typename ToType>
 using RawSinkMethodFactory = std::function<RawSinkCb(Handler* handler, DoContext<ToType>* context)>;
 
-struct ShardId : public absl::variant<uint32_t, std::string> {
-  using Parent = absl::variant<uint32_t, std::string>;
+struct ShardId : public absl::variant<absl::monostate, uint32_t, std::string> {
+  using Parent = absl::variant<absl::monostate, uint32_t, std::string>;
 
   using Parent::Parent;
 

@@ -19,6 +19,10 @@ namespace rj = rapidjson;
 
 namespace detail {
 
+void VerifyUnspecifiedSharding(const pb::Output& outp) {
+  CHECK(!outp.has_shard_spec()) << "Output " << outp.name() << " should not have sharding spec";
+}
+
 TableBase::~TableBase() {}
 
 void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
@@ -68,11 +72,29 @@ void TableBase::CheckFailIdentity() const { CHECK(defined() && is_identity_); }
 
 }  // namespace detail
 
+namespace {
+
+struct ShardVisitor {
+  absl::string_view base;
+
+  ShardVisitor(absl::string_view b) : base(b) {}
+
+  string operator()(const string& id) const { return id; }
+
+  string operator()(uint32_t val) const {
+    return absl::StrCat(base, "-", absl::Dec(val, absl::kZeroPad4));
+  }
+
+  string operator()(absl::monostate ms) const { return "undefined"; }
+};
+
+}  // namespace
+
 RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 
 RawContext::~RawContext() {}
 
-FrequencyMap<uint32_t>&  RawContext::GetFreqMapStatistic(const std::string& map_id) {
+FrequencyMap<uint32_t>& RawContext::GetFreqMapStatistic(const std::string& map_id) {
   auto res = freq_maps_.emplace(map_id, nullptr);
   if (res.second) {
     res.first->second.reset(new FrequencyMap<uint32_t>);
@@ -80,7 +102,8 @@ FrequencyMap<uint32_t>&  RawContext::GetFreqMapStatistic(const std::string& map_
   return *res.first->second;
 }
 
-const FrequencyMap<uint32_t>* RawContext::FindMaterializedFreqMapStatistic(const std::string& map_id) const {
+const FrequencyMap<uint32_t>* RawContext::FindMaterializedFreqMapStatistic(
+    const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
   if (it == finalized_maps_->end())
     return nullptr;
@@ -88,12 +111,8 @@ const FrequencyMap<uint32_t>* RawContext::FindMaterializedFreqMapStatistic(const
     return it->second.get();
 }
 
-
 std::string ShardId::ToString(absl::string_view basename) const {
-  if (absl::holds_alternative<string>(*this)) {
-    return absl::get<string>(*this);
-  }
-  return absl::StrCat(basename, "-", absl::Dec(absl::get<uint32_t>(*this), absl::kZeroPad4));
+  return absl::visit(ShardVisitor{basename}, static_cast<const Parent&>(*this));
 }
 
 void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
@@ -136,10 +155,7 @@ bool RecordTraits<rj::Document>::Parse(bool is_binary, std::string&& tmp, rj::Do
 }  // namespace mr3
 
 ostream& operator<<(ostream& os, const mr3::ShardId& sid) {
-  if (absl::holds_alternative<string>(sid)) {
-    os << absl::get<string>(sid);
-  } else {
-    os << absl::get<uint32_t>(sid);
-  }
+  os << sid.ToString("shard");
+
   return os;
 }

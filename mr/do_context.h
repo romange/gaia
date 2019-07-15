@@ -18,6 +18,9 @@ class OperatorExecutor;
 
 namespace detail {
 template <typename Handler, typename ToType> class HandlerWrapper;
+
+void VerifyUnspecifiedSharding(const pb::Output& outp);
+
 }  // namespace detail
 
 // User facing interfaces. void tag for dispatching per class of types
@@ -131,7 +134,12 @@ template <typename T> class DoContext {
 
   RawContext* raw() { return context_; }
 
-  void SetConstantShard(ShardId sid) { out_.SetConstantShard(std::move(sid)); }
+  //
+  void SetOutputShard(ShardId sid) {
+    detail::VerifyUnspecifiedSharding(out_.msg());
+    out_.SetConstantShard(std::move(sid));
+  }
+
   void CloseShard(const ShardId& sid) { raw()->CloseShard(sid); }
 
  private:

@@ -38,7 +38,7 @@ template <typename T> class Output : public OutputBase {
   using CustomShardingFunc = std::function<std::string(const T&)>;
   using ModNShardingFunc = std::function<unsigned(const T&)>;
 
-  absl::variant<ShardId, ModNShardingFunc, CustomShardingFunc> shard_op_;
+  absl::variant<absl::monostate, ShardId, ModNShardingFunc, CustomShardingFunc> shard_op_;
   unsigned modn_ = 0;
 
   struct Visitor {
@@ -46,9 +46,11 @@ template <typename T> class Output : public OutputBase {
     unsigned modn_;
 
     Visitor(const T& t, unsigned modn) :t_(t), modn_(modn) {}
+
     ShardId operator()(const ShardId& id) const { return id; }
     ShardId operator()(const ModNShardingFunc& func) const { return ShardId{func(t_) % modn_}; }
     ShardId operator()(const CustomShardingFunc& func) const { return ShardId{func(t_)}; }
+    ShardId operator()(absl::monostate ms) const { return ms; }
   };
 
  public:
@@ -77,7 +79,10 @@ template <typename T> class Output : public OutputBase {
     return absl::visit(Visitor{t, modn_}, shard_op_);
   }
 
+
+  // TODO: to expose it for friends.
   void SetConstantShard(ShardId sid) { shard_op_ = std::move(sid); }
+
  private:
   Output(pb::Output* out) : OutputBase(out) {}
 };
