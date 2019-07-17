@@ -130,7 +130,7 @@ inline bool ShouldRetry(h2::status st) {
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
   os << msg.reason() << endl;
   for (const auto& f : msg) {
-    os << f.name() << " : " << f.value() << endl;
+    os << f.name_string() << " : " << f.value() << endl;
   }
   return os;
 }
@@ -147,16 +147,21 @@ auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp
   uint8_t buf[512];
   auto& body = parser.get().body();
   error_code ec;
+  size_t sz = 0;
 
   // Drain pending response completely to allow reusing the current connection.
   while (!parser.is_done()) {
     body.data = buf;
     body.size = sizeof(buf);
-    h2::read(*stream, *tmp_buf, parser, ec);
+    size_t s1 = h2::read(*stream, *tmp_buf, parser, ec);
     if (ec && ec != h2::error::need_buffer) {
       return ec;
     }
+    sz += s1;
+    VLOG(1) << "DrainResp: " << parser.get();
   }
+  VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
+
   return ec;
 }
 
@@ -192,7 +197,6 @@ util::Status GCS::CloseSequential() {
   if (!seq_file_) {
     return Status::OK;
   }
-  VLOG(1) << "CloseSequential - Drain";
   CHECK(client_);
   error_code ec = seq_file_->Drain(client_.get(), &tmp_buffer_);
   seq_file_.reset();
@@ -366,7 +370,7 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     }
 
     VLOG(1) << "HeaderResp: " << msg;
-    VLOG(1) << "Msg Accessors: KA" << tmp_file->parser.keep_alive() << "/"
+    VLOG(1) << "Msg Accessors, KA: " << tmp_file->parser.keep_alive() << "/"
             << tmp_file->parser.need_eof();
     if (!tmp_file->parser.keep_alive()) {
       VLOG(1) << "No keep-alive, requested reconnect";
@@ -423,6 +427,8 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
   if (ec && ec != h2::error::need_buffer) {
     LOG(ERROR) << "ec: " << ec << "/" << ec.message();
+    LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
+
     return ToStatus(ec);
   }
 
