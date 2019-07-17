@@ -58,6 +58,10 @@ class Pipeline {
     return ReadText(name, InputSpec{glob});
   }
 
+  PInput<std::string> ReadLst(const std::string& name, const InputSpec& input_spec) {
+    return Read(name, pb::WireFormat::LST, input_spec);
+  }
+
   PInput<std::string> ReadLst(const std::string& name, const std::vector<std::string>& globs) {
     return Read(name, pb::WireFormat::LST, globs);
   }
