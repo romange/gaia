@@ -72,6 +72,7 @@ class FiberSocketImpl {
   void Worker(const std::string& hname, const std::string& service);
   void WakeWorker();
   error_code Reconnect(const std::string& hname, const std::string& service);
+  void SetStatus(const error_code& ec, const char* where);
 
   error_code status_;
 
@@ -119,7 +120,8 @@ template <typename MBS> size_t FiberSocketImpl::read_some(const MBS& bufs, error
     read_size = sock_.async_read_some(new_seq, fibers_ext::yield[ec]);
     read_state_ = READ_IDLE;
   }
-  status_ = ec;
+  if (ec)
+    SetStatus(ec, "read_some");
 
   if (clientsock_data_) {
     WakeWorker();  // For client socket case.

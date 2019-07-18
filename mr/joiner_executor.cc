@@ -100,13 +100,14 @@ void JoinerExecutor::CheckInputs(const std::vector<const InputBase*>& inputs) {
   for (const auto& input : inputs) {
     const pb::Output* linked_outp = input->linked_outp();
     CHECK(linked_outp) << input->msg().DebugString();
-    CHECK(linked_outp->has_shard_spec()) << linked_outp->DebugString();
 
-    CHECK_EQ(linked_outp->shard_spec().type(), pb::ShardSpec::MODN);
-    if (!modn) {
-      modn = linked_outp->shard_spec().modn();
-    } else {
-      CHECK_EQ(modn, linked_outp->shard_spec().modn());
+    if (linked_outp->has_shard_spec()) {
+      CHECK_EQ(linked_outp->shard_spec().type(), pb::ShardSpec::MODN);
+      if (!modn) {
+        modn = linked_outp->shard_spec().modn();
+      } else {
+        CHECK_EQ(modn, linked_outp->shard_spec().modn());
+      }
     }
 
     for (const auto& fspec : input->msg().file_spec()) {

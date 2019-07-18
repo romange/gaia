@@ -76,6 +76,13 @@ void FiberSocketImpl::Shutdown(error_code& ec) {
   }
 }
 
+void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
+  status_ = ec;
+  if (ec) {
+    VLOG(1) << "Setting socket status to " << ec << "/" << ec.message() << " at " << where;
+  }
+}
+
 void FiberSocketImpl::WakeWorker() { clientsock_data_->worker_cv.notify_one(); }
 
 void FiberSocketImpl::InitiateConnection(const std::string& hname, const std::string& port,
@@ -155,16 +162,8 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   using namespace asio::ip;
 
   auto& asio_io_cntx = clientsock_data_->io_cntx->raw_context();
-  //  asio::steady_timer timer(asio_io_cntx, clientsock_data_->connect_duration);
 
   tcp::resolver resolver(asio_io_cntx);
-
-  /*timer.async_wait([&](const system::error_code& ec) {
-    if (!ec) {  // Successfully expired.
-      VLOG(1) << "Cancelling resolver";
-      resolver.cancel();
-    }
-  });*/
 
   system::error_code ec;
   VLOG(1) << "Before AsyncResolve";
@@ -192,12 +191,14 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
 
     // Use mutex to so that WaitToConnect would be thread-safe.
     std::lock_guard<fibers::mutex> lock(clientsock_data_->connect_mu);
-    status_ = ec;
+    SetStatus(ec, "reconnect");
+
     // notify_one awakes only those threads that already suspend on cnd.wait(). Therefore
     // we must change status_ under mutex.
     clientsock_data_->cv_st.notify_one();
+  } else {
+    status_.clear();
   }
-  status_ = ec;
 
   return status_;
 }
