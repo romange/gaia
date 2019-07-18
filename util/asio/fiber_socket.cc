@@ -186,20 +186,19 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   asio::async_connect(sock_, results, fibers_ext::yield[ec]);
   DVLOG(1) << "After async_connect " << ec;
 
-  if (!ec) {
+  if (ec) {
+    SetStatus(ec, "reconnect");
+  } else {
     sock_.non_blocking(true);  // For some reason async_connect clears this option.
 
     // Use mutex to so that WaitToConnect would be thread-safe.
     std::lock_guard<fibers::mutex> lock(clientsock_data_->connect_mu);
-    SetStatus(ec, "reconnect");
+    status_.clear();
 
     // notify_one awakes only those threads that already suspend on cnd.wait(). Therefore
     // we must change status_ under mutex.
     clientsock_data_->cv_st.notify_one();
-  } else {
-    status_.clear();
   }
-
   return status_;
 }
 
