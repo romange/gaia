@@ -183,6 +183,18 @@ void WriteStringToFileOrDie(StringPiece contents, StringPiece name) {
 
 bool CreateDir(StringPiece name, int mode) { return mkdir(name.data(), mode) == 0; }
 
+util::Status CreateSubDirIfNeeded(const string& path) {
+  struct stat sb;
+  if (stat(path.c_str(), &sb) == 0) {
+    if(!S_ISDIR(sb.st_mode)) {
+      return Status(StatusCode::IO_ERROR, "Path exists, but it's not a directory!");
+    }
+  } else if (!file_util::RecursivelyCreateDir(path.c_str(), 0755)) {
+    return Status(StatusCode::IO_ERROR, "Could not create a dir!");
+  }
+  return Status::OK;
+}
+
 bool RecursivelyCreateDir(StringPiece path, int mode) {
   struct stat st;
   int res = stat(path.data(), &st);

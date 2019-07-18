@@ -44,6 +44,10 @@ void WriteStringToFileOrDie(StringPiece contents, StringPiece name);
 // Create a directory.
 bool CreateDir(StringPiece name, int mode);
 
+// Returns OK if either this path already exists as a directory or
+// it was successfully created using RecursivelyCreateDir below.
+util::Status CreateSubDirIfNeeded(const std::string& path);
+
 // Create a directory and all parent directories if necessary.
 bool RecursivelyCreateDir(StringPiece path, int mode);
 
