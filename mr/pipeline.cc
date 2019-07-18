@@ -106,6 +106,9 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
   }
   input_names.pop_back();
 
+  // TODO: To allow skipping of the pipeline - i.e. partial dry run mode. For that we need to
+  // scan output directory of each operator for shard files and populate shards from there.
+  // In addition we must save freq maps on disk to allow loading them during dry run.
   LOG(INFO) << op.op_name() << " started on inputs [" << input_names << "]";
   ShardFileMap out_files;
   executor_->Run(inputs, tbl, &out_files);
