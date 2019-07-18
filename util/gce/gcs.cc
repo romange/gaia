@@ -140,6 +140,7 @@ struct GCS::SeqReadFile {
   SeqReadFile() { parser.body_limit(kuint64max); }
 
   error_code Drain(SslStream* stream, ::boost::beast::flat_buffer* buf);
+  size_t offset = 0, file_size = 0;
 };
 
 auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp_buf)
@@ -161,6 +162,7 @@ auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp
     VLOG(1) << "DrainResp: " << parser.get();
   }
   VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
+  offset += sz;
 
   return ec;
 }
@@ -395,7 +397,8 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     if (msg.result() == h2::status::ok) {
       auto content_len_it = msg.find(h2::field::content_length);
       if (content_len_it != msg.end()) {
-        absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size);
+        CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size));
+        tmp_file->file_size = file_size;
       }
       break;
     }
@@ -430,13 +433,16 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   left_available = range.size();
 
   error_code ec;
-  h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
+  size_t sz_read = h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
   if (ec && ec != h2::error::need_buffer) {
-    LOG(ERROR) << "ec: " << ec << "/" << ec.message();
+    LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
+               << seq_file_->file_size;
     LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
 
     return ToStatus(ec);
   }
+  DCHECK_EQ(sz_read, range.size() - left_available);
+  seq_file_->offset += sz_read;
 
   return range.size() - left_available;  // how much written
 }
