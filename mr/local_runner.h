@@ -31,7 +31,7 @@ class LocalRunner : public Runner {
 
   void OperatorEnd(ShardFileMap* out_files) final;
 
-  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
+  void ExpandGlob(const std::string& glob, ExpandCb cb) final;
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,

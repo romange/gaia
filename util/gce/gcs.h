@@ -39,10 +39,13 @@ class GCS {
 
   ListBucketResult ListBuckets();
 
+  // Called with (size, key_name) pairs.
+  using ListObjectCb = std::function<void(size_t, absl::string_view)>;
+
   // fs_mode = true - will return files only without "/" delimiter after the prefix.
   // fs_mode = false - will return all files recursively containing the prefix.
   ListObjectResult List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
-                        std::function<void(absl::string_view)> cb);
+                        ListObjectCb cb);
 
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);

@@ -131,8 +131,8 @@ void MapperExecutor::PushInput(const InputBase* input) {
     const pb::Input* pb_input = &input->msg();
     for (int i = 0; i < pb_input->file_spec_size(); ++i) {
       const pb::Input::FileSpec& file_spec = pb_input->file_spec(i);
-      runner_->ExpandGlob(file_spec.url_glob(), [&](const auto& str) {
-        files.push_back(FileInput{pb_input, size_t(i), str});
+      runner_->ExpandGlob(file_spec.url_glob(), [&](size_t sz, const auto& str) {
+        files.push_back(FileInput{pb_input, size_t(i), sz, str});
       });
     }
   });

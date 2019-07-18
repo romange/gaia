@@ -63,7 +63,7 @@ class TestRunner : public Runner {
 
   RawContext* CreateContext() final;
 
-  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final;
+  void ExpandGlob(const std::string& glob, ExpandCb cb) final;
 
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
@@ -103,8 +103,8 @@ class EmptyRunner : public Runner {
 
   RawContext* CreateContext() final { return new Context; }
 
-  void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) final {
-    cb(glob);
+  void ExpandGlob(const std::string& glob, ExpandCb cb) final {
+    cb(0, glob);
   }
 
   void OperatorStart(const pb::Operator* op) final {}

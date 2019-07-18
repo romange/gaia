@@ -85,7 +85,8 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
   runner_->OperatorEnd(&out_files);
   ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "shard-0000-*.txt.gz")));
   std::vector<string> expanded;
-  runner_->ExpandGlob(out_files.begin()->second, [&](auto& s) { expanded.push_back(s); });
+  runner_->ExpandGlob(out_files.begin()->second,
+                      [&](size_t sz, auto& s) { expanded.push_back(s); });
   EXPECT_THAT(expanded, UnorderedElementsAre(EndsWith("shard-0000-000.txt.gz"),
                                              EndsWith("shard-0000-001.txt.gz")));
 }

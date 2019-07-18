@@ -41,12 +41,12 @@ RawContext* TestRunner::CreateContext() {
   return new TestContext(this, res.get());
 }
 
-void TestRunner::ExpandGlob(const string& glob, function<void(const string&)> cb) {
+void TestRunner::ExpandGlob(const string& glob, ExpandCb cb) {
   auto it = input_fs_.find(glob);
   CHECK(it != input_fs_.end()) << "Missing test file " << glob;
 
   if (it != input_fs_.end()) {
-    cb(it->first);
+    cb(it->second.size(), it->first);  // TODO: to fix size.
   }
 }
 

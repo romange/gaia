@@ -51,7 +51,7 @@ struct LocalRunner::Impl {
   void Start(const pb::Operator* op);
   void End(ShardFileMap* out_files);
 
-  void ExpandGCS(absl::string_view glob, std::function<void(const std::string&)> cb);
+  void ExpandGCS(absl::string_view glob, ExpandCb cb);
 
   util::StatusObject<file::ReadonlyFile*> OpenReadFile(const std::string& filename,
                                                        file::FiberReadOptions::Stats* stats);
@@ -194,15 +194,16 @@ void LocalRunner::Impl::End(ShardFileMap* out_files) {
   current_op = nullptr;
 }
 
-void LocalRunner::Impl::ExpandGCS(absl::string_view glob,
-                                  std::function<void(const std::string&)> cb) {
+void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   absl::string_view bucket, path;
   CHECK(GCS::SplitToBucketPath(glob, &bucket, &path));
 
   // Lazy init of gce_handle.
   LazyGcsInit();
 
-  auto cb2 = [cb = std::move(cb), bucket](absl::string_view s) { cb(GCS::ToGcsPath(bucket, s)); };
+  auto cb2 = [cb = std::move(cb), bucket](size_t sz, absl::string_view s) {
+    cb(sz, GCS::ToGcsPath(bucket, s));
+  };
 
   // std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
   auto gcs = GetGcsHandle();
@@ -281,7 +282,7 @@ void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   impl_->End(out_files);
 }
 
-void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) {
+void LocalRunner::ExpandGlob(const std::string& glob, ExpandCb cb) {
   if (util::IsGcsPath(glob)) {
     impl_->ExpandGCS(glob, cb);
     return;
@@ -290,7 +291,7 @@ void LocalRunner::ExpandGlob(const std::string& glob, std::function<void(const s
   std::vector<file_util::StatShort> paths = file_util::StatFiles(glob);
   for (const auto& v : paths) {
     if (v.st_mode & S_IFREG) {
-      cb(v.name);
+      cb(v.size, v.name);
     }
   }
 }

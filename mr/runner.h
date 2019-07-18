@@ -32,7 +32,9 @@ class Runner {
 
   virtual void OperatorEnd(ShardFileMap* out_files) = 0;
 
-  virtual void ExpandGlob(const std::string& glob, std::function<void(const std::string&)> cb) = 0;
+  using ExpandCb = std::function<void(size_t file_size, const std::string&)>;
+
+  virtual void ExpandGlob(const std::string& glob, ExpandCb cb) = 0;
 
   // Read file and fill queue. This function must be fiber-friendly.
   // Returns number of records processed.

@@ -258,7 +258,7 @@ auto GCS::ListBuckets() -> ListBucketResult {
 }
 
 auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
-               std::function<void(absl::string_view)> cb) -> ListObjectResult {
+               ListObjectCb cb) -> ListObjectResult {
   CHECK(!bucket.empty());
   RETURN_IF_ERROR(PrepareConnection());
 
@@ -298,7 +298,13 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
       const auto& item = array[i];
       auto it = item.FindMember("name");
       CHECK(it != item.MemberEnd());
-      cb(absl::string_view(it->value.GetString(), it->value.GetStringLength()));
+      absl::string_view key_name(it->value.GetString(), it->value.GetStringLength());
+      it = item.FindMember("size");
+      CHECK(it != item.MemberEnd());
+      absl::string_view sz_str(it->value.GetString(), it->value.GetStringLength());
+      size_t item_size = 0;
+      CHECK(absl::SimpleAtoi(sz_str, &item_size));
+      cb(item_size, key_name);
     }
     it = doc.FindMember("nextPageToken");
     if (it == doc.MemberEnd()) {

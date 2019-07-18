@@ -99,7 +99,8 @@ void JoinerExecutor::CheckInputs(const std::vector<const InputBase*>& inputs) {
   uint32_t modn = 0;
   for (const auto& input : inputs) {
     const pb::Output* linked_outp = input->linked_outp();
-    CHECK(linked_outp && linked_outp->has_shard_spec());
+    CHECK(linked_outp && linked_outp->has_shard_spec()) << input->msg().DebugString();
+
     CHECK_EQ(linked_outp->shard_spec().type(), pb::ShardSpec::MODN);
     if (!modn) {
       modn = linked_outp->shard_spec().modn();
