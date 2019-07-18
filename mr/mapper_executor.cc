@@ -137,6 +137,11 @@ void MapperExecutor::PushInput(const InputBase* input) {
     }
   });
 
+  // Sort - bigger sizes first to reduce the variance of the reading phase.
+  std::sort(files.begin(), files.end(), [](const auto& l, auto& r) {
+    return l.file_size > r.file_size;
+  });
+
   LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
   for (const auto& fl_name : files) {
     channel_op_status st = file_name_q_->push(fl_name);

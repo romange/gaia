@@ -16,7 +16,7 @@ class MapperExecutor : public OperatorExecutor {
   struct FileInput {
     const pb::Input* input;
     size_t spec_index;
-    size_t sz;
+    size_t file_size;
     std::string file_name;
   };
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
