@@ -19,5 +19,8 @@ cxx_link(gsod_group mr3_lib absl_hash absl_str_format http_v2)
 add_executable(movies_join movies_join.cc)
 cxx_link(movies_join mr3_lib absl_hash absl_str_format http_v2 TRDP::re2)
 
+add_executable(mr_read_test mr_read_test.cc)
+cxx_link(mr_read_test mr3_lib http_v2)
+
 add_executable(osmium_road_length osmium_road_length.cc)
 cxx_link(osmium_road_length base TRDP::libosmium)
