@@ -13,6 +13,7 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 
+#include "absl/types/optional.h"
 #include "absl/strings/strip.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
@@ -136,30 +137,36 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
 }
 
 struct GCS::SeqReadFile {
-  h2::response_parser<h2::buffer_body> parser;
-  SeqReadFile() { parser.body_limit(kuint64max); }
+  SeqReadFile(string url) : read_obj_url(std::move(url)) {
+    parser.emplace();
+    parser->body_limit(kuint64max);
+  }
 
   error_code Drain(SslStream* stream, ::boost::beast::flat_buffer* buf);
+
+  string read_obj_url;
   size_t offset = 0, file_size = 0;
+  uint32_t errors = 0;
+  absl::optional<h2::response_parser<h2::buffer_body>> parser;
 };
 
 auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp_buf)
     -> error_code {
   uint8_t buf[512];
-  auto& body = parser.get().body();
+  auto& body = parser->get().body();
   error_code ec;
   size_t sz = 0;
 
   // Drain pending response completely to allow reusing the current connection.
-  while (!parser.is_done()) {
+  while (!parser->is_done()) {
     body.data = buf;
     body.size = sizeof(buf);
-    size_t s1 = h2::read(*stream, *tmp_buf, parser, ec);
+    size_t s1 = h2::read(*stream, *tmp_buf, *parser, ec);
     if (ec && ec != h2::error::need_buffer) {
       return ec;
     }
     sz += s1;
-    VLOG(1) << "DrainResp: " << parser.get();
+    VLOG(1) << "DrainResp: " << parser->get();
   }
   VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
   offset += sz;
@@ -347,12 +354,12 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
   error_code ec;
-  unique_ptr<SeqReadFile> tmp_file;
+  unique_ptr<SeqReadFile> tmp_file(new SeqReadFile(read_obj_url));
   size_t file_size = 0;
   size_t sleep_sec = 1;
   unsigned unautharized_iters = 0;
   unsigned throttle_iters = 0;
-  unsigned error_iters = 0;
+
   while (true) {
     RETURN_IF_ERROR(PrepareConnection());
 
@@ -360,12 +367,11 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
     h2::write(*client_, req, ec);
     RETURN_EC_STATUS(ec);
 
-    tmp_file.reset(new SeqReadFile);
-
-    h2::read_header(*client_, tmp_buffer_, tmp_file->parser, ec);
-    const auto& msg = tmp_file->parser.get();
+    tmp_file->parser.emplace();
+    h2::read_header(*client_, tmp_buffer_, *tmp_file->parser, ec);
+    const auto& msg = tmp_file->parser->get();
     if (ec) {
-      LOG(ERROR) << "Socket iter/error " << error_iters << "/" << ec << " " << ec.message();
+      LOG(ERROR) << "Socket iter/error " << tmp_file->errors << "/" << ec << " " << ec.message();
       VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
 
       Status st = InitSslClient();
@@ -373,25 +379,16 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
         LOG(ERROR) << "Could not reconnect " << st;
         return st;
       }
-      ++error_iters;
+      ++tmp_file->errors;
       continue;
     }
 
     VLOG(1) << "HeaderResp: " << msg;
-    VLOG(1) << "Msg Accessors, KA: " << tmp_file->parser.keep_alive() << "/"
-            << tmp_file->parser.need_eof();
-    if (!tmp_file->parser.keep_alive()) {
-      VLOG(1) << "No keep-alive, requested reconnect";
+    VLOG(1) << "Msg Accessors, KA: " << tmp_file->parser->keep_alive() << "/"
+            << tmp_file->parser->need_eof();
+    if (!tmp_file->parser->keep_alive()) {
+      LOG(WARNING) << "No keep-alive, requested reconnect";
       reconnect_needed_ = true;
-    }
-    if (ShouldRetry(msg.result())) {
-      ++throttle_iters;
-      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
-      LOG_IF(WARNING, throttle_iters > 2) << "Retrying iteration " << throttle_iters;
-      VLOG(1) << "Retrying iteration " << throttle_iters;
-      this_fiber::sleep_for(chrono::seconds(sleep_sec));
-      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
-      continue;
     }
 
     if (msg.result() == h2::status::ok) {
@@ -402,6 +399,17 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
       }
       break;
     }
+
+    if (ShouldRetry(msg.result())) {
+      ++throttle_iters;
+      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
+      LOG(WARNING) << "Retrying iteration " << throttle_iters;
+      VLOG(1) << "Retrying iteration " << throttle_iters;
+      this_fiber::sleep_for(chrono::seconds(sleep_sec));
+      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
+      continue;
+    }
+
 
     if (IsUnauthorized(msg)) {
       if (++unautharized_iters > 1) {
@@ -423,17 +431,22 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
 auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
   CHECK(seq_file_ && client_);
 
-  if (seq_file_->parser.is_done()) {
+  if (seq_file_->parser->is_done()) {
     return 0;
   }
 
-  auto& body = seq_file_->parser.get().body();
+  auto& body = seq_file_->parser->get().body();
   body.data = range.data();
   auto& left_available = body.size;
   left_available = range.size();
 
   error_code ec;
-  size_t sz_read = h2::read(*client_, tmp_buffer_, seq_file_->parser, ec);
+  size_t sz_read = h2::read(*client_, tmp_buffer_, *seq_file_->parser, ec);
+  if (ec && ec != h2::error::need_buffer) {
+    if (ec = asio::ssl::error::stream_truncated) {
+      // TODO: to reconnect and refetch from offset.
+    }
+  }
   if (ec && ec != h2::error::need_buffer) {
     LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
                << seq_file_->file_size;
