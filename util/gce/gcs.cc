@@ -441,10 +441,15 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 
     return ToStatus(ec);
   }
-  DCHECK_EQ(sz_read, range.size() - left_available);
-  seq_file_->offset += sz_read;
+  auto http_read = range.size() - left_available;
+  DVLOG(2) << "Read " << http_read << " bytes from " << seq_file_->offset
+                     << " with capacity " << range.size() << ", sz_read: " << sz_read;
 
-  return range.size() - left_available;  // how much written
+  // This check does not happen for some reason: https://github.com/boostorg/beast/issues/1662
+  // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
+  seq_file_->offset += http_read;
+
+  return http_read;  // how much written
 }
 
 util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
