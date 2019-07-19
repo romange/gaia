@@ -6,7 +6,9 @@
 
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
+#include <boost/beast/http/parser.hpp>
 
 #include <memory>
 
@@ -69,6 +71,8 @@ class GCS {
  private:
   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
+  template <typename Body> using Parser = ::boost::beast::http::response_parser<Body>;
+  struct SeqReadFile;
 
   util::Status RefreshToken(Request* req);
 
@@ -76,17 +80,27 @@ class GCS {
   util::Status InitSslClient();
   util::Status PrepareConnection();
 
+  OpenSeqResult OpenSequentialInternal(Request* req, SeqReadFile* file);
+
   // Higher level function. Handles token expiration use-cases.
   template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
 
-  template <typename RespBody> error_code WriteAndRead(Request* req, Response<RespBody>* resp);
+  template <typename RespBody>
+  error_code WriteAndRead(const Request& req, Response<RespBody>* resp);
+
+  error_code DrainResponse(Parser<::boost::beast::http::buffer_body>* parser);
+
+  // Returns true if the request succeeded and the response is ok.
+  // Returns false if we had an intermittent error and need to retry.
+  // Returns error status if we are completely screwed.
+  util::StatusObject<bool> SendRequestIterative(Request* req,
+                                                Parser<::boost::beast::http::buffer_body>* parser);
 
 
   ::boost::beast::flat_buffer tmp_buffer_;
   std::string access_token_header_;
   std::unique_ptr<SslStream> client_;
 
-  struct SeqReadFile;
   std::unique_ptr<SeqReadFile> seq_file_;
   uint32_t reconnect_msec_ = 1000;
   bool reconnect_needed_ = true;

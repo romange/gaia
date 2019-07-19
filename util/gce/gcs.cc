@@ -13,8 +13,8 @@
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 
-#include "absl/types/optional.h"
 #include "absl/strings/strip.h"
+#include "absl/types/optional.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
 #include "util/asio/fiber_socket.h"
@@ -60,13 +60,13 @@ inline util::Status ToStatus(const ::boost::system::error_code& ec) {
   return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
 }
 
-#define RETURN_EC_STATUS(x)       \
-  do {                            \
-    auto __ec$ = (x);             \
-    if (__ec$) {                  \
-      VLOG(1) << "EC: " << __ec$ << " " <<  __ec$.message(); \
-      return ToStatus(x);         \
-    }                             \
+#define RETURN_EC_STATUS(x)                                 \
+  do {                                                      \
+    auto __ec$ = (x);                                       \
+    if (__ec$) {                                            \
+      VLOG(1) << "EC: " << __ec$ << " " << __ec$.message(); \
+      return ToStatus(x);                                   \
+    }                                                       \
   } while (false)
 
 inline absl::string_view absl_sv(beast::string_view s) {
@@ -138,11 +138,12 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
 
 struct GCS::SeqReadFile {
   SeqReadFile(string url) : read_obj_url(std::move(url)) {
+  }
+
+  void Init() {
     parser.emplace();
     parser->body_limit(kuint64max);
   }
-
-  error_code Drain(SslStream* stream, ::boost::beast::flat_buffer* buf);
 
   string read_obj_url;
   size_t offset = 0, file_size = 0;
@@ -150,34 +151,11 @@ struct GCS::SeqReadFile {
   absl::optional<h2::response_parser<h2::buffer_body>> parser;
 };
 
-auto GCS::SeqReadFile::Drain(SslStream* stream, ::boost::beast::flat_buffer* tmp_buf)
-    -> error_code {
-  uint8_t buf[512];
-  auto& body = parser->get().body();
-  error_code ec;
-  size_t sz = 0;
-
-  // Drain pending response completely to allow reusing the current connection.
-  while (!parser->is_done()) {
-    body.data = buf;
-    body.size = sizeof(buf);
-    size_t s1 = h2::read(*stream, *tmp_buf, *parser, ec);
-    if (ec && ec != h2::error::need_buffer) {
-      return ec;
-    }
-    sz += s1;
-    VLOG(1) << "DrainResp: " << parser->get();
-  }
-  VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
-  offset += sz;
-
-  return ec;
-}
 
 GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
 
 GCS::~GCS() {
-  if (seq_file_) {
+  if (seq_file_ && seq_file_->parser) {
     LOG(ERROR) << "File was not closed";
   }
   VLOG(1) << "GCS::~GCS";
@@ -207,10 +185,12 @@ util::Status GCS::CloseSequential() {
     return Status::OK;
   }
   CHECK(client_);
-  error_code ec = seq_file_->Drain(client_.get(), &tmp_buffer_);
-  seq_file_.reset();
 
-  RETURN_EC_STATUS(ec);
+  if (seq_file_->parser) {
+    error_code ec = DrainResponse(&seq_file_->parser.value());
+    seq_file_->parser.reset();
+    RETURN_EC_STATUS(ec);
+  }
 
   return Status::OK;
 }
@@ -266,8 +246,8 @@ auto GCS::ListBuckets() -> ListBucketResult {
   return results;
 }
 
-auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
-               ListObjectCb cb) -> ListObjectResult {
+auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode, ListObjectCb cb)
+    -> ListObjectResult {
   CHECK(!bucket.empty());
   RETURN_IF_ERROR(PrepareConnection());
 
@@ -350,82 +330,94 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   return range.size() - left_available;  // how much written
 }
 
+auto GCS::DrainResponse(Parser<h2::buffer_body>* parser) -> error_code {
+  uint8_t buf[512];
+  auto& body = parser->get().body();
+  error_code ec;
+  size_t sz = 0;
+
+  // Drain pending response completely to allow reusing the current connection.
+  while (!parser->is_done()) {
+    body.data = buf;
+    body.size = sizeof(buf);
+    size_t s1 = h2::read(*client_, tmp_buffer_, *parser, ec);
+    if (ec && ec != h2::error::need_buffer) {
+      return ec;
+    }
+    sz += s1;
+    VLOG(1) << "DrainResp: " << parser->get();
+  }
+  VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
+
+  return error_code{};
+}
+
+StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_body>* parser) {
+  VLOG(1) << "Req: " << req;
+
+  error_code ec;
+  h2::write(*client_, *req, ec);
+  RETURN_EC_STATUS(ec);
+
+  h2::read_header(*client_, tmp_buffer_, *parser, ec);
+
+  if (ec) {
+    LOG(ERROR) << "Socket error: " << ec << "/" << ec.message();
+    VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
+
+    Status st = InitSslClient();
+    if (!st.ok()) {
+      LOG(ERROR) << "Could not reconnect " << st;
+      return st;
+    }
+    return false;  // need to retry
+  }
+
+  const auto& msg = parser->get();
+  VLOG(1) << "HeaderResp: " << msg;
+  if (!parser->keep_alive()) {
+    LOG(WARNING) << "No keep-alive, requested reconnect";
+    reconnect_needed_ = true;
+  }
+
+  if (msg.result() == h2::status::ok) {
+    return true;  // all is good.
+  }
+
+  if (ShouldRetry(msg.result())) {
+    RETURN_EC_STATUS(DrainResponse(parser));
+    this_fiber::sleep_for(1s);
+    return false;  // retry
+  }
+
+  if (IsUnauthorized(msg)) {
+    RETURN_EC_STATUS(DrainResponse(parser));
+
+    auto st = RefreshToken(req);
+    if (!st.ok())
+      return st;
+    return false;
+  }
+
+  LOG(ERROR) << "Unexpected status " << msg;
+
+  return Status(StatusCode::INTERNAL_ERROR, "Unexpected http response");
+}
+
 auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
-  error_code ec;
-  unique_ptr<SeqReadFile> tmp_file(new SeqReadFile(read_obj_url));
-  size_t file_size = 0;
-  size_t sleep_sec = 1;
-  unsigned unautharized_iters = 0;
-  unsigned throttle_iters = 0;
 
-  while (true) {
-    RETURN_IF_ERROR(PrepareConnection());
+  std::unique_ptr<SeqReadFile> open_file(new SeqReadFile(read_obj_url));
 
-    VLOG(1) << "Req: " << req;
-    h2::write(*client_, req, ec);
-    RETURN_EC_STATUS(ec);
+  OpenSeqResult res = OpenSequentialInternal(&req, open_file.get());
+  if (!res.ok())
+    return res.status;
 
-    tmp_file->parser.emplace();
-    h2::read_header(*client_, tmp_buffer_, *tmp_file->parser, ec);
-    const auto& msg = tmp_file->parser->get();
-    if (ec) {
-      LOG(ERROR) << "Socket iter/error " << tmp_file->errors << "/" << ec << " " << ec.message();
-      VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
+  seq_file_ = std::move(open_file);
+  seq_file_->file_size = res.obj;
 
-      Status st = InitSslClient();
-      if (!st.ok()) {
-        LOG(ERROR) << "Could not reconnect " << st;
-        return st;
-      }
-      ++tmp_file->errors;
-      continue;
-    }
-
-    VLOG(1) << "HeaderResp: " << msg;
-    VLOG(1) << "Msg Accessors, KA: " << tmp_file->parser->keep_alive() << "/"
-            << tmp_file->parser->need_eof();
-    if (!tmp_file->parser->keep_alive()) {
-      LOG(WARNING) << "No keep-alive, requested reconnect";
-      reconnect_needed_ = true;
-    }
-
-    if (msg.result() == h2::status::ok) {
-      auto content_len_it = msg.find(h2::field::content_length);
-      if (content_len_it != msg.end()) {
-        CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &file_size));
-        tmp_file->file_size = file_size;
-      }
-      break;
-    }
-
-    if (ShouldRetry(msg.result())) {
-      ++throttle_iters;
-      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
-      LOG(WARNING) << "Retrying iteration " << throttle_iters;
-      VLOG(1) << "Retrying iteration " << throttle_iters;
-      this_fiber::sleep_for(chrono::seconds(sleep_sec));
-      sleep_sec = sleep_sec >= 16 ? 16 : sleep_sec * 2;
-      continue;
-    }
-
-
-    if (IsUnauthorized(msg)) {
-      if (++unautharized_iters > 1) {
-        return Status(StatusCode::INTERNAL_ERROR, "Access denied");
-      }
-
-      RETURN_EC_STATUS(tmp_file->Drain(client_.get(), &tmp_buffer_));
-      RETURN_IF_ERROR(RefreshToken(&req));
-      continue;
-    }
-    LOG(ERROR) << "Unsupported error in response " << msg << "/" << msg.reason();
-    return Status(StatusCode::INTERNAL_ERROR, "HTTP ERROR");
-  }
-  seq_file_ = std::move(tmp_file);
-
-  return file_size;
+  return res.obj;
 }
 
 auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
@@ -435,34 +427,50 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
     return 0;
   }
 
-  auto& body = seq_file_->parser->get().body();
-  body.data = range.data();
-  auto& left_available = body.size;
-  left_available = range.size();
+  for (unsigned iters = 0; iters < 3; ++iters) {
+    auto& body = seq_file_->parser->get().body();
+    body.data = range.data();
+    auto& left_available = body.size;
+    left_available = range.size();
 
-  error_code ec;
-  size_t sz_read = h2::read(*client_, tmp_buffer_, *seq_file_->parser, ec);
-  if (ec && ec != h2::error::need_buffer) {
+    error_code ec;
+
+    // h2::read returns number of raw bytes read from stream before parsing.
+    // Also it does not consider temporary buffer caching. Therefore we use left_available to count.
+    h2::read(*client_, tmp_buffer_, *seq_file_->parser, ec);
+    if (!ec || ec == h2::error::need_buffer) {
+      size_t http_read = range.size() - left_available;
+      DVLOG(2) << "Read " << http_read << " bytes from " << seq_file_->offset << " with capacity "
+               << range.size();
+
+      // This check does not happen for some reason: https://github.com/boostorg/beast/issues/1662
+      // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
+      seq_file_->offset += http_read;
+      return http_read;
+    }
+
     if (ec = asio::ssl::error::stream_truncated) {
-      // TODO: to reconnect and refetch from offset.
+      reconnect_needed_ = true;
+      auto req = PrepareRequest(h2::verb::get, seq_file_->read_obj_url, access_token_header_);
+      req.set(h2::field::range, absl::StrCat("bytes=", seq_file_->offset, "-"));
+      OpenSeqResult res = OpenSequentialInternal(&req, seq_file_.get());
+
+      if (!res.ok())
+        return res.status;
+
+      // I do not change seq_file_ since it contains valid offset, file_size fields.
+      // TODO: to validate that file version has not been changed between retries.
+      continue;
+    } else {
+      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
+                 << seq_file_->file_size;
+      LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
+
+      return ToStatus(ec);
     }
   }
-  if (ec && ec != h2::error::need_buffer) {
-    LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
-               << seq_file_->file_size;
-    LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
 
-    return ToStatus(ec);
-  }
-  auto http_read = range.size() - left_available;
-  DVLOG(2) << "Read " << http_read << " bytes from " << seq_file_->offset
-                     << " with capacity " << range.size() << ", sz_read: " << sz_read;
-
-  // This check does not happen for some reason: https://github.com/boostorg/beast/issues/1662
-  // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
-  seq_file_->offset += http_read;
-
-  return http_read;  // how much written
+  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
 }
 
 util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
@@ -507,10 +515,34 @@ util::Status GCS::PrepareConnection() {
   return Status::OK;
 }
 
+auto GCS::OpenSequentialInternal(Request* req, SeqReadFile* seq_file) -> OpenSeqResult {
+  for (unsigned iters = 0; iters < 5; ++iters) {
+    RETURN_IF_ERROR(PrepareConnection());  //! Drains and connects if needed.
+
+    seq_file->Init();
+    auto status_obj = SendRequestIterative(req, &seq_file->parser.value());
+    if (!status_obj.ok())
+      return status_obj.status;
+    bool success = status_obj.obj;
+
+    if (success) {
+      const auto& msg = seq_file->parser->get();
+      auto content_len_it = msg.find(h2::field::content_length);
+      size_t content_sz = 0;
+      if (content_len_it != msg.end()) {
+        CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &content_sz));
+      }
+      return content_sz;
+    }
+  }
+
+  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
+}
+
 template <typename RespBody>
-auto GCS::WriteAndRead(Request* req, Response<RespBody>* resp) -> error_code {
+auto GCS::WriteAndRead(const Request& req, Response<RespBody>* resp) -> error_code {
   error_code ec;
-  h2::write(*client_, *req, ec);
+  h2::write(*client_, req, ec);
   if (ec)
     return ec;
 
@@ -533,7 +565,7 @@ template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<Resp
   for (unsigned i = 0; i < 2; ++i) {
     VLOG(1) << "Req: " << *req;
 
-    error_code ec = WriteAndRead(req, resp);
+    error_code ec = WriteAndRead(*req, resp);
     if (ec) {
       return ToStatus(ec);
     }
