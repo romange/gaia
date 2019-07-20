@@ -450,6 +450,8 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
     }
 
     if (ec = asio::ssl::error::stream_truncated) {
+      LOG(WARNING) << "Stream " << seq_file_->read_obj_url << " truncated at "
+                   << seq_file_->offset << "/" << seq_file_->file_size;
       reconnect_needed_ = true;
       auto req = PrepareRequest(h2::verb::get, seq_file_->read_obj_url, access_token_header_);
       req.set(h2::field::range, absl::StrCat("bytes=", seq_file_->offset, "-"));
@@ -457,8 +459,8 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 
       if (!res.ok())
         return res.status;
-
-      // I do not change seq_file_ since it contains valid offset, file_size fields.
+      VLOG(1) << "Reopened the file, new size: " << seq_file_->offset + res.obj;
+      // I do not change seq_file_->offset,file_size fields.
       // TODO: to validate that file version has not been changed between retries.
       continue;
     } else {
