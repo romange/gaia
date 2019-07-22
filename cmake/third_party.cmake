@@ -192,7 +192,7 @@ set(PROTOC ${PROTOBUF_DIR}/bin/protoc)
 add_third_party(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-    GIT_TAG v3.7.1
+    GIT_TAG v3.9.0
     GIT_SHALLOW 1
     PATCH_COMMAND <SOURCE_DIR>/autogen.sh
 
