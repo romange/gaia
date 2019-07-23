@@ -152,7 +152,8 @@ struct GCS::SeqReadFile {
 };
 
 
-GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {}
+GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {
+}
 
 GCS::~GCS() {
   if (seq_file_ && seq_file_->parser) {
@@ -193,6 +194,10 @@ util::Status GCS::CloseSequential() {
   }
 
   return Status::OK;
+}
+
+bool GCS::IsOpenSequential() const {
+  return seq_file_ && seq_file_->parser;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
@@ -476,7 +481,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 }
 
 util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
-  CHECK(!seq_file_) << "Can not open " << full_path << " before closing the previous one ";
+  CHECK(!IsOpenSequential()) << "Can not open " << full_path << " before closing the previous one ";
 
   absl::string_view bucket, obj_path;
   CHECK(GCS::SplitToBucketPath(full_path, &bucket, &obj_path));
@@ -499,6 +504,8 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
 }
 
 util::Status GCS::InitSslClient() {
+  VLOG(1) << "GCS::InitSslClient";
+
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
 
   auto status = SslConnect(client_.get(), reconnect_msec_);
