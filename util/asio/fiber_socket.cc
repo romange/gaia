@@ -42,6 +42,7 @@ FiberSocketImpl::FiberSocketImpl(const std::string& hname, const std::string& po
                                  size_t rbuf_size)
     : FiberSocketImpl(socket_t(cntx->raw_context(), asio::ip::tcp::v4()), rbuf_size) {
   status_ = asio::error::not_connected;
+
   InitiateConnection(hname, port, cntx);
 }
 
@@ -166,11 +167,15 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   tcp::resolver resolver(asio_io_cntx);
 
   system::error_code ec;
-  VLOG(1) << "Before AsyncResolve";
+
+  socket_t::reuse_address opt(true);
+  sock_.set_option(opt, ec);
+  VLOG(1) << "Before AsyncResolve ";
 
   // It seems that resolver waits for 10s and ignores cancel command.
   auto results = resolver.async_resolve(tcp::v4(), hname, service, fibers_ext::yield[ec]);
   if (ec) {
+    VLOG(1) << "Resolver error " << ec;
     return ec;
   }
   DVLOG(1) << "After AsyncResolve";
