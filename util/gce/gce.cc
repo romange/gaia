@@ -279,6 +279,8 @@ void GCE::Test_InjectAcessToken(std::string access_token) {
 util::Status SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
   if (ec) {
+    VLOG(1) << "Error " << ec << "/" << ec.message();
+
     return ToStatus(ec);
   }
 

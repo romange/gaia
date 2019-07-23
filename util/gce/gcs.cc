@@ -504,6 +504,8 @@ util::Status GCS::InitSslClient() {
   auto status = SslConnect(client_.get(), reconnect_msec_);
   if (status.ok()) {
     reconnect_needed_ = false;
+  } else {
+    VLOG(1) << "Error connecting " << status;
   }
   return status;
 }
