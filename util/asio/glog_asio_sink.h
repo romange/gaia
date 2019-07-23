@@ -21,8 +21,8 @@ class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
 
  protected:
   struct Item {
-    const char *full_filename;
-    const char *base_filename;
+    const char* full_filename;
+    const char* base_filename;
     google::LogSeverity severity;
     int line;
     struct ::tm tm_time;
@@ -32,7 +32,7 @@ class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
 
   unsigned lost_messages_ = 0;
 
-  virtual bool ShouldIgnore(google::LogSeverity severity, const char *full_filename, int line) {
+  virtual bool ShouldIgnore(google::LogSeverity severity, const char* full_filename, int line) {
     return false;
   }
 
@@ -40,8 +40,9 @@ class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
   virtual void HandleItem(const Item& item) = 0;
 
  private:
-  void send(google::LogSeverity severity, const char *full_filename, const char *base_filename,
-            int line, const struct ::tm *tm_time, const char *message, size_t message_len) override;
+  //! Derived from LogSink.
+  void send(google::LogSeverity severity, const char* full_filename, const char* base_filename,
+            int line, const struct ::tm* tm_time, const char* message, size_t message_len) override;
 
   void WaitTillSent() override;
 };

@@ -2,6 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "util/asio/glog_asio_sink.h"
+#include <glog/raw_logging.h>
 
 namespace util {
 using namespace ::boost;
@@ -17,6 +18,7 @@ GlogAsioSink::~GlogAsioSink() noexcept {
 
 void GlogAsioSink::Run() {
   google::AddLogSink(this);
+  RAW_DLOG(INFO, "Started running");
 
   Item item;
   while (true) {
@@ -25,6 +27,7 @@ void GlogAsioSink::Run() {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
+    // RAW_VLOG(1, "HandleItem : %s:%d", item.base_filename, item.line);
     HandleItem(item);
   }
 
@@ -48,9 +51,9 @@ void GlogAsioSink::send(google::LogSeverity severity, const char* full_filename,
       100us);
 
   if (st != channel_op_status::success) {
-    // str_pool_.Release(str);
     ++lost_messages_;
   }
+  // RAW_VLOG(1, "send : %d %d", severity, int(st));
 }
 
 void GlogAsioSink::WaitTillSent() {

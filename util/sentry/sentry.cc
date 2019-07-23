@@ -6,6 +6,9 @@
 #include <boost/beast/http/write.hpp>  // For serializing req/resp to ostream
 #include <cstring>
 
+#include "base/logging.h"
+#include <glog/raw_logging.h>
+
 #include "strings/strcat.h"
 #include "util/asio/glog_asio_sink.h"
 #include "util/http/http_client.h"
@@ -77,6 +80,8 @@ SentrySink::SentrySink(Dsn dsn, IoContext* io_context) : client_(io_context), ds
 void SentrySink::HandleItem(const Item& item) {
   auto ec = client_.Connect(dsn_.hostname, port_);
   if (ec) {
+    auto msg = ec.message();
+    RAW_VLOG(1, "Could not connect %s", msg.c_str());
     ++lost_messages_;
     return;
   }
@@ -86,6 +91,7 @@ void SentrySink::HandleItem(const Item& item) {
   ec = client_.Send(http::Client::Verb::post, dsn_.url, body, &resp);
 
   if (ec) {
+    RAW_VLOG(1, "Could not send ");
     ++lost_messages_;
   }
 }

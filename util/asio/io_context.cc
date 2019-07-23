@@ -8,6 +8,8 @@
 #include <boost/fiber/scheduler.hpp>
 
 #include "base/logging.h"
+#include <glog/raw_logging.h>
+
 #include "base/walltime.h"
 #include "util/asio/io_context.h"
 
@@ -338,7 +340,7 @@ void AsioScheduler::notify() noexcept {
     // then there is nothing to cancel and run_one won't break.
     // In addition, AsioScheduler::notify is called from remote thread so may only access
     // thread-safe data. Therefore, the simplest solution would be just post a callback.
-    VLOG(1) << "AsioScheduler::notify";
+    RAW_VLOG(1, "AsioScheduler::notify");
 
     /*suspend_timer_->expires_at(chrono::steady_clock::now());
     suspend_timer_->async_wait([this](const system::error_code& ec) {
@@ -348,7 +350,7 @@ void AsioScheduler::notify() noexcept {
     asio::post(*io_context_, [] { this_fiber::yield(); });
     notify_cnt_.fetch_add(1, std::memory_order_relaxed);
   } else {
-    VLOG(1) << "Called during shutdown phase";
+    RAW_VLOG(1, "Called during shutdown phase");
   }
   notify_guard_.fetch_sub(1, std::memory_order_acq_rel);
 }
