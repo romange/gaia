@@ -3,6 +3,7 @@
 //
 #include "mr/local_runner.h"
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/histogram.h"
@@ -204,10 +205,12 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   auto cb2 = [cb = std::move(cb), bucket](size_t sz, absl::string_view s) {
     cb(sz, GCS::ToGcsPath(bucket, s));
   };
-
-  // std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
+  bool recursive = absl::EndsWith(glob, "**");
+  if (recursive) {
+    path.remove_suffix(2);
+  }
   auto gcs = GetGcsHandle();
-  auto status = gcs->List(bucket, path, true, cb2);
+  auto status = gcs->List(bucket, path, recursive, cb2);
   CHECK_STATUS(status);
 }
 
