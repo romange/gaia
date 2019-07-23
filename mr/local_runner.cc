@@ -210,7 +210,8 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
     path.remove_suffix(2);
   }
   auto gcs = GetGcsHandle();
-  auto status = gcs->List(bucket, path, recursive, cb2);
+  bool fs_mode = !recursive;
+  auto status = gcs->List(bucket, path, fs_mode, cb2);
   CHECK_STATUS(status);
 }
 
