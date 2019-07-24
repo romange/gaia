@@ -99,7 +99,7 @@ class VarzMapAverage5m : public VarzListNode {
 
 class VarzCount : public VarzListNode {
  public:
-  explicit VarzCount(const char* varname) : VarzListNode(varname) {}
+  explicit VarzCount(const char* varname) : VarzListNode(varname), val_(0) {}
 
   void IncBy(int32 delta) { val_ += delta; }
   void Inc() { IncBy(1); }
