@@ -30,6 +30,8 @@ struct FiberSocketImpl::ClientData {
 };
 
 FiberSocketImpl::~FiberSocketImpl() {
+  VLOG(1) << "FiberSocketImpl::~FiberSocketImpl";
+
   error_code ec;
   Shutdown(ec);
 }
@@ -41,7 +43,10 @@ FiberSocketImpl::FiberSocketImpl(socket_t&& sock, size_t rbuf_size)
 FiberSocketImpl::FiberSocketImpl(const std::string& hname, const std::string& port, IoContext* cntx,
                                  size_t rbuf_size)
     : FiberSocketImpl(socket_t(cntx->raw_context(), asio::ip::tcp::v4()), rbuf_size) {
+  VLOG(1) << "FiberSocketImpl::FiberSocketImpl " << sock_.native_handle();
+
   status_ = asio::error::not_connected;
+
   InitiateConnection(hname, port, cntx);
 }
 
@@ -110,6 +115,7 @@ system::error_code FiberSocketImpl::ClientWaitToConnect(uint32_t ms) {
 void FiberSocketImpl::Worker(const std::string& hname, const std::string& service) {
   while (is_open_) {
     if (status_) {
+      VLOG(1) << "Status " << status_ << " for socket " << sock_.native_handle();
       error_code ec = Reconnect(hname, service);
       VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message() << " is_open: " << is_open_;
       if (ec && is_open_) {  // Only sleep for open socket for the next reconnect.
@@ -166,11 +172,15 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   tcp::resolver resolver(asio_io_cntx);
 
   system::error_code ec;
-  VLOG(1) << "Before AsyncResolve";
+
+  socket_t::reuse_address opt(true);
+  sock_.set_option(opt, ec);
+  VLOG(1) << "Before AsyncResolve for socket " << sock_.native_handle();
 
   // It seems that resolver waits for 10s and ignores cancel command.
   auto results = resolver.async_resolve(tcp::v4(), hname, service, fibers_ext::yield[ec]);
   if (ec) {
+    VLOG(1) << "Resolver error " << ec;
     return ec;
   }
   DVLOG(1) << "After AsyncResolve";
@@ -184,7 +194,7 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   });
 
   asio::async_connect(sock_, results, fibers_ext::yield[ec]);
-  DVLOG(1) << "After async_connect " << ec;
+  VLOG(1) << "After async_connect " << ec << "/" << sock_.native_handle();
 
   if (ec) {
     SetStatus(ec, "reconnect");

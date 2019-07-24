@@ -3,6 +3,7 @@
 //
 #include "mr/local_runner.h"
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/histogram.h"
@@ -20,7 +21,7 @@
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/gce/gcs.h"
-
+#include "util/stats/varz_stats.h"
 #include "util/zlib_source.h"
 
 namespace mr3 {
@@ -38,12 +39,12 @@ namespace {
 
 using namespace intrusive;
 
-
 }  // namespace
 
 struct LocalRunner::Impl {
  public:
-  Impl(IoContextPool* p, const string& d) : io_pool(p), data_dir(d), fq_pool(0, 128) {}
+  Impl(IoContextPool* p, const string& d) : io_pool(p), data_dir(d), fq_pool(0, 128),
+    gcs_connections_("local-runner-gcs-connections") {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -72,11 +73,10 @@ struct LocalRunner::Impl {
 
   fibers::mutex gce_mu;
   std::unique_ptr<GCE> gce_handle;
-
  private:
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
-    // fibers::fiber_specific_ptr<> fs_gcs_handle;
+
     base::Histogram record_fetch_hist;
   };
 
@@ -85,15 +85,13 @@ struct LocalRunner::Impl {
 
     handle_keeper(PerThread* pt) : per_thread(pt) {}
 
-    void operator()(GCS* gcs) {
-      per_thread->gcs_handles.emplace_back(gcs);
-    }
+    void operator()(GCS* gcs) { per_thread->gcs_handles.emplace_back(gcs); }
   };
 
   unique_ptr<GCS, handle_keeper> GetGcsHandle();
 
-
   static thread_local std::unique_ptr<PerThread> per_thread_;
+  util::VarzCount gcs_connections_;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
@@ -101,6 +99,7 @@ thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::pe
 auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   auto* pt = per_thread_.get();
   CHECK(pt);
+  VLOG(1) << "GetGcsHandle: " << pt->gcs_handles.size();
 
   for (auto it = pt->gcs_handles.begin(); it != pt->gcs_handles.end(); ++it) {
     if ((*it)->IsOpenSequential()) {
@@ -116,6 +115,8 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
 
   IoContext* io_context = io_pool->GetThisContext();
   CHECK(io_context) << "Must run from IO context thread";
+  gcs_connections_.Inc();
+
   GCS* gcs = new GCS(*gce_handle, io_context);
   auto status = gcs->Connect(kGcsConnectTimeout);
   CHECK_STATUS(status);
@@ -204,10 +205,13 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   auto cb2 = [cb = std::move(cb), bucket](size_t sz, absl::string_view s) {
     cb(sz, GCS::ToGcsPath(bucket, s));
   };
-
-  // std::lock_guard<fibers::mutex> lk(per_thread_->gcs_handle->mu);
+  bool recursive = absl::EndsWith(glob, "**");
+  if (recursive) {
+    path.remove_suffix(2);
+  }
   auto gcs = GetGcsHandle();
-  auto status = gcs->List(bucket, path, true, cb2);
+  bool fs_mode = !recursive;
+  auto status = gcs->List(bucket, path, fs_mode, cb2);
   CHECK_STATUS(status);
 }
 

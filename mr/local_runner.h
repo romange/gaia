@@ -31,6 +31,7 @@ class LocalRunner : public Runner {
 
   void OperatorEnd(ShardFileMap* out_files) final;
 
+  // For GCS, if glob ends with "**", expands it recursively.
   void ExpandGlob(const std::string& glob, ExpandCb cb) final;
 
   // Read file and fill queue. This function must be fiber-friendly.
