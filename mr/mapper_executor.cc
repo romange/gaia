@@ -15,7 +15,7 @@
 namespace mr3 {
 
 DEFINE_uint32(map_limit, 0, "");
-DEFINE_uint32(map_io_read_factor, 1, "");
+DEFINE_uint32(map_io_read_factor, 2, "");
 
 using namespace std;
 using namespace boost;
