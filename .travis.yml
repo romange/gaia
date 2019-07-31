@@ -22,6 +22,7 @@ cache:
   directories:
   - /opt/boost_1_70_0
   - build-dbg/third_party  # Relative to $TRAVIS_BUILD_DIR
+  - $HOME/doxygen/doxygen-1.8.15/bin
   ccache: true
 
 before_cache:
@@ -39,6 +40,15 @@ before_install:
     done
   - sudo apt update -qq
   - eval "${MATRIX_EVAL}"
+  # Travis has an OLD doxygen build, so we fetch a recent one
+  - export DOXY_BINPATH=/home/travis/doxygen/doxygen-1.8.15/bin
+  - |
+    if [ ! -e "$DOXY_BINPATH/doxygen" ] && [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
+      mkdir -p ~/doxygen && cd ~/doxygen
+      wget http://doxygen.nl/files/doxygen-1.8.15.linux.bin.tar.gz
+      tar xzf doxygen-1.8.15.linux.bin.tar.gz
+    fi
+  - export PATH=$PATH:$DOXY_BINPATH
 
 install:
   - sudo ./install-dependencies.sh
