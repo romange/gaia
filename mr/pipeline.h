@@ -32,6 +32,13 @@ template <typename T> class PInput : public PTable<T> {
   InputBase* input_;
 };
 
+
+/*! \class mr3::Pipeline
+    \brief Serves as the main entry point for setting up and configuring the mapreduce pipeline.
+
+    Usually returned by PipelineMain object and used to read initial inputs or to join between
+    one or more tables.
+*/
 class Pipeline {
   friend class detail::TableBase;
 
@@ -39,6 +46,8 @@ class Pipeline {
   explicit Pipeline(util::IoContextPool* pool);
   ~Pipeline();
 
+  /*! \brief Convenience class that represents multiple types that can be treated as input globs.
+  */
   class InputSpec {
     std::vector<pb::Input::FileSpec> file_spec_;
 
