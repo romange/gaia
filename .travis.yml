@@ -41,17 +41,18 @@ before_install:
   - sudo apt update -qq
   - eval "${MATRIX_EVAL}"
   # Travis has an OLD doxygen build, so we fetch a recent one
-  - export DOXY_BINPATH=/home/travis/doxygen/doxygen-1.8.15/bin
+  - export DOXY_BINPATH=$HOME/doxygen/doxygen-1.8.15/bin
   - |
     if [ ! -e "$DOXY_BINPATH/doxygen" ] && [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
       mkdir -p ~/doxygen && cd ~/doxygen
       wget http://doxygen.nl/files/doxygen-1.8.15.linux.bin.tar.gz
       tar xzf doxygen-1.8.15.linux.bin.tar.gz
+      cd -
     fi
   - export PATH=$PATH:$DOXY_BINPATH
 
 install:
-  - sudo ./install-dependencies.sh
+  - sudo $TRAVIS_BUILD_DIR/install-dependencies.sh
   - ls -l /opt/
 
 before_script:
@@ -61,6 +62,7 @@ before_script:
   - ls build-dbg/third_party || true
 
 script:
+  - cd $TRAVIS_BUILD_DIR
   - mkdir testresults && mkdir -p build-dbg && cd build-dbg
   - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
   - ninja -j4 base array_test dynasm_project libosmium_project
