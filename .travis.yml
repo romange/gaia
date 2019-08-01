@@ -71,6 +71,11 @@ script:
   - ninja -j4 $tests_list asio_fibers gsod_group -k 10
   - echo $tests_list |  xargs -n1 -t ../scripts/run_test.sh -l ../testresults -t 25 --name
 
+after_failure:
+  - pwd
+  - find third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
+  - find ../testresults | xargs -n 3 -t cat
+
 jobs:
   fast_finish: true
   include:
@@ -100,8 +105,4 @@ jobs:
       on:
         branch: master
 
-after_failure:
-  - pwd
-  - find third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
-  - find ../testresults | xargs -n 3 -t cat
 
