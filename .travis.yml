@@ -15,7 +15,6 @@ env:
 addons:
   apt:
     packages:
-      - doxygen
       - graphviz
 
 cache:
