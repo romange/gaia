@@ -79,17 +79,15 @@ jobs:
   fast_finish: true
   include:
   - stage: Build
-    env:
-      - MATRIX_EVAL="CC=clang && CXX=clang++"
-      - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
-      - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
-      addons:
+    env: MATRIX_EVAL="CC=clang && CXX=clang++"
+   -env: MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+   -env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    addons:
         apt:
           sources:
             - ubuntu-toolchain-r-test
           packages:
             - g++-7
-
   - stage: deploy
     script:
       - mkdir -p build-dbg && cd build-dbg
