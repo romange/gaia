@@ -61,6 +61,7 @@ before_script:
   - ls build-dbg/third_party || true
 
 script:
+  - set -e
   - cd $TRAVIS_BUILD_DIR
   - mkdir testresults && mkdir -p build-dbg && cd build-dbg
   - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
