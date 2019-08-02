@@ -61,7 +61,6 @@ before_script:
   - ls build-dbg/third_party || true
 
 script:
-  - set -e
   - cd $TRAVIS_BUILD_DIR
   - mkdir testresults && mkdir -p build-dbg && cd build-dbg
   - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
@@ -80,28 +79,23 @@ jobs:
   fast_finish: true
   include:
   - stage: Build
-    - env:
-        - MATRIX_EVAL="CC=clang && CXX=clang++"
-    - env:
-        - MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
-    - env:
-        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    env: MATRIX_EVAL="CC=clang && CXX=clang++"
+  - env: MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
+  - env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
     addons:
-      apt:
-        sources:
-          - ubuntu-toolchain-r-test
-        packages:
-          - g++-7
-    after_failure:
-      - pwd
-      - find third_party/src/ -regex ".*\(err\|out\).log" | xargs -n 3 -t cat
-      - find ../testresults | xargs -n 3 -t cat
-
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-7
   - stage: deploy
-    script:
-      - mkdir -p build-dbg && cd build-dbg
-      - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
-      - ninja doc
+    script: |
+      if [[ ($TRAVIS_BRANCH == master) &&
+              ($TRAVIS_PULL_REQUEST == false) ]] ; then
+        mkdir -p build-dbg && cd build-dbg
+        cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
+        ninja doc
+      fi
     deploy:
       provider: pages
       skip_cleanup: true
