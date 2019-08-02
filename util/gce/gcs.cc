@@ -454,7 +454,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
       return http_read;
     }
 
-    if (ec = asio::ssl::error::stream_truncated) {
+    if (ec == asio::ssl::error::stream_truncated) {
       LOG(WARNING) << "Stream " << seq_file_->read_obj_url << " truncated at "
                    << seq_file_->offset << "/" << seq_file_->file_size;
       reconnect_needed_ = true;
