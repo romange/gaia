@@ -89,10 +89,13 @@ jobs:
           packages:
             - g++-7
   - stage: deploy
-    script:
-      - mkdir -p build-dbg && cd build-dbg
-      - cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
-      - ninja doc
+    script: |
+      if [[ ($TRAVIS_BRANCH == master) &&
+              ($TRAVIS_PULL_REQUEST == false) ]] ; then
+        mkdir -p build-dbg && cd build-dbg
+        cmake -L -DCMAKE_BUILD_TYPE=Debug -GNinja -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
+        ninja doc
+      fi
     deploy:
       provider: pages
       skip_cleanup: true
