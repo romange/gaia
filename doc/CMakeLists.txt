@@ -3,7 +3,7 @@ find_package(Doxygen)
 IF(NOT DOXYGEN_FOUND)
     MESSAGE(STATUS "No Doxygen found. Documentation won't be built")
 ELSE()
-    file(GLOB SOURCES ${CMAKE_CURRENT_LIST_DIR}/../include/*)
+    file(GLOB SOURCES ${CMAKE_CURRENT_LIST_DIR}/../mr/*)
     file(GLOB MARKDOWN_DOC ${CMAKE_CURRENT_LIST_DIR}/*.md)
     list(APPEND MARKDOWN_DOC ${CMAKE_CURRENT_LIST_DIR}/../README.md)
 
