@@ -44,6 +44,10 @@ class OperatorExecutor {
 
   static void SetMetaData(const pb::Input::FileSpec& fs, RawContext* context);
 
+  static void SetPosition(size_t pos, RawContext* context) {
+    context->input_pos_ = pos;
+  }
+
   virtual void InitInternal() = 0;
 
   util::IoContextPool* pool_;

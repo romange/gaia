@@ -178,16 +178,14 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
     const pb::Input* pb_input = file_input.input;
     bool is_binary = detail::IsBinary(pb_input->format().type());
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
-    record_q.Push(Record{op, file_input.file_name});
-
-    Record meta{Record::METADATA, &pb_input->file_spec(file_input.spec_index)};
-    record_q.Push(std::move(meta));
+    record_q.Push(op, 0, file_input.file_name);
+    record_q.Push(Record::METADATA, &pb_input->file_spec(file_input.spec_index));
 
     auto cb = [&, skip = pb_input->skip_header(), record_num = uint64_t{0}](string&& s) mutable {
       if (record_num++ < skip)
         return;
+      record_q.Push(Record::RECORD, aux_local->records_read, std::move(s));
       ++aux_local->records_read;
-      record_q.Push(Record{Record::RECORD, std::move(s)});
     };
 
     cnt +=
@@ -222,10 +220,10 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     if (record.op != Record::RECORD) {
       switch (record.op) {
         case Record::BINARY_FORMAT:
-          SetFileName(true, absl::get<string>(record.payload), raw_context);
+          SetFileName(true, absl::get<pair<size_t, string>>(record.payload).second, raw_context);
           break;
         case Record::TEXT_FORMAT:
-          SetFileName(false, absl::get<string>(record.payload), raw_context);
+          SetFileName(false, absl::get<pair<size_t, string>>(record.payload).second, raw_context);
           break;
         case Record::METADATA:
           SetMetaData(*absl::get<const pb::Input::FileSpec*>(record.payload), raw_context);
@@ -246,7 +244,10 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    cb(std::move(absl::get<string>(record.payload)));
+    auto& pp = absl::get<pair<size_t, string>>(record.payload);
+    SetPosition(pp.first, raw_context);
+
+    cb(std::move(pp.second));
 
     if (++record_num % 1000 == 0) {
       this_fiber::yield();

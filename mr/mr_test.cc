@@ -31,19 +31,23 @@ using testing::UnorderedElementsAreArray;
 
 namespace rj = rapidjson;
 
-class StrValMapper {
-  set<string>* input_files_;
-  set<string>* meta_;
+struct MetaCheck {
+  set<string> input_files;
+  set<string> meta;
+  vector<size_t> pos;
+};
 
+class StrValMapper {
+  MetaCheck* meta_check_;
  public:
-  StrValMapper(set<string>* input_files, set<string>* meta)
-      : input_files_(input_files), meta_(meta) {}
+  StrValMapper(MetaCheck* meta_check) : meta_check_(meta_check) {}
 
   void Do(string val, mr3::DoContext<StrVal>* cntx) {
-    input_files_->insert(cntx->raw()->input_file_name());
+    meta_check_->input_files.insert(cntx->raw()->input_file_name());
     if (absl::holds_alternative<int64_t>(cntx->raw()->meta_data())) {
-      meta_->insert(to_string(absl::get<int64_t>(cntx->raw()->meta_data())));
+      meta_check_->meta.insert(to_string(absl::get<int64_t>(cntx->raw()->meta_data())));
     }
+    meta_check_->pos.push_back(cntx->raw()->input_pos());
 
     StrVal a;
     val.append("a");
@@ -169,8 +173,9 @@ TEST_F(MrTest, Map) {
   fspec.set_i64val(42);
 
   StringTable str1 = pipeline_->ReadText("read_bar", std::vector<pb::Input::FileSpec>{fspec});
-  set<string> input_files, metadata;
-  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1", &input_files, &metadata);
+
+  MetaCheck meta_check;
+  PTable<StrVal> str2 = str1.Map<StrValMapper>("Map1", &meta_check);
 
   str2.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
   vector<string> elements{"1", "2", "3", "4"};
@@ -178,8 +183,9 @@ TEST_F(MrTest, Map) {
   runner_.AddInputRecords("bar.txt", elements);
   pipeline_->Run(&runner_);
 
-  EXPECT_THAT(input_files, UnorderedElementsAre("bar.txt"));
-  EXPECT_THAT(metadata, UnorderedElementsAre("42"));
+  EXPECT_THAT(meta_check.input_files, UnorderedElementsAre("bar.txt"));
+  EXPECT_THAT(meta_check.meta, UnorderedElementsAre("42"));
+  EXPECT_THAT(meta_check.pos, ElementsAre(0, 1, 2, 3));
 
   vector<string> expected;
   for (const auto& e : elements)
@@ -204,12 +210,13 @@ class IntMapper {
 
 TEST_F(MrTest, MapAB) {
   vector<string> elements{"1", "2", "3", "4"};
-  set<string> input_files, metadata;
 
   runner_.AddInputRecords("bar.txt", elements);
   PTable<IntVal> itable =
       pipeline_->ReadText("read_bar", "bar.txt").As<IntVal>();  // Map<StrValMapper>("Map1");
-  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1", &input_files, &metadata);
+
+  MetaCheck meta_check;
+  PTable<StrVal> atable = itable.Map<StrValMapper>("Map1", &meta_check);
 
   atable.Write("table", pb::WireFormat::TXT).WithModNSharding(10, [](const StrVal&) { return 11; });
 
@@ -219,7 +226,7 @@ TEST_F(MrTest, MapAB) {
   });
 
   pipeline_->Run(&runner_);
-  EXPECT_THAT(input_files, UnorderedElementsAre("bar.txt"));
+  EXPECT_THAT(meta_check.input_files, UnorderedElementsAre("bar.txt"));
 
   vector<string> expected;
   for (const auto& e : elements)

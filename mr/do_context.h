@@ -81,6 +81,10 @@ class RawContext {
   size_t item_writes() const { return item_writes_;}
 
   const std::string& input_file_name() const { return file_name_;}
+
+  // Line number for text files.
+  size_t input_pos() const { return input_pos_; }
+
   const InputMetaData& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
@@ -108,6 +112,7 @@ class RawContext {
 
   FreqMapRegistry freq_maps_;
   const FreqMapRegistry* finalized_maps_ = nullptr;
+  size_t input_pos_ = 0;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.

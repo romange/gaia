@@ -17,14 +17,23 @@ class MapperExecutor : public OperatorExecutor {
     const pb::Input* input;
     size_t spec_index;
     size_t file_size;
-    std::string file_name;
+    ::std::string file_name;
   };
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
 
   struct Record {
     enum Operand { BINARY_FORMAT, TEXT_FORMAT, METADATA, RECORD} op;
 
-    absl::variant<const pb::Input::FileSpec*, std::string> payload;
+    // either file spec or <pos,record> pair.
+    absl::variant<const pb::Input::FileSpec*, ::std::pair<size_t, ::std::string>> payload;
+
+    Record() = default;
+
+    Record(Operand op2, size_t pos, ::std::string val)
+      : op(op2), payload(::std::pair<size_t, ::std::string>{pos, ::std::move(val)}) {}
+
+    Record(Operand op2, const pb::Input::FileSpec* fspec)
+      : op(op2), payload(fspec) {}
   };
 
   using RecordQueue = util::fibers_ext::SimpleChannel<Record>;

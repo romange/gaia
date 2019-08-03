@@ -10,6 +10,9 @@ set(PROJECT_CONTACT romange@gmail.com)
 
 project(${PACKAGE_NAME})
 set(CMAKE_CXX_STANDARD 14)
+set(VERSION_MAJOR 0)
+set(VERSION_MINOR 1)
+set(VERSION_PATCH 0)
 
 option (ONLY_THIRD_PARTY "Build third party only")
 
