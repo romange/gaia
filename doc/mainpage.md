@@ -13,9 +13,10 @@ class Grepper {
  public:
   Grepper(string reg_exp) : re_(reg_exp) {}
 
-  void Do(string val, mr3::DoContext<GsodRecord>* context) {
+  void Do(string val, mr3::DoContext<string>* context) {
     if (RE2::PartialMatch(val, re_)) {
-      cout << context->raw()->input_file_name() << ": " << val << endl;
+      auto* raw = context->raw();
+      cout << raw->input_file_name() << ":" << raw->input_pos() << " " << val << endl;
     }
   }
 };
@@ -31,8 +32,8 @@ int main(int argc, char** argv) {
 
   Pipeline* pipeline = pm.pipeline();
   StringTable st = pipeline->ReadText("read_input", inputs);
-  StringTable no_output = st.Map<Grepper>("grep", FLAGS_e);
-  no_output.Write("null", pb::WireFormat::TXT);
+  StringTable null_output = st.Map<Grepper>("grep", FLAGS_e);
+  null_output.Write("null", pb::WireFormat::TXT);  // To force this mapper to run.
 
   LocalRunner* runner = pm.StartLocalRunner("/tmp/");
   pipeline->Run(runner);
