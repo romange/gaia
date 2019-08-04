@@ -24,7 +24,8 @@ class Grepper {
 
   void Do(string val, DoContext<string>* context) {
     if (RE2::PartialMatch(val, re_)) {
-      cout << context->raw()->input_file_name() << ": " << val << endl;
+      auto* raw = context->raw();
+      cout << raw->input_file_name() << ":" << raw->input_pos() << " " << val << endl;
     }
   }
 
