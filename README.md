@@ -1,4 +1,4 @@
-Gaia - primal goddess of rapid development in C++
+# Gaia - rapid backend development framework in C++
 
 [![Build Status](https://travis-ci.org/romange/gaia.svg?branch=master)](https://travis-ci.org/romange/gaia)
 =====
