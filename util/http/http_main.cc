@@ -6,6 +6,7 @@
 
 #include "util/http/http_conn_handler.h"
 #include "util/html/sorted_table.h"
+#include "util/stats/varz_stats.h"
 
 #include "absl/strings/str_join.h"
 #include "base/init.h"
@@ -17,6 +18,9 @@ using namespace std;
 using namespace boost;
 using namespace util;
 namespace h2 = beast::http;
+
+VarzQps http_qps("bar-qps");
+
 
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
@@ -31,6 +35,7 @@ int main(int argc, char** argv) {
 
     http::SetMime(http::kTextMime, &resp);
     resp.set(beast::http::field::server, "GAIA");
+    http_qps.Inc();
 
     return send->Invoke(std::move(resp));
   };
