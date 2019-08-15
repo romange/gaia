@@ -12,7 +12,9 @@
 
 #include <memory>
 
+#include "absl/types/optional.h"
 #include "absl/types/variant.h"
+
 #include "file/file.h"
 #include "strings/stringpiece.h"
 #include "util/gce/gce.h"
@@ -59,7 +61,7 @@ class GCS {
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
   util::Status CloseSequential();
 
-  bool IsOpenSequential() const;
+  bool IsBusy() const;
 
   util::StatusObject<file::ReadonlyFile*> OpenGcsFile(absl::string_view full_path);
 
@@ -80,8 +82,9 @@ class GCS {
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
   template <typename Body> using Parser = ::boost::beast::http::response_parser<Body>;
 
-  struct SeqReadHandler;
-  struct WriteHandler;
+  // Parser can not be reset, so we use absl::optional to workaround.
+  using ReusableParser = absl::optional<Parser<boost::beast::http::buffer_body>>;
+
   class ConnState;
 
   util::Status RefreshToken(Request* req);
@@ -90,7 +93,9 @@ class GCS {
   util::Status InitSslClient();
   util::Status PrepareConnection();
 
-  OpenSeqResult OpenSequentialInternal(Request* req, SeqReadHandler* file);
+  util::Status ClearConnState();
+
+  OpenSeqResult OpenSequentialInternal(Request* req, ReusableParser* parser);
 
   // Higher level function. Handles token expiration use-cases.
   template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);

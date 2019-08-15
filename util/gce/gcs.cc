@@ -32,6 +32,10 @@ static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
 
+inline absl::string_view absl_sv(beast::string_view s) {
+  return absl::string_view{s.data(), s.size()};
+}
+
 class GcsFile : public file::ReadonlyFile {
  public:
   // does not own gcs object, only wraps it with ReadonlyFile interface.
@@ -61,6 +65,11 @@ inline Status ToStatus(const ::boost::system::error_code& ec) {
     : Status::OK;
 }
 
+template<typename Body> inline Status HttpError(const h2::response<Body>& resp) {
+ return Status(StatusCode::IO_ERROR, absl::StrCat("Http error: ", resp.result_int(), " ",
+                                                  absl_sv(resp.reason())));
+}
+
 #define RETURN_EC_STATUS(x)                                 \
   do {                                                      \
     auto __ec$ = (x);                                       \
@@ -70,9 +79,6 @@ inline Status ToStatus(const ::boost::system::error_code& ec) {
     }                                                       \
   } while (false)
 
-inline absl::string_view absl_sv(beast::string_view s) {
-  return absl::string_view{s.data(), s.size()};
-}
 
 inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
                                                   const beast::string_view access_token) {
@@ -137,13 +143,8 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
-struct GCS::SeqReadHandler {
+struct SeqReadHandler {
   SeqReadHandler(string url) : read_obj_url(std::move(url)) {}
-
-  void Init() {
-    parser.emplace();
-    parser->body_limit(kuint64max);
-  }
 
   string read_obj_url;
   size_t offset = 0, file_size = 0;
@@ -153,8 +154,10 @@ struct GCS::SeqReadHandler {
   OptParser parser;
 };
 
-struct GCS::WriteHandler {
+struct WriteHandler {
   WriteHandler() {}
+
+  string url;
 };
 
 class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
@@ -194,27 +197,13 @@ Status GCS::Connect(unsigned msec) {
 
 Status GCS::CloseSequential() {
   CHECK(io_context_.InContextThread());
-
-  if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
-    VLOG(1) << "Close::SeqReadHandler";
-
-    CHECK(client_);
-    error_code ec;
-
-    if (seq_ptr->parser) {
-      ec = DrainResponse(&seq_ptr->parser.value());
-    }
-    conn_state_->emplace<absl::monostate>();
-    return ToStatus(ec);
-  }
-
-  return Status::OK;
+  return ClearConnState();
 }
 
-bool GCS::IsOpenSequential() const {
-  auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get());
+bool GCS::IsBusy() const {
+  bool is_empty = absl::holds_alternative<absl::monostate>(*conn_state_);
 
-  return seq_ptr && seq_ptr->parser;
+  return !is_empty;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
@@ -234,9 +223,9 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
     RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
     if (resp_msg.result() != h2::status::ok) {
-      return Status(StatusCode::IO_ERROR, absl::StrCat("Http error: ", resp_msg.result_int(), " ",
-                                                       absl_sv(resp_msg.reason())));
+      return HttpError(resp_msg);
     }
+
     http::RjBufSequenceStream is(resp_msg.body().data());
 
     doc.ParseStream<rj::kParseDefaultFlags>(is);
@@ -353,22 +342,25 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
 }
 
 auto GCS::DrainResponse(Parser<h2::buffer_body>* parser) -> error_code {
-  uint8_t buf[512];
+  constexpr size_t kBufSize = 1 << 16;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
   auto& body = parser->get().body();
   error_code ec;
   size_t sz = 0;
 
   // Drain pending response completely to allow reusing the current connection.
+  VLOG(1) << "parser: " << parser->got_some();
   while (!parser->is_done()) {
-    body.data = buf;
-    body.size = sizeof(buf);
-    size_t s1 = h2::read(*client_, tmp_buffer_, *parser, ec);
+    body.data = buf.get();
+    body.size = kBufSize;
+    size_t raw_bytes = h2::read(*client_, tmp_buffer_, *parser, ec);
     if (ec && ec != h2::error::need_buffer) {
       VLOG(1) << "Error " << ec << "/" << ec.message();
       return ec;
     }
-    sz += s1;
-    VLOG(1) << "DrainResp: " << parser->get();
+    sz += raw_bytes;
+
+    VLOG(1) << "DrainResp: " << raw_bytes << "/" << body.size << ", " << parser->get();
   }
   VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
 
@@ -438,8 +430,9 @@ auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -
 
   SeqReadHandler& handler = conn_state_->emplace<SeqReadHandler>(read_obj_url);
 
-  OpenSeqResult res = OpenSequentialInternal(&req, &handler);
+  OpenSeqResult res = OpenSequentialInternal(&req, &handler.parser);
   if (!res.ok()) {
+    conn_state_->emplace<absl::monostate>();
     return res.status;
   }
 
@@ -486,7 +479,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 
       auto req = PrepareRequest(h2::verb::get, handler->read_obj_url, access_token_header_);
       req.set(h2::field::range, absl::StrCat("bytes=", handler->offset, "-"));
-      OpenSeqResult res = OpenSequentialInternal(&req, handler);
+      OpenSeqResult res = OpenSequentialInternal(&req, &handler->parser);
 
       if (!res.ok())
         return res.status;
@@ -507,7 +500,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 }
 
 StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
-  CHECK(!IsOpenSequential()) << "Can not open " << full_path << " before closing the previous one ";
+  CHECK(!IsBusy()) << "Can not open " << full_path << " before closing the previous one ";
 
   absl::string_view bucket, obj_path;
   CHECK(GCS::SplitToBucketPath(full_path, &bucket, &obj_path));
@@ -518,6 +511,36 @@ StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) 
   }
 
   return new GcsFile{this, res.obj};
+}
+
+util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_path) {
+  RETURN_IF_ERROR(PrepareConnection());
+
+  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
+
+  string url = "/upload/storage/v1/b/";
+  absl::StrAppend(&url, bucket, "/o?uploadType=resumable&name=");
+  strings::AppendEncodedUrl(obj_path, &url);
+
+  auto req = PrepareRequest(h2::verb::post, url, access_token_header_);
+  h2::response<h2::dynamic_body> resp_msg;
+
+  req.prepare_payload();
+
+  RETURN_IF_ERROR(HttpMessage(&req, &resp_msg));
+  if (resp_msg.result() != h2::status::ok) {
+    return HttpError(resp_msg);
+  }
+  auto it = resp_msg.find(h2::field::location);
+  if (it == resp_msg.end()) {
+    return Status(StatusCode::PARSE_ERROR, "Can not find location header");
+  }
+  WriteHandler& wh = conn_state_->emplace<WriteHandler>();
+  wh.url = string(it->value());
+
+  VLOG(1) << "Url: " << absl_sv(it->value());
+
+  return Status::OK;
 }
 
 string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
@@ -544,7 +567,7 @@ Status GCS::InitSslClient() {
 }
 
 Status GCS::PrepareConnection() {
-  auto status = CloseSequential();
+  auto status = ClearConnState();
 
   if (!status.ok()) {
     reconnect_needed_ = true;
@@ -557,17 +580,35 @@ Status GCS::PrepareConnection() {
   return Status::OK;
 }
 
-auto GCS::OpenSequentialInternal(Request* req, SeqReadHandler* seq_file) -> OpenSeqResult {
-  for (unsigned iters = 0; iters < 5; ++iters) {
-    seq_file->Init();
-    auto status_obj = SendRequestIterative(req, &seq_file->parser.value());
+util::Status GCS::ClearConnState() {
+  if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
+    VLOG(1) << "Close::SeqReadHandler";
+
+    CHECK(client_);
+    error_code ec;
+
+    if (seq_ptr->parser) {
+      ec = DrainResponse(&seq_ptr->parser.value());
+    }
+    conn_state_->emplace<absl::monostate>();
+    return ToStatus(ec);
+  }
+  return Status::OK;
+}
+
+auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSeqResult {
+  for (unsigned iters = 0; iters < 3; ++iters) {
+    parser->emplace();
+    parser->value().body_limit(kuint64max);
+
+    auto status_obj = SendRequestIterative(req, &parser->value());
     if (!status_obj.ok()) {
       return status_obj.status;
     }
     bool success = status_obj.obj;
 
     if (success) {
-      const auto& msg = seq_file->parser->get();
+      const auto& msg = (*parser)->get();
       auto content_len_it = msg.find(h2::field::content_length);
       size_t content_sz = 0;
       if (content_len_it != msg.end()) {
