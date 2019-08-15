@@ -47,7 +47,7 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
       int res = ProfilerStart(profile_name.c_str());
       LOG(INFO) << "Starting profiling into " << profile_name << " " << res;
       body.append("<p> Yeah, let's profile this bitch, baby!</p> \n"
-        "<img src='https://gist.githack.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/profiler.gif'>\n");
+        "<img src='https://gistcdn.githack.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/profiler.gif'>\n");
     }
     return;
   }

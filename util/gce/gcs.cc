@@ -56,8 +56,9 @@ class GcsFile : public file::ReadonlyFile {
   size_t offs_ = 0;
 };
 
-inline util::Status ToStatus(const ::boost::system::error_code& ec) {
-  return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+inline Status ToStatus(const ::boost::system::error_code& ec) {
+  return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
+    : Status::OK;
 }
 
 #define RETURN_EC_STATUS(x)                                 \
@@ -175,7 +176,7 @@ GCS::~GCS() {
   client_.reset();
 }
 
-util::Status GCS::Connect(unsigned msec) {
+Status GCS::Connect(unsigned msec) {
   CHECK(io_context_.InContextThread());
   if (!reconnect_needed_) {
     return Status::OK;
@@ -191,10 +192,12 @@ util::Status GCS::Connect(unsigned msec) {
   return Status::OK;
 }
 
-util::Status GCS::CloseSequential() {
+Status GCS::CloseSequential() {
   CHECK(io_context_.InContextThread());
 
   if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
+    VLOG(1) << "Close::SeqReadHandler";
+
     CHECK(client_);
     error_code ec;
 
@@ -361,6 +364,7 @@ auto GCS::DrainResponse(Parser<h2::buffer_body>* parser) -> error_code {
     body.size = sizeof(buf);
     size_t s1 = h2::read(*client_, tmp_buffer_, *parser, ec);
     if (ec && ec != h2::error::need_buffer) {
+      VLOG(1) << "Error " << ec << "/" << ec.message();
       return ec;
     }
     sz += s1;
@@ -399,7 +403,8 @@ StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_bod
     reconnect_needed_ = true;
   }
 
-  if (msg.result() == h2::status::ok) {
+  // Partial content can appear because of the previous reconnect.
+  if (msg.result() == h2::status::ok || msg.result() == h2::status::partial_content) {
     return true;  // all is good.
   }
 
@@ -501,7 +506,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
 }
 
-util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
+StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
   CHECK(!IsOpenSequential()) << "Can not open " << full_path << " before closing the previous one ";
 
   absl::string_view bucket, obj_path;
@@ -524,7 +529,7 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
   return read_obj_url;
 }
 
-util::Status GCS::InitSslClient() {
+Status GCS::InitSslClient() {
   VLOG(1) << "GCS::InitSslClient";
 
   client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
@@ -538,7 +543,7 @@ util::Status GCS::InitSslClient() {
   return status;
 }
 
-util::Status GCS::PrepareConnection() {
+Status GCS::PrepareConnection() {
   auto status = CloseSequential();
 
   if (!status.ok()) {
