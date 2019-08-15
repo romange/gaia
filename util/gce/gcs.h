@@ -12,6 +12,7 @@
 
 #include <memory>
 
+#include "absl/types/variant.h"
 #include "file/file.h"
 #include "strings/stringpiece.h"
 #include "util/gce/gce.h"
@@ -52,6 +53,8 @@ class GCS {
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
 
+  // Read API
+
   OpenSeqResult OpenSequential(absl::string_view bucket, absl::string_view path);
   ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
   util::Status CloseSequential();
@@ -68,11 +71,18 @@ class GCS {
   // Inverse function. Returns full gcs URI that starts with "gs://"".
   static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
 
+  // Write Interface
+  util::Status OpenForWrite(absl::string_view bucket, absl::string_view obj_path);
+  util::Status Write(absl::string_view data);
+
  private:
   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
   template <typename Body> using Parser = ::boost::beast::http::response_parser<Body>;
-  struct SeqReadFile;
+
+  struct SeqReadHandler;
+  struct WriteHandler;
+  class ConnState;
 
   util::Status RefreshToken(Request* req);
 
@@ -80,7 +90,7 @@ class GCS {
   util::Status InitSslClient();
   util::Status PrepareConnection();
 
-  OpenSeqResult OpenSequentialInternal(Request* req, SeqReadFile* file);
+  OpenSeqResult OpenSequentialInternal(Request* req, SeqReadHandler* file);
 
   // Higher level function. Handles token expiration use-cases.
   template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
@@ -101,7 +111,8 @@ class GCS {
   std::string access_token_header_;
   std::unique_ptr<SslStream> client_;
 
-  std::unique_ptr<SeqReadFile> seq_file_;
+  std::unique_ptr<ConnState> conn_state_;
+
   uint32_t reconnect_msec_ = 1000;
   bool reconnect_needed_ = true;
 };

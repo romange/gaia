@@ -136,9 +136,8 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
-struct GCS::SeqReadFile {
-  SeqReadFile(string url) : read_obj_url(std::move(url)) {
-  }
+struct GCS::SeqReadHandler {
+  SeqReadHandler(string url) : read_obj_url(std::move(url)) {}
 
   void Init() {
     parser.emplace();
@@ -148,17 +147,30 @@ struct GCS::SeqReadFile {
   string read_obj_url;
   size_t offset = 0, file_size = 0;
   uint32_t errors = 0;
-  absl::optional<h2::response_parser<h2::buffer_body>> parser;
+
+  using OptParser = absl::optional<h2::response_parser<h2::buffer_body>>;
+  OptParser parser;
 };
 
+struct GCS::WriteHandler {
+  WriteHandler() {}
+};
 
-GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {
-}
+class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
+ public:
+  ~ConnState() {
+    if (auto* pval = absl::get_if<SeqReadHandler>(this)) {
+      if (pval->parser) {
+        LOG(ERROR) << "File was not closed";
+      }
+    }
+  }
+};
+
+GCS::GCS(const GCE& gce, IoContext* context)
+    : gce_(gce), io_context_(*context), conn_state_(new ConnState) {}
 
 GCS::~GCS() {
-  if (seq_file_ && seq_file_->parser) {
-    LOG(ERROR) << "File was not closed";
-  }
   VLOG(1) << "GCS::~GCS";
   client_.reset();
 }
@@ -182,22 +194,24 @@ util::Status GCS::Connect(unsigned msec) {
 util::Status GCS::CloseSequential() {
   CHECK(io_context_.InContextThread());
 
-  if (!seq_file_) {
-    return Status::OK;
-  }
-  CHECK(client_);
+  if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
+    CHECK(client_);
+    error_code ec;
 
-  if (seq_file_->parser) {
-    error_code ec = DrainResponse(&seq_file_->parser.value());
-    seq_file_->parser.reset();
-    RETURN_EC_STATUS(ec);
+    if (seq_ptr->parser) {
+      ec = DrainResponse(&seq_ptr->parser.value());
+    }
+    conn_state_->emplace<absl::monostate>();
+    return ToStatus(ec);
   }
 
   return Status::OK;
 }
 
 bool GCS::IsOpenSequential() const {
-  return seq_file_ && seq_file_->parser;
+  auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get());
+
+  return seq_ptr && seq_ptr->parser;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
@@ -410,30 +424,35 @@ StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_bod
 }
 
 auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
+  RETURN_IF_ERROR(PrepareConnection());
+
+  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
+
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
 
-  std::unique_ptr<SeqReadFile> open_file(new SeqReadFile(read_obj_url));
+  SeqReadHandler& handler = conn_state_->emplace<SeqReadHandler>(read_obj_url);
 
-  OpenSeqResult res = OpenSequentialInternal(&req, open_file.get());
-  if (!res.ok())
+  OpenSeqResult res = OpenSequentialInternal(&req, &handler);
+  if (!res.ok()) {
     return res.status;
+  }
 
-  seq_file_ = std::move(open_file);
-  seq_file_->file_size = res.obj;
+  handler.file_size = res.obj;
 
   return res.obj;
 }
 
 auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
-  CHECK(seq_file_ && client_);
+  SeqReadHandler* handler = absl::get_if<SeqReadHandler>(conn_state_.get());
+  CHECK(handler && client_);
 
-  if (seq_file_->parser->is_done()) {
+  if (handler->parser->is_done()) {
     return 0;
   }
 
   for (unsigned iters = 0; iters < 3; ++iters) {
-    auto& body = seq_file_->parser->get().body();
+    auto& body = handler->parser->get().body();
     body.data = range.data();
     auto& left_available = body.size;
     left_available = range.size();
@@ -442,35 +461,37 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
 
     // h2::read returns number of raw bytes read from stream before parsing.
     // Also it does not consider temporary buffer caching. Therefore we use left_available to count.
-    h2::read(*client_, tmp_buffer_, *seq_file_->parser, ec);
+    h2::read(*client_, tmp_buffer_, *handler->parser, ec);
     if (!ec || ec == h2::error::need_buffer) {
       size_t http_read = range.size() - left_available;
-      DVLOG(2) << "Read " << http_read << " bytes from " << seq_file_->offset << " with capacity "
+      DVLOG(2) << "Read " << http_read << " bytes from " << handler->offset << " with capacity "
                << range.size();
 
-      // This check does not happen for some reason: https://github.com/boostorg/beast/issues/1662
+      // This check does not happen. See here why: https://github.com/boostorg/beast/issues/1662
       // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
-      seq_file_->offset += http_read;
+      handler->offset += http_read;
       return http_read;
     }
 
     if (ec == asio::ssl::error::stream_truncated) {
-      LOG(WARNING) << "Stream " << seq_file_->read_obj_url << " truncated at "
-                   << seq_file_->offset << "/" << seq_file_->file_size;
-      reconnect_needed_ = true;
-      auto req = PrepareRequest(h2::verb::get, seq_file_->read_obj_url, access_token_header_);
-      req.set(h2::field::range, absl::StrCat("bytes=", seq_file_->offset, "-"));
-      OpenSeqResult res = OpenSequentialInternal(&req, seq_file_.get());
+      LOG(WARNING) << "Stream " << handler->read_obj_url << " truncated at " << handler->offset
+                   << "/" << handler->file_size;
+
+      RETURN_IF_ERROR(InitSslClient());
+
+      auto req = PrepareRequest(h2::verb::get, handler->read_obj_url, access_token_header_);
+      req.set(h2::field::range, absl::StrCat("bytes=", handler->offset, "-"));
+      OpenSeqResult res = OpenSequentialInternal(&req, handler);
 
       if (!res.ok())
         return res.status;
-      VLOG(1) << "Reopened the file, new size: " << seq_file_->offset + res.obj;
+      VLOG(1) << "Reopened the file, new size: " << handler->offset + res.obj;
       // I do not change seq_file_->offset,file_size fields.
       // TODO: to validate that file version has not been changed between retries.
       continue;
     } else {
-      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
-                 << seq_file_->file_size;
+      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << handler->offset << "/"
+                 << handler->file_size;
       LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
 
       return ToStatus(ec);
@@ -518,7 +539,12 @@ util::Status GCS::InitSslClient() {
 }
 
 util::Status GCS::PrepareConnection() {
-  RETURN_IF_ERROR(CloseSequential());
+  auto status = CloseSequential();
+
+  if (!status.ok()) {
+    reconnect_needed_ = true;
+    LOG(INFO) << "Reconnecting due to " << status;
+  }
 
   if (reconnect_needed_) {
     RETURN_IF_ERROR(InitSslClient());
@@ -526,14 +552,13 @@ util::Status GCS::PrepareConnection() {
   return Status::OK;
 }
 
-auto GCS::OpenSequentialInternal(Request* req, SeqReadFile* seq_file) -> OpenSeqResult {
+auto GCS::OpenSequentialInternal(Request* req, SeqReadHandler* seq_file) -> OpenSeqResult {
   for (unsigned iters = 0; iters < 5; ++iters) {
-    RETURN_IF_ERROR(PrepareConnection());  //! Drains and connects if needed.
-
     seq_file->Init();
     auto status_obj = SendRequestIterative(req, &seq_file->parser.value());
-    if (!status_obj.ok())
+    if (!status_obj.ok()) {
       return status_obj.status;
+    }
     bool success = status_obj.obj;
 
     if (success) {
