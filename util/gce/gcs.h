@@ -75,7 +75,8 @@ class GCS {
 
   // Write Interface
   util::Status OpenForWrite(absl::string_view bucket, absl::string_view obj_path);
-  util::Status Write(absl::string_view data);
+  util::Status Write(strings::ByteRange data);
+  util::Status CloseWrite();
 
  private:
   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;

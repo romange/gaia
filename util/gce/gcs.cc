@@ -158,6 +158,8 @@ struct WriteHandler {
   WriteHandler() {}
 
   string url;
+
+  string buffer;
 };
 
 class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
@@ -539,6 +541,50 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   wh.url = string(it->value());
 
   VLOG(1) << "Url: " << absl_sv(it->value());
+
+  return Status::OK;
+}
+
+util::Status GCS::Write(strings::ByteRange src) {
+  CHECK(!src.empty());
+  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
+  CHECK(wh && !wh->url.empty());
+
+  //auto scratch = wh->buffer.prepare(src.size());
+  //memcpy(scratch.data(), src.data(), src.size());
+  //wh->buffer.commit(src.size());
+  absl::StrAppend(&wh->buffer, StringPiece(reinterpret_cast<const char*>(src.data()),
+                                           src.size()));
+  VLOG(2) << "GCS::Write " << wh->buffer.size() << "/" << wh->buffer.max_size();
+
+  return Status::OK;
+}
+
+util::Status GCS::CloseWrite() {
+  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
+  CHECK(wh && !wh->url.empty());
+
+  h2::request<h2::buffer_body> req(h2::verb::put, wh->url, 11);
+
+  // h2::request_serializer<h2::buffer_body> rs{req};
+
+  auto& body = req.body();
+  body.data = &wh->buffer.front();
+  body.size = wh->buffer.size();
+  body.more = false;
+
+  req.prepare_payload();
+
+  error_code ec;
+  h2::write(*client_, req, ec);
+  RETURN_EC_STATUS(ec);
+
+  h2::response<h2::dynamic_body> resp_msg;
+  h2::read(*client_, tmp_buffer_, resp_msg, ec);
+  RETURN_EC_STATUS(ec);
+
+
+  VLOG(1) << "CloseWrite: " << resp_msg;
 
   return Status::OK;
 }

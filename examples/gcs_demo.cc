@@ -99,6 +99,14 @@ void Run(const GCE& gce, IoContext* context) {
   if (!FLAGS_upload.empty()) {
     auto status = gcs.OpenForWrite(FLAGS_bucket, FLAGS_upload);
     CHECK_STATUS(status);
+
+    string contents(1 << 16, 'a');
+    strings::MutableByteRange range(reinterpret_cast<uint8_t*>(&contents.front()), contents.size());
+    for (size_t i = 0; i < 100; ++i) {
+      status = gcs.Write(range);
+      CHECK_STATUS(status);
+    }
+    CHECK_STATUS(gcs.CloseWrite());
     return;
   }
 
