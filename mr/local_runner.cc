@@ -48,16 +48,20 @@ struct LocalRunner::Impl {
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
+  /// Called from the main thread orchestrating the pipeline run.
   void Start(const pb::Operator* op);
+
+  /// Called from the main thread orchestrating the pipeline run.
   void End(ShardFileMap* out_files);
 
+  /// The functions below are called from IO threads.
   void ExpandGCS(absl::string_view glob, ExpandCb cb);
-
   util::StatusObject<file::ReadonlyFile*> OpenReadFile(const std::string& filename,
                                                        file::FiberReadOptions::Stats* stats);
-
   void ShutDown();
 
+
+  // TODO: to make members below private.
   // private:
 
   void LazyGcsInit();
@@ -178,10 +182,16 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   CHECK(!dest_mgr);
   current_op = op;
   string out_dir = file_util::JoinPath(data_dir, op->output().name());
-  if (!file::Exists(out_dir)) {
+  if (util::IsGcsPath(out_dir)) {
+    LazyGcsInit();  // Initializes gce handle.
+  } else if (!file::Exists(out_dir)) {
     CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
   }
-  dest_mgr.reset(new DestFileSet(out_dir, op->output(), &fq_pool));
+  dest_mgr.reset(new DestFileSet(out_dir, op->output(), io_pool, &fq_pool));
+
+  if (util::IsGcsPath(out_dir)) {
+    dest_mgr->set_gce(gce_handle.get());
+  }
 }
 
 void LocalRunner::Impl::End(ShardFileMap* out_files) {

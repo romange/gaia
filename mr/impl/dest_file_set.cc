@@ -10,8 +10,8 @@
 #include "base/logging.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
-#include "file/proto_writer.h"
 #include "file/gzip_file.h"
+#include "file/proto_writer.h"
 #include "util/zlib_source.h"
 #include "util/zstd_sinksource.h"
 
@@ -47,7 +47,7 @@ string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
   if (pb_out.format().type() == pb::WireFormat::TXT) {
     absl::StrAppend(&res, ".txt");
     if (pb_out.has_compress()) {
-      switch(pb_out.compress().type()) {
+      switch (pb_out.compress().type()) {
         case pb::Output::GZIP:
           absl::StrAppend(&res, ".gz");
           break;
@@ -55,7 +55,7 @@ string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
           absl::StrAppend(&res, ".zst");
           break;
         default:
-        LOG(FATAL) << "Not supported " << pb_out.compress().ShortDebugString();
+          LOG(FATAL) << "Not supported " << pb_out.compress().ShortDebugString();
       }
     }
   } else if (pb_out.format().type() == pb::WireFormat::LST) {
@@ -106,10 +106,8 @@ class LstHandle : public DestHandle {
   boost::fibers::mutex mu_;
 };
 
-
 CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
     : DestHandle(owner, sid), compress_out_buf_(new StringSink) {
-
   static std::default_random_engine rnd;
 
   // Randomize when we flush first for each handle. That should define uniform flushing cycle
@@ -210,8 +208,8 @@ bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
 }  // namespace
 
 DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
-                         fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), pb_out_(out), fq_(fq) {}
+                         util::IoContextPool* pool, fibers_ext::FiberQueueThreadPool* fq)
+    : root_dir_(root_dir), pb_out_(out), pool_(*pool), fq_(*fq) {}
 
 DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   std::lock_guard<fibers::mutex> lk(mu_);
@@ -221,8 +219,8 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
 
     if (pb_out_.format().type() == pb::WireFormat::LST) {
       dh.reset(new LstHandle{this, sid});
-    } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT
-        && AllowCompressHandle(pb_out_.compress())) {
+    } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT &&
+               AllowCompressHandle(pb_out_.compress())) {
       dh.reset(new CompressHandle{this, sid});
     } else {
       dh.reset(new DestHandle{this, sid});

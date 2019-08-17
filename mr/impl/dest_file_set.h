@@ -13,6 +13,11 @@
 #include "mr/mr_types.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 
+namespace util {
+class IoContextPool;
+class GCE;
+}  // namespace util
+
 namespace mr3 {
 namespace detail {
 
@@ -25,11 +30,8 @@ class DestFileSet {
   const std::string root_dir_;
   const pb::Output& pb_out_;
 
-  util::fibers_ext::FiberQueueThreadPool* fq_;
-  ::boost::fibers::mutex mu_;
-
  public:
-  DestFileSet(const std::string& root_dir, const pb::Output& out,
+  DestFileSet(const std::string& root_dir, const pb::Output& out, util::IoContextPool* pool,
               util::fibers_ext::FiberQueueThreadPool* fq);
   ~DestFileSet();
 
@@ -44,7 +46,7 @@ class DestFileSet {
   /// with DestFileSet.
   DestHandle* GetOrCreate(const ShardId& key);
 
-  util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
+  util::fibers_ext::FiberQueueThreadPool* pool() { return &fq_; }
 
   std::vector<ShardId> GetShards() const;
 
@@ -54,9 +56,16 @@ class DestFileSet {
 
   const pb::Output& output() const { return pb_out_; }
 
+  void set_gce(util::GCE* gce) { gce_ = gce;}
+
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
   HandleMap dest_files_;
+  ::boost::fibers::mutex mu_;
+  util::GCE* gce_ = nullptr;
+
+  util::IoContextPool& pool_;
+  util::fibers_ext::FiberQueueThreadPool& fq_;
 };
 
 
