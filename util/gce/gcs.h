@@ -54,7 +54,11 @@ class HttpsClient {
  private:
   error_code HandleError(const error_code& ec);
 
-  error_code ReconnectIfNeeded() { return InitSslClient(); }
+  error_code ReconnectIfNeeded() {
+    if (reconnect_needed_)
+      return InitSslClient();
+    return error_code{};
+  }
 
   error_code InitSslClient();
 

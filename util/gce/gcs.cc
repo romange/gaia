@@ -8,7 +8,7 @@
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/read.hpp>
-#include <boost/beast/http/write.hpp>  // for operator<<
+#include <boost/beast/http/write.hpp>
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -132,16 +132,6 @@ inline bool ShouldRetry(h2::status st) {
          h2::to_status_class(st) == h2::status_class::server_error;
 }
 
-}  // namespace
-
-std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
-  os << msg.reason() << endl;
-  for (const auto& f : msg) {
-    os << f.name_string() << " : " << f.value() << endl;
-  }
-  return os;
-}
-
 struct SeqReadHandler {
   SeqReadHandler(string url) : read_obj_url(std::move(url)) {}
 
@@ -153,18 +143,83 @@ struct SeqReadHandler {
   OptParser parser;
 };
 
+//! [from, to) range. If to is kuint64max - then the range is unlimited from above.
+inline void SetRange(size_t from, size_t to, h2::fields* flds) {
+  string tmp = absl::StrCat("bytes=", from, "-");
+  if (to < kuint64max) {
+    absl::StrAppend(&tmp, to - 1);
+  }
+  flds->set(h2::field::range, std::move(tmp));
+}
+
+// [from, to) limited range out of total. If total is 0 then it's unknown.
+inline void SetContentRange(size_t from, size_t to, size_t total, h2::fields* flds) {
+  string tmp = absl::StrCat("bytes ", from, "-", to - 1, "/");
+  if (total) {
+    absl::StrAppend(&tmp, total);
+  } else {
+    tmp.push_back('*');
+  }
+
+  flds->set(h2::field::content_range, std::move(tmp));
+}
+
+}  // namespace
+
+std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
+  os << msg.reason() << endl;
+  for (const auto& f : msg) {
+    os << f.name_string() << " : " << f.value() << endl;
+  }
+  os << "-------------------------";
+
+  return os;
+}
+
+template <typename Body>
+std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
+  os << msg.method_string() << " " << msg.target() << endl;
+  for (const auto& f : msg) {
+    os << f.name_string() << " : " << f.value() << endl;
+  }
+  os << "-------------------------";
+
+  return os;
+}
+
 struct WriteHandler {
-  WriteHandler() {}
+  static constexpr size_t kUploadSize = 1 << 19;  // 512K
+
+  WriteHandler() : body_mb(kUploadSize) {}
 
   string url;
 
-  string buffer;
+  // Returns true if flush is needed. Removes the appended data from src.
+  bool Append(strings::ByteRange* src);
+
+  beast::multi_buffer body_mb;
+  size_t uploaded = 0;
 };
+
+bool WriteHandler::Append(strings::ByteRange* src) {
+  size_t prepare_size = std::min(src->size(), kUploadSize - body_mb.size());
+  auto mbs = body_mb.prepare(prepare_size);
+  size_t offs = 0;
+  for (auto mb : mbs) {
+    memcpy(mb.data(), src->data() + offs, mb.size());
+    offs += mb.size();
+  }
+  CHECK_EQ(offs, prepare_size);
+  src->remove_prefix(prepare_size);
+  body_mb.commit(prepare_size);
+
+  DCHECK_LE(body_mb.size(), kUploadSize);
+  return body_mb.size() == kUploadSize;
+}
 
 HttpsClient::HttpsClient(absl::string_view host, IoContext* context,
                          ::boost::asio::ssl::context* ssl_ctx)
-    :io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {
-}
+    : io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {}
 
 auto HttpsClient::Connect(unsigned msec) -> error_code {
   CHECK(io_context_.InContextThread());
@@ -376,7 +431,7 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
 
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
-  req.set(h2::field::range, absl::StrCat("bytes=", ofs, "-", ofs + range.size() - 1));
+  SetRange(ofs, ofs + range.size(), &req);
 
   h2::response<h2::buffer_body> resp_msg;
   auto& body = resp_msg.body();
@@ -491,7 +546,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
                    << "/" << handler->file_size;
 
       auto req = PrepareRequest(h2::verb::get, handler->read_obj_url, access_token_header_);
-      req.set(h2::field::range, absl::StrCat("bytes=", handler->offset, "-"));
+      SetRange(handler->offset, kuint64max, &req);
       OpenSeqResult res = OpenSequentialInternal(&req, &handler->parser);
 
       if (!res.ok())
@@ -561,11 +616,32 @@ util::Status GCS::Write(strings::ByteRange src) {
   WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
   CHECK(wh && !wh->url.empty());
 
-  // auto scratch = wh->buffer.prepare(src.size());
-  // memcpy(scratch.data(), src.data(), src.size());
-  // wh->buffer.commit(src.size());
-  absl::StrAppend(&wh->buffer, StringPiece(reinterpret_cast<const char*>(src.data()), src.size()));
-  VLOG(2) << "GCS::Write " << wh->buffer.size() << "/" << wh->buffer.max_size();
+  while (wh->Append(&src)) {
+    h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
+
+    size_t body_size = wh->body_mb.size();
+    size_t to = wh->uploaded + body_size;
+
+    req.body() = std::move(wh->body_mb);
+    SetContentRange(wh->uploaded, to, 0, &req);
+    req.set(h2::field::content_type, "application/octet-stream");
+    req.prepare_payload();
+
+    h2::response<h2::dynamic_body> resp_msg;
+    VLOG(1) << "UploadReq: " << req;
+    error_code ec = https_client_->Send(req, &resp_msg);
+    RETURN_EC_STATUS(ec);
+
+    VLOG(1) << "UploadResp: " << resp_msg;
+
+    wh->body_mb = std::move(req.body());
+    wh->body_mb.consume(body_size);
+    wh->uploaded = to;
+    DCHECK_EQ(0, wh->body_mb.size());
+
+    if (src.empty())
+      break;
+  }
 
   return Status::OK;
 }
@@ -574,23 +650,23 @@ util::Status GCS::CloseWrite() {
   WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
   CHECK(wh && !wh->url.empty());
 
-  h2::request<h2::buffer_body> req(h2::verb::put, wh->url, 11);
-
-  // h2::request_serializer<h2::buffer_body> rs{req};
+  h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
 
   auto& body = req.body();
-  body.data = &wh->buffer.front();
-  body.size = wh->buffer.size();
-  body.more = false;
+  body = std::move(wh->body_mb);
+  size_t to = wh->uploaded + req.body().size();
 
+  SetContentRange(wh->uploaded, to, to, &req);
   req.prepare_payload();
 
-  h2::response<h2::dynamic_body> resp_msg;
+  VLOG(1) << "CloseWriteReq: " << req;
 
+  h2::response<h2::dynamic_body> resp_msg;
   error_code ec = https_client_->Send(req, &resp_msg);
   RETURN_EC_STATUS(ec);
+  VLOG(1) << "CloseWriteResp: " << resp_msg;
 
-  VLOG(1) << "CloseWrite: " << resp_msg;
+  conn_state_->emplace<absl::monostate>();
 
   return Status::OK;
 }
@@ -676,7 +752,8 @@ template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<Resp
     }
     VLOG(1) << "Resp: " << *resp;
 
-    if (!IsUnauthorized(*resp)) {
+    bool is_auth_ok = !IsUnauthorized(*resp);
+    if (is_auth_ok) {
       break;
     }
     RETURN_IF_ERROR(RefreshToken(req));
