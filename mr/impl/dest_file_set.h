@@ -18,8 +18,9 @@ namespace detail {
 
 class DestHandle;
 
-// designed to be process central data structure holding all the destination files during
-// the operator execution.
+/*! Designed to be process-central data structure holding all the destination handles during
+ *  the operator execution.
+ */
 class DestFileSet {
   const std::string root_dir_;
   const pb::Output& pb_out_;
@@ -35,17 +36,19 @@ class DestFileSet {
   // Closes and deletes all the handles.
   void CloseAllHandles();
 
-  // return full file path of the shard.
-  // if sub_shard is < 0, returns the glob of all files corresponding to this shard.
+  /// Returns full file path of the shard.
+  /// if sub_shard is < 0, returns the glob of all files corresponding to this shard.
   std::string ShardFilePath(const ShardId& key, int32 sub_shard) const;
 
+  /// Returns DestHandle that writes into specified shard. The ownership for DestHandle stays
+  /// with DestFileSet.
   DestHandle* GetOrCreate(const ShardId& key);
 
   util::fibers_ext::FiberQueueThreadPool* pool() { return fq_; }
 
   std::vector<ShardId> GetShards() const;
 
-  // Closes the handle but leave it in the map.
+  // Closes the handle but leaves it in the map.
   // GatherAll will still return it.
   void CloseHandle(const ShardId& key);
 
@@ -56,6 +59,14 @@ class DestFileSet {
   HandleMap dest_files_;
 };
 
+
+/*! \class mr3::detail::DestHandle
+    \brief Thread-safe handle that abstracts away compression/file formats and disk systems.
+
+    Using Write() function, multiple threads write into the same DestHandle object without
+    creating too much contention. The class is especially optimized to work with fibers and
+    IOContext threads.
+*/
 class DestHandle {
   friend class DestFileSet;
 
@@ -65,9 +76,12 @@ class DestHandle {
  public:
   virtual ~DestHandle() {}
 
-  // Thread-safe. Called from multiple threads/do_contexts.
+  //! Thread-safe. Called from multiple threads/do_contexts.
+  //! Implements string generator that allows the writing thread to pull few strings at once.
   using StringGenCb = std::function<absl::optional<std::string>()>;
 
+  //! Writes 0 or many string records according to what cb returns.
+  //! When cb is out of records, it will returns absl::nullopt.
   virtual void Write(StringGenCb cb);
 
   // Thread-safe. Called from multiple threads/do_contexts.

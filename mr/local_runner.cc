@@ -32,7 +32,6 @@ using namespace util;
 using namespace boost;
 using namespace std;
 using detail::DestFileSet;
-using detail::DestHandle;
 
 constexpr size_t kGcsConnectTimeout = 3000;
 namespace {
