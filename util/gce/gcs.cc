@@ -8,7 +8,7 @@
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/read.hpp>
-#include <boost/beast/http/write.hpp>  // for operator<<
+#include <boost/beast/http/write.hpp>
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -31,6 +31,10 @@ namespace rj = rapidjson;
 static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
+
+inline absl::string_view absl_sv(beast::string_view s) {
+  return absl::string_view{s.data(), s.size()};
+}
 
 class GcsFile : public file::ReadonlyFile {
  public:
@@ -56,8 +60,14 @@ class GcsFile : public file::ReadonlyFile {
   size_t offs_ = 0;
 };
 
-inline util::Status ToStatus(const ::boost::system::error_code& ec) {
-  return Status(::util::StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()));
+inline Status ToStatus(const ::boost::system::error_code& ec) {
+  return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
+            : Status::OK;
+}
+
+template <typename Body> inline Status HttpError(const h2::response<Body>& resp) {
+  return Status(StatusCode::IO_ERROR,
+                absl::StrCat("Http error: ", resp.result_int(), " ", absl_sv(resp.reason())));
 }
 
 #define RETURN_EC_STATUS(x)                                 \
@@ -68,10 +78,6 @@ inline util::Status ToStatus(const ::boost::system::error_code& ec) {
       return ToStatus(x);                                   \
     }                                                       \
   } while (false)
-
-inline absl::string_view absl_sv(beast::string_view s) {
-  return absl::string_view{s.data(), s.size()};
-}
 
 inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
                                                   const beast::string_view access_token) {
@@ -126,6 +132,38 @@ inline bool ShouldRetry(h2::status st) {
          h2::to_status_class(st) == h2::status_class::server_error;
 }
 
+struct SeqReadHandler {
+  SeqReadHandler(string url) : read_obj_url(std::move(url)) {}
+
+  string read_obj_url;
+  size_t offset = 0, file_size = 0;
+  uint32_t errors = 0;
+
+  using OptParser = absl::optional<h2::response_parser<h2::buffer_body>>;
+  OptParser parser;
+};
+
+//! [from, to) range. If to is kuint64max - then the range is unlimited from above.
+inline void SetRange(size_t from, size_t to, h2::fields* flds) {
+  string tmp = absl::StrCat("bytes=", from, "-");
+  if (to < kuint64max) {
+    absl::StrAppend(&tmp, to - 1);
+  }
+  flds->set(h2::field::range, std::move(tmp));
+}
+
+// [from, to) limited range out of total. If total is 0 then it's unknown.
+inline void SetContentRange(size_t from, size_t to, size_t total, h2::fields* flds) {
+  string tmp = absl::StrCat("bytes ", from, "-", to - 1, "/");
+  if (total) {
+    absl::StrAppend(&tmp, total);
+  } else {
+    tmp.push_back('*');
+  }
+
+  flds->set(h2::field::content_range, std::move(tmp));
+}
+
 }  // namespace
 
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
@@ -133,44 +171,129 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   for (const auto& f : msg) {
     os << f.name_string() << " : " << f.value() << endl;
   }
+  os << "-------------------------";
+
   return os;
 }
 
-struct GCS::SeqReadFile {
-  SeqReadFile(string url) : read_obj_url(std::move(url)) {
+template <typename Body>
+std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
+  os << msg.method_string() << " " << msg.target() << endl;
+  for (const auto& f : msg) {
+    os << f.name_string() << " : " << f.value() << endl;
   }
+  os << "-------------------------";
 
-  void Init() {
-    parser.emplace();
-    parser->body_limit(kuint64max);
-  }
+  return os;
+}
 
-  string read_obj_url;
-  size_t offset = 0, file_size = 0;
-  uint32_t errors = 0;
-  absl::optional<h2::response_parser<h2::buffer_body>> parser;
+struct WriteHandler {
+  static constexpr size_t kUploadSize = 1 << 19;  // 512K
+
+  WriteHandler() : body_mb(kUploadSize) {}
+
+  string url;
+
+  // Returns true if flush is needed. Removes the appended data from src.
+  bool Append(strings::ByteRange* src);
+
+  beast::multi_buffer body_mb;
+  size_t uploaded = 0;
 };
 
-
-GCS::GCS(const GCE& gce, IoContext* context) : gce_(gce), io_context_(*context) {
-}
-
-GCS::~GCS() {
-  if (seq_file_ && seq_file_->parser) {
-    LOG(ERROR) << "File was not closed";
+bool WriteHandler::Append(strings::ByteRange* src) {
+  size_t prepare_size = std::min(src->size(), kUploadSize - body_mb.size());
+  auto mbs = body_mb.prepare(prepare_size);
+  size_t offs = 0;
+  for (auto mb : mbs) {
+    memcpy(mb.data(), src->data() + offs, mb.size());
+    offs += mb.size();
   }
-  VLOG(1) << "GCS::~GCS";
-  client_.reset();
+  CHECK_EQ(offs, prepare_size);
+  src->remove_prefix(prepare_size);
+  body_mb.commit(prepare_size);
+
+  DCHECK_LE(body_mb.size(), kUploadSize);
+  return body_mb.size() == kUploadSize;
 }
 
-util::Status GCS::Connect(unsigned msec) {
+HttpsClient::HttpsClient(absl::string_view host, IoContext* context,
+                         ::boost::asio::ssl::context* ssl_ctx)
+    : io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {}
+
+auto HttpsClient::Connect(unsigned msec) -> error_code {
   CHECK(io_context_.InContextThread());
-  if (!reconnect_needed_) {
-    return Status::OK;
-  }
 
   reconnect_msec_ = msec;
-  RETURN_IF_ERROR(InitSslClient());
+
+  return InitSslClient();
+}
+
+auto HttpsClient::InitSslClient() -> error_code {
+  VLOG(1) << "GCS::InitSslClient " << reconnect_needed_;
+
+  error_code ec;
+  if (!reconnect_needed_)
+    return ec;
+  client_.reset(new SslStream(FiberSyncSocket{host_name_, "443", &io_context_}, ssl_cntx_));
+
+  ec = SslConnect(client_.get(), reconnect_msec_);
+  if (!ec) {
+    reconnect_needed_ = false;
+  } else {
+    VLOG(1) << "Error connecting " << ec;
+  }
+  return ec;
+}
+
+auto HttpsClient::DrainResponse(h2::response_parser<h2::buffer_body>* parser) -> error_code {
+  constexpr size_t kBufSize = 1 << 16;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  auto& body = parser->get().body();
+  error_code ec;
+  size_t sz = 0;
+
+  // Drain pending response completely to allow reusing the current connection.
+  VLOG(1) << "parser: " << parser->got_some();
+  while (!parser->is_done()) {
+    body.data = buf.get();
+    body.size = kBufSize;
+    size_t raw_bytes = h2::read(*client_, tmp_buffer_, *parser, ec);
+    if (ec && ec != h2::error::need_buffer) {
+      VLOG(1) << "Error " << ec << "/" << ec.message();
+      return ec;
+    }
+    sz += raw_bytes;
+
+    VLOG(1) << "DrainResp: " << raw_bytes << "/" << body.size << ", " << parser->get();
+  }
+  VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
+
+  return error_code{};
+}
+
+class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
+ public:
+  ~ConnState() {
+    if (auto* pval = absl::get_if<SeqReadHandler>(this)) {
+      if (pval->parser) {
+        LOG(ERROR) << "File was not closed";
+      }
+    }
+  }
+};
+
+GCS::GCS(const GCE& gce, IoContext* context)
+    : gce_(gce), io_context_(*context), conn_state_(new ConnState),
+      https_client_(new HttpsClient(kDomain, context, &gce_.ssl_context())) {}
+
+GCS::~GCS() {
+  VLOG(1) << "GCS::~GCS";
+  https_client_.reset();
+}
+
+Status GCS::Connect(unsigned msec) {
+  RETURN_EC_STATUS(https_client_->Connect(msec));
 
   auto res = gce_.GetAccessToken(&io_context_);
   if (!res.ok())
@@ -179,25 +302,15 @@ util::Status GCS::Connect(unsigned msec) {
   return Status::OK;
 }
 
-util::Status GCS::CloseSequential() {
+Status GCS::CloseSequential() {
   CHECK(io_context_.InContextThread());
-
-  if (!seq_file_) {
-    return Status::OK;
-  }
-  CHECK(client_);
-
-  if (seq_file_->parser) {
-    error_code ec = DrainResponse(&seq_file_->parser.value());
-    seq_file_->parser.reset();
-    RETURN_EC_STATUS(ec);
-  }
-
-  return Status::OK;
+  return ClearConnState();
 }
 
-bool GCS::IsOpenSequential() const {
-  return seq_file_ && seq_file_->parser;
+bool GCS::IsBusy() const {
+  bool is_empty = absl::holds_alternative<absl::monostate>(*conn_state_);
+
+  return !is_empty;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
@@ -217,9 +330,9 @@ auto GCS::ListBuckets() -> ListBucketResult {
 
     RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
     if (resp_msg.result() != h2::status::ok) {
-      return Status(StatusCode::IO_ERROR, absl::StrCat("Http error: ", resp_msg.result_int(), " ",
-                                                       absl_sv(resp_msg.reason())));
+      return HttpError(resp_msg);
     }
+
     http::RjBufSequenceStream is(resp_msg.body().data());
 
     doc.ParseStream<rj::kParseDefaultFlags>(is);
@@ -318,7 +431,7 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
 
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
-  req.set(h2::field::range, absl::StrCat("bytes=", ofs, "-", ofs + range.size() - 1));
+  SetRange(ofs, ofs + range.size(), &req);
 
   h2::response<h2::buffer_body> resp_msg;
   auto& body = resp_msg.body();
@@ -335,68 +448,40 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   return range.size() - left_available;  // how much written
 }
 
-auto GCS::DrainResponse(Parser<h2::buffer_body>* parser) -> error_code {
-  uint8_t buf[512];
-  auto& body = parser->get().body();
-  error_code ec;
-  size_t sz = 0;
-
-  // Drain pending response completely to allow reusing the current connection.
-  while (!parser->is_done()) {
-    body.data = buf;
-    body.size = sizeof(buf);
-    size_t s1 = h2::read(*client_, tmp_buffer_, *parser, ec);
-    if (ec && ec != h2::error::need_buffer) {
-      return ec;
-    }
-    sz += s1;
-    VLOG(1) << "DrainResp: " << parser->get();
-  }
-  VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
-
-  return error_code{};
-}
-
 StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_body>* parser) {
   VLOG(1) << "Req: " << req;
 
-  error_code ec;
-  h2::write(*client_, *req, ec);
+  error_code ec = https_client_->Send(*req);
   RETURN_EC_STATUS(ec);
 
-  h2::read_header(*client_, tmp_buffer_, *parser, ec);
+  ec = https_client_->ReadHeader(parser);
 
   if (ec) {
     LOG(ERROR) << "Socket error: " << ec << "/" << ec.message();
-    VLOG(1) << "FiberSocket status: " << client_->next_layer().status();
+    VLOG(1) << "FiberSocket status: " << https_client_->client()->next_layer().status();
 
-    Status st = InitSslClient();
-    if (!st.ok()) {
-      LOG(ERROR) << "Could not reconnect " << st;
-      return st;
-    }
     return false;  // need to retry
   }
 
   const auto& msg = parser->get();
   VLOG(1) << "HeaderResp: " << msg;
   if (!parser->keep_alive()) {
-    LOG(WARNING) << "No keep-alive, requested reconnect";
-    reconnect_needed_ = true;
+    LOG(ERROR) << "TODO: No keep-alive, requested reconnect";
   }
 
-  if (msg.result() == h2::status::ok) {
+  // Partial content can appear because of the previous reconnect.
+  if (msg.result() == h2::status::ok || msg.result() == h2::status::partial_content) {
     return true;  // all is good.
   }
 
   if (ShouldRetry(msg.result())) {
-    RETURN_EC_STATUS(DrainResponse(parser));
+    RETURN_EC_STATUS(https_client_->DrainResponse(parser));
     this_fiber::sleep_for(1s);
     return false;  // retry
   }
 
   if (IsUnauthorized(msg)) {
-    RETURN_EC_STATUS(DrainResponse(parser));
+    RETURN_EC_STATUS(https_client_->DrainResponse(parser));
 
     auto st = RefreshToken(req);
     if (!st.ok())
@@ -410,68 +495,70 @@ StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_bod
 }
 
 auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
+  RETURN_IF_ERROR(PrepareConnection());
+
+  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
+
   string read_obj_url = BuildGetObjUrl(bucket, obj_path);
   auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
 
-  std::unique_ptr<SeqReadFile> open_file(new SeqReadFile(read_obj_url));
+  SeqReadHandler& handler = conn_state_->emplace<SeqReadHandler>(read_obj_url);
 
-  OpenSeqResult res = OpenSequentialInternal(&req, open_file.get());
-  if (!res.ok())
+  OpenSeqResult res = OpenSequentialInternal(&req, &handler.parser);
+  if (!res.ok()) {
+    conn_state_->emplace<absl::monostate>();
     return res.status;
+  }
 
-  seq_file_ = std::move(open_file);
-  seq_file_->file_size = res.obj;
+  handler.file_size = res.obj;
 
   return res.obj;
 }
 
 auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
-  CHECK(seq_file_ && client_);
+  SeqReadHandler* handler = absl::get_if<SeqReadHandler>(conn_state_.get());
+  CHECK(handler && https_client_);
 
-  if (seq_file_->parser->is_done()) {
+  if (handler->parser->is_done()) {
     return 0;
   }
 
   for (unsigned iters = 0; iters < 3; ++iters) {
-    auto& body = seq_file_->parser->get().body();
+    auto& body = handler->parser->get().body();
     body.data = range.data();
     auto& left_available = body.size;
     left_available = range.size();
 
-    error_code ec;
-
-    // h2::read returns number of raw bytes read from stream before parsing.
-    // Also it does not consider temporary buffer caching. Therefore we use left_available to count.
-    h2::read(*client_, tmp_buffer_, *seq_file_->parser, ec);
+    error_code ec = https_client_->Read(&handler->parser.value());
     if (!ec || ec == h2::error::need_buffer) {
       size_t http_read = range.size() - left_available;
-      DVLOG(2) << "Read " << http_read << " bytes from " << seq_file_->offset << " with capacity "
+      DVLOG(2) << "Read " << http_read << " bytes from " << handler->offset << " with capacity "
                << range.size();
 
-      // This check does not happen for some reason: https://github.com/boostorg/beast/issues/1662
+      // This check does not happen. See here why: https://github.com/boostorg/beast/issues/1662
       // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
-      seq_file_->offset += http_read;
+      handler->offset += http_read;
       return http_read;
     }
 
     if (ec == asio::ssl::error::stream_truncated) {
-      LOG(WARNING) << "Stream " << seq_file_->read_obj_url << " truncated at "
-                   << seq_file_->offset << "/" << seq_file_->file_size;
-      reconnect_needed_ = true;
-      auto req = PrepareRequest(h2::verb::get, seq_file_->read_obj_url, access_token_header_);
-      req.set(h2::field::range, absl::StrCat("bytes=", seq_file_->offset, "-"));
-      OpenSeqResult res = OpenSequentialInternal(&req, seq_file_.get());
+      LOG(WARNING) << "Stream " << handler->read_obj_url << " truncated at " << handler->offset
+                   << "/" << handler->file_size;
+
+      auto req = PrepareRequest(h2::verb::get, handler->read_obj_url, access_token_header_);
+      SetRange(handler->offset, kuint64max, &req);
+      OpenSeqResult res = OpenSequentialInternal(&req, &handler->parser);
 
       if (!res.ok())
         return res.status;
-      VLOG(1) << "Reopened the file, new size: " << seq_file_->offset + res.obj;
+      VLOG(1) << "Reopened the file, new size: " << handler->offset + res.obj;
       // I do not change seq_file_->offset,file_size fields.
       // TODO: to validate that file version has not been changed between retries.
       continue;
     } else {
-      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << seq_file_->offset << "/"
-                 << seq_file_->file_size;
-      LOG(ERROR) << "FiberSocket status: " << client_->next_layer().status();
+      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << handler->offset << "/"
+                 << handler->file_size;
+      LOG(ERROR) << "FiberSocket status: " << https_client_->client()->next_layer().status();
 
       return ToStatus(ec);
     }
@@ -480,8 +567,8 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
   return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
 }
 
-util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
-  CHECK(!IsOpenSequential()) << "Can not open " << full_path << " before closing the previous one ";
+StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
+  CHECK(!IsBusy()) << "Can not open " << full_path << " before closing the previous one ";
 
   absl::string_view bucket, obj_path;
   CHECK(GCS::SplitToBucketPath(full_path, &bucket, &obj_path));
@@ -494,6 +581,96 @@ util::StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_
   return new GcsFile{this, res.obj};
 }
 
+util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_path) {
+  RETURN_IF_ERROR(PrepareConnection());
+
+  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
+
+  string url = "/upload/storage/v1/b/";
+  absl::StrAppend(&url, bucket, "/o?uploadType=resumable&name=");
+  strings::AppendEncodedUrl(obj_path, &url);
+
+  auto req = PrepareRequest(h2::verb::post, url, access_token_header_);
+  h2::response<h2::dynamic_body> resp_msg;
+
+  req.prepare_payload();
+
+  RETURN_IF_ERROR(HttpMessage(&req, &resp_msg));
+  if (resp_msg.result() != h2::status::ok) {
+    return HttpError(resp_msg);
+  }
+  auto it = resp_msg.find(h2::field::location);
+  if (it == resp_msg.end()) {
+    return Status(StatusCode::PARSE_ERROR, "Can not find location header");
+  }
+  WriteHandler& wh = conn_state_->emplace<WriteHandler>();
+  wh.url = string(it->value());
+
+  VLOG(1) << "Url: " << absl_sv(it->value());
+
+  return Status::OK;
+}
+
+util::Status GCS::Write(strings::ByteRange src) {
+  CHECK(!src.empty());
+  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
+  CHECK(wh && !wh->url.empty());
+
+  while (wh->Append(&src)) {
+    h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
+
+    size_t body_size = wh->body_mb.size();
+    size_t to = wh->uploaded + body_size;
+
+    req.body() = std::move(wh->body_mb);
+    SetContentRange(wh->uploaded, to, 0, &req);
+    req.set(h2::field::content_type, "application/octet-stream");
+    req.prepare_payload();
+
+    h2::response<h2::dynamic_body> resp_msg;
+    VLOG(1) << "UploadReq: " << req;
+    error_code ec = https_client_->Send(req, &resp_msg);
+    RETURN_EC_STATUS(ec);
+
+    VLOG(1) << "UploadResp: " << resp_msg;
+
+    wh->body_mb = std::move(req.body());
+    wh->body_mb.consume(body_size);
+    wh->uploaded = to;
+    DCHECK_EQ(0, wh->body_mb.size());
+
+    if (src.empty())
+      break;
+  }
+
+  return Status::OK;
+}
+
+util::Status GCS::CloseWrite() {
+  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
+  CHECK(wh && !wh->url.empty());
+
+  h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
+
+  auto& body = req.body();
+  body = std::move(wh->body_mb);
+  size_t to = wh->uploaded + req.body().size();
+
+  SetContentRange(wh->uploaded, to, to, &req);
+  req.prepare_payload();
+
+  VLOG(1) << "CloseWriteReq: " << req;
+
+  h2::response<h2::dynamic_body> resp_msg;
+  error_code ec = https_client_->Send(req, &resp_msg);
+  RETURN_EC_STATUS(ec);
+  VLOG(1) << "CloseWriteResp: " << resp_msg;
+
+  conn_state_->emplace<absl::monostate>();
+
+  return Status::OK;
+}
+
 string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   string read_obj_url{"/storage/v1/b/"};
   absl::StrAppend(&read_obj_url, bucket, "/o/");
@@ -503,41 +680,45 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
   return read_obj_url;
 }
 
-util::Status GCS::InitSslClient() {
-  VLOG(1) << "GCS::InitSslClient";
+Status GCS::PrepareConnection() {
+  auto status = ClearConnState();
 
-  client_.reset(new SslStream(FiberSyncSocket{kDomain, "443", &io_context_}, gce_.ssl_context()));
-
-  auto status = SslConnect(client_.get(), reconnect_msec_);
-  if (status.ok()) {
-    reconnect_needed_ = false;
-  } else {
-    VLOG(1) << "Error connecting " << status;
+  if (!status.ok()) {
+    LOG(ERROR) << "Error in ClearConnState " << status;
   }
-  return status;
+
+  return Status::OK;
 }
 
-util::Status GCS::PrepareConnection() {
-  RETURN_IF_ERROR(CloseSequential());
+util::Status GCS::ClearConnState() {
+  if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
+    VLOG(1) << "Close::SeqReadHandler";
 
-  if (reconnect_needed_) {
-    RETURN_IF_ERROR(InitSslClient());
+    CHECK(https_client_);
+    error_code ec;
+
+    if (seq_ptr->parser) {
+      ec = https_client_->DrainResponse(&seq_ptr->parser.value());
+    }
+    conn_state_->emplace<absl::monostate>();
+    return ToStatus(ec);
   }
   return Status::OK;
 }
 
-auto GCS::OpenSequentialInternal(Request* req, SeqReadFile* seq_file) -> OpenSeqResult {
-  for (unsigned iters = 0; iters < 5; ++iters) {
-    RETURN_IF_ERROR(PrepareConnection());  //! Drains and connects if needed.
+auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSeqResult {
+  for (unsigned iters = 0; iters < 3; ++iters) {
+    parser->emplace();
+    parser->value().body_limit(kuint64max);
 
-    seq_file->Init();
-    auto status_obj = SendRequestIterative(req, &seq_file->parser.value());
-    if (!status_obj.ok())
+    auto status_obj = SendRequestIterative(req, &parser->value());
+    if (!status_obj.ok()) {
       return status_obj.status;
+    }
     bool success = status_obj.obj;
 
     if (success) {
-      const auto& msg = seq_file->parser->get();
+      const auto& msg = (*parser)->get();
       auto content_len_it = msg.find(h2::field::content_length);
       size_t content_sz = 0;
       if (content_len_it != msg.end()) {
@@ -548,17 +729,6 @@ auto GCS::OpenSequentialInternal(Request* req, SeqReadFile* seq_file) -> OpenSeq
   }
 
   return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
-}
-
-template <typename RespBody>
-auto GCS::WriteAndRead(const Request& req, Response<RespBody>* resp) -> error_code {
-  error_code ec;
-  h2::write(*client_, req, ec);
-  if (ec)
-    return ec;
-
-  h2::read(*client_, tmp_buffer_, *resp, ec);
-  return ec;
 }
 
 Status GCS::RefreshToken(Request* req) {
@@ -576,13 +746,14 @@ template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<Resp
   for (unsigned i = 0; i < 2; ++i) {
     VLOG(1) << "Req: " << *req;
 
-    error_code ec = WriteAndRead(*req, resp);
+    error_code ec = https_client_->Send(*req, resp);
     if (ec) {
       return ToStatus(ec);
     }
     VLOG(1) << "Resp: " << *resp;
 
-    if (!IsUnauthorized(*resp)) {
+    bool is_auth_ok = !IsUnauthorized(*resp);
+    if (is_auth_ok) {
       break;
     }
     RETURN_IF_ERROR(RefreshToken(req));

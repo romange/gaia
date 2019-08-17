@@ -213,7 +213,8 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
 
   } else {
     SslStream stream(FiberSyncSocket{kDomain, kService, context}, *ssl_ctx_);
-    RETURN_IF_ERROR(SslConnect(&stream, 2000));
+    ec = SslConnect(&stream, 2000);
+    RETURN_ON_ERROR;
 
     h2::request<h2::string_body> req{h2::verb::post, "/token", 11};
     req.set(h2::field::host, kDomain);
@@ -276,20 +277,20 @@ void GCE::Test_InjectAcessToken(std::string access_token) {
   access_token_.swap(access_token);
 }
 
-util::Status SslConnect(SslStream* stream, unsigned ms) {
+::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
   if (ec) {
     VLOG(1) << "Error " << ec << "/" << ec.message();
 
-    return ToStatus(ec);
+    return ec;
   }
 
   stream->handshake(asio::ssl::stream_base::client, ec);
   if (ec) {
-    return ToStatus(ec);
+    return ec;
   }
 
-  return Status::OK;
+  return ::boost::system::error_code{};
 }
 
 }  // namespace util

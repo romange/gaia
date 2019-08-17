@@ -49,6 +49,7 @@ class GCE {
   bool is_prod_env_ = false;
 };
 
-util::Status SslConnect(SslStream* stream, unsigned msec);
+// TODO: To move to dedicated header related to SSL/HTTPS.
+::boost::system::error_code SslConnect(SslStream* stream, unsigned msec);
 
 }  // namespace util

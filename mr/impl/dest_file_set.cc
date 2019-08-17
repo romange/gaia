@@ -144,6 +144,7 @@ void CompressHandle::Write(StringGenCb cb) {
       tmp_str->clear();
       tmp_str->swap(compress_out_buf_->contents());
 
+      // TODO: To support io_context based write-files like with GCS.
       owner_->pool()->Add(fq_index_, WriteCb(std::move(*tmp_str), wf_));
       start_delta_ = 0;
     }

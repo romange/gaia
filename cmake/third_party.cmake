@@ -318,13 +318,11 @@ ExternalProject_Add_Step(folly_project config
 set(ZSTD_DIR ${THIRD_PARTY_LIB_DIR}/zstd)
 add_third_party(zstd
   GIT_REPOSITORY https://github.com/facebook/zstd.git
-  GIT_TAG v1.4.0
-  BUILD_IN_SOURCE 1
-  CONFIGURE_COMMAND echo "foo"
+  GIT_TAG v1.4.2
+  SOURCE_SUBDIR "build/cmake"
 
-  # for debug: "CFLAGS=-fPIC -O0 -ggdb"
-  BUILD_COMMAND make -e "CFLAGS=-fPIC -O3" -j4
-  INSTALL_COMMAND make install -e PREFIX=${ZSTD_DIR}
+  # for debug pass : "CFLAGS=-fPIC -O0 -ggdb"
+  CMAKE_PASS_FLAGS "-DZSTD_BUILD_SHARED=OFF"
 )
 
 add_third_party(blosc

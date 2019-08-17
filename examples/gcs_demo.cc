@@ -24,6 +24,7 @@ DEFINE_string(read_path, "", "");
 DEFINE_string(prefix, "", "");
 DEFINE_string(download, "", "");
 DEFINE_string(access_token, "", "");
+DEFINE_string(upload, "", "");
 
 using FileQ = fibers::buffered_channel<string>;
 
@@ -94,6 +95,21 @@ void Download(const GCE& gce, IoContextPool* pool) {
 void Run(const GCE& gce, IoContext* context) {
   GCS gcs(gce, context);
   CHECK_STATUS(gcs.Connect(2000));
+
+  if (!FLAGS_upload.empty()) {
+    auto status = gcs.OpenForWrite(FLAGS_bucket, FLAGS_upload);
+    CHECK_STATUS(status);
+
+    string contents(1 << 16, 'a');
+    strings::MutableByteRange range(reinterpret_cast<uint8_t*>(&contents.front()), contents.size());
+    for (size_t i = 0; i < 100; ++i) {
+      status = gcs.Write(range);
+      CHECK_STATUS(status);
+    }
+    CHECK_STATUS(gcs.CloseWrite());
+    return;
+  }
+
   auto res = gcs.ListBuckets();
   CHECK_STATUS(res.status);
   for (const auto& s : res.obj) {

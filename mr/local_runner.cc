@@ -32,7 +32,6 @@ using namespace util;
 using namespace boost;
 using namespace std;
 using detail::DestFileSet;
-using detail::DestHandle;
 
 constexpr size_t kGcsConnectTimeout = 3000;
 namespace {
@@ -102,7 +101,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   VLOG(1) << "GetGcsHandle: " << pt->gcs_handles.size();
 
   for (auto it = pt->gcs_handles.begin(); it != pt->gcs_handles.end(); ++it) {
-    if ((*it)->IsOpenSequential()) {
+    if ((*it)->IsBusy()) {
       continue;
     }
 
