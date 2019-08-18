@@ -56,16 +56,18 @@ class DestFileSet {
 
   const pb::Output& output() const { return pb_out_; }
 
-  void set_gce(util::GCE* gce) { gce_ = gce;}
+  void set_gce(const util::GCE* gce) { gce_ = gce;}
+  bool is_gcs_dest() const { return is_gcs_dest_; }
 
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
   HandleMap dest_files_;
   ::boost::fibers::mutex mu_;
-  util::GCE* gce_ = nullptr;
+  const util::GCE* gce_ = nullptr;
 
   util::IoContextPool& pool_;
   util::fibers_ext::FiberQueueThreadPool& fq_;
+  bool is_gcs_dest_ = false;
 };
 
 
@@ -80,6 +82,7 @@ class DestHandle {
   friend class DestFileSet;
 
   void AppendThreadLocal(const std::string& val);
+
   static ::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path);
 
  public:
@@ -97,6 +100,7 @@ class DestHandle {
   virtual void Close();
 
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
+  const std::string full_path() const { return full_path_;}
 
  protected:
   template <typename Func> auto Await(Func&& f) {
@@ -111,7 +115,7 @@ class DestHandle {
   DestFileSet* owner_;
   ShardId sid_;
 
-  ::file::WriteFile* wf_ = nullptr;
+  ::file::WriteFile* write_file_ = nullptr;
   std::string full_path_;
 
   size_t raw_size_ = 0;

@@ -42,8 +42,9 @@ using namespace intrusive;
 
 struct LocalRunner::Impl {
  public:
-  Impl(IoContextPool* p, const string& d) : io_pool(p), data_dir(d), fq_pool(0, 128),
-    gcs_connections_("local-runner-gcs-connections") {}
+  Impl(IoContextPool* p, const string& d)
+      : io_pool(p), data_dir(d), fq_pool(0, 128), gcs_connections_("local-runner-gcs-connections") {
+  }
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -60,7 +61,6 @@ struct LocalRunner::Impl {
                                                        file::FiberReadOptions::Stats* stats);
   void ShutDown();
 
-
   // TODO: to make members below private.
   // private:
 
@@ -76,6 +76,7 @@ struct LocalRunner::Impl {
 
   fibers::mutex gce_mu;
   std::unique_ptr<GCE> gce_handle;
+
  private:
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
@@ -273,7 +274,11 @@ LocalRunner::LocalRunner(IoContextPool* pool, const std::string& data_dir)
 
 LocalRunner::~LocalRunner() {}
 
-void LocalRunner::Init() { file_util::RecursivelyCreateDir(impl_->data_dir, 0750); }
+void LocalRunner::Init() {
+  if (!util::IsGcsPath(impl_->data_dir)) {
+    file_util::RecursivelyCreateDir(impl_->data_dir, 0750);
+  }
+}
 
 void LocalRunner::Shutdown() {
   impl_->fq_pool.Shutdown();

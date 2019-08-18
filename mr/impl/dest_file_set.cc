@@ -12,6 +12,7 @@
 #include "file/filesource.h"
 #include "file/gzip_file.h"
 #include "file/proto_writer.h"
+#include "util/gce/gcs.h"
 #include "util/zlib_source.h"
 #include "util/zstd_sinksource.h"
 
@@ -124,26 +125,33 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
 }
 
 void CompressHandle::Open() {
-  wf_ = Await([&] { return file::Open(full_path_); });
-  CHECK(wf_);
+  if (owner_->is_gcs_dest()) {
+    LOG(FATAL) << "TBD: To open gcs based files";
+  } else {
+    write_file_ = Await([&] { return file::Open(full_path_); });
+  }
+  CHECK(write_file_);
 }
 
 void CompressHandle::Write(StringGenCb cb) {
   absl::optional<string> tmp_str;
-  std::unique_lock<fibers::mutex> lk(zmu_);
-
   while (true) {
     tmp_str = cb();
     if (!tmp_str)
       break;
-    strings::ByteRange br = strings::ToByteRange(tmp_str.value());
+
+    std::unique_lock<fibers::mutex> lk(zmu_);
+
+    strings::ByteRange br = strings::ToByteRange(*tmp_str);
     CHECK_STATUS(compress_sink_->Append(br));
     if (compress_out_buf_->contents().size() >= kBufLimit - start_delta_) {
       tmp_str->clear();
       tmp_str->swap(compress_out_buf_->contents());
 
+      lk.unlock();
+
       // TODO: To support io_context based write-files like with GCS.
-      owner_->pool()->Add(fq_index_, WriteCb(std::move(*tmp_str), wf_));
+      owner_->pool()->Add(fq_index_, WriteCb(std::move(*tmp_str), write_file_));
       start_delta_ = 0;
     }
   }
@@ -153,7 +161,7 @@ void CompressHandle::Close() {
   CHECK_STATUS(compress_sink_->Flush());
 
   if (!compress_out_buf_->contents().empty()) {
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(compress_out_buf_->contents()), wf_));
+    owner_->pool()->Add(fq_index_, WriteCb(std::move(compress_out_buf_->contents()), write_file_));
   }
 
   DestHandle::Close();
@@ -180,7 +188,7 @@ void LstHandle::Open() {
   DestHandle::Open();
   namespace gpb = google::protobuf;
 
-  util::Sink* fs = new file::Sink{wf_, DO_NOT_TAKE_OWNERSHIP};
+  util::Sink* fs = new file::Sink{write_file_, DO_NOT_TAKE_OWNERSHIP};
   lst_writer_.reset(new file::ListWriter{fs});
   if (!owner_->output().type_name().empty()) {
     lst_writer_->AddMeta(file::kProtoTypeKey, owner_->output().type_name());
@@ -209,8 +217,12 @@ bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
 
 DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
                          util::IoContextPool* pool, fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), pb_out_(out), pool_(*pool), fq_(*fq) {}
+    : root_dir_(root_dir), pb_out_(out), pool_(*pool), fq_(*fq) {
+  is_gcs_dest_ = util::IsGcsPath(root_dir_);
+}
 
+// DestHandle is cached in each of the calling IO threads and the only contention happens
+// when a new handle shard is created.
 DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   std::lock_guard<fibers::mutex> lk(mu_);
   auto it = dest_files_.find(sid);
@@ -220,7 +232,7 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
     if (pb_out_.format().type() == pb::WireFormat::LST) {
       dh.reset(new LstHandle{this, sid});
     } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT &&
-               AllowCompressHandle(pb_out_.compress())) {
+               (is_gcs_dest_ || AllowCompressHandle(pb_out_.compress()))) {
       dh.reset(new CompressHandle{this, sid});
     } else {
       dh.reset(new DestHandle{this, sid});
@@ -229,6 +241,7 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
       dh->set_raw_limit(size_t(1U << 20) * pb_out_.shard_spec().max_raw_size_mb());
     }
     dh->Open();
+    VLOG(1) << "Open destination shard " << dh->full_path();
 
     auto res = dest_files_.emplace(sid, std::move(dh));
     CHECK(res.second);
@@ -284,16 +297,17 @@ DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), 
 }
 
 void DestHandle::AppendThreadLocal(const std::string& str) {
-  auto status = wf_->Write(str);
+  auto status = write_file_->Write(str);
   CHECK_STATUS(status);
+
   if (raw_limit_ < kuint64max) {
     raw_size_ += str.size();
     if (raw_size_ >= raw_limit_) {
-      CHECK(wf_->Close());
+      CHECK(write_file_->Close());
       ++sub_shard_;
       raw_size_ = 0;
       full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
-      wf_ = OpenThreadLocal(owner_->output(), full_path_);
+      write_file_ = OpenThreadLocal(owner_->output(), full_path_);
     }
   }
 }
@@ -301,6 +315,8 @@ void DestHandle::AppendThreadLocal(const std::string& str) {
 ::file::WriteFile* DestHandle::OpenThreadLocal(const pb::Output& output, const std::string& path) {
   if (output.has_compress()) {
     if (output.compress().type() == pb::Output::GZIP) {
+      CHECK(!util::IsGcsPath(path));
+
       file::GzipFile* gzres = file::GzipFile::Create(path, output.compress().level());
       CHECK(gzres->Open());
       return gzres;
@@ -332,19 +348,19 @@ void DestHandle::Open() {
   // have subdirectories specified by the user.
   file_util::RecursivelyCreateDir(string(dirname), 0755);
 
-  wf_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
+  write_file_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
 }
 
 void DestHandle::Close() {
-  if (!wf_)
+  if (!write_file_)
     return;
 
   bool res = Await([this] {
-    VLOG(1) << "Closing file " << wf_->create_file_name();
-    return wf_->Close();
+    VLOG(1) << "Closing file " << write_file_->create_file_name();
+    return write_file_->Close();
   });
   CHECK(res);
-  wf_ = nullptr;
+  write_file_ = nullptr;
 }
 
 }  // namespace detail
