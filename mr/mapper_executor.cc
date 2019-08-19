@@ -138,9 +138,8 @@ void MapperExecutor::PushInput(const InputBase* input) {
   });
 
   // Sort - bigger sizes first to reduce the variance of the reading phase.
-  std::sort(files.begin(), files.end(), [](const auto& l, auto& r) {
-    return l.file_size > r.file_size;
-  });
+  std::sort(files.begin(), files.end(),
+            [](const auto& l, auto& r) { return l.file_size > r.file_size; });
 
   LOG(INFO) << "Running on input " << input->msg().name() << " with " << files.size() << " files";
   for (const auto& fl_name : files) {
@@ -181,8 +180,9 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
     record_q.Push(op, 0, file_input.file_name);
     record_q.Push(Record::METADATA, &pb_input->file_spec(file_input.spec_index));
 
-    auto cb = [&, skip = pb_input->skip_header(), record_num = uint64_t{0}](string&& s) mutable {
-      if (record_num++ < skip)
+    auto cb = [&, skip = pb_input->skip_header(),
+               file_record_cnt = uint64_t{0}](string&& s) mutable {
+      if (file_record_cnt++ < skip)
         return;
       record_q.Push(Record::RECORD, aux_local->records_read, std::move(s));
       ++aux_local->records_read;

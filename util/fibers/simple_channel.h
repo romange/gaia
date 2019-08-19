@@ -77,6 +77,9 @@ template <typename T> class SimpleChannel {
 template <typename T>
 template <typename... Args>
 void SimpleChannel<T>::Push(Args&&... args) noexcept {
+  if (TryPush(std::forward<Args>(args)...))  // fast path.
+    return;
+
   while (true) {
     EventCount::Key key = push_ec_.prepareWait();
     if (TryPush(std::forward<Args>(args)...)) {
@@ -87,7 +90,7 @@ void SimpleChannel<T>::Push(Args&&... args) noexcept {
 }
 
 template <typename T> bool SimpleChannel<T>::Pop(T& dest) {
-  if (TryPop(dest))
+  if (TryPop(dest))  // fast path
     return true;
 
   while (true) {
