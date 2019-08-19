@@ -8,10 +8,13 @@
 #include "absl/strings/str_cat.h"
 #include "base/hash.h"
 #include "base/logging.h"
+
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "file/gzip_file.h"
 #include "file/proto_writer.h"
+
+#include "util/asio/io_context_pool.h"
 #include "util/gce/gcs.h"
 #include "util/zlib_source.h"
 #include "util/zstd_sinksource.h"
@@ -88,9 +91,12 @@ class CompressHandle : public DestHandle {
 
   size_t start_delta_ = 0;
   util::StringSink* compress_out_buf_ = nullptr;
-  std::unique_ptr<util::Sink> compress_sink_;
+  unique_ptr<util::Sink> compress_sink_;
 
-  boost::fibers::mutex zmu_;
+  fibers::mutex zmu_;
+  unique_ptr<fibers_ext::FiberQueue> out_queue_;
+  unique_ptr<GCS> gcs_;
+  fibers::fiber write_fiber_;
 };
 
 class LstHandle : public DestHandle {
@@ -126,11 +132,23 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
 
 void CompressHandle::Open() {
   if (owner_->is_gcs_dest()) {
-    LOG(FATAL) << "TBD: To open gcs based files";
+    size_t index = queue_index_ % owner_->io_pool()->size();
+    absl::string_view bucket, path;
+    CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
+
+    IoContext& io_context = owner_->io_pool()->at(index);
+    gcs_.reset(new util::GCS(*owner_->gce(), &io_context));
+    io_context.AwaitSafe([&] {
+      CHECK_STATUS(gcs_->Connect(2000));
+      CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
+    });
+
+    out_queue_.reset(new fibers_ext::FiberQueue(32));
+    write_fiber_ = io_context.LaunchFiber([this] { out_queue_->Run(); });
   } else {
     write_file_ = Await([&] { return file::Open(full_path_); });
+    CHECK(write_file_);
   }
-  CHECK(write_file_);
 }
 
 void CompressHandle::Write(StringGenCb cb) {
@@ -150,8 +168,14 @@ void CompressHandle::Write(StringGenCb cb) {
 
       lk.unlock();
 
-      // TODO: To support io_context based write-files like with GCS.
-      owner_->pool()->Add(fq_index_, WriteCb(std::move(*tmp_str), write_file_));
+      if (out_queue_) {
+        out_queue_->Add([this, str = std::move(*tmp_str)] {
+          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+        });
+      } else {
+        // TODO: To support io_context based write-files like with GCS.
+        owner_->pool()->Add(queue_index_, WriteCb(std::move(*tmp_str), write_file_));
+      }
       start_delta_ = 0;
     }
   }
@@ -160,11 +184,27 @@ void CompressHandle::Write(StringGenCb cb) {
 void CompressHandle::Close() {
   CHECK_STATUS(compress_sink_->Flush());
 
-  if (!compress_out_buf_->contents().empty()) {
-    owner_->pool()->Add(fq_index_, WriteCb(std::move(compress_out_buf_->contents()), write_file_));
+  auto& buf = compress_out_buf_->contents();
+  if (!buf.empty()) {
+    if (out_queue_) {
+      out_queue_->Add([this, str = std::move(buf)] {
+        CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+      });
+    } else {
+      owner_->pool()->Add(queue_index_,
+                        WriteCb(std::move(buf), write_file_));
+    }
   }
-
-  DestHandle::Close();
+  if (out_queue_) {
+    out_queue_->Await([this] {
+      CHECK_STATUS(gcs_->CloseWrite());
+      gcs_.reset();
+    });
+    out_queue_->Shutdown();
+    write_fiber_.join();
+  } else {
+    DestHandle::Close();
+  }
 }
 
 LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
@@ -217,7 +257,7 @@ bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
 
 DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
                          util::IoContextPool* pool, fibers_ext::FiberQueueThreadPool* fq)
-    : root_dir_(root_dir), pb_out_(out), pool_(*pool), fq_(*fq) {
+    : root_dir_(root_dir), pb_out_(out), io_pool_(*pool), fq_(*fq) {
   is_gcs_dest_ = util::IsGcsPath(root_dir_);
 }
 
@@ -293,7 +333,7 @@ DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), 
   CHECK(owner_);
 
   full_path_ = owner_->ShardFilePath(sid, 0);
-  fq_index_ = base::Murmur32(full_path_, 120577U);
+  queue_index_ = base::Murmur32(full_path_, 120577U);
 }
 
 void DestHandle::AppendThreadLocal(const std::string& str) {
@@ -335,7 +375,8 @@ void DestHandle::Write(StringGenCb cb) {
     tmp_str = cb();
     if (!tmp_str)
       break;
-    owner_->pool()->Add(fq_index_, [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
+    owner_->pool()->Add(queue_index_,
+                        [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
   }
 }
 

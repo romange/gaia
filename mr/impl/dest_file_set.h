@@ -57,7 +57,11 @@ class DestFileSet {
   const pb::Output& output() const { return pb_out_; }
 
   void set_gce(const util::GCE* gce) { gce_ = gce;}
+  const util::GCE* gce() const { return gce_;}
+
   bool is_gcs_dest() const { return is_gcs_dest_; }
+
+  util::IoContextPool* io_pool() { return &io_pool_;}
 
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
@@ -65,7 +69,7 @@ class DestFileSet {
   ::boost::fibers::mutex mu_;
   const util::GCE* gce_ = nullptr;
 
-  util::IoContextPool& pool_;
+  util::IoContextPool& io_pool_;
   util::fibers_ext::FiberQueueThreadPool& fq_;
   bool is_gcs_dest_ = false;
 };
@@ -104,7 +108,7 @@ class DestHandle {
 
  protected:
   template <typename Func> auto Await(Func&& f) {
-    return owner_->pool()->Await(fq_index_, std::forward<Func>(f));
+    return owner_->pool()->Await(queue_index_, std::forward<Func>(f));
   }
 
   DestHandle(DestFileSet* owner, const ShardId& sid);
@@ -121,7 +125,7 @@ class DestHandle {
   size_t raw_size_ = 0;
   size_t raw_limit_ = kuint64max;
   uint32_t sub_shard_ = 0;
-  uint32_t fq_index_;
+  uint32_t queue_index_;
 };
 
 }  // namespace detail

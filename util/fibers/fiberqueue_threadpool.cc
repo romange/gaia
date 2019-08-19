@@ -45,6 +45,11 @@ void FiberQueue::Run() {
   }
 }
 
+void FiberQueue::Shutdown() {
+  is_closed_.store(true, memory_order_seq_cst);
+  pull_ec_.notify();
+}
+
 FiberQueueThreadPool::FiberQueueThreadPool(unsigned num_threads, unsigned queue_size) {
   if (num_threads == 0) {
     num_threads = std::thread::hardware_concurrency();
