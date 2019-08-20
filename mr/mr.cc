@@ -133,6 +133,11 @@ void OutputBase::SetShardSpec(pb::ShardSpec::Type st, unsigned modn) {
   }
 }
 
+void OutputBase::FailUndefinedShard() const {
+  LOG(FATAL) << "Sharding function for output " << out_->ShortDebugString() << " is not defined.\n"
+             << "Did you forget to call .With<Some>Sharding()?";
+}
+
 std::string RecordTraits<rj::Document>::Serialize(bool is_binary, const rj::Document& doc) {
   sb_.Clear();
   rj::Writer<rj::StringBuffer> writer(sb_);

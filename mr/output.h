@@ -30,6 +30,7 @@ class OutputBase {
 
   void SetCompress(pb::Output::CompressType ct, unsigned level);
   void SetShardSpec(pb::ShardSpec::Type st, unsigned modn = 0);
+  void FailUndefinedShard() const;
 };
 
 template <typename T> class Output : public OutputBase {
@@ -50,7 +51,10 @@ template <typename T> class Output : public OutputBase {
     ShardId operator()(const ShardId& id) const { return id; }
     ShardId operator()(const ModNShardingFunc& func) const { return ShardId{func(t_) % modn_}; }
     ShardId operator()(const CustomShardingFunc& func) const { return ShardId{func(t_)}; }
-    ShardId operator()(absl::monostate ms) const { return ms; }
+    ShardId operator()(absl::monostate ms) const {
+      return ms;
+    }
+
   };
 
  public:
@@ -76,9 +80,12 @@ template <typename T> class Output : public OutputBase {
   Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
 
   ShardId Shard(const T& t) const {
-    return absl::visit(Visitor{t, modn_}, shard_op_);
+    auto res = absl::visit(Visitor{t, modn_}, shard_op_);
+    if (absl::holds_alternative<absl::monostate>(res)) {
+      FailUndefinedShard();
+    }
+    return res;
   }
-
 
   // TODO: to expose it for friends.
   void SetConstantShard(ShardId sid) { shard_op_ = std::move(sid); }
