@@ -101,6 +101,8 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
   std::vector<const InputBase*> inputs;
   string input_names;
   for (const auto& input_name : op.input_name()) {
+    CHECK(!input_name.empty()) << "Empty input found for operator '" << op.op_name() << "'";
+
     absl::StrAppend(&input_names, input_name, ",");
     inputs.push_back(CheckedInput(input_name));
   }

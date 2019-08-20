@@ -195,6 +195,7 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
   }
 
   void CheckFailIdentity() const;
+  static void ValidateGroupInputOrDie(const TableBase* other);
 
   pb::Operator CreateMapOp(const std::string& name) const;
 
@@ -277,6 +278,7 @@ template <typename OutT> class TableImplT : public TableBase {
     std::vector<RawSinkMethodFactory<GrouperType, OutT>> factories;
 
     for (auto& arg : args) {
+      ValidateGroupInputOrDie(arg.tbase());
       op.add_input_name(arg.tbase()->op().output().name());
       factories.push_back(arg.factory());
     }

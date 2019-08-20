@@ -70,6 +70,12 @@ HandlerWrapperBase* TableBase::CreateHandler(RawContext* context) {
 
 void TableBase::CheckFailIdentity() const { CHECK(defined() && is_identity_); }
 
+void TableBase::ValidateGroupInputOrDie(const TableBase* other) {
+  const auto& op = other->op();
+  CHECK(!op.output().name().empty()) << "Table '" << op.op_name() << "' does not produce "
+    "output. Did you forget to call .Write(..) on it?";
+}
+
 }  // namespace detail
 
 namespace {
