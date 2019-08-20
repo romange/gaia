@@ -51,6 +51,8 @@ class HttpsClient {
 
   SslStream* client() { return client_.get(); }
 
+  void schedule_reconnect() {reconnect_needed_ = true;}
+
  private:
   error_code HandleError(const error_code& ec);
 
