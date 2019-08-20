@@ -188,7 +188,7 @@ std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
 }
 
 struct WriteHandler {
-  static constexpr size_t kUploadSize = 1 << 19;  // 512K
+  static constexpr size_t kUploadSize = 1 << 21;  // 512K
 
   WriteHandler() : body_mb(kUploadSize) {}
 
@@ -637,9 +637,10 @@ util::Status GCS::Write(strings::ByteRange src) {
 
       if (h2::status::permanent_redirect == resp_msg.result())
         break;
+
       if (resp_msg.result() == h2::status::service_unavailable) {
         https_client_->schedule_reconnect();
-	continue;
+        continue;
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
