@@ -634,6 +634,18 @@ util::Status GCS::Write(strings::ByteRange src) {
 
     VLOG(1) << "UploadResp: " << resp_msg;
 
+    CHECK_EQ(h2::status::permanent_redirect, resp_msg.result()) << resp_msg;
+
+    auto it = resp_msg.find(h2::field::range);
+    CHECK(it != resp_msg.end()) << resp_msg;
+    absl::string_view range = absl_sv(it->value());
+    CHECK(absl::ConsumePrefix(&range, "bytes="));
+    size_t pos = range.find('-');
+    CHECK_LT(pos, range.size());
+    size_t uploaded_pos = 0;
+    CHECK(absl::SimpleAtoi(range.substr(pos + 1), &uploaded_pos));
+    CHECK_EQ(uploaded_pos + 1, to);
+
     wh->body_mb = std::move(req.body());
     wh->body_mb.consume(body_size);
     wh->uploaded = to;
