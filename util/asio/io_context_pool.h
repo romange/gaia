@@ -74,7 +74,7 @@ class IoContextPool {
     }
   }
 
-  // Blocks until all the asynchronous calls to func return.
+  //! Blocks until all the asynchronous calls to func return. Func must accept IoContext&.
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {

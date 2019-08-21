@@ -43,7 +43,8 @@ using namespace intrusive;
 struct LocalRunner::Impl {
  public:
   Impl(IoContextPool* p, const string& d)
-      : io_pool(p), data_dir(d), fq_pool(0, 128), gcs_connections_("local-runner-gcs-connections") {
+      : io_pool_(p), data_dir(d), fq_pool(0, 128),
+      varz_stats_("local-runner", [this] { return GetStats();}) {
   }
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -66,7 +67,7 @@ struct LocalRunner::Impl {
 
   void LazyGcsInit();
 
-  IoContextPool* io_pool;
+  IoContextPool* io_pool_;
   string data_dir;
   std::unique_ptr<DestFileSet> dest_mgr;
   fibers_ext::FiberQueueThreadPool fq_pool;
@@ -78,6 +79,8 @@ struct LocalRunner::Impl {
   std::unique_ptr<GCE> gce_handle;
 
  private:
+  util::VarzValue::Map GetStats() const;
+
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
 
@@ -95,7 +98,8 @@ struct LocalRunner::Impl {
   unique_ptr<GCS, handle_keeper> GetGcsHandle();
 
   static thread_local std::unique_ptr<PerThread> per_thread_;
-  util::VarzCount gcs_connections_;
+  util::VarzFunction varz_stats_;
+
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
@@ -117,15 +121,29 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
     return unique_ptr<GCS, handle_keeper>(res.release(), pt);
   }
 
-  IoContext* io_context = io_pool->GetThisContext();
+  IoContext* io_context = io_pool_->GetThisContext();
   CHECK(io_context) << "Must run from IO context thread";
-  gcs_connections_.Inc();
 
   GCS* gcs = new GCS(*gce_handle, io_context);
   auto status = gcs->Connect(kGcsConnectTimeout);
   CHECK_STATUS(status);
 
   return unique_ptr<GCS, handle_keeper>(gcs, pt);
+}
+
+VarzValue::Map LocalRunner::Impl::GetStats() const {
+  VarzValue::Map map;
+  std::atomic<uint32_t> input_gcs_conn{0};
+
+  io_pool_->AwaitOnAll([&](IoContext&) {
+    auto* pt = per_thread_.get();
+    input_gcs_conn += pt->gcs_handles.size();
+  });
+
+  map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn.load()));
+  map.emplace_back("output-gcs-connections", VarzValue::FromInt(dest_mgr->HandleCount()));
+
+  return map;
 }
 
 uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
@@ -188,7 +206,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   } else if (!file::Exists(out_dir)) {
     CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
   }
-  dest_mgr.reset(new DestFileSet(out_dir, op->output(), io_pool, &fq_pool));
+  dest_mgr.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool));
 
   if (util::IsGcsPath(out_dir)) {
     dest_mgr->set_gce(gce_handle.get());
@@ -281,8 +299,9 @@ void LocalRunner::Init() {
 }
 
 void LocalRunner::Shutdown() {
+  // TODO: to move it to Impl.
   impl_->fq_pool.Shutdown();
-  impl_->io_pool->AwaitFiberOnAll([this](IoContext&) { impl_->ShutDown(); });
+  impl_->io_pool_->AwaitFiberOnAll([this](IoContext&) { impl_->ShutDown(); });
 
   LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
 }

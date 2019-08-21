@@ -628,10 +628,14 @@ util::Status GCS::Write(strings::ByteRange src) {
     req.prepare_payload();
 
     h2::response<h2::dynamic_body> resp_msg;
+    error_code ec;
     for (unsigned i = 0; i < 3; ++i) {
       VLOG(1) << "UploadReq: " << req;
-      error_code ec = https_client_->Send(req, &resp_msg);
-      RETURN_EC_STATUS(ec);
+      ec = https_client_->Send(req, &resp_msg);
+      if (ec) {
+        LOG(WARNING) << "retrying " << i << " after " << ec;
+        continue;
+      }
 
       VLOG(1) << "UploadResp: " << resp_msg;
 
@@ -644,6 +648,8 @@ util::Status GCS::Write(strings::ByteRange src) {
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
+    RETURN_EC_STATUS(ec);
+
     auto it = resp_msg.find(h2::field::range);
     CHECK(it != resp_msg.end()) << resp_msg;
     absl::string_view range = absl_sv(it->value());

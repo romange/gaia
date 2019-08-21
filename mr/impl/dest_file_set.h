@@ -50,6 +50,8 @@ class DestFileSet {
 
   std::vector<ShardId> GetShards() const;
 
+  size_t HandleCount() const;
+
   // Closes the handle but leaves it in the map.
   // GatherAll will still return it.
   void CloseHandle(const ShardId& key);
@@ -66,7 +68,8 @@ class DestFileSet {
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
   HandleMap dest_files_;
-  ::boost::fibers::mutex mu_;
+  mutable ::boost::fibers::mutex mu_;
+
   const util::GCE* gce_ = nullptr;
 
   util::IoContextPool& io_pool_;

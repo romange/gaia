@@ -151,6 +151,7 @@ void CompressHandle::Open() {
   }
 }
 
+// CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.
 void CompressHandle::Write(StringGenCb cb) {
   absl::optional<string> tmp_str;
   while (true) {
@@ -261,6 +262,8 @@ DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
   is_gcs_dest_ = util::IsGcsPath(root_dir_);
 }
 
+DestFileSet::~DestFileSet() {}
+
 // DestHandle is cached in each of the calling IO threads and the only contention happens
 // when a new handle shard is created.
 DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
@@ -302,6 +305,8 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
 }
 
 void DestFileSet::CloseAllHandles() {
+  std::lock_guard<fibers::mutex> lk(mu_);
+
   for (auto& k_v : dest_files_) {
     k_v.second->Close();
   }
@@ -331,13 +336,20 @@ void DestFileSet::CloseHandle(const ShardId& sid) {
 std::vector<ShardId> DestFileSet::GetShards() const {
   std::vector<ShardId> res;
   res.reserve(dest_files_.size());
+
+  std::unique_lock<fibers::mutex> lk(mu_);
   transform(begin(dest_files_), end(dest_files_), back_inserter(res),
             [](const auto& pair) { return pair.first; });
 
   return res;
 }
 
-DestFileSet::~DestFileSet() {}
+size_t DestFileSet::HandleCount() const {
+  std::unique_lock<fibers::mutex> lk(mu_);
+
+  return dest_files_.size();
+}
+
 
 DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), sid_(sid) {
   CHECK(owner_);
