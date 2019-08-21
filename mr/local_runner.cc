@@ -220,7 +220,7 @@ void LocalRunner::Impl::End(ShardFileMap* out_files) {
   for (const ShardId& sid : shards) {
     out_files->emplace(sid, dest_mgr->ShardFilePath(sid, -1));
   }
-  dest_mgr->CloseAllHandles();
+  dest_mgr->CloseAllHandles(stop_signal_.load(std::memory_order_acquire));
   dest_mgr.reset();
   current_op = nullptr;
 }

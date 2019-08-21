@@ -35,8 +35,10 @@ class DestFileSet {
               util::fibers_ext::FiberQueueThreadPool* fq);
   ~DestFileSet();
 
-  // Closes and deletes all the handles.
-  void CloseAllHandles();
+  //! Closes and deletes all the handles. If abort_write is true, the manager may
+  //! delete or drop output files without finalizing them properly.
+  //! Useful when we break in the middle of the run.
+  void CloseAllHandles(bool abort_write);
 
   /// Returns full file path of the shard.
   /// if sub_shard is < 0, returns the glob of all files corresponding to this shard.
@@ -104,7 +106,7 @@ class DestHandle {
   virtual void Write(StringGenCb cb);
 
   // Thread-safe. Called from multiple threads/do_contexts.
-  virtual void Close();
+  virtual void Close(bool abort_write);
 
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
   const std::string full_path() const { return full_path_;}

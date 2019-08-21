@@ -84,7 +84,7 @@ class CompressHandle : public DestHandle {
   CompressHandle(DestFileSet* owner, const ShardId& sid);
 
   void Write(StringGenCb str) override;
-  void Close() override;
+  void Close(bool abort_write) override;
 
  private:
   void Open() override;
@@ -105,7 +105,7 @@ class LstHandle : public DestHandle {
   LstHandle(DestFileSet* owner, const ShardId& sid);
 
   void Write(StringGenCb cb) final;
-  void Close() override;
+  void Close(bool abort_write) override;
 
  private:
   void Open() override;
@@ -190,29 +190,32 @@ void CompressHandle::Write(StringGenCb cb) {
   }
 }
 
-void CompressHandle::Close() {
-  CHECK_STATUS(compress_sink_->Flush());
+void CompressHandle::Close(bool abort_write) {
+  if (!abort_write) {
+    CHECK_STATUS(compress_sink_->Flush());
 
-  auto& buf = compress_out_buf_->contents();
-  if (!buf.empty()) {
-    if (out_queue_) {
-      out_queue_->Add([this, str = std::move(buf)] {
-        CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-      });
-    } else {
-      owner_->pool()->Add(queue_index_,
-                        WriteCb(std::move(buf), write_file_));
+    auto& buf = compress_out_buf_->contents();
+    if (!buf.empty()) {
+      if (out_queue_) {  // GCS flow.
+        out_queue_->Add([this, str = std::move(buf)] {
+          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+        });
+      } else {
+        owner_->pool()->Add(queue_index_,
+                          WriteCb(std::move(buf), write_file_));
+      }
     }
   }
+
   if (out_queue_) {
-    out_queue_->Await([this] {
-      CHECK_STATUS(gcs_->CloseWrite());
+    out_queue_->Await([this, abort_write] {
+      CHECK_STATUS(gcs_->CloseWrite(abort_write));
       gcs_.reset();
     });
     out_queue_->Shutdown();
     write_fiber_.join();
   } else {
-    DestHandle::Close();
+    DestHandle::Close(abort_write);
   }
 }
 
@@ -252,10 +255,10 @@ void LstHandle::Open() {
   CHECK_STATUS(lst_writer_->Init());
 }
 
-void LstHandle::Close() {
+void LstHandle::Close(bool abort_write) {
   CHECK_STATUS(lst_writer_->Flush());
 
-  DestHandle::Close();
+  DestHandle::Close(abort_write);
 }
 
 bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
@@ -312,11 +315,11 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   return it->second.get();
 }
 
-void DestFileSet::CloseAllHandles() {
+void DestFileSet::CloseAllHandles(bool abort_write) {
   std::lock_guard<fibers::mutex> lk(mu_);
 
   for (auto& k_v : dest_files_) {
-    k_v.second->Close();
+    k_v.second->Close(abort_write);
   }
   dest_files_.clear();
 }
@@ -338,7 +341,7 @@ void DestFileSet::CloseHandle(const ShardId& sid) {
   lk.unlock();
   VLOG(1) << "Closing handle " << ShardFilePath(sid, -1);
 
-  dh->Close();
+  dh->Close(false);
 }
 
 std::vector<ShardId> DestFileSet::GetShards() const {
@@ -422,7 +425,7 @@ void DestHandle::Open() {
   write_file_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
 }
 
-void DestHandle::Close() {
+void DestHandle::Close(bool abort_write) {
   if (!write_file_)
     return;
 

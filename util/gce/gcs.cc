@@ -178,8 +178,7 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
-template <typename Body>
-std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
+template <typename Body> std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
   os << msg.method_string() << " " << msg.target() << endl;
   for (const auto& f : msg) {
     os << f.name_string() << " : " << f.value() << endl;
@@ -190,7 +189,7 @@ std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
 }
 
 struct WriteHandler {
-  WriteHandler() : body_mb(FLAGS_gcs_upload_buf_log_size) {}
+  WriteHandler() : body_mb(1 << FLAGS_gcs_upload_buf_log_size) {}
 
   string url;
 
@@ -466,7 +465,8 @@ StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_bod
   const auto& msg = parser->get();
   VLOG(1) << "HeaderResp: " << msg;
   if (!parser->keep_alive()) {
-    LOG(ERROR) << "TODO: No keep-alive, requested reconnect";
+    https_client_->schedule_reconnect();
+    LOG(INFO) << "Scheduling reconnect due to conn-close header";
   }
 
   // Partial content can appear because of the previous reconnect.
@@ -603,6 +603,8 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   if (it == resp_msg.end()) {
     return Status(StatusCode::PARSE_ERROR, "Can not find location header");
   }
+  CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
+
   WriteHandler& wh = conn_state_->emplace<WriteHandler>();
   wh.url = string(it->value());
 
@@ -630,14 +632,14 @@ util::Status GCS::Write(strings::ByteRange src) {
     h2::response<h2::dynamic_body> resp_msg;
     error_code ec;
     for (unsigned i = 0; i < 3; ++i) {
-      VLOG(1) << "UploadReq: " << req;
+      VLOG(1) << "UploadReq: " << i << " " << req;
       ec = https_client_->Send(req, &resp_msg);
       if (ec) {
         LOG(WARNING) << "retrying " << i << " after " << ec;
         continue;
       }
 
-      VLOG(1) << "UploadResp: " << resp_msg;
+      VLOG(1) << "UploadResp: " << i << " " << resp_msg;
 
       if (h2::status::permanent_redirect == resp_msg.result())
         break;
@@ -672,22 +674,24 @@ util::Status GCS::Write(strings::ByteRange src) {
   return Status::OK;
 }
 
-util::Status GCS::CloseWrite() {
+util::Status GCS::CloseWrite(bool abort_write) {
   WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
   CHECK(wh && !wh->url.empty());
 
-  h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
+  h2::request<h2::dynamic_body> req(abort_write ? h2::verb::delete_ : h2::verb::put, wh->url, 11);
+  h2::response<h2::dynamic_body> resp_msg;
 
-  auto& body = req.body();
-  body = std::move(wh->body_mb);
-  size_t to = wh->uploaded + req.body().size();
+  if (!abort_write) {
+    auto& body = req.body();
+    body = std::move(wh->body_mb);
+    size_t to = wh->uploaded + req.body().size();
 
-  SetContentRange(wh->uploaded, to, to, &req);
+    SetContentRange(wh->uploaded, to, to, &req);
+  }
+
   req.prepare_payload();
 
   VLOG(1) << "CloseWriteReq: " << req;
-
-  h2::response<h2::dynamic_body> resp_msg;
   error_code ec = https_client_->Send(req, &resp_msg);
   RETURN_EC_STATUS(ec);
   VLOG(1) << "CloseWriteResp: " << resp_msg;
