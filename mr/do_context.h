@@ -95,6 +95,8 @@ class RawContext {
   // Finds the map produced by operators in the previous steps
   const FrequencyMap<uint32_t>* FindMaterializedFreqMapStatistic(const std::string& map_id) const;
 
+  const ShardId& current_shard() const { return current_shard_;}
+
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
     ++item_writes_;
@@ -107,6 +109,8 @@ class RawContext {
   StringPieceDenseMap<long> metric_map_;
   size_t parse_errors_ = 0, item_writes_ = 0;
   std::string file_name_;
+  ShardId current_shard_;
+
   InputMetaData metadata_;
   bool is_binary_ = false;
 

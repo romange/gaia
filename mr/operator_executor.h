@@ -48,6 +48,10 @@ class OperatorExecutor {
     context->input_pos_ = pos;
   }
 
+  static void SetCurrentShard(ShardId shard, RawContext* context) {
+    context->current_shard_ = std::move(shard);
+  }
+
   virtual void InitInternal() = 0;
 
   util::IoContextPool* pool_;

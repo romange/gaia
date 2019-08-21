@@ -31,6 +31,8 @@ struct ShardId : public absl::variant<absl::monostate, uint32_t, std::string> {
   ShardId() = default;
 
   std::string ToString(absl::string_view basename) const;
+
+  bool is_defined() const { return !absl::holds_alternative<absl::monostate>(*this); }
 };
 
 }  // namespace mr3

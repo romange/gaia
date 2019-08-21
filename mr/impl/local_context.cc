@@ -88,7 +88,7 @@ void BufferedWriter::Write(string&& val) {
 LocalContext::LocalContext(DestFileSet* mgr) : mgr_(mgr) { CHECK(mgr_); }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
-  DCHECK(!absl::holds_alternative<absl::monostate>(shard_id)) << "Undefined shard id";
+  DCHECK(shard_id.is_defined()) << "Undefined shard id";
 
   auto it = custom_shard_files_.find(shard_id);
   if (it == custom_shard_files_.end()) {
