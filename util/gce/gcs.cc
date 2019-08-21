@@ -21,6 +21,8 @@
 #include "util/asio/io_context.h"
 #include "util/http/beast_rj_utils.h"
 
+DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
+
 namespace util {
 using namespace std;
 using namespace boost;
@@ -188,9 +190,7 @@ std::ostream& operator<<(std::ostream& os, const h2::request<Body>& msg) {
 }
 
 struct WriteHandler {
-  static constexpr size_t kUploadSize = 1 << 21;  // 512K
-
-  WriteHandler() : body_mb(kUploadSize) {}
+  WriteHandler() : body_mb(FLAGS_gcs_upload_buf_log_size) {}
 
   string url;
 
@@ -202,7 +202,7 @@ struct WriteHandler {
 };
 
 bool WriteHandler::Append(strings::ByteRange* src) {
-  size_t prepare_size = std::min(src->size(), kUploadSize - body_mb.size());
+  size_t prepare_size = std::min(src->size(), body_mb.max_size() - body_mb.size());
   auto mbs = body_mb.prepare(prepare_size);
   size_t offs = 0;
   for (auto mb : mbs) {
@@ -213,8 +213,8 @@ bool WriteHandler::Append(strings::ByteRange* src) {
   src->remove_prefix(prepare_size);
   body_mb.commit(prepare_size);
 
-  DCHECK_LE(body_mb.size(), kUploadSize);
-  return body_mb.size() == kUploadSize;
+  DCHECK_LE(body_mb.size(), body_mb.max_size());
+  return body_mb.size() == body_mb.max_size();
 }
 
 HttpsClient::HttpsClient(absl::string_view host, IoContext* context,

@@ -88,6 +88,7 @@ class CompressHandle : public DestHandle {
 
  private:
   void Open() override;
+  void GcsWriteFiber();
 
   size_t start_delta_ = 0;
   util::StringSink* compress_out_buf_ = nullptr;
@@ -144,11 +145,18 @@ void CompressHandle::Open() {
     });
 
     out_queue_.reset(new fibers_ext::FiberQueue(32));
-    write_fiber_ = io_context.LaunchFiber([this] { out_queue_->Run(); });
+    write_fiber_ = io_context.LaunchFiber([this] { GcsWriteFiber(); });
   } else {
     write_file_ = Await([&] { return file::Open(full_path_); });
     CHECK(write_file_);
   }
+}
+
+void CompressHandle::GcsWriteFiber() {
+  // We want write fiber to have higher priority and initiate write as fast as possible.
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
+
+  out_queue_->Run();
 }
 
 // CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.

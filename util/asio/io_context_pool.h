@@ -38,10 +38,11 @@ class IoContextPool {
   /// Runs all io_context objects in the pool and exits.
   void Run();
 
-  /// Stop all io_context objects in the pool.
-  // Waits for all the threads to finish.
-  // Requires that Run has been called.
-  // Blocks the current thread until all the pool threads exited.
+  /*! @brief Stops all io_context objects in the pool.
+   *
+   *  Waits for all the threads to finish. Requires that Run has been called.
+   *  Blocks the current thread until all the pool threads exited.
+   */
   void Stop();
 
   /// Get an io_context to use. Thread-safe.
@@ -74,7 +75,8 @@ class IoContextPool {
     }
   }
 
-  //! Blocks until all the asynchronous calls to func return. Func must accept IoContext&.
+  //! @brief Blocks until all the asynchronous calls to func return. Func must accept IoContext&.
+  //!
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {

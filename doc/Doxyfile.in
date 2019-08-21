@@ -829,6 +829,7 @@ WARN_LOGFILE           =
 
 INPUT                  = @CMAKE_CURRENT_SOURCE_DIR@/mr3.md \
                          @CMAKE_CURRENT_SOURCE_DIR@/../mr/ \
+                         @CMAKE_CURRENT_SOURCE_DIR@/../util/ \
                          @CMAKE_CURRENT_SOURCE_DIR@/mainpage.md
 
 

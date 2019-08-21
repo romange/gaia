@@ -18,7 +18,7 @@ void FiberQueue::Run() {
   bool is_closed = false;
   Func func;
 
-  auto cb = [&]() {
+  auto cb = [&] {
     if (queue_.try_dequeue(func)) {
       push_ec_.notify();
       return true;

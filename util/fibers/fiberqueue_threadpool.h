@@ -32,11 +32,14 @@ class FiberQueue {
   }
 
   template <typename F> void Add(F&& f) {
+    if (TryAdd(std::forward<F>(f))) {
+      return;
+    }
+
     while (true) {
       EventCount::Key key = push_ec_.prepareWait();
 
-      if (queue_.try_enqueue(std::forward<F>(f))) {
-        pull_ec_.notify();
+      if (TryAdd(std::forward<F>(f))) {
         break;
       }
       push_ec_.wait(key.epoch());
