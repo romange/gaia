@@ -60,5 +60,11 @@ std::ostream& operator<<(std::ostream& o, const Status& status) {
   return o;
 }
 
+bool StatusFailPrintImpl(::util::Status st) {
+  LOG_IF(ERROR, !st.ok()) << "Status error " << st;
+
+  return !st.ok();
+}
+
 }  // namespace util
 

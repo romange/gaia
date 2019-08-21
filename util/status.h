@@ -140,12 +140,12 @@ template<typename T> StatusObject<T>& StatusObject<T>::operator=(StatusObject<T>
     if (UNLIKELY(!__status__.ok())) return __status__; \
   } while (false)
 
-#define CHECK_STATUS(stmt) \
-  do { \
-    auto __status__ = (stmt); \
-    CHECK(__status__.ok()) << __status__; \
-  } while (false)
 
+// Returns true if status failed.
+bool StatusFailPrintImpl(::util::Status st);
+
+#define CHECK_STATUS(stmt) \
+  LOG_IF(FATAL, UNLIKELY(StatusFailPrintImpl(stmt))) << "status check failed with " #stmt
 
 #define GET_UNLESS_ERROR(var, stmt) \
   decltype((stmt).obj) var; \

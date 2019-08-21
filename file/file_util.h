@@ -25,6 +25,7 @@ std::string JoinPath(StringPiece dirname, StringPiece basename);
 // Retrieve file name from a path. If path dosnt's contain dir returns the path itself.
 StringPiece GetNameFromPath(StringPiece path);
 
+// Retrieves a dirname from the path or the whole path if it does not contain directory.
 StringPiece DirName(StringPiece path);
 
 // Tries to open the file under file_name in the given mode. Will fail if
