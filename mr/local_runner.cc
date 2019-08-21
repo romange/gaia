@@ -137,7 +137,9 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
 
   io_pool_->AwaitOnAll([&](IoContext&) {
     auto* pt = per_thread_.get();
-    input_gcs_conn += pt->gcs_handles.size();
+    if (pt) {
+      input_gcs_conn += pt->gcs_handles.size();
+    }
   });
 
   map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn.load()));
