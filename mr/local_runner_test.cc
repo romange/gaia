@@ -112,12 +112,12 @@ TEST_F(LocalRunnerTest, Subdir) {
   Start(pb::WireFormat::TXT);
 
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
-  const ShardId subdir_shard{"foo/bar"};
-  context->TEST_Write(subdir_shard, "val1");
+  const ShardId subdir_shard{"foo/bar/zed"};
+  context->TEST_Write(subdir_shard, "zed is dead, baby");
 
   context->Flush();
   runner_->OperatorEnd(&out_files);
-  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(subdir_shard, "w1/foo/bar.txt")));
+  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(subdir_shard, "w1/foo/bar/zed.txt")));
 }
 
 }  // namespace mr3
