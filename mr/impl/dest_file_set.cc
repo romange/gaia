@@ -269,6 +269,15 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
   if (it == dest_files_.end()) {
     std::unique_ptr<DestHandle> dh;
 
+    bool is_local_fs = !is_gcs_dest_;
+    if (is_local_fs) {
+      string shard_name = sid.ToString(absl::string_view{});
+      absl::string_view dir_name = file_util::DirName(shard_name);
+      if (dir_name.size() != shard_name.size()) {
+        string sub_dir = file_util::JoinPath(root_dir_, dir_name);
+        CHECK_STATUS(file_util::CreateSubDirIfNeeded(sub_dir)) << sub_dir;
+      }
+    }
     if (pb_out_.format().type() == pb::WireFormat::LST) {
       dh.reset(new LstHandle{this, sid});
     } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT &&
@@ -280,6 +289,7 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
     if (pb_out_.shard_spec().has_max_raw_size_mb()) {
       dh->set_raw_limit(size_t(1U << 20) * pb_out_.shard_spec().max_raw_size_mb());
     }
+
     dh->Open();
     VLOG(1) << "Open destination shard " << dh->full_path();
 

@@ -106,4 +106,18 @@ TEST_F(LocalRunnerTest, Lst) {
   ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(kShard0, "w1/w1-shard-0000.lst")));
 }
 
+
+TEST_F(LocalRunnerTest, Subdir) {
+  ShardFileMap out_files;
+  Start(pb::WireFormat::TXT);
+
+  std::unique_ptr<RawContext> context{runner_->CreateContext()};
+  const ShardId subdir_shard{"foo/bar"};
+  context->TEST_Write(subdir_shard, "val1");
+
+  context->Flush();
+  runner_->OperatorEnd(&out_files);
+  ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(subdir_shard, "w1/foo/bar.txt")));
+}
+
 }  // namespace mr3
