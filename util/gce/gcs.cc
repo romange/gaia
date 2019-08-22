@@ -242,6 +242,7 @@ auto HttpsClient::InitSslClient() -> error_code {
   if (!reconnect_needed_)
     return ec;
   client_.reset(new SslStream(FiberSyncSocket{host_name_, "443", &io_context_}, ssl_cntx_));
+  client_->next_layer().set_keep_alive(true);
 
   ec = SslConnect(client_.get(), reconnect_msec_);
   if (!ec) {
@@ -299,12 +300,19 @@ GCS::~GCS() {
 }
 
 Status GCS::Connect(unsigned msec) {
-  RETURN_EC_STATUS(https_client_->Connect(msec));
+  auto ec = https_client_->Connect(msec);
+  if (ec) {
+    VLOG(1) << "Error connecting " << ec << " " << https_client_->client()->next_layer().status();
+    return ToStatus(ec);
+  }
 
   auto res = gce_.GetAccessToken(&io_context_);
   if (!res.ok())
     return res.status;
   access_token_header_ = absl::StrCat("Bearer ", res.obj);
+
+  VLOG(1) << "GCS::Connect OK " << native_handle();
+
   return Status::OK;
 }
 
@@ -620,7 +628,7 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   WriteHandler& wh = conn_state_->emplace<WriteHandler>();
   wh.url = string(it->value());
 
-  VLOG(1) << "Url: " << absl_sv(it->value());
+  // VLOG(1) << "Url: " << absl_sv(it->value());
 
   return Status::OK;
 }
@@ -648,7 +656,8 @@ util::Status GCS::Write(strings::ByteRange src) {
     uint64_t start = base::GetMonotonicMicrosFast();
 
     for (; retry < 3; ++retry) {
-      VLOG(1) << "UploadReq" << retry << ": " << req;
+      VLOG(1) << "UploadReq" << retry << ": " << req << " socket "
+              << native_handle();
       ec = https_client_->Send(req, &resp_msg);
       if (ec) {
         LOG(WARNING) << "retrying " << retry<< " after " << ec << "/" << ec.message();
@@ -757,10 +766,15 @@ util::Status GCS::ClearConnState() {
 
     if (seq_ptr->parser) {
       ec = https_client_->DrainResponse(&seq_ptr->parser.value());
+      if (ec) {
+        https_client_->schedule_reconnect();
+      }
     }
+
     conn_state_->emplace<absl::monostate>();
-    return ToStatus(ec);
+    return Status::OK;
   }
+
   return Status::OK;
 }
 

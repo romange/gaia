@@ -280,7 +280,8 @@ void GCE::Test_InjectAcessToken(std::string access_token) {
 ::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
   auto ec = stream->next_layer().ClientWaitToConnect(ms);
   if (ec) {
-    VLOG(1) << "Error " << ec << "/" << ec.message();
+    VLOG(1) << "Error " << ec << "/" << ec.message() << " for socket "
+            << stream->next_layer().native_handle();
 
     return ec;
   }

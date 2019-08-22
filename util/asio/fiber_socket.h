@@ -22,7 +22,7 @@ class FiberSyncSocket {
   FiberSyncSocket(next_layer_type&& sock, size_t rbuf_size = 1 << 12)
       : impl_(new detail::FiberSocketImpl{std::move(sock), rbuf_size}) {}
 
-  // Creates a client socket.
+  //! Client socket constructor.
   FiberSyncSocket(const std::string& hname, const std::string& port, IoContext* cntx,
                   size_t rbuf_size = 1 << 12)
       : impl_(new detail::FiberSocketImpl{hname, port, cntx, rbuf_size}) {}
@@ -82,6 +82,9 @@ class FiberSyncSocket {
 
   // For debugging/testing.
   IoContext& context() { return impl_->context(); }
+
+  bool keep_alive() const { return impl_->keep_alive(); }
+  void set_keep_alive(bool flag) { impl_->set_keep_alive(flag); }
 
  private:
   std::unique_ptr<detail::FiberSocketImpl> impl_;

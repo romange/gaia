@@ -145,7 +145,7 @@ template<typename T> StatusObject<T>& StatusObject<T>::operator=(StatusObject<T>
 bool StatusFailPrintImpl(::util::Status st);
 
 #define CHECK_STATUS(stmt) \
-  LOG_IF(FATAL, UNLIKELY(StatusFailPrintImpl(stmt))) << "status check failed with " #stmt
+  LOG_IF(FATAL, UNLIKELY(StatusFailPrintImpl(stmt))) << "status check failed on <" #stmt ">"
 
 #define GET_UNLESS_ERROR(var, stmt) \
   decltype((stmt).obj) var; \

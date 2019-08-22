@@ -65,11 +65,16 @@ class FiberSocketImpl {
   // For debugging/testing.
   IoContext& context();
 
+  bool keep_alive() const { return keep_alive_;}
+  void set_keep_alive(bool flag) { keep_alive_ = flag;}
+
  private:
   // Asynchronous function that make this socket a client socket and initiates client-flow
   // connection process. Should be called only once. Can be called from any thread.
-  void InitiateConnection(const std::string& hname, const std::string& port, IoContext* cntx);
-  void Worker(const std::string& hname, const std::string& service);
+  void InitiateConnection();
+
+  void ClientWorker();
+
   void WakeWorker();
   error_code Reconnect(const std::string& hname, const std::string& service);
   void SetStatus(const error_code& ec, const char* where);
@@ -78,13 +83,16 @@ class FiberSocketImpl {
 
   // socket.is_open() is unreliable and does not reflect close() status even if is called
   // from the same thread.
-  bool is_open_ = true;
+  bool is_open_ = true, keep_alive_ = false;
   enum State { READ_IDLE, READ_ACTIVE } read_state_ = READ_IDLE;
 
   size_t rbuf_size_;
   next_layer_type sock_;
   std::unique_ptr<uint8_t[]> rbuf_;
   ::boost::asio::mutable_buffer rslice_;
+
+  std::string hname_, port_;
+  IoContext* io_cntx_ = nullptr;
 
   // Stuff related to client sockets.
   struct ClientData;
@@ -120,9 +128,9 @@ template <typename MBS> size_t FiberSocketImpl::read_some(const MBS& bufs, error
     read_size = sock_.async_read_some(new_seq, fibers_ext::yield[ec]);
     read_state_ = READ_IDLE;
   }
-  if (ec)
+  if (ec) {
     SetStatus(ec, "read_some");
-
+  }
   if (clientsock_data_) {
     WakeWorker();  // For client socket case.
   }

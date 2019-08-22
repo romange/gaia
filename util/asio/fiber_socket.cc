@@ -44,10 +44,10 @@ FiberSocketImpl::FiberSocketImpl(const std::string& hname, const std::string& po
                                  size_t rbuf_size)
     : FiberSocketImpl(socket_t(cntx->raw_context(), asio::ip::tcp::v4()), rbuf_size) {
   VLOG(1) << "FiberSocketImpl::FiberSocketImpl " << sock_.native_handle();
-
+  hname_ = hname;
+  port_ = port;
+  io_cntx_ = cntx;
   status_ = asio::error::not_connected;
-
-  InitiateConnection(hname, port, cntx);
 }
 
 void FiberSocketImpl::Shutdown(error_code& ec) {
@@ -90,20 +90,21 @@ void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
 
 void FiberSocketImpl::WakeWorker() { clientsock_data_->worker_cv.notify_one(); }
 
-void FiberSocketImpl::InitiateConnection(const std::string& hname, const std::string& port,
-                                         IoContext* cntx) {
-  CHECK(!clientsock_data_ && (&cntx->raw_context() == &sock_.get_executor().context()));
+void FiberSocketImpl::InitiateConnection() {
+  CHECK(!clientsock_data_ && (&io_cntx_->raw_context() == &sock_.get_executor().context()));
 
-  clientsock_data_.reset(new ClientData(cntx));
-  cntx->Await([hname, port, this] {
+  clientsock_data_.reset(new ClientData(io_cntx_));
+  io_cntx_->Await([this] {
     rslice_ = asio::buffer(rbuf_.get(), 0);
-    clientsock_data_->worker = fibers::fiber(&FiberSocketImpl::Worker, this, hname, port);
+    clientsock_data_->worker = fibers::fiber(&FiberSocketImpl::ClientWorker, this);
   });
 }
 
 // Waits for socket to become connected. Can be called from any thread.
 system::error_code FiberSocketImpl::ClientWaitToConnect(uint32_t ms) {
-  CHECK(clientsock_data_);
+  if (!clientsock_data_) {
+    InitiateConnection();
+  }
   using std::chrono::milliseconds;
 
   std::unique_lock<fibers::mutex> lock(clientsock_data_->connect_mu);
@@ -112,11 +113,11 @@ system::error_code FiberSocketImpl::ClientWaitToConnect(uint32_t ms) {
   return status_;
 }
 
-void FiberSocketImpl::Worker(const std::string& hname, const std::string& service) {
+void FiberSocketImpl::ClientWorker() {
   while (is_open_) {
     if (status_) {
       VLOG(1) << "Status " << status_ << " for socket " << sock_.native_handle();
-      error_code ec = Reconnect(hname, service);
+      error_code ec = Reconnect(hname_, port_);
       VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message() << " is_open: " << is_open_;
       if (ec && is_open_) {  // Only sleep for open socket for the next reconnect.
         this_fiber::sleep_for(10ms);
@@ -175,6 +176,10 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
 
   socket_t::reuse_address opt(true);
   sock_.set_option(opt, ec);
+
+  socket_t::keep_alive opt2(keep_alive_);
+  sock_.set_option(opt2, ec);
+
   VLOG(1) << "Before AsyncResolve for socket " << sock_.native_handle();
 
   // It seems that resolver waits for 10s and ignores cancel command.

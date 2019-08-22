@@ -157,6 +157,10 @@ class GCS {
   util::StatusObject<bool> SendRequestIterative(Request* req,
                                                 Parser<::boost::beast::http::buffer_body>* parser);
 
+  auto native_handle() {
+    return https_client_->client()->next_layer().native_handle();
+  }
+
   std::string access_token_header_;
   std::unique_ptr<ConnState> conn_state_;
   std::unique_ptr<HttpsClient> https_client_;
