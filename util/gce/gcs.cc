@@ -455,7 +455,7 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
 }
 
 StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_body>* parser) {
-  VLOG(1) << "Req: " << req;
+  VLOG(1) << "Req: " << *req;
 
   error_code ec = https_client_->Send(*req);
   RETURN_EC_STATUS(ec);
@@ -765,13 +765,17 @@ util::Status GCS::ClearConnState() {
 }
 
 auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSeqResult {
+  Status err_st;
   for (unsigned iters = 0; iters < 3; ++iters) {
+    VLOG(1) << "OpenSequentialInternal" << iters;
+
     parser->emplace();
     parser->value().body_limit(kuint64max);
 
     auto status_obj = SendRequestIterative(req, &parser->value());
     if (!status_obj.ok()) {
-      return status_obj.status;
+      err_st = status_obj.status;
+      continue;
     }
     bool success = status_obj.obj;
 
@@ -786,7 +790,7 @@ auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSe
     }
   }
 
-  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
+  return err_st;
 }
 
 Status GCS::RefreshToken(Request* req) {
