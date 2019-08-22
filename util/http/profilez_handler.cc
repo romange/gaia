@@ -104,7 +104,7 @@ static void HandleHeapProfile(bool enable, StringResponse* response) {
     if (IsHeapProfilerRunning()) {
       body.append("<p> Man, heap profiling is already running, relax!</p>\n");
     } else {
-      string suffix = base::LocalTimeNow("_%d%m%Y_%H%M%S");
+      string suffix = base::LocalTimeNow("_heap_%d%m%Y_%H%M%S");
       profile_name.append(suffix);
       HeapProfilerStart(profile_name.c_str());
       LOG(INFO) << "Starting heap profiling into " << profile_name;

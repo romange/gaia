@@ -689,7 +689,8 @@ util::Status GCS::Write(strings::ByteRange src) {
     wh->body_mb = std::move(req.body());
     wh->body_mb.consume(body_size);
     wh->uploaded = to;
-    DCHECK_EQ(0, wh->body_mb.size());
+    CHECK_EQ(0, wh->body_mb.size());
+    CHECK_EQ(wh->body_mb.capacity(), wh->body_mb.max_size());
 
     gcs_writes->Inc();
     gcs_latency->IncBy("write", base::GetMonotonicMicrosFast() - start);
