@@ -3,19 +3,19 @@
 //
 #include <unordered_map>
 
+#include <gperftools/heap-profiler.h>
 #include <gperftools/malloc_extension.h>
 #include <gperftools/profiler.h>
-#include <gperftools/heap-profiler.h>
 
-#include "base/walltime.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "strings/human_readable.h"
 #include "strings/numbers.h"
 #include "strings/split.h"
 #include "strings/strcat.h"
-#include "util/spawn.h"
-#include "util/http/http_conn_handler.h"
 #include "util/fibers/fibers_ext.h"
+#include "util/http/http_conn_handler.h"
+#include "util/spawn.h"
 
 namespace util {
 namespace http {
@@ -46,8 +46,11 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
       strcpy(last_profile_suffix, suffix.c_str());
       int res = ProfilerStart(profile_name.c_str());
       LOG(INFO) << "Starting profiling into " << profile_name << " " << res;
-      body.append("<p> Yeah, let's profile this bitch, baby!</p> \n"
-        "<img src='https://gistcdn.githack.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/profiler.gif'>\n");
+      body.append(
+          "<p> Yeah, let's profile this bitch, baby!</p> \n"
+          "<img "
+          "src='https://gistcdn.githack.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/"
+          "profiler.gif'>\n");
     }
     return;
   }
@@ -90,19 +93,51 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
   response->result(h2::status::moved_permanently);
 }
 
+static void HandleHeapProfile(bool enable, StringResponse* response) {
+  string profile_name = "/tmp/" + base::ProgramBaseName();
+  response->set(h2::field::cache_control, "no-cache, no-store, must-revalidate");
+  response->set(h2::field::pragma, "no-cache");
+  response->set(field::content_type, kHtmlMime);
+  auto& body = response->body();
+
+  if (enable) {
+    if (IsHeapProfilerRunning()) {
+      body.append("<p> Man, heap profiling is already running, relax!</p>\n");
+    } else {
+      string suffix = base::LocalTimeNow("_%d%m%Y_%H%M%S");
+      profile_name.append(suffix);
+      HeapProfilerStart(profile_name.c_str());
+      LOG(INFO) << "Starting heap profiling into " << profile_name;
+      body.append("<p> Let's find memory leaks, w00t!</p> \n");
+    }
+  } else {
+    HeapProfilerStop();
+    body.append(
+        "<h3>Heap profiling is off, master!</h3> \n"
+        "<img src='https://m.popkey.co/770e6b/4Mm5x.gif'>\n");
+  }
+}
 
 void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   bool enable = false;
+  bool heap = false;
   for (const auto& k_v : args) {
     if (k_v.first == "profile" && k_v.second == "on")
       enable = true;
+    if (k_v.first == "heap" && k_v.second == "on") {
+      heap = true;
+    }
   }
 
   fibers_ext::Done done;
-  std::thread([=] () mutable {
+  std::thread([=]() mutable {
     StringResponse response;
 
-    HandleCpuProfile(enable, &response);
+    if (!heap) {
+      HandleCpuProfile(enable, &response);
+    } else {
+      HandleHeapProfile(enable, &response);
+    }
     send->Invoke(std::move(response));
     done.Notify();
   }).detach();
@@ -113,37 +148,5 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   done.Wait();
 }
 
-#if 0
-static void HandleHeapProfile(bool enable, Response* response) {
-  string profile_name = "/tmp/" + base::ProgramBaseName();
-  response->AddHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  response->AddHeader("Pragma", "no-cache");
-
-  if (enable) {
-    if (IsHeapProfilerRunning()) {
-      response->AppendContent("<p> Man, heap profiling is already running, relax!</p>\n");
-    } else {
-      string suffix = LocalTimeNow("_%d%m%Y_%H%M%S");
-      profile_name.append(suffix);
-      HeapProfilerStart(profile_name.c_str());
-      LOG(INFO) << "Starting heap profiling into " << profile_name;
-      response->AppendContent("<p> Let's find memory leaks, w00t!</p> \n");
-    }
-    return;
-  }
-
-  HeapProfilerStop();
-  response->AppendContent("<h3>Heap profiling is off, master!</h3> \n"
-    "<img src='https://m.popkey.co/770e6b/4Mm5x.gif'>\n");
-  return;
-}
-
-static string HumanReadableBytes(StringPiece key, int64 val) {
-  return StrCat(key, ": ", HumanReadableNumBytes::ToString(val), "\n");
-}
-
-#endif
-
 }  // namespace http
 }  // namespace util
-

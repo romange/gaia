@@ -135,6 +135,7 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
   std::atomic<uint32_t> input_gcs_conn{0};
 
+  auto start = base::GetMonotonicMicrosFast();
   io_pool_->AwaitOnAll([&](IoContext&) {
     auto* pt = per_thread_.get();
     if (pt) {
@@ -144,6 +145,7 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
 
   map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn.load()));
   map.emplace_back("output-gcs-connections", VarzValue::FromInt(dest_mgr->HandleCount()));
+  map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return map;
 }

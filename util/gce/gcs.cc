@@ -16,10 +16,12 @@
 #include "absl/strings/strip.h"
 #include "absl/types/optional.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "strings/escaping.h"
 #include "util/asio/fiber_socket.h"
 #include "util/asio/io_context.h"
 #include "util/http/beast_rj_utils.h"
+#include "util/stats/varz_stats.h"
 
 DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
 
@@ -33,6 +35,11 @@ namespace rj = rapidjson;
 static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
+
+unique_ptr<VarzQps> gcs_writes;
+unique_ptr<VarzMapAverage5m> gcs_latency;
+
+once_flag gcs_write_set_flag;
 
 inline absl::string_view absl_sv(beast::string_view s) {
   return absl::string_view{s.data(), s.size()};
@@ -586,6 +593,11 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
 
   CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
 
+  std::call_once(gcs_write_set_flag, [] {
+    gcs_writes.reset(new VarzQps("gcs-writes"));
+    gcs_latency.reset(new VarzMapAverage5m("gcs-latency"));
+  });
+
   string url = "/upload/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?uploadType=resumable&name=");
   strings::AppendEncodedUrl(obj_path, &url);
@@ -617,6 +629,7 @@ util::Status GCS::Write(strings::ByteRange src) {
   CHECK(!src.empty());
   WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
   CHECK(wh && !wh->url.empty());
+  CHECK(io_context_.InContextThread());
 
   while (wh->Append(&src)) {
     h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
@@ -631,26 +644,37 @@ util::Status GCS::Write(strings::ByteRange src) {
 
     h2::response<h2::dynamic_body> resp_msg;
     error_code ec;
-    for (unsigned i = 0; i < 3; ++i) {
-      VLOG(1) << "UploadReq: " << i << " " << req;
+    unsigned retry = 0;
+    uint64_t start = base::GetMonotonicMicrosFast();
+
+    for (; retry < 3; ++retry) {
+      VLOG(1) << "UploadReq" << retry << ": " << req;
       ec = https_client_->Send(req, &resp_msg);
       if (ec) {
-        LOG(WARNING) << "retrying " << i << " after " << ec;
+        LOG(WARNING) << "retrying " << retry<< " after " << ec << "/" << ec.message();
+        gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
         continue;
       }
 
-      VLOG(1) << "UploadResp: " << i << " " << resp_msg;
+      VLOG(1) << "UploadResp" << retry << ": " << resp_msg;
 
       if (h2::status::permanent_redirect == resp_msg.result())
         break;
 
-      if (resp_msg.result() == h2::status::service_unavailable) {
+      h2::status_class st_class = h2::to_status_class(resp_msg.result());
+      if (st_class == h2::status_class::server_error) {
+        VLOG(1) << "Retrying the service "<< retry;
+        this_fiber::sleep_for(10ms);
         https_client_->schedule_reconnect();
+        gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
         continue;
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
     RETURN_EC_STATUS(ec);
+    if (h2::status::service_unavailable == resp_msg.result()) {
+      LOG(FATAL) << "Service unavailable " << resp_msg << " after " << retry << " retries";
+    }
 
     auto it = resp_msg.find(h2::field::range);
     CHECK(it != resp_msg.end()) << resp_msg;
@@ -666,6 +690,9 @@ util::Status GCS::Write(strings::ByteRange src) {
     wh->body_mb.consume(body_size);
     wh->uploaded = to;
     DCHECK_EQ(0, wh->body_mb.size());
+
+    gcs_writes->Inc();
+    gcs_latency->IncBy("write", base::GetMonotonicMicrosFast() - start);
 
     if (src.empty())
       break;
@@ -773,20 +800,23 @@ Status GCS::RefreshToken(Request* req) {
 }
 
 template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<RespBody>* resp) {
-  for (unsigned i = 0; i < 2; ++i) {
-    VLOG(1) << "Req: " << *req;
+  for (unsigned i = 0; i < 3; ++i) {
+    VLOG(1) << "HttpReq" << i << ": " << *req;
 
     error_code ec = https_client_->Send(*req, resp);
     if (ec) {
       return ToStatus(ec);
     }
-    VLOG(1) << "Resp: " << *resp;
+    VLOG(1) << "HttpResp" << i << ": " << *resp;
 
-    bool is_auth_ok = !IsUnauthorized(*resp);
-    if (is_auth_ok) {
+    if (resp->result() == h2::status::ok) {
       break;
+    };
+
+    if (IsUnauthorized(*resp)) {
+      RETURN_IF_ERROR(RefreshToken(req));
+      continue;
     }
-    RETURN_IF_ERROR(RefreshToken(req));
     *resp = Response<RespBody>{};
   }
   return Status::OK;
