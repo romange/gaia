@@ -4,6 +4,7 @@ set -e
 
 apt install -y cmake libunwind-dev zip flex bison ninja-build autoconf-archive
 apt install -y curl
+gcc --version
 
 BVER=1.71.0
 BOOST=boost_${BVER//./_}   # replace all . with _
