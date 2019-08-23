@@ -4,10 +4,13 @@ set -e
 
 apt install -y cmake libunwind-dev zip flex bison ninja-build autoconf-archive
 apt install -y curl
-gcc --version
+g++ --version
 
 BVER=1.71.0
 BOOST=boost_${BVER//./_}   # replace all . with _
+
+# For sake of boost install we always use g++.
+export CXX=g++
 
 install_boost() {
     mkdir -p /tmp/boost && pushd /tmp/boost
@@ -21,11 +24,8 @@ install_boost() {
     booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"
     cd $BOOST
     boostrap_cmd=`readlink -f bootstrap.sh`
-    g++ -dumpmachine
-    echo after dumpmachine
-    cd tools/build/src/engine/
-    ./build.sh gcc
-    cd -
+
+    echo "CXX compiler ${CXX}"
     echo "Running ${boostrap_cmd} ${booststap_arg}"
     ${boostrap_cmd} ${booststap_arg} || { cat bootstrap.log; return 1; }
     b2_args=(define=BOOST_COROUTINES_NO_DEPRECATION_WARNING=1 link=shared variant=release debug-symbols=on
