@@ -1,4 +1,4 @@
-add_library(http_v2 http_conn_handler.cc status_page.cc profilez_handler.cc)
+add_library(http_v2 http_conn_handler.cc status_page.cc profilez_handler.cc prebuilt_beast.cc)
 cxx_link(http_v2 asio_fiber_lib proc_stats strings stats_lib fast_malloc)
 
 add_executable(http_main http_main.cc)
