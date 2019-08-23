@@ -20,11 +20,13 @@ install_boost() {
     booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"
     cd $BOOST
     boostrap_cmd=`readlink -f bootstrap.sh`
+    echo "Running ${boostrap_cmd} ${booststap_arg}"
     ${boostrap_cmd} ${booststap_arg}
     b2_args=(define=BOOST_COROUTINES_NO_DEPRECATION_WARNING=1 link=shared variant=release debug-symbols=on
              threading=multi --without-test --without-math --without-log --without-locale --without-wave
              --without-regex --without-python -j4)
 
+    echo "Building targets with ${b2_args[@]}"
     ./b2 "${b2_args[@]}" cxxflags='-std=c++14 -Wno-deprecated-declarations'
     ./b2 install "${b2_args[@]}" -d0
     chown ${SUDO_USER}:${SUDO_USER} -R ./
