@@ -21,6 +21,9 @@ install_boost() {
     booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"
     cd $BOOST
     boostrap_cmd=`readlink -f bootstrap.sh`
+    cd tools/build/src/engine/
+    ./build.sh gcc
+    cd -
     echo "Running ${boostrap_cmd} ${booststap_arg}"
     ${boostrap_cmd} ${booststap_arg} || { cat bootstrap.log; return 1; }
     b2_args=(define=BOOST_COROUTINES_NO_DEPRECATION_WARNING=1 link=shared variant=release debug-symbols=on
