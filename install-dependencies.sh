@@ -21,6 +21,8 @@ install_boost() {
     booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"
     cd $BOOST
     boostrap_cmd=`readlink -f bootstrap.sh`
+    g++ -dumpmachine
+    echo after dumpmachine
     cd tools/build/src/engine/
     ./build.sh gcc
     cd -
