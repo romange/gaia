@@ -6,7 +6,10 @@
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ssl/impl/src.hpp>
+
+#ifdef BOOST_ASIO_SEPARATE_COMPILATION
+  #include <boost/asio/ssl/impl/src.hpp>
+#endif
 
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -279,20 +282,21 @@ void GCE::Test_InjectAcessToken(std::string access_token) {
 }
 
 ::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
-  auto ec = stream->next_layer().ClientWaitToConnect(ms);
-  if (ec) {
-    VLOG(1) << "Error " << ec << "/" << ec.message() << " for socket "
-            << stream->next_layer().native_handle();
+  system::error_code ec;
+  for (unsigned i = 0; i < 2; ++i) {
+    ec = stream->next_layer().ClientWaitToConnect(ms);
+    if (ec) {
+      VLOG(1) << "Error " << i << ": " << ec << "/" << ec.message() << " for socket "
+              << stream->next_layer().native_handle();
 
+      continue;
+    }
+
+    stream->handshake(asio::ssl::stream_base::client, ec);
     return ec;
   }
 
-  stream->handshake(asio::ssl::stream_base::client, ec);
-  if (ec) {
-    return ec;
-  }
-
-  return ::boost::system::error_code{};
+  return ec;
 }
 
 }  // namespace util

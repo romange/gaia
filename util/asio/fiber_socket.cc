@@ -118,7 +118,8 @@ void FiberSocketImpl::ClientWorker() {
     if (status_) {
       VLOG(1) << "Status " << status_ << " for socket " << sock_.native_handle();
       error_code ec = Reconnect(hname_, port_);
-      VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message() << " is_open: " << is_open_;
+      VLOG(1) << "After  Reconnect: " << ec << "/" << ec.message() << " is_open: " << is_open_
+              << ", " << native_handle();
       if (ec && is_open_) {  // Only sleep for open socket for the next reconnect.
         this_fiber::sleep_for(10ms);
       }

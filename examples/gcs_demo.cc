@@ -106,7 +106,7 @@ void Run(const GCE& gce, IoContext* context) {
       status = gcs.Write(range);
       CHECK_STATUS(status);
     }
-    CHECK_STATUS(gcs.CloseWrite());
+    CHECK_STATUS(gcs.CloseWrite(false));
     return;
   }
 

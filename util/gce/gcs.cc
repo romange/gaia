@@ -236,7 +236,7 @@ auto HttpsClient::Connect(unsigned msec) -> error_code {
 }
 
 auto HttpsClient::InitSslClient() -> error_code {
-  VLOG(1) << "GCS::InitSslClient " << reconnect_needed_;
+  VLOG(2) << "Https::InitSslClient " << reconnect_needed_;
 
   error_code ec;
   if (!reconnect_needed_)
@@ -248,7 +248,7 @@ auto HttpsClient::InitSslClient() -> error_code {
   if (!ec) {
     reconnect_needed_ = false;
   } else {
-    VLOG(1) << "Error connecting " << ec;
+    VLOG(1) << "Error connecting " << ec << ", socket " << client_->next_layer().native_handle();
   }
   return ec;
 }
@@ -381,6 +381,8 @@ auto GCS::ListBuckets() -> ListBucketResult {
 auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode, ListObjectCb cb)
     -> ListObjectResult {
   CHECK(!bucket.empty());
+  VLOG(1) << "GCS::List " << native_handle();
+
   RETURN_IF_ERROR(PrepareConnection());
 
   string url = "/storage/v1/b/";
@@ -781,7 +783,7 @@ util::Status GCS::ClearConnState() {
 auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSeqResult {
   Status err_st;
   for (unsigned iters = 0; iters < 3; ++iters) {
-    VLOG(1) << "OpenSequentialInternal" << iters;
+    VLOG(1) << "OpenSequentialInternal" << iters << ": socket " << native_handle();
 
     parser->emplace();
     parser->value().body_limit(kuint64max);
@@ -820,7 +822,7 @@ Status GCS::RefreshToken(Request* req) {
 
 template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<RespBody>* resp) {
   for (unsigned i = 0; i < 3; ++i) {
-    VLOG(1) << "HttpReq" << i << ": " << *req;
+    VLOG(1) << "HttpReq" << i << ": " << *req << ", socket " << native_handle();
 
     error_code ec = https_client_->Send(*req, resp);
     if (ec) {
