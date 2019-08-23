@@ -51,7 +51,8 @@ class HttpsClient {
 
   SslStream* client() { return client_.get(); }
 
-  void schedule_reconnect() {reconnect_needed_ = true;}
+  void schedule_reconnect() { reconnect_needed_ = true;}
+  auto native_handle() { return client_->native_handle(); }
 
  private:
   error_code HandleError(const error_code& ec);
@@ -205,7 +206,8 @@ template <typename Parser> auto HttpsClient::Read(Parser* parser) -> error_code 
 }
 
 inline auto HttpsClient::HandleError(const error_code& ec) -> error_code {
-  if (ec && ec != ::boost::beast::http::error::need_buffer)
+  using err = ::boost::beast::http::error;
+  if (ec && ec != err::need_buffer && ec != err::partial_message)
     reconnect_needed_ = true;
   return ec;
 }

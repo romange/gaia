@@ -547,7 +547,7 @@ auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectRe
     left_available = range.size();
 
     error_code ec = https_client_->Read(&handler->parser.value());
-    if (!ec || ec == h2::error::need_buffer) {
+    if (!ec || ec == h2::error::need_buffer || ec == h2::error::partial_message) {
       size_t http_read = range.size() - left_available;
       DVLOG(2) << "Read " << http_read << " bytes from " << handler->offset << " with capacity "
                << range.size();
@@ -594,6 +594,8 @@ StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) 
   if (!res.ok()) {
     return res.status;
   }
+
+  VLOG(1) << "Opened gcs " << full_path << " on socket " << native_handle();
 
   return new GcsFile{this, res.obj};
 }
