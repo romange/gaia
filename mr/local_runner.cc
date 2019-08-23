@@ -27,13 +27,13 @@
 namespace mr3 {
 
 DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
+DECLARE_uint32(gcs_connect_deadline_ms);
 
 using namespace util;
 using namespace boost;
 using namespace std;
 using detail::DestFileSet;
 
-constexpr size_t kGcsConnectTimeout = 3000;
 namespace {
 
 using namespace intrusive;
@@ -125,8 +125,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   CHECK(io_context) << "Must run from IO context thread";
 
   GCS* gcs = new GCS(*gce_handle, io_context);
-  auto status = gcs->Connect(kGcsConnectTimeout);
-  CHECK_STATUS(status);
+  CHECK_STATUS(gcs->Connect(FLAGS_gcs_connect_deadline_ms));
 
   return unique_ptr<GCS, handle_keeper>(gcs, pt);
 }

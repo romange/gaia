@@ -20,6 +20,9 @@
 #include "util/zstd_sinksource.h"
 
 namespace mr3 {
+
+DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
+
 namespace detail {
 
 // For some reason disabling dest_file_force_gzfile performs slower than
@@ -140,7 +143,7 @@ void CompressHandle::Open() {
     IoContext& io_context = owner_->io_pool()->at(index);
     gcs_.reset(new util::GCS(*owner_->gce(), &io_context));
     io_context.AwaitSafe([&] {
-      CHECK_STATUS(gcs_->Connect(2000));
+      CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
       CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
     });
 
