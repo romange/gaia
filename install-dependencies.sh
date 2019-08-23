@@ -21,7 +21,7 @@ install_boost() {
     cd $BOOST
     boostrap_cmd=`readlink -f bootstrap.sh`
     echo "Running ${boostrap_cmd} ${booststap_arg}"
-    ${boostrap_cmd} ${booststap_arg}
+    ${boostrap_cmd} ${booststap_arg} || { cat bootstrap.log; return 1; }
     b2_args=(define=BOOST_COROUTINES_NO_DEPRECATION_WARNING=1 link=shared variant=release debug-symbols=on
              threading=multi --without-test --without-math --without-log --without-locale --without-wave
              --without-regex --without-python -j4)
