@@ -34,7 +34,7 @@ TEST_F(PeriodicTest, BasicTimer) {
   unsigned int count = 0;
   {
     std::unique_ptr<PeriodicTask> task(new PeriodicTask(cntx, milliseconds(1)));
-    task->Start([&count](int) { ++count; });
+    task->Start([&count](int delta) { count += delta; });
     SleepForMilliseconds(20);
     EXPECT_GT(count, 10);
   }
