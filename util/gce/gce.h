@@ -1,6 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+
 #pragma once
 
 #include <boost/asio/ssl.hpp>
@@ -11,9 +12,6 @@
 
 namespace util {
 class IoContext;
-class FiberSyncSocket;
-
-using SslStream = ::boost::asio::ssl::stream<FiberSyncSocket>;
 
 class GCE {
  public:
@@ -48,8 +46,5 @@ class GCE {
   std::unique_ptr<SslContext> ssl_ctx_;
   bool is_prod_env_ = false;
 };
-
-// TODO: To move to dedicated header related to SSL/HTTPS.
-::boost::system::error_code SslConnect(SslStream* stream, unsigned msec);
 
 }  // namespace util

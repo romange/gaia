@@ -44,7 +44,7 @@ class FiberSocketImpl {
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
   template <typename BS> size_t write_some(const BS& bufs, error_code& ec);
 
-  auto native_handle() { return sock_.native_handle(); }
+  next_layer_type::native_handle_type native_handle() { return sock_.native_handle(); }
 
   bool is_open() const { return is_open_; }
 

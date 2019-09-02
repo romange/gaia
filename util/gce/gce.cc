@@ -7,15 +7,10 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
-#ifdef BOOST_ASIO_SEPARATE_COMPILATION
-  #include <boost/asio/ssl/impl/src.hpp>
-#endif
-
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
-#include <boost/beast/http/read.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>  // for operator<<
 
@@ -29,6 +24,7 @@
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "util/asio/fiber_socket.h"
+#include "util/http/https_client.h"
 
 namespace util {
 using namespace std;
@@ -216,8 +212,8 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
     RETURN_ON_ERROR;
 
   } else {
-    SslStream stream(FiberSyncSocket{kDomain, kService, context}, *ssl_ctx_);
-    ec = SslConnect(&stream, 2000);
+    http::SslStream stream(FiberSyncSocket{kDomain, kService, context}, *ssl_ctx_);
+    ec = http::SslConnect(&stream, 2000);
     RETURN_ON_ERROR;
 
     h2::request<h2::string_body> req{h2::verb::post, "/token", 11};
@@ -279,24 +275,6 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
 void GCE::Test_InjectAcessToken(std::string access_token) {
   std::lock_guard<fibers::mutex> lk(mu_);
   access_token_.swap(access_token);
-}
-
-::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
-  system::error_code ec;
-  for (unsigned i = 0; i < 2; ++i) {
-    ec = stream->next_layer().ClientWaitToConnect(ms);
-    if (ec) {
-      VLOG(1) << "Error " << i << ": " << ec << "/" << ec.message() << " for socket "
-              << stream->next_layer().native_handle();
-
-      continue;
-    }
-
-    stream->handshake(asio::ssl::stream_base::client, ec);
-    return ec;
-  }
-
-  return ec;
 }
 
 }  // namespace util
