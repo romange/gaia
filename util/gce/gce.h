@@ -37,6 +37,7 @@ class GCE {
  private:
   util::Status ParseDefaultConfig();
   util::Status ReadDevCreds(const std::string& root_path);
+  util::StatusObject<std::string> ParseTokenResponse(std::string&& response) const;
 
   std::string project_id_, client_id_, client_secret_, account_id_, refresh_token_;
 

@@ -182,9 +182,6 @@ util::Status GCE::ReadDevCreds(const std::string& root_path) {
 }
 
 StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_refresh) const {
-  const char kDomain[] = "oauth2.googleapis.com";
-  const char kService[] = "443";
-
   if (!force_refresh) {
     std::lock_guard<fibers::mutex> lk(mu_);
     if (!access_token_.empty())
@@ -193,8 +190,7 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
 
   h2::response<h2::string_body> resp;
   error_code ec;
-  beast::flat_buffer buffer;
-  access_token_.clear();
+  
   if (is_prod_env_) {
     h2::request<h2::empty_body> req{
         h2::verb::get, "/computeMetadata/v1/instance/service-accounts/default/token", 11};
@@ -208,35 +204,31 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
     h2::write(socket, req, ec);
     RETURN_ON_ERROR;
 
+    beast::flat_buffer buffer;
     h2::read(socket, buffer, resp, ec);
     RETURN_ON_ERROR;
-
   } else {
-    http::SslStream stream(FiberSyncSocket{kDomain, kService, context}, *ssl_ctx_);
-    ec = http::SslConnect(&stream, 2000);
+    constexpr char kDomain[] = "oauth2.googleapis.com";
+
+    http::HttpsClient https_client(kDomain, context, ssl_ctx_.get());
+
+    ec = https_client.Connect(2000);
     RETURN_ON_ERROR;
 
     h2::request<h2::string_body> req{h2::verb::post, "/token", 11};
     req.set(h2::field::host, kDomain);
     req.set(h2::field::content_type, "application/x-www-form-urlencoded");
 
-    string body{"grant_type=refresh_token"};
-
-    absl::StrAppend(&body, "&client_secret=", client_secret(), "&refresh_token=", refresh_token());
+    string& body = req.body();
+    body = absl::StrCat("grant_type=refresh_token&client_secret=", client_secret(),
+                        "&refresh_token=", refresh_token());
     absl::StrAppend(&body, "&client_id=", client_id());
-
-    req.body().assign(body.begin(), body.end());
     req.prepare_payload();
     VLOG(1) << "Req: " << req;
 
-    h2::write(stream, req, ec);
+    ec = https_client.Send(req, &resp);
     if (ec) {
       return Status(absl::StrCat("Error sending access token request: ", ec.message()));
-    }
-
-    h2::read(stream, buffer, resp, ec);
-    if (ec) {
-      return Status(absl::StrCat("Error reading access token request: ", ec.message()));
     }
   }
 
@@ -245,11 +237,14 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
                   absl::StrCat("Http error ", string(resp.reason()), "Body: ", resp.body()));
   }
   VLOG(1) << "Resp: " << resp;
-  string& str = resp.body();
 
+  return ParseTokenResponse(std::move(resp.body()));
+}
+
+util::StatusObject<std::string> GCE::ParseTokenResponse(std::string&& response) const {
   rj::Document doc;
   constexpr unsigned kFlags = rj::kParseTrailingCommasFlag | rj::kParseCommentsFlag;
-  doc.ParseInsitu<kFlags>(&str.front());
+  doc.ParseInsitu<kFlags>(&response.front());
 
   if (doc.HasParseError()) {
     return Status(rj::GetParseError_En(doc.GetParseError()));
@@ -269,6 +264,7 @@ StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_ref
 
   std::lock_guard<fibers::mutex> lk(mu_);
   access_token_ = access_token;
+
   return access_token;
 }
 

@@ -17,6 +17,8 @@ namespace http {
 using namespace boost;
 namespace h2 = beast::http;
 
+constexpr const char kPort[] = "443";
+
 HttpsClient::HttpsClient(absl::string_view host, IoContext* context,
                          ::boost::asio::ssl::context* ssl_ctx)
     : io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {}
@@ -35,7 +37,7 @@ auto HttpsClient::InitSslClient() -> error_code {
   error_code ec;
   if (!reconnect_needed_)
     return ec;
-  client_.reset(new SslStream(FiberSyncSocket{host_name_, "443", &io_context_}, ssl_cntx_));
+  client_.reset(new SslStream(FiberSyncSocket{host_name_, kPort, &io_context_}, ssl_cntx_));
   client_->next_layer().set_keep_alive(true);
 
   ec = SslConnect(client_.get(), reconnect_msec_);
