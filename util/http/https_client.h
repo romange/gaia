@@ -33,8 +33,18 @@ class HttpsClient {
 
   error_code Connect(unsigned msec);
 
+  /*! @brief Sends http request but does not read response back.
+   *
+   *  Possibly retries and reconnects if there are problems with connection.
+   *  See set_retry_count method.
+   */
   template <typename Req> error_code Send(const Req& req);
 
+  /*! @brief Sends http request and reads response back.
+   *
+   *  Possibly retries and reconnects if there are problems with connection.
+   *  See set_retry_count method for details.
+   */
   template <typename Req, typename Resp> error_code Send(const Req& req, Resp* resp);
 
   template <typename Parser> error_code ReadHeader(Parser* parser);
@@ -46,10 +56,18 @@ class HttpsClient {
   SslStream* client() { return client_.get(); }
 
   void schedule_reconnect() { reconnect_needed_ = true; }
+
   auto native_handle() { return client_->native_handle(); }
+  uint32_t retry_count() const { return retry_cnt_;}
+  void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt;}
 
  private:
   error_code HandleError(const error_code& ec);
+
+  bool IsError(const error_code& ec) const {
+    using err = ::boost::beast::http::error;
+    return ec && ec != err::need_buffer && ec != err::partial_message;
+  }
 
   error_code ReconnectIfNeeded() {
     if (reconnect_needed_)
@@ -69,6 +87,7 @@ class HttpsClient {
 
   uint32_t reconnect_msec_ = 1000;
   bool reconnect_needed_ = true;
+  uint32_t retry_cnt_ = 1;
 };
 
 ::boost::system::error_code SslConnect(SslStream* stream, unsigned msec);
@@ -76,19 +95,33 @@ class HttpsClient {
 template <typename Req, typename Resp>
 auto HttpsClient::Send(const Req& req, Resp* resp) -> error_code {
   namespace h2 = ::boost::beast::http;
-  error_code ec = Send(req);
-  if (ec)
-    return ec;
-
-  h2::read(*client_, tmp_buffer_, *resp, ec);
+  error_code ec;
+  for (uint32_t i = 0; i < retry_cnt_; ++i) {
+     ec = Send(req);
+     if (IsError(ec))  // Send already retries.
+       break;
+     h2::read(*client_, tmp_buffer_, *resp, ec);
+     if (!IsError(ec)) {
+       return ec;
+     }
+     *resp = Resp{};
+  }
   return HandleError(ec);
 }
 
 template <typename Req> auto HttpsClient::Send(const Req& req) -> error_code {
-  error_code ec = ReconnectIfNeeded();
-  if (ec)
-    return ec;
-  ::boost::beast::http::write(*client_, req, ec);
+  error_code ec;
+  for (uint32_t i = 0; i < retry_cnt_; ++i) {
+    ec = ReconnectIfNeeded();
+    if (IsError(ec))
+      continue;
+    ::boost::beast::http::write(*client_, req, ec);
+    if (IsError(ec)) {
+      reconnect_needed_ = true;
+    } else {
+      return ec;
+    }
+  }
   return HandleError(ec);
 }
 
@@ -110,8 +143,7 @@ template <typename Parser> auto HttpsClient::Read(Parser* parser) -> error_code 
 }
 
 inline auto HttpsClient::HandleError(const error_code& ec) -> error_code {
-  using err = ::boost::beast::http::error;
-  if (ec && ec != err::need_buffer && ec != err::partial_message)
+  if (IsError(ec))
     reconnect_needed_ = true;
   return ec;
 }

@@ -99,8 +99,8 @@ class GCS {
 
   OpenSeqResult OpenSequentialInternal(Request* req, ReusableParser* parser);
 
-  // Higher level function. Handles token expiration use-cases.
-  template <typename RespBody> util::Status HttpMessage(Request* req, Response<RespBody>* resp);
+  //! Higher level function. Handles auth token expiration use-case.
+  template <typename RespBody> util::Status SendWithToken(Request* req, Response<RespBody>* resp);
 
   // Returns true if the request succeeded and the response is ok.
   // Returns false if we had an intermittent error and need to retry.

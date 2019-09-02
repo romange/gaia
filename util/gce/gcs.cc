@@ -237,7 +237,9 @@ class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, Wri
 
 GCS::GCS(const GCE& gce, IoContext* context)
     : gce_(gce), io_context_(*context), conn_state_(new ConnState),
-      https_client_(new http::HttpsClient(kDomain, context, &gce_.ssl_context())) {}
+      https_client_(new http::HttpsClient(kDomain, context, &gce_.ssl_context())) {
+  https_client_->set_retry_count(3);
+}
 
 GCS::~GCS() {
   VLOG(1) << "GCS::~GCS";
@@ -287,7 +289,7 @@ auto GCS::ListBuckets() -> ListBucketResult {
   while (true) {
     h2::response<h2::dynamic_body> resp_msg;
 
-    RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
+    RETURN_IF_ERROR(SendWithToken(&http_req, &resp_msg));
     if (resp_msg.result() != h2::status::ok) {
       return HttpError(resp_msg);
     }
@@ -342,7 +344,7 @@ auto GCS::List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
   rj::Document doc;
   while (true) {
     h2::response<h2::dynamic_body> resp_msg;
-    RETURN_IF_ERROR(HttpMessage(&http_req, &resp_msg));
+    RETURN_IF_ERROR(SendWithToken(&http_req, &resp_msg));
     CHECK_EQ(h2::status::ok, resp_msg.result()) << resp_msg;
 
     http::RjBufSequenceStream is(resp_msg.body().data());
@@ -400,7 +402,7 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   body.size = range.size();
   body.more = false;
 
-  RETURN_IF_ERROR(HttpMessage(&req, &resp_msg));
+  RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
   if (resp_msg.result() != h2::status::partial_content) {
     return Status(StatusCode::IO_ERROR, string(resp_msg.reason()));
   }
@@ -564,7 +566,7 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
 
   req.prepare_payload();
 
-  RETURN_IF_ERROR(HttpMessage(&req, &resp_msg));
+  RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
   if (resp_msg.result() != h2::status::ok) {
     return HttpError(resp_msg);
   }
@@ -608,15 +610,11 @@ util::Status GCS::Write(strings::ByteRange src) {
       VLOG(1) << "UploadReq" << retry << ": " << req << " socket "
               << native_handle();
       ec = https_client_->Send(req, &resp_msg);
-      if (ec) {
-        LOG(WARNING) << "retrying " << retry<< " after " << ec << "/" << ec.message();
-        gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
-        continue;
-      }
+      RETURN_EC_STATUS(ec);
 
       VLOG(1) << "UploadResp" << retry << ": " << resp_msg;
 
-      if (h2::status::permanent_redirect == resp_msg.result())
+      if (h2::status::permanent_redirect == resp_msg.result())  // 308
         break;
 
       h2::status_class st_class = h2::to_status_class(resp_msg.result());
@@ -769,8 +767,8 @@ Status GCS::RefreshToken(Request* req) {
   return Status::OK;
 }
 
-template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<RespBody>* resp) {
-  for (unsigned i = 0; i < 3; ++i) {
+template <typename RespBody> Status GCS::SendWithToken(Request* req, Response<RespBody>* resp) {
+  for (unsigned i = 0; i < 2; ++i) {  // Iterate for possible token refresh.
     VLOG(1) << "HttpReq" << i << ": " << *req << ", socket " << native_handle();
 
     error_code ec = https_client_->Send(*req, resp);
@@ -787,7 +785,7 @@ template <typename RespBody> Status GCS::HttpMessage(Request* req, Response<Resp
       RETURN_IF_ERROR(RefreshToken(req));
       continue;
     }
-    *resp = Response<RespBody>{};
+    LOG(FATAL) << "Unexpected response " << *resp;
   }
   return Status::OK;
 }
