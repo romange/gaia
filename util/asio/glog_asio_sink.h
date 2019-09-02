@@ -8,6 +8,7 @@
 #include <boost/fiber/buffered_channel.hpp>
 
 #include "util/asio/io_context.h"
+#include "util/fibers/event_count.h"
 
 namespace util {
 
@@ -18,6 +19,8 @@ class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
 
   void Run() override;
   void Cancel() override;
+
+  void WaitTillRun();
 
  protected:
   struct Item {
@@ -45,6 +48,9 @@ class GlogAsioSink : public IoContext::Cancellable, ::google::LogSink {
             int line, const struct ::tm* tm_time, const char* message, size_t message_len) override;
 
   void WaitTillSent() override;
+
+  std::atomic_bool run_started_{false};
+  fibers_ext::EventCount ec_;
 };
 
 }  // namespace util

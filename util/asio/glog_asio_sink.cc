@@ -19,6 +19,8 @@ GlogAsioSink::~GlogAsioSink() noexcept {
 void GlogAsioSink::Run() {
   google::AddLogSink(this);
   RAW_DLOG(INFO, "Started running");
+  run_started_.store(true, std::memory_order_seq_cst);
+  ec_.notifyAll();
 
   Item item;
   while (true) {
@@ -39,6 +41,10 @@ void GlogAsioSink::Cancel() {
   msg_q_.close();
 }
 
+void GlogAsioSink::WaitTillRun() {
+  ec_.await([this] { return run_started_.load(std::memory_order_acquire); });
+}
+
 void GlogAsioSink::send(google::LogSeverity severity, const char* full_filename,
                       const char* base_filename, int line, const struct ::tm* tm_time,
                       const char* message, size_t message_len) {
@@ -53,7 +59,7 @@ void GlogAsioSink::send(google::LogSeverity severity, const char* full_filename,
   if (st != channel_op_status::success) {
     ++lost_messages_;
   }
-  // RAW_VLOG(1, "send : %d %d", severity, int(st));
+  RAW_VLOG(1, "GlogAsioSink::SendExit : %d", int(st));
 }
 
 void GlogAsioSink::WaitTillSent() {

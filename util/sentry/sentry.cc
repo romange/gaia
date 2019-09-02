@@ -78,6 +78,8 @@ SentrySink::SentrySink(Dsn dsn, IoContext* io_context) : client_(io_context), ds
 }
 
 void SentrySink::HandleItem(const Item& item) {
+  RAW_VLOG(2, "SentrySink::HandleItem");
+
   auto ec = client_.Connect(dsn_.hostname, port_);
   if (ec) {
     auto msg = ec.message();
@@ -143,7 +145,9 @@ void EnableSentry(IoContext* context) {
   CHECK(ParseDsn(FLAGS_sentry_dsn, &dsn)) << "Could not parse " << FLAGS_sentry_dsn;
 
   auto ptr = std::make_unique<SentrySink>(std::move(dsn), context);
-  context->AttachCancellable(ptr.release());
+  context->AttachCancellable(ptr.get());
+  ptr->WaitTillRun();
+  ptr.release();
 }
 
 }  // namespace util

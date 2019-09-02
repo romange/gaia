@@ -289,8 +289,8 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     DCHECK_GT(ready_cnt_, 0);
     --ready_cnt_;
 
-    DVLOG(2) << "Switching from " << short_id() << " to " << short_id(ctx) << " switch_cnt("
-             << switch_cnt_ << ")";
+    RAW_VLOG(2, "Switching from ", short_id(), " to ", short_id(ctx), " switch_cnt(",
+             switch_cnt_, ")");
     DCHECK(ctx != fibers::context::active());
 
     // Checking if we want to resume to main loop prematurely to preserve responsiveness
@@ -307,7 +307,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
       // we are sure there is at least one worker fiber, and the main loop won't stuck in run_one.
     }
 
-    DVLOG(3) << "pick_next: " << short_id(ctx);
+    RAW_VLOG(3, "pick_next: ", short_id(ctx));
 
     return ctx;
   }
@@ -319,12 +319,12 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     fibers::context* ctx = &dispatch_q.front();
     dispatch_q.pop_front();
 
-    DVLOG(2) << "Switching from " << short_id() << " to dispatch " << short_id(ctx)
-             << ", mask: " << unsigned(mask_);
+    RAW_VLOG(2, "Switching from ", short_id(), " to dispatch ", short_id(ctx),
+             ", mask: ", unsigned(mask_));
     return ctx;
   }
 
-  DVLOG(2) << "pick_next: null";
+  RAW_VLOG(2, "pick_next: null");
 
   return nullptr;
 }

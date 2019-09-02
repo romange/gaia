@@ -2,7 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 // Based on the design of folly event_count which in turn based on
-// Dmitry Vyukov's propasal at
+// Dmitry Vyukov's proposal at
 // https://software.intel.com/en-us/forums/intel-threading-building-blocks/topic/299245
 #pragma once
 

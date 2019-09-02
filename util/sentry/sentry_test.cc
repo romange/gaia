@@ -41,8 +41,9 @@ TEST_F(SentryTest, Basic) {
 
   FLAGS_sentry_dsn = absl::StrCat("foo@localhost:", port_, "/id");
   EnableSentry(&pool_->GetNextContext());
+  // this_fiber::sleep_for(10ms);
+
   LOG(ERROR) << "Try";
-  this_fiber::sleep_for(10ms);
   done.Wait();
 
   EXPECT_EQ(1, req_);
