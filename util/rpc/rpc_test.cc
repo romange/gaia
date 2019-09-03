@@ -105,11 +105,14 @@ TEST_F(RpcTest, InvalidAndConnect) {
   frame_.header_size = send_msg.size();
   frame_.letter_size = 0;
 
+  LOG(INFO) << "Before Connect " << sock2_->native_handle();
   ec_ = sock2_->ClientWaitToConnect(1000);
   ASSERT_FALSE(ec_);
+  LOG(INFO) << "After Connect " << sock2_->native_handle();
+
   io_cntx.AwaitSafe([&] {
     asio::write(*sock2_, make_buffer_seq(FrameBuffer(), send_msg), ec_);
-    ASSERT_FALSE(ec_);
+    ASSERT_FALSE(ec_) << ec_.message();
     ec_ = frame_.Read(sock2_.get());
     ASSERT_FALSE(ec_) << ec_.message();
   });
