@@ -239,7 +239,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     ++record_num;
 
-    if (record_num % 1000 == 0) {
+    if (record_num % 100 == 0) {
       this_fiber::yield();
     }
 
@@ -262,7 +262,11 @@ util::VarzValue::Map MapperExecutor::GetStats() const {
   util::VarzValue::Map res;
   atomic<size_t> parse_errors{0}, record_read{0};
 
+  LOG(INFO) << "MapperExecutor::GetStats";
+
   pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
+    LOG(INFO) << "MapperExecutor::GetStats CB";
+
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
       record_read.fetch_add(aux_local->records_read, memory_order_relaxed);
