@@ -102,7 +102,7 @@ class Pipeline {
   std::vector<std::shared_ptr<detail::TableBase>> tables_;
 
   ::boost::fibers::mutex mu_;
-  std::unique_ptr<OperatorExecutor> executor_;  // guarded by mu_
+  std::shared_ptr<OperatorExecutor> executor_;  // guarded by mu_
   std::atomic_bool stopped_{false};
 
   RawContext::FreqMapRegistry freq_maps_;

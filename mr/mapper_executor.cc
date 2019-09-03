@@ -205,6 +205,8 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper) {
   this_fiber::properties<IoFiberProperties>().set_name("MapFiber");
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL);
+
   PerIoStruct* aux_local = per_io_.get();
   RawContext* raw_context = aux_local->raw_context.get();
   CHECK(raw_context);
@@ -237,6 +239,10 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     ++record_num;
 
+    if (record_num % 1000 == 0) {
+      this_fiber::yield();
+    }
+
     // TODO: to pass it as argument to Runner::ProcessInputFile.
     if (FLAGS_map_limit && record_num > FLAGS_map_limit) {
       continue;
@@ -248,10 +254,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     SetPosition(pp.first, raw_context);
 
     cb(std::move(pp.second));
-
-    if (++record_num % 1000 == 0) {
-      this_fiber::yield();
-    }
   }
   VLOG(1) << "MapFiber finished " << record_num;
 }
@@ -260,15 +262,19 @@ util::VarzValue::Map MapperExecutor::GetStats() const {
   util::VarzValue::Map res;
   atomic<size_t> parse_errors{0}, record_read{0};
 
-  pool_->AwaitOnAll([&](IoContext& io) {
+  pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
     PerIoStruct* aux_local = per_io_.get();
-    record_read.fetch_add(aux_local->records_read, memory_order_relaxed);
-    if (aux_local->raw_context) {
-      parse_errors.fetch_add(aux_local->raw_context->parse_errors(), memory_order_relaxed);
+    if (aux_local) {
+      record_read.fetch_add(aux_local->records_read, memory_order_relaxed);
+      if (aux_local->raw_context) {
+        parse_errors.fetch_add(aux_local->raw_context->parse_errors(), memory_order_relaxed);
+      }
     }
   });
+
   res.emplace_back("parse_errors", util::VarzValue::FromInt(parse_errors.load()));
   res.emplace_back("records_read", util::VarzValue::FromInt(record_read.load()));
+
   return res;
 }
 

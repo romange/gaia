@@ -36,14 +36,14 @@ class HttpsClient {
   /*! @brief Sends http request but does not read response back.
    *
    *  Possibly retries and reconnects if there are problems with connection.
-   *  See set_retry_count method.
+   *  See set_retry_count(uint32_t) method.
    */
   template <typename Req> error_code Send(const Req& req);
 
   /*! @brief Sends http request and reads response back.
    *
    *  Possibly retries and reconnects if there are problems with connection.
-   *  See set_retry_count method for details.
+   *  See set_retry_count(uint32_t) method for details.
    */
   template <typename Req, typename Resp> error_code Send(const Req& req, Resp* resp);
 
@@ -59,6 +59,8 @@ class HttpsClient {
 
   auto native_handle() { return client_->native_handle(); }
   uint32_t retry_count() const { return retry_cnt_;}
+
+  //! Sets number of retries for Send(...) methods.
   void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt;}
 
  private:

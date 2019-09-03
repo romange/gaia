@@ -81,10 +81,10 @@ void Pipeline::Run(Runner* runner) {
     std::unique_lock<fibers::mutex> lk(mu_);
     switch (op.type()) {
       case pb::Operator::GROUP:
-        executor_.reset(new JoinerExecutor{pool_, runner});
+        executor_ = std::make_shared<JoinerExecutor>(pool_, runner);
         break;
       default:
-        executor_.reset(new MapperExecutor{pool_, runner});
+        executor_ = std::make_shared<MapperExecutor>(pool_, runner);
     }
 
     executor_->Init(freq_maps_);

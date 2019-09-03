@@ -13,14 +13,14 @@
 namespace util {
 namespace fibers_ext {
 
-/*
-  This is single producer - single consumer thread-safe channel.
-  It's fiber friendly, which means, multiple fibers at each end-point can use the channel:
-  K fibers from producer thread can push and N fibers from consumer thread can pull the records.
-  It has blocking interface that suspends blocked fibers upon empty/full conditions.
-  It also can be used for single-thread/multiple-fibers scenario.
-  This class designed to be pretty efficient by reducing the contention on its synchronization
-  primitives to minimum.
+/*!
+  \brief Single producer - single consumer thread-safe, fiber-friendly channel.
+
+  Fiber friendly - means that multiple fibers within a single thread at each end-point
+  can use the channel: K fibers from producer thread can push and N fibers from consumer thread
+  can pull the records. It has optional blocking interface that suspends blocked fibers upon
+  empty/full conditions. This class designed to be pretty efficient by reducing the contention
+  on its synchronization primitives to minimum.
 */
 template <typename T> class SimpleChannel {
   typedef ::boost::fibers::context::wait_queue_t wait_queue_t;
@@ -34,15 +34,17 @@ template <typename T> class SimpleChannel {
   // Blocking call. Returns false if channel is closed, true otherwise with the popped value.
   bool Pop(T& dest);
 
-  // Should be called only from the producer side. Signals the consumers that the channel
-  // is going to be close. Consumers may still pop the existing items until Pop() return false.
+  /*! /brief Should be called only from the producer side.
 
-  // This function does not block, only puts the channel into closing state.
-  // It's responsibility of the caller to wait for the consumers to empty the remaining items
-  // and stop using the channel.
+      Signals the consumers that the channel is going to be close.
+      Consumers may still pop the existing items until Pop() return false.
+      This function does not block, only puts the channel into closing state.
+      It's responsibility of the caller to wait for the consumers to empty the remaining items
+      and stop using the channel.
+  */
   void StartClosing();
 
-  // Non blocking
+  //! Non blocking push.
   template <typename... Args> bool TryPush(Args&&... args) noexcept {
     if (q_.write(std::forward<Args>(args)...)) {
       if (++throttled_pushes_ > q_.capacity() / 3) {
@@ -54,6 +56,7 @@ template <typename T> class SimpleChannel {
     return false;
   }
 
+  //! Non blocking pop.
   bool TryPop(T& val) {
     if (q_.read(val)) {
       return true;

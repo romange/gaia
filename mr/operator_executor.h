@@ -15,7 +15,14 @@ class IoContextPool;
 namespace mr3 {
 class InputBase;
 
-class OperatorExecutor {
+
+/*! \brief Base class for operator executors.
+    \author Roman Gershman
+
+    OperatorExecutor derives from std::enable_shared_from_this<> to allow flexible
+    ownership semantics when passing its objects between asynchronous callbacks.
+*/
+class OperatorExecutor : public std::enable_shared_from_this<OperatorExecutor> {
  public:
   OperatorExecutor(util::IoContextPool* pool, Runner* runner)
     : pool_(pool), runner_(runner) {}
