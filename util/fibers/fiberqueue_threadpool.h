@@ -46,6 +46,13 @@ class FiberQueue {
     }
   }
 
+  /**
+   * @brief Sends f to consumer and waits for it to finish runnning.
+   *
+   * @tparam Func
+   * @param f
+   * @return decltype(f())
+   */
   template <typename Func> auto Await(Func&& f) -> decltype(f()) {
     Done done;
     using ResultType = decltype(f());
@@ -60,6 +67,10 @@ class FiberQueue {
     return std::move(mover).get();
   }
 
+  /**
+   * @brief Notifies Run() function to empty the queue and to exit.
+   *        Does not block.
+   */
   void Shutdown();
 
   void Run();

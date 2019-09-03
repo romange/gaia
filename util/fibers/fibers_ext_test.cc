@@ -4,6 +4,7 @@
 #include "base/gtest.h"
 #include "base/walltime.h"
 
+#include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/fibers/simple_channel.h"
 
@@ -109,7 +110,35 @@ TEST_F(FibersTest, SimpleChannelDone) {
   t.join();
 }
 
+TEST_F(FibersTest, FiberQueue) {
+  IoContextPool pool{1};
+  pool.Run();
 
+  IoContext& cntx = pool.GetNextContext();
+  FiberQueue fq{32};
+
+  auto fiber = cntx.LaunchFiber([&] {
+    this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
+    fq.Run();
+  });
+
+  constexpr unsigned kIters = 10000;
+  size_t delay = 0;
+  size_t invocations = 0;
+  for (unsigned i = 0; i < kIters; ++i) {
+    auto start = base::GetMonotonicMicrosFast();
+    fq.Add([&, start] {
+      ASSERT_TRUE(cntx.InContextThread());
+      delay += base::GetMonotonicMicrosFast() - start;
+      ++invocations;
+    });
+  }
+  fq.Shutdown();
+  fiber.join();
+
+  EXPECT_EQ(kIters, invocations);
+  EXPECT_LT(delay / kIters, 30);
+}
 
 }  // namespace fibers_ext
 }  // namespace util

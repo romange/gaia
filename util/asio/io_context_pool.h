@@ -30,8 +30,8 @@ class IoContextPool {
   IoContextPool(const IoContextPool&) = delete;
   void operator=(const IoContextPool&) = delete;
 
-  // Construct the io_context pool.
-  // pool_size = 0 provides pool size as number of cpus.
+  //! Constructs io_context pool.
+  //! pool_size = 0 provides pool size equal to number of cpus.
   explicit IoContextPool(std::size_t pool_size = 0);
   ~IoContextPool();
 
