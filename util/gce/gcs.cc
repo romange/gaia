@@ -24,6 +24,8 @@
 #include "util/stats/varz_stats.h"
 
 DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
+DEFINE_bool(gcs_dry_write, false, "If set true do not really perform upload requests."
+                                  "Still creates gcs connections for upload.");
 
 namespace util {
 using namespace std;
@@ -609,8 +611,13 @@ util::Status GCS::Write(strings::ByteRange src) {
     for (; retry < 3; ++retry) {
       VLOG(1) << "UploadReq" << retry << ": " << req << " socket "
               << native_handle();
-      ec = https_client_->Send(req, &resp_msg);
-      RETURN_EC_STATUS(ec);
+      if (FLAGS_gcs_dry_write) {
+        resp_msg.set(h2::field::range, absl::StrCat("bytes=0-", to - 1));
+        resp_msg.result(h2::status::permanent_redirect);
+      } else {
+        ec = https_client_->Send(req, &resp_msg);
+        RETURN_EC_STATUS(ec);
+      }
 
       VLOG(1) << "UploadResp" << retry << ": " << resp_msg;
 
@@ -627,7 +634,6 @@ util::Status GCS::Write(strings::ByteRange src) {
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
-    RETURN_EC_STATUS(ec);
     if (h2::status::service_unavailable == resp_msg.result()) {
       LOG(FATAL) << "Service unavailable " << resp_msg << " after " << retry << " retries";
     }
@@ -678,9 +684,15 @@ util::Status GCS::CloseWrite(bool abort_write) {
   req.prepare_payload();
 
   VLOG(1) << "CloseWriteReq: " << req;
-  error_code ec = https_client_->Send(req, &resp_msg);
-  RETURN_EC_STATUS(ec);
-  VLOG(1) << "CloseWriteResp: " << resp_msg;
+  if (FLAGS_gcs_dry_write) {
+  } else {
+    error_code ec = https_client_->Send(req, &resp_msg);
+    RETURN_EC_STATUS(ec);
+    VLOG(1) << "CloseWriteResp: " << resp_msg;
+  }
+  if (resp_msg.result() != h2::status::ok) {
+    LOG(ERROR) << "Error closing GCS file " << resp_msg;
+  }
 
   conn_state_->emplace<absl::monostate>();
 
