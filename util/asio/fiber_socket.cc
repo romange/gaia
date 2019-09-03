@@ -12,9 +12,14 @@
 namespace util {
 
 using namespace boost;
-using namespace std::chrono_literals;
+using namespace std;
+using namespace chrono_literals;
 
 namespace detail {
+
+template <typename Duration> uint32_t ms_duration(const Duration& d) {
+  return chrono::duration_cast<chrono::milliseconds>(d).count();
+}
 
 using socket_t = FiberSocketImpl::next_layer_type;
 
@@ -24,7 +29,7 @@ struct FiberSocketImpl::ClientData {
   IoContext* io_cntx;
 
   fibers::mutex connect_mu;
-  ::std::chrono::steady_clock::duration connect_duration = ::std::chrono::seconds(2);
+  chrono::steady_clock::duration connect_duration = chrono::seconds(2);
 
   ClientData(IoContext* io) : io_cntx(io) {}
 };
@@ -128,7 +133,7 @@ void FiberSocketImpl::ClientWorker() {
     DCHECK(sock_.non_blocking());
 
     error_code ec;
-    VLOG(2) << "BeforeAsyncWait";
+    VLOG(3) << "BeforeAsyncWait";
     sock_.async_wait(socket_t::wait_read, fibers_ext::yield[ec]);
     if (ec) {
       LOG_IF(ERROR, is_open_) << "AsyncWait: " << ec.message();
@@ -146,11 +151,13 @@ void FiberSocketImpl::ClientWorker() {
       } else if (status_ == system::errc::resource_unavailable_try_again) {
         status_.clear();
       } else {
-        VLOG(1) << "SockReceive: " << status_.message();
+        VLOG(1) << "SockReceive: " << status_.message() << ", read_cnt " << 0;
+        sock_.close(ec);
+        LOG_IF(ERROR, ec) << "Could not close socket " << sock_.native_handle() << " " << ec;
       }
       continue;
     }
-    VLOG(2) << "BeforeCvReadWait";
+    VLOG(3) << "BeforeCvReadWait";
     auto should_iterate = [this] {
       return !is_open() || (read_state_ == READ_IDLE && rslice_.size() != rbuf_size_);
     };
@@ -159,9 +166,36 @@ void FiberSocketImpl::ClientWorker() {
     std::unique_lock<fibers::mutex> lock(mu);
     clientsock_data_->worker_cv.wait(lock, should_iterate);
 
-    VLOG(2) << "WorkerIteration: ";
+    VLOG(3) << "WorkerIteration: ";
   }
   VLOG(1) << "FiberSocketReadExit";
+}
+
+system::error_code OpenAndConfigure(bool keep_alive, asio::ip::tcp::socket& sock) {
+  using namespace asio::ip;
+  system::error_code ec;
+
+  if (!sock.is_open()) {
+    sock.open(tcp::v4(), ec);
+    if (ec)
+      return ec;
+    CHECK(sock.is_open());
+  }
+
+  // We close before we configure. That way we can reuse the same socket descriptor.
+  socket_t::reuse_address opt(true);
+  sock.set_option(opt, ec);
+  if (ec)
+    return ec;
+  socket_t::keep_alive opt2(keep_alive);
+  sock.set_option(opt2, ec);
+  if (ec)
+    return ec;
+
+  sock.non_blocking(true, ec);
+  if (ec)
+    return ec;
+  return system::error_code{};
 }
 
 system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
@@ -175,12 +209,6 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
 
   system::error_code ec;
 
-  socket_t::reuse_address opt(true);
-  sock_.set_option(opt, ec);
-
-  socket_t::keep_alive opt2(keep_alive_);
-  sock_.set_option(opt2, ec);
-
   VLOG(1) << "Before AsyncResolve for socket " << sock_.native_handle();
 
   // It seems that resolver waits for 10s and ignores cancel command.
@@ -189,23 +217,45 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
     VLOG(1) << "Resolver error " << ec;
     return ec;
   }
-  DVLOG(1) << "After AsyncResolve";
+  DVLOG(1) << "After AsyncResolve, got " << results.size() << " results";
 
   asio::steady_timer timer(asio_io_cntx, clientsock_data_->connect_duration);
   timer.async_wait([&](const system::error_code& ec) {
     if (!ec) {  // Successfully expired.
-      VLOG(1) << "Cancelling sock_";
+      VLOG(1) << "Cancelling socket " << sock_.native_handle() << " after "
+              << detail::ms_duration(clientsock_data_->connect_duration) << " millis.";
       sock_.cancel();
     }
   });
 
-  asio::async_connect(sock_, results, fibers_ext::yield[ec]);
-  VLOG(1) << "After async_connect " << ec << "/" << sock_.native_handle();
+  //! I do not use asio::async_connect because it closes the socket underneath and looses
+  //! all the configuration and options we set before connect.
+  size_t result_index = 0;
+  for (const auto& remote_dest : results) {
+    OpenAndConfigure(keep_alive_, sock_);
+
+    sock_.async_connect(remote_dest, fibers_ext::yield[ec]);
+
+    // If we succeeded - break the loop.
+    // Also, for operation aborted we do not iterate since it means we went over connect_duration limit.
+    if (!ec || ec == asio::error::operation_aborted)
+      break;
+    VLOG(2) << "Connect iteration " << result_index << ", error " << ec << " socket "
+            << sock_.native_handle();
+    ++result_index;
+    sock_.close(ec);
+  }
+  VLOG(1) << "After async_connect " << ec << "/" << sock_.native_handle() << " result index "
+          << result_index;
 
   if (ec) {
     SetStatus(ec, "reconnect");
   } else {
-    sock_.non_blocking(true);  // For some reason async_connect clears this option.
+    CHECK(sock_.non_blocking());
+
+    socket_t::keep_alive ka_opt;
+    sock_.get_option(ka_opt, ec);
+    CHECK_EQ(keep_alive_, ka_opt.value()) << keep_alive_;
 
     // Use mutex to so that WaitToConnect would be thread-safe.
     std::lock_guard<fibers::mutex> lock(clientsock_data_->connect_mu);
