@@ -91,7 +91,7 @@ class CompressHandle : public DestHandle {
 
  private:
   void Open() override;
-  void GcsWriteFiber();
+  void GcsWriteFiber(IoContext* io_context);
 
   size_t start_delta_ = 0;
   util::StringSink* compress_out_buf_ = nullptr;
@@ -137,27 +137,28 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
 void CompressHandle::Open() {
   if (owner_->is_gcs_dest()) {
     size_t index = queue_index_ % owner_->io_pool()->size();
-    absl::string_view bucket, path;
-    CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
 
     IoContext& io_context = owner_->io_pool()->at(index);
-    gcs_.reset(new util::GCS(*owner_->gce(), &io_context));
-    io_context.AwaitSafe([&] {
-      CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
-      CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
-    });
-
     out_queue_.reset(new fibers_ext::FiberQueue(32));
-    write_fiber_ = io_context.LaunchFiber([this] { GcsWriteFiber(); });
+    write_fiber_ = io_context.LaunchFiber([this, &io_context] { GcsWriteFiber(&io_context); });
   } else {
     write_file_ = Await([&] { return file::Open(full_path_); });
     CHECK(write_file_);
   }
 }
 
-void CompressHandle::GcsWriteFiber() {
+void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   // We want write fiber to have higher priority and initiate write as fast as possible.
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
+
+  static thread_local asio::ssl::context ssl_context = GCE::CheckedSslContext();
+
+  absl::string_view bucket, path;
+  CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
+
+  gcs_.reset(new util::GCS(*owner_->gce(), &ssl_context, io_context));
+  CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
+  CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
 
   out_queue_->Run();
 }

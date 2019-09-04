@@ -10,7 +10,7 @@ add_library(http_client_lib http_client.cc)
 cxx_link(http_client_lib strings asio_fiber_lib)
 
 add_library(https_client_lib https_client.cc)
-cxx_link(https_client_lib strings asio_fiber_lib http_beast_prebuilt ssl crypto)
+cxx_link(https_client_lib strings asio_fiber_lib absl_variant http_beast_prebuilt ssl crypto)
 
 add_library(http_test_lib http_testing.cc)
 cxx_link(http_test_lib http_v2 gaia_gtest_main TRDP::rapidjson)

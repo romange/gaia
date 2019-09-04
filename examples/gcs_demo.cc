@@ -8,12 +8,14 @@
 
 #include "base/init.h"
 #include "base/logging.h"
+#include "file/file_util.h"
+
 #include "util/gce/gce.h"
 #include "util/gce/gcs.h"
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
-#include "util/http/http_client.h"
+#include "util/http/https_client.h"
 
 using namespace std;
 using namespace boost;
@@ -27,6 +29,17 @@ DEFINE_string(access_token, "", "");
 DEFINE_string(upload, "", "");
 
 using FileQ = fibers::buffered_channel<string>;
+
+string ca_cert;
+
+static asio::ssl::context CheckedSslContext() {
+  auto res = http::CreateClientSslContext(ca_cert);
+
+  asio::ssl::context* ssl_cntx = absl::get_if<asio::ssl::context>(&res);
+  CHECK(ssl_cntx) << absl::get<system::error_code>(res);
+
+  return std::move(*ssl_cntx);
+}
 
 void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
   constexpr size_t kBufSize = 1 << 16;
@@ -57,7 +70,10 @@ void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
 
 void DownloadConsumer(const GCE& gce, IoContext* io_context, FileQ* q) {
   string obj_path;
-  GCS gcs(gce, io_context);
+
+  asio::ssl::context ssl_cntx = CheckedSslContext();
+
+  GCS gcs(gce, &ssl_cntx, io_context);
   CHECK_STATUS(gcs.Connect(2000));
   while (true) {
     fibers::channel_op_status st = q->pop(obj_path);
@@ -77,9 +93,10 @@ void Download(const GCE& gce, IoContextPool* pool) {
         [&](IoContext& io_context) { DownloadConsumer(gce, &io_context, &file_q); });
   });
   IoContext& io_context = pool->GetNextContext();
+  asio::ssl::context ssl_cntx = CheckedSslContext();
 
   auto producer = [&] {
-    GCS gcs(gce, &io_context);
+    GCS gcs(gce, &ssl_cntx, &io_context);
     CHECK_STATUS(gcs.Connect(2000));
     auto status = gcs.List(FLAGS_bucket, FLAGS_download, true,
                            [&](size_t sz, absl::string_view name) {
@@ -93,7 +110,9 @@ void Download(const GCE& gce, IoContextPool* pool) {
 }
 
 void Run(const GCE& gce, IoContext* context) {
-  GCS gcs(gce, context);
+  asio::ssl::context ssl_cntx = CheckedSslContext();
+
+  GCS gcs(gce, &ssl_cntx, context);
   CHECK_STATUS(gcs.Connect(2000));
 
   if (!FLAGS_upload.empty()) {
@@ -138,6 +157,8 @@ void Run(const GCE& gce, IoContext* context) {
 
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
+
+  file_util::ReadFileToStringOrDie("/etc/ssl/certs/ca-certificates.crt", &ca_cert);
 
   GCE gce;
   CHECK_STATUS(gce.Init());

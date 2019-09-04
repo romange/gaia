@@ -24,8 +24,9 @@
 #include "util/stats/varz_stats.h"
 
 DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
-DEFINE_bool(gcs_dry_write, false, "If set true do not really perform upload requests."
-                                  "Still creates gcs connections for upload.");
+DEFINE_bool(gcs_dry_write, false,
+            "If set true do not really perform upload requests."
+            "Still creates gcs connections for upload.");
 
 namespace util {
 using namespace std;
@@ -225,7 +226,6 @@ bool WriteHandler::Append(strings::ByteRange* src) {
   return body_mb.size() == body_mb.max_size();
 }
 
-
 class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
  public:
   ~ConnState() {
@@ -237,9 +237,9 @@ class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, Wri
   }
 };
 
-GCS::GCS(const GCE& gce, IoContext* context)
-    : gce_(gce), io_context_(*context), conn_state_(new ConnState),
-      https_client_(new http::HttpsClient(kDomain, context, &gce_.ssl_context())) {
+GCS::GCS(const GCE& gce, asio::ssl::context* ssl_cntx, IoContext* io_context)
+    : gce_(gce), io_context_(*io_context), conn_state_(new ConnState),
+      https_client_(new http::HttpsClient(kDomain, io_context, ssl_cntx)) {
   https_client_->set_retry_count(3);
 }
 
@@ -609,8 +609,7 @@ util::Status GCS::Write(strings::ByteRange src) {
     uint64_t start = base::GetMonotonicMicrosFast();
 
     for (; retry < 3; ++retry) {
-      VLOG(1) << "UploadReq" << retry << ": " << req << " socket "
-              << native_handle();
+      VLOG(1) << "UploadReq" << retry << ": " << req << " socket " << native_handle();
       if (FLAGS_gcs_dry_write) {
         resp_msg.set(h2::field::range, absl::StrCat("bytes=0-", to - 1));
         resp_msg.result(h2::status::permanent_redirect);
@@ -626,7 +625,7 @@ util::Status GCS::Write(strings::ByteRange src) {
 
       h2::status_class st_class = h2::to_status_class(resp_msg.result());
       if (st_class == h2::status_class::server_error) {
-        VLOG(1) << "Retrying the service "<< retry;
+        VLOG(1) << "Retrying the service " << retry;
         this_fiber::sleep_for(10ms);
         https_client_->schedule_reconnect();
         gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
@@ -819,9 +818,7 @@ std::string GCS::ToGcsPath(absl::string_view bucket, absl::string_view obj_path)
   return absl::StrCat(kGsUrl, bucket, "/", obj_path);
 }
 
-uint32_t GCS::native_handle() {
-  return https_client_->client()->next_layer().native_handle();
-}
+uint32_t GCS::native_handle() { return https_client_->client()->next_layer().native_handle(); }
 
 bool IsGcsPath(absl::string_view path) { return absl::StartsWith(path, kGsUrl); }
 

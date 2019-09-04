@@ -40,7 +40,7 @@ class GCS {
   using ListObjectResult = util::Status;
   using error_code = ::boost::system::error_code;
 
-  GCS(const GCE& gce, IoContext* context);
+  GCS(const GCE& gce, ::boost::asio::ssl::context* ssl_cntx, IoContext* io_context);
   ~GCS();
 
   util::Status Connect(unsigned msec);

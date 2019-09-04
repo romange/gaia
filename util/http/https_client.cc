@@ -8,16 +8,37 @@
 #include "util/asio/io_context.h"
 
 #ifdef BOOST_ASIO_SEPARATE_COMPILATION
-  #include <boost/asio/ssl/impl/src.hpp>
+#include <boost/asio/ssl/impl/src.hpp>
 #endif
 
 namespace util {
 namespace http {
 
 using namespace boost;
+using namespace std;
 namespace h2 = beast::http;
 
+namespace {
 constexpr const char kPort[] = "443";
+
+}  // namespace
+
+SslContextResult CreateClientSslContext(absl::string_view cert_string) {
+  system::error_code ec;
+  asio::ssl::context cntx{asio::ssl::context::tlsv12_client};
+
+  cntx.set_verify_mode(asio::ssl::verify_peer, ec);
+  if (ec) {
+    return SslContextResult(ec);
+  }
+
+  cntx.add_certificate_authority(asio::buffer(cert_string.data(), cert_string.size()), ec);
+  if (ec) {
+    return SslContextResult(ec);
+  }
+
+  return SslContextResult(std::move(cntx));
+}
 
 HttpsClient::HttpsClient(absl::string_view host, IoContext* context,
                          ::boost::asio::ssl::context* ssl_ctx)

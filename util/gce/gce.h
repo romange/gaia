@@ -17,6 +17,7 @@ class GCE {
  public:
   using SslContext = ::boost::asio::ssl::context;
   using error_code = ::boost::system::error_code;
+
   GCE() = default;
 
   Status Init();
@@ -27,7 +28,8 @@ class GCE {
   const std::string& account_id() const { return account_id_; }
   const std::string& refresh_token() const { return refresh_token_; }
 
-  SslContext& ssl_context() const { return *ssl_ctx_; }
+  static const char* GoogleCert();
+  static ::boost::asio::ssl::context CheckedSslContext();
 
   StatusObject<std::string> GetAccessToken(IoContext* context, bool force_refresh = false) const;
   bool is_prod_env() const { return is_prod_env_; }

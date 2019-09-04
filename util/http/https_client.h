@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <boost/asio/ssl.hpp>
+#include <boost/asio/ssl/stream.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/message.hpp>
@@ -13,6 +13,7 @@
 #include <boost/beast/http/write.hpp>
 
 #include "absl/strings/string_view.h"
+#include "absl/types/variant.h"
 #include "util/asio/fiber_socket.h"
 
 namespace util {
@@ -22,6 +23,10 @@ class FiberSyncSocket;
 namespace http {
 
 using SslStream = ::boost::asio::ssl::stream<FiberSyncSocket>;
+
+// Waiting for std::expected to arrive. Meanwhile we use this interface.
+using SslContextResult = absl::variant<::boost::system::error_code, ::boost::asio::ssl::context>;
+SslContextResult CreateClientSslContext(absl::string_view cert_string);
 
 class HttpsClient {
  public:
@@ -58,10 +63,10 @@ class HttpsClient {
   void schedule_reconnect() { reconnect_needed_ = true; }
 
   auto native_handle() { return client_->native_handle(); }
-  uint32_t retry_count() const { return retry_cnt_;}
+  uint32_t retry_count() const { return retry_cnt_; }
 
   //! Sets number of retries for Send(...) methods.
-  void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt;}
+  void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt; }
 
  private:
   error_code HandleError(const error_code& ec);
@@ -99,14 +104,14 @@ auto HttpsClient::Send(const Req& req, Resp* resp) -> error_code {
   namespace h2 = ::boost::beast::http;
   error_code ec;
   for (uint32_t i = 0; i < retry_cnt_; ++i) {
-     ec = Send(req);
-     if (IsError(ec))  // Send already retries.
-       break;
-     h2::read(*client_, tmp_buffer_, *resp, ec);
-     if (!IsError(ec)) {
-       return ec;
-     }
-     *resp = Resp{};
+    ec = Send(req);
+    if (IsError(ec))  // Send already retries.
+      break;
+    h2::read(*client_, tmp_buffer_, *resp, ec);
+    if (!IsError(ec)) {
+      return ec;
+    }
+    *resp = Resp{};
   }
   return HandleError(ec);
 }

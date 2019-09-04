@@ -44,8 +44,7 @@ struct LocalRunner::Impl {
  public:
   Impl(IoContextPool* p, const string& d)
       : io_pool_(p), data_dir(d), fq_pool(0, 128),
-      varz_stats_("local-runner", [this] { return GetStats();}) {
-  }
+        varz_stats_("local-runner", [this] { return GetStats(); }) {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -85,6 +84,8 @@ struct LocalRunner::Impl {
     vector<unique_ptr<GCS>> gcs_handles;
 
     base::Histogram record_fetch_hist;
+
+    absl::optional<asio::ssl::context> ssl_context;
   };
 
   struct handle_keeper {
@@ -99,7 +100,6 @@ struct LocalRunner::Impl {
 
   static thread_local std::unique_ptr<PerThread> per_thread_;
   util::VarzFunction varz_stats_;
-
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
@@ -108,6 +108,8 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   auto* pt = per_thread_.get();
   CHECK(pt);
   VLOG(1) << "GetGcsHandle: " << pt->gcs_handles.size();
+
+  CHECK(pt->ssl_context.has_value());
 
   for (auto it = pt->gcs_handles.begin(); it != pt->gcs_handles.end(); ++it) {
     if ((*it)->IsBusy()) {
@@ -124,7 +126,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   IoContext* io_context = io_pool_->GetThisContext();
   CHECK(io_context) << "Must run from IO context thread";
 
-  GCS* gcs = new GCS(*gce_handle, io_context);
+  GCS* gcs = new GCS(*gce_handle, &pt->ssl_context.value(), io_context);
   CHECK_STATUS(gcs->Connect(FLAGS_gcs_connect_deadline_ms));
 
   return unique_ptr<GCS, handle_keeper>(gcs, pt);
@@ -270,6 +272,10 @@ void LocalRunner::Impl::LazyGcsInit() {
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
+  if (!per_thread_->ssl_context) {
+    per_thread_->ssl_context = GCE::CheckedSslContext();
+  }
+
   {
     std::lock_guard<fibers::mutex> lk(gce_mu);
     if (!gce_handle) {
