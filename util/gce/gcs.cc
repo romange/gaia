@@ -794,6 +794,7 @@ template <typename RespBody> Status GCS::SendWithToken(Request* req, Response<Re
 
     if (IsUnauthorized(*resp)) {
       RETURN_IF_ERROR(RefreshToken(req));
+      *resp = Response<RespBody>{};
       continue;
     }
     LOG(FATAL) << "Unexpected response " << *resp;
