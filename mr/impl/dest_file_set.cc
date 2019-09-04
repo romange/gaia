@@ -8,6 +8,7 @@
 #include "absl/strings/str_cat.h"
 #include "base/hash.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 
 #include "file/file_util.h"
 #include "file/filesource.h"
@@ -16,10 +17,13 @@
 
 #include "util/asio/io_context_pool.h"
 #include "util/gce/gcs.h"
+#include "util/stats/varz_stats.h"
 #include "util/zlib_source.h"
 #include "util/zstd_sinksource.h"
 
 namespace mr3 {
+
+util::VarzMapAverage5m dest_files("dest-files-set");
 
 DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
 
@@ -85,8 +89,11 @@ inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
 class CompressHandle : public DestHandle {
  public:
   CompressHandle(DestFileSet* owner, const ShardId& sid);
+  ~CompressHandle() override;
 
   void Write(StringGenCb str) override;
+
+  // Closes the handle without blocking.
   void Close(bool abort_write) override;
 
  private:
@@ -134,6 +141,12 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
   }
 }
 
+CompressHandle::~CompressHandle() {
+  if (write_fiber_.joinable()) {
+    write_fiber_.join();
+  }
+}
+
 void CompressHandle::Open() {
   if (owner_->is_gcs_dest()) {
     size_t index = queue_index_ % owner_->io_pool()->size();
@@ -148,6 +161,8 @@ void CompressHandle::Open() {
 }
 
 void CompressHandle::GcsWriteFiber(IoContext* io_context) {
+  CHECK(io_context->InContextThread());
+
   // We want write fiber to have higher priority and initiate write as fast as possible.
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
 
@@ -161,6 +176,7 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
 
   out_queue_->Run();
+  gcs_.reset();
 }
 
 // CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.
@@ -182,9 +198,13 @@ void CompressHandle::Write(StringGenCb cb) {
       lk.unlock();
 
       if (out_queue_) {
-        out_queue_->Add([this, str = std::move(*tmp_str)] {
+        auto start = base::GetMonotonicMicrosFast();
+        out_queue_->Add([start, this, str = std::move(*tmp_str)] {
+          dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
         });
+        dest_files.IncBy("gcs-submit", base::GetMonotonicMicrosFast() - start);
+        this_fiber::yield();
       } else {
         // TODO: To support io_context based write-files like with GCS.
         owner_->pool()->Add(queue_index_, WriteCb(std::move(*tmp_str), write_file_));
@@ -200,6 +220,7 @@ void CompressHandle::Close(bool abort_write) {
 
     auto& buf = compress_out_buf_->contents();
     if (!buf.empty()) {
+      // Flush the rest of compressed data.
       if (out_queue_) {  // GCS flow.
         out_queue_->Add([this, str = std::move(buf)] {
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
@@ -212,12 +233,11 @@ void CompressHandle::Close(bool abort_write) {
   }
 
   if (out_queue_) {
-    out_queue_->Await([this, abort_write] {
+    // Send GCS closure callback and signal the queue to finish file but do not block on it.
+    out_queue_->Add([this, abort_write] {
       CHECK_STATUS(gcs_->CloseWrite(abort_write));
-      gcs_.reset();
     });
     out_queue_->Shutdown();
-    write_fiber_.join();
   } else {
     DestHandle::Close(abort_write);
   }
@@ -322,10 +342,12 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
 void DestFileSet::CloseAllHandles(bool abort_write) {
   std::lock_guard<fibers::mutex> lk(mu_);
 
+  // DestHandle::Close() does not block (on GCS) which allows us to signal all handles to close
+  // and then wait for them to actually close.
   for (auto& k_v : dest_files_) {
     k_v.second->Close(abort_write);
   }
-  dest_files_.clear();
+  dest_files_.clear();  // ~DestHandle() might block until all its resources finished.
 }
 
 std::string DestFileSet::ShardFilePath(const ShardId& key, int32 sub_shard) const {

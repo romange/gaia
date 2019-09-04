@@ -139,7 +139,7 @@ GcsFile::~GcsFile() {
   }
 }
 
-inline bool ShouldRetry(h2::status st) {
+inline bool DoesServerPushback(h2::status st) {
   return st == h2::status::too_many_requests ||
          h2::to_status_class(st) == h2::status_class::server_error;
 }
@@ -164,7 +164,7 @@ inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   flds->set(h2::field::range, std::move(tmp));
 }
 
-// [from, to) limited range out of total. If total is 0 then it's unknown.
+//! [from, to) limited range out of total. If total is 0 then it's unknown.
 inline void SetContentRange(size_t from, size_t to, size_t total, h2::fields* flds) {
   string tmp = absl::StrCat("bytes ", from, "-", to - 1, "/");
   if (total) {
@@ -225,6 +225,7 @@ bool WriteHandler::Append(strings::ByteRange* src) {
   DCHECK_LE(body_mb.size(), body_mb.max_size());
   return body_mb.size() == body_mb.max_size();
 }
+
 
 class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
  public:
@@ -440,15 +441,16 @@ StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_bod
     return true;  // all is good.
   }
 
-  if (ShouldRetry(msg.result())) {
-    RETURN_EC_STATUS(https_client_->DrainResponse(parser));
+  // Parse & drain whatever comes after problematic status.
+  // We must do it as long as we plan to use this connection for more requests.
+  RETURN_EC_STATUS(https_client_->DrainResponse(parser));
+
+  if (DoesServerPushback(msg.result())) {
     this_fiber::sleep_for(1s);
     return false;  // retry
   }
 
   if (IsUnauthorized(msg)) {
-    RETURN_EC_STATUS(https_client_->DrainResponse(parser));
-
     auto st = RefreshToken(req);
     if (!st.ok())
       return st;
@@ -553,6 +555,7 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   RETURN_IF_ERROR(PrepareConnection());
 
   CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
+  CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
 
   std::call_once(gcs_write_set_flag, [] {
     gcs_writes.reset(new VarzQps("gcs-writes"));
@@ -565,8 +568,9 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
 
   auto req = PrepareRequest(h2::verb::post, url, access_token_header_);
   h2::response<h2::dynamic_body> resp_msg;
-
   req.prepare_payload();
+
+  string upload_id;
 
   RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
   if (resp_msg.result() != h2::status::ok) {
@@ -576,12 +580,10 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   if (it == resp_msg.end()) {
     return Status(StatusCode::PARSE_ERROR, "Can not find location header");
   }
-  CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
+  upload_id = string(it->value());
 
   WriteHandler& wh = conn_state_->emplace<WriteHandler>();
-  wh.url = string(it->value());
-
-  // VLOG(1) << "Url: " << absl_sv(it->value());
+  wh.url = std::move(upload_id);
 
   return Status::OK;
 }
@@ -690,7 +692,7 @@ util::Status GCS::CloseWrite(bool abort_write) {
     VLOG(1) << "CloseWriteResp: " << resp_msg;
   }
   if (resp_msg.result() != h2::status::ok) {
-    LOG(ERROR) << "Error closing GCS file " << resp_msg;
+    LOG(ERROR) << "Error closing GCS file " << resp_msg << " for request: \n" << req;
   }
 
   conn_state_->emplace<absl::monostate>();
