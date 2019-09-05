@@ -12,14 +12,15 @@ namespace fibers_ext {
 class FiberQueueThreadPool;
 
 
-// MPSC task-queue that is consumed by a single consumer loop.
-// The loop is exposed as a function to incorporate into a thread or fiber of your choice.
+/**
+ * @brief MPSC task-queue that is handled by a single consumer loop.
+ *
+ * The loop is exposed as a function to incorporate into a thread or fiber of your choice.
+ */
 class FiberQueue {
   friend class FiberQueueThreadPool;
 
  public:
-  typedef std::function<void()> Func;
-
   explicit FiberQueue(unsigned queue_size = 128);
   FiberQueue();
 
@@ -47,18 +48,18 @@ class FiberQueue {
   }
 
   /**
-   * @brief Sends f to consumer and waits for it to finish runnning.
+   * @brief Sends f to consumer thread and waits for it to finish runnning.
    *
-   * @tparam Func
-   * @param f
+   * @tparam F
+   * @param f - a callback
    * @return decltype(f())
    */
-  template <typename Func> auto Await(Func&& f) -> decltype(f()) {
+  template <typename F> auto Await(F&& f) -> decltype(f()) {
     Done done;
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
 
-    Add([&mover, f = std::forward<Func>(f), done]() mutable {
+    Add([&mover, f = std::forward<F>(f), done]() mutable {
       mover.Apply(f);
       done.Notify();
     });
@@ -76,7 +77,10 @@ class FiberQueue {
   void Run();
 
  private:
-  using FuncQ = base::mpmc_bounded_queue<Func>;
+  typedef std::function<void()> CbFunc;
+
+
+  using FuncQ = base::mpmc_bounded_queue<CbFunc>;
   FuncQ queue_;
 
   EventCount push_ec_, pull_ec_;
@@ -86,17 +90,15 @@ class FiberQueue {
 // This thread pool has a global fiber-friendly queue for incoming tasks.
 class FiberQueueThreadPool {
  public:
-  typedef std::function<void()> Func;
-
   explicit FiberQueueThreadPool(unsigned num_threads = 0, unsigned queue_size = 128);
   ~FiberQueueThreadPool();
 
-  template <typename Func> auto Await(Func&& f) -> decltype(f()) {
+  template <typename F> auto Await(F&& f) -> decltype(f()) {
     Done done;
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
 
-    Add([&, f = std::forward<Func>(f), done]() mutable {
+    Add([&, f = std::forward<F>(f), done]() mutable {
       mover.Apply(f);
       done.Notify();
     });
@@ -105,12 +107,12 @@ class FiberQueueThreadPool {
     return std::move(mover).get();
   }
 
-  template <typename Func> auto Await(size_t worker_index, Func&& f) -> decltype(f()) {
+  template <typename F> auto Await(size_t worker_index, F&& f) -> decltype(f()) {
     Done done;
     using ResultType = decltype(f());
     detail::ResultMover<ResultType> mover;
 
-    Add(worker_index, [&, f = std::forward<Func>(f), done]() mutable {
+    Add(worker_index, [&, f = std::forward<F>(f), done]() mutable {
       mover.Apply(f);
       done.Notify();
     });

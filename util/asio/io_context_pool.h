@@ -17,8 +17,12 @@
 
 namespace util {
 
-/// @brief A pool of io_context objects.
-/// @author Roman Gershman
+/** @brief A pool of IoContext objects, representing and managing CPU resources of the system.
+ *  @author Roman Gershman
+ *
+ *  The main entry for launching asynchronous processes across all IO threads. For single thread
+ *  manager see IoContext class.
+ */
 class IoContextPool {
   template <typename Func, typename... Args>
   using AcceptArgsCheck =
@@ -30,12 +34,13 @@ class IoContextPool {
   IoContextPool(const IoContextPool&) = delete;
   void operator=(const IoContextPool&) = delete;
 
-  //! Constructs io_context pool.
-  //! pool_size = 0 provides pool size equal to number of cpus.
+  //! Constructs io_context pool with number of threads equal to 'pool_size'.
+  //! pool_size = 0 chooses automatically pool size equal to number of cores in the system.
   explicit IoContextPool(std::size_t pool_size = 0);
+
   ~IoContextPool();
 
-  /// Runs all io_context objects in the pool and exits.
+  //! Starts running all IoContext objects in the pool. Does not block.
   void Run();
 
   /*! @brief Stops all io_context objects in the pool.
@@ -45,7 +50,7 @@ class IoContextPool {
    */
   void Stop();
 
-  /// Get an io_context to use. Thread-safe.
+  //! Get an io_context to use. Thread-safe.
   IoContext& GetNextContext();
 
   IoContext& operator[](size_t i) { return context_arr_[i]; }
@@ -53,9 +58,12 @@ class IoContextPool {
 
   size_t size() const { return context_arr_.size(); }
 
-  // Runs func in all IO threads asynchronously. The task must be CPU-only non IO-blocking code
-  // because it runs directly in IO-fiber. MapTask runs asynchronously and will exit before
-  // the task finishes. The 'func' must accept context as its argument.
+  /*! @brief Runs func in all IO threads asynchronously.
+   *
+   * The task must be CPU-only non IO-blocking code because it runs directly in IO-fiber.
+   * MapTask runs asynchronously and will exit before  the task finishes.
+   * The 'func' must accept IoContext& as its argument.
+   */
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
@@ -65,7 +73,12 @@ class IoContextPool {
     }
   }
 
-  // Similar but Func accept the id (unsigned) of IoContext in the pool and IoContext&.
+  /*! @brief Runs func in all IO threads asynchronously.
+   *
+   * The task must be CPU-only non IO-blocking code because it runs directly in IO-fiber.
+   * MapTask runs asynchronously and will exit before  the task finishes.
+   * The 'func' must accept unsigned int (io context index) and IoContext& as its arguments.
+   */
   template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
   void AsyncOnAll(Func&& func) {
     for (unsigned i = 0; i < size(); ++i) {
@@ -75,8 +88,11 @@ class IoContextPool {
     }
   }
 
-  //! @brief Blocks until all the asynchronous calls to func return. Func must accept IoContext&.
-  //!
+  /**
+   * @brief Runs func in all IO threads asynchronously. Blocks until all the asynchronous calls to func return.
+   *
+   * Func must accept IoContext&.
+   */
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {
@@ -87,8 +103,11 @@ class IoContextPool {
     bc.Wait();
   }
 
-  // Blocks until all the asynchronous calls to func return. Func receives both the index and
-  // IoContext&.
+  /**
+   * @brief Blocks until all the asynchronous calls to func return. Func receives both the index
+   * and IoContext&. func must not block.
+   *
+   */
   template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
   void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
@@ -100,16 +119,28 @@ class IoContextPool {
     bc.Wait();
   }
 
-  // Runs `func` in a fiber asynchronously. func must accept IoContext&.
-  // The callback runs inside a wrapping fiber.
+  /**
+   * @brief Runs `func` in a fiber asynchronously. func must accept IoContext&.
+   *        func may fiber-block.
+   *
+   * @param func
+   *
+   * 'func' callback runs inside a wrapping fiber.
+   */
   template <typename Func> void AsyncFiberOnAll(Func&& func) {
     AsyncOnAll([func = std::forward<Func>(func)](IoContext& context) {
       ::boost::fibers::fiber(func, std::ref(context)).detach();
     });
   }
 
-  // Runs func in all IO threads in parallel, but waits for all the callbacks to finish.
-  // The callback runs inside a wrapping fiber.
+  /**
+   * @brief Runs `func` wrapped in fiber on all IO threads in parallel. func must accept IoContext&.
+   *        func may fiber-block.
+   *
+   * @param func
+   *
+   * Waits for all the callbacks to finish.
+   */
   template <typename Func> void AwaitFiberOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {

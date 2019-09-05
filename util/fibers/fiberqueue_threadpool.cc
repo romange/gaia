@@ -16,7 +16,7 @@ FiberQueue::FiberQueue(unsigned queue_size) : queue_(queue_size) {
 
 void FiberQueue::Run() {
   bool is_closed = false;
-  Func func;
+  CbFunc func;
 
   auto cb = [&] {
     if (queue_.try_dequeue(func)) {
