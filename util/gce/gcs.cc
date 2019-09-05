@@ -177,7 +177,7 @@ string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
   }
 
   absl::StrAppend(&tmp, from, "-", to, "/");
-  if (total) {
+  if (total >= 0) {
     absl::StrAppend(&tmp, total);
   } else {
     tmp.push_back('*');
