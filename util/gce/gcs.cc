@@ -620,8 +620,7 @@ util::Status GCS::Write(strings::ByteRange src) {
     error_code ec;
     unsigned retry = 0;
     uint64_t start = base::GetMonotonicMicrosFast();
-
-    for (; retry < 3; ++retry) {
+    for (; retry < 4; ++retry) {
       VLOG(1) << "UploadReq" << retry << ": " << req << " socket " << native_handle();
       if (FLAGS_gcs_dry_write) {
         resp_msg.set(h2::field::range, absl::StrCat("bytes=0-", to - 1));
@@ -639,11 +638,17 @@ util::Status GCS::Write(strings::ByteRange src) {
       h2::status_class st_class = h2::to_status_class(resp_msg.result());
       if (st_class == h2::status_class::server_error) {
         VLOG(1) << "Retrying the service " << retry;
-        this_fiber::sleep_for(10ms);
-        https_client_->schedule_reconnect();
+
+        // Sometimes response contains "Connection: Close" and sometimes not.
+        if (!resp_msg.keep_alive()) {
+          https_client_->schedule_reconnect();
+        }
+
+        unsigned millis = (1 << retry) * 1000 + (rand() % 1000);
+        this_fiber::sleep_for(chrono::milliseconds(millis));
         gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
         continue;
-      }
+      
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
     if (h2::status::service_unavailable == resp_msg.result()) {
