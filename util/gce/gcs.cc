@@ -164,16 +164,25 @@ inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   flds->set(h2::field::range, std::move(tmp));
 }
 
-//! [from, to) limited range out of total. If total is 0 then it's unknown.
-inline void SetContentRange(size_t from, size_t to, size_t total, h2::fields* flds) {
-  string tmp = absl::StrCat("bytes ", from, "-", to - 1, "/");
+//! [from, to) limited range out of total. If total is < 0 then it's unknown.
+string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
+  CHECK_LE(from, to);
+  string tmp{"bytes "};
+
+  if (from == to) {
+    // We can write empty ranges only when we finalize the file and total is known.
+    CHECK_GE(total, 0);
+    absl::StrAppend(&tmp, "*/", total);
+    return tmp;
+  }
+
+  absl::StrAppend(&tmp, from, "-", to, "/");
   if (total) {
     absl::StrAppend(&tmp, total);
   } else {
     tmp.push_back('*');
   }
-
-  flds->set(h2::field::content_range, std::move(tmp));
+  return tmp;
 }
 
 }  // namespace
@@ -597,10 +606,13 @@ util::Status GCS::Write(strings::ByteRange src) {
     h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
 
     size_t body_size = wh->body_mb.size();
+    CHECK_GT(body_size, 0);
+    CHECK_EQ(0, body_size % (1U << 18)) << body_size;  // Must be multiple of 256KB.
+
     size_t to = wh->uploaded + body_size;
 
     req.body() = std::move(wh->body_mb);
-    SetContentRange(wh->uploaded, to, 0, &req);
+    req.set(h2::field::content_range, ContentRangeHeader(wh->uploaded, to, -1));
     req.set(h2::field::content_type, "application/octet-stream");
     req.prepare_payload();
 
@@ -672,11 +684,10 @@ util::Status GCS::CloseWrite(bool abort_write) {
 
   h2::request<h2::dynamic_body> req(abort_write ? h2::verb::delete_ : h2::verb::put, wh->url, 11);
   if (!abort_write) {
-    auto& body = req.body();
-    body = std::move(wh->body_mb);
+    req.body() = std::move(wh->body_mb);
     size_t to = wh->uploaded + req.body().size();
 
-    SetContentRange(wh->uploaded, to, to, &req);
+    req.set(h2::field::content_range, ContentRangeHeader(wh->uploaded, to, to));
   }
 
   req.prepare_payload();

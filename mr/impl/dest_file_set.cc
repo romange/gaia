@@ -199,11 +199,15 @@ void CompressHandle::Write(StringGenCb cb) {
 
       if (out_queue_) {
         auto start = base::GetMonotonicMicrosFast();
-        out_queue_->Add([start, this, str = std::move(*tmp_str)] {
+        bool preempted = out_queue_->Add([start, this, str = std::move(*tmp_str)] {
           dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
         });
-        dest_files.IncBy("gcs-submit", base::GetMonotonicMicrosFast() - start);
+        if (preempted) {
+          dest_files.IncBy("gcs-submit-preempted", base::GetMonotonicMicrosFast() - start);
+        } else {
+          dest_files.IncBy("gcs-submit-fast", base::GetMonotonicMicrosFast() - start);
+        }
         this_fiber::yield();
       } else {
         // TODO: To support io_context based write-files like with GCS.

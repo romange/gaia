@@ -32,19 +32,29 @@ class FiberQueue {
     return false;
   }
 
-  template <typename F> void Add(F&& f) {
+  /**
+   * @brief Submits a callback into the queue. Should not be called after calling Shutdown().
+   *
+   * @tparam F - callback type
+   * @param f  - callback object
+   * @return true if Add() had to preempt, false is fast path without preemptions was followed.
+   */
+  template <typename F> bool Add(F&& f) {
     if (TryAdd(std::forward<F>(f))) {
-      return;
+      return false;
     }
 
+    bool result = false;
     while (true) {
       EventCount::Key key = push_ec_.prepareWait();
 
       if (TryAdd(std::forward<F>(f))) {
         break;
       }
+      result = true;
       push_ec_.wait(key.epoch());
     }
+    return result;
   }
 
   /**
