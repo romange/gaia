@@ -169,19 +169,19 @@ string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
   CHECK_LE(from, to);
   string tmp{"bytes "};
 
-  if (from == to) {
+  if (from < to) {  // common case.
+    absl::StrAppend(&tmp, from, "-", to - 1, "/");  // content-range is inclusive.
+    if (total >= 0) {
+      absl::StrAppend(&tmp, total);
+    } else {
+      tmp.push_back('*');
+    }
+  } else {
     // We can write empty ranges only when we finalize the file and total is known.
     CHECK_GE(total, 0);
     absl::StrAppend(&tmp, "*/", total);
-    return tmp;
   }
 
-  absl::StrAppend(&tmp, from, "-", to, "/");
-  if (total >= 0) {
-    absl::StrAppend(&tmp, total);
-  } else {
-    tmp.push_back('*');
-  }
   return tmp;
 }
 
