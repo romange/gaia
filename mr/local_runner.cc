@@ -61,6 +61,8 @@ struct LocalRunner::Impl {
                                                        file::FiberReadOptions::Stats* stats);
   void ShutDown();
 
+  RawContext* NewContext();
+
   // TODO: to make members below private.
   // private:
 
@@ -68,7 +70,6 @@ struct LocalRunner::Impl {
 
   IoContextPool* io_pool_;
   string data_dir;
-  std::unique_ptr<DestFileSet> dest_mgr;
   fibers_ext::FiberQueueThreadPool fq_pool;
   std::atomic_bool stop_signal_{false};
   std::atomic_ulong file_cache_hit_bytes{0};
@@ -100,6 +101,9 @@ struct LocalRunner::Impl {
 
   static thread_local std::unique_ptr<PerThread> per_thread_;
   util::VarzFunction varz_stats_;
+
+  mutable std::mutex dest_mgr_mu_;
+  std::unique_ptr<DestFileSet> dest_mgr_;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
@@ -137,6 +141,14 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   std::atomic<uint32_t> input_gcs_conn{0};
 
   auto start = base::GetMonotonicMicrosFast();
+  unsigned out_gcs_count = 0;
+  {
+    lock_guard<std::mutex> lk(dest_mgr_mu_);
+    if (dest_mgr_) {
+      out_gcs_count = dest_mgr_->HandleCount();
+    }
+  }
+
   io_pool_->AwaitOnAll([&](IoContext&) {
     auto* pt = per_thread_.get();
     if (pt) {
@@ -145,7 +157,7 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   });
 
   map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn.load()));
-  map.emplace_back("output-gcs-connections", VarzValue::FromInt(dest_mgr->HandleCount()));
+  map.emplace_back("output-gcs-connections", VarzValue::FromInt(out_gcs_count));
   map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return map;
@@ -203,7 +215,7 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
 }
 
 void LocalRunner::Impl::Start(const pb::Operator* op) {
-  CHECK(!dest_mgr);
+  CHECK(!dest_mgr_);
   current_op = op;
   string out_dir = file_util::JoinPath(data_dir, op->output().name());
   if (util::IsGcsPath(out_dir)) {
@@ -211,20 +223,26 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   } else if (!file::Exists(out_dir)) {
     CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
   }
-  dest_mgr.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool));
+
+  lock_guard<mutex> lk(dest_mgr_mu_);
+  dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool));
 
   if (util::IsGcsPath(out_dir)) {
-    dest_mgr->set_gce(gce_handle.get());
+    dest_mgr_->set_gce(gce_handle.get());
   }
 }
 
 void LocalRunner::Impl::End(ShardFileMap* out_files) {
-  auto shards = dest_mgr->GetShards();
+  CHECK(dest_mgr_);
+
+  auto shards = dest_mgr_->GetShards();
   for (const ShardId& sid : shards) {
-    out_files->emplace(sid, dest_mgr->ShardFilePath(sid, -1));
+    out_files->emplace(sid, dest_mgr_->ShardFilePath(sid, -1));
   }
-  dest_mgr->CloseAllHandles(stop_signal_.load(std::memory_order_acquire));
-  dest_mgr.reset();
+  dest_mgr_->CloseAllHandles(stop_signal_.load(std::memory_order_acquire));
+
+  lock_guard<mutex> lk(dest_mgr_mu_);
+  dest_mgr_.reset();
   current_op = nullptr;
 }
 
@@ -293,6 +311,12 @@ void LocalRunner::Impl::ShutDown() {
   }
 }
 
+RawContext* LocalRunner::Impl::NewContext() {
+  CHECK_NOTNULL(current_op);
+
+  return new detail::LocalContext(dest_mgr_.get());
+}
+
 /* LocalRunner implementation
 ********************************************/
 
@@ -318,9 +342,7 @@ void LocalRunner::Shutdown() {
 void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
 RawContext* LocalRunner::CreateContext() {
-  CHECK_NOTNULL(impl_->current_op);
-
-  return new detail::LocalContext(impl_->dest_mgr.get());
+  return impl_->NewContext();
 }
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
