@@ -35,6 +35,8 @@ using namespace boost;
 namespace h2 = beast::http;
 namespace rj = rapidjson;
 
+using base::GetMonotonicMicrosFast;
+
 static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
@@ -110,6 +112,36 @@ template <typename Msg> inline bool IsUnauthorized(const Msg& msg) {
   return it != msg.end();
 }
 
+inline bool DoesServerPushback(h2::status st) {
+  return st == h2::status::too_many_requests ||
+         h2::to_status_class(st) == h2::status_class::server_error;
+}
+
+
+//! returns true if resp is backend error 050x. In that case, sleeps using exponential backoff
+// See https://cloud.google.com/storage/docs/exponential-backoff
+bool BackoffForServerError(unsigned iteration, const h2::response<h2::dynamic_body>& resp,
+                           http::HttpsClient* client) {
+  h2::status_class st_class = h2::to_status_class(resp.result());
+  if (st_class != h2::status_class::server_error)
+    return false;
+  VLOG(1) << "Backend error " << iteration;
+
+  // Sometimes response contains "Connection: Close" and sometimes not.
+  if (!resp.keep_alive()) {
+    client->schedule_reconnect();
+  }
+
+  unsigned millis = (1 << iteration) * 1000 + (rand() % 1000);
+  uint64_t start = GetMonotonicMicrosFast();
+  this_fiber::sleep_for(chrono::milliseconds(millis));
+  uint64_t delta = GetMonotonicMicrosFast() - start;
+
+  LOG_IF(WARNING, delta / 1000 < millis - 10) << "Wanted to sleep " << millis
+                                              << " but slept " << delta / 1000;
+  return true;
+}
+
 StatusObject<size_t> GcsFile::Read(size_t offset, const strings::MutableByteRange& range) {
   if (offset != offs_) {
     return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
@@ -137,11 +169,6 @@ GcsFile::~GcsFile() {
     LOG(WARNING) << "Close was not called";
     Close();
   }
-}
-
-inline bool DoesServerPushback(h2::status st) {
-  return st == h2::status::too_many_requests ||
-         h2::to_status_class(st) == h2::status_class::server_error;
 }
 
 struct SeqReadHandler {
@@ -258,6 +285,11 @@ GCS::~GCS() {
 }
 
 Status GCS::Connect(unsigned msec) {
+  std::call_once(gcs_write_set_flag, [] {
+    gcs_writes.reset(new VarzQps("gcs-writes"));
+    gcs_latency.reset(new VarzMapAverage5m("gcs-latency"));
+  });
+
   auto ec = https_client_->Connect(msec);
   if (ec) {
     VLOG(1) << "Error connecting " << ec << " " << https_client_->client()->next_layer().status();
@@ -565,11 +597,6 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
   CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
 
-  std::call_once(gcs_write_set_flag, [] {
-    gcs_writes.reset(new VarzQps("gcs-writes"));
-    gcs_latency.reset(new VarzMapAverage5m("gcs-latency"));
-  });
-
   string url = "/upload/storage/v1/b/";
   absl::StrAppend(&url, bucket, "/o?uploadType=resumable&name=");
   strings::AppendEncodedUrl(obj_path, &url);
@@ -579,16 +606,19 @@ util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_p
   req.prepare_payload();
 
   string upload_id;
-
-  RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
-  if (resp_msg.result() != h2::status::ok) {
-    return HttpError(resp_msg);
+  if (FLAGS_gcs_dry_write) {
+    upload_id = "dry_write";
+  } else {
+    RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
+    if (resp_msg.result() != h2::status::ok) {
+      return HttpError(resp_msg);
+    }
+    auto it = resp_msg.find(h2::field::location);
+    if (it == resp_msg.end()) {
+      return Status(StatusCode::PARSE_ERROR, "Can not find location header");
+    }
+    upload_id = string(it->value());
   }
-  auto it = resp_msg.find(h2::field::location);
-  if (it == resp_msg.end()) {
-    return Status(StatusCode::PARSE_ERROR, "Can not find location header");
-  }
-  upload_id = string(it->value());
 
   WriteHandler& wh = conn_state_->emplace<WriteHandler>();
   wh.url = std::move(upload_id);
@@ -619,7 +649,7 @@ util::Status GCS::Write(strings::ByteRange src) {
     h2::response<h2::dynamic_body> resp_msg;
     error_code ec;
     unsigned retry = 0;
-    uint64_t start = base::GetMonotonicMicrosFast();
+    uint64_t start = GetMonotonicMicrosFast();
     for (; retry < 4; ++retry) {
       VLOG(1) << "UploadReq" << retry << ": " << req << " socket " << native_handle();
       if (FLAGS_gcs_dry_write) {
@@ -635,20 +665,10 @@ util::Status GCS::Write(strings::ByteRange src) {
       if (h2::status::permanent_redirect == resp_msg.result())  // 308
         break;
 
-      h2::status_class st_class = h2::to_status_class(resp_msg.result());
-      if (st_class == h2::status_class::server_error) {
-        VLOG(1) << "Retrying the service " << retry;
-
-        // Sometimes response contains "Connection: Close" and sometimes not.
-        if (!resp_msg.keep_alive()) {
-          https_client_->schedule_reconnect();
-        }
-
-        unsigned millis = (1 << retry) * 1000 + (rand() % 1000);
-        this_fiber::sleep_for(chrono::milliseconds(millis));
-        gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
+      if (BackoffForServerError(retry, resp_msg, https_client_.get())) {
+        gcs_latency->IncBy("retry", GetMonotonicMicrosFast() - start);
         continue;
-      }  // server_error
+      }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
     if (h2::status::service_unavailable == resp_msg.result()) {
@@ -672,7 +692,7 @@ util::Status GCS::Write(strings::ByteRange src) {
     // CHECK_EQ(wh->body_mb.capacity(), wh->body_mb.max_size());
 
     gcs_writes->Inc();
-    gcs_latency->IncBy("write", base::GetMonotonicMicrosFast() - start);
+    gcs_latency->IncBy("write", GetMonotonicMicrosFast() - start);
 
     if (src.empty())
       break;
@@ -699,22 +719,21 @@ util::Status GCS::CloseWrite(bool abort_write) {
   using Response = h2::response<h2::dynamic_body>;
   Response resp_msg;
 
-  for (unsigned retries = 0; retries < 3; ++retries) {
+  for (unsigned retry = 0; retry < 3; ++retry) {
     resp_msg = Response{};
     if (FLAGS_gcs_dry_write) {
     } else {
-      VLOG(1) << "CloseWriteReq" << retries << ": " << req;
+      VLOG(1) << "CloseWriteReq" << retry << ": " << req;
       error_code ec = https_client_->Send(req, &resp_msg);
       RETURN_EC_STATUS(ec);
-      VLOG(1) << "CloseWriteResp" << retries << ": " << resp_msg;
+      VLOG(1) << "CloseWriteResp" << retry << ": " << resp_msg;
     }
 
     if (resp_msg.result() == h2::status::ok) {
       break;
     }
 
-    if (resp_msg.result() == h2::status::service_unavailable) {
-      this_fiber::sleep_for(30ms);
+    if (BackoffForServerError(retry, resp_msg, https_client_.get())) {
       continue;
     }
     LOG(ERROR) << "Error closing GCS file " << resp_msg << " for request: \n" << req;

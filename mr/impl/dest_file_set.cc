@@ -202,13 +202,15 @@ void CompressHandle::Write(StringGenCb cb) {
 
       if (out_queue_) {
         auto start = base::GetMonotonicMicrosFast();
+        auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
+
         bool preempted = out_queue_->Add([start, this, str = std::move(*tmp_str)] {
           dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
         });
         auto delta = base::GetMonotonicMicrosFast() - start;
         if (preempted) {
-          if (fiber_state_.load(std::memory_order_relaxed) == 1) {
+          if (fiber_state == 1) {
             dest_files.IncBy("gcs-submit-preempted", delta);
           } else {
             dest_files.IncBy("gcs-submit-launching", delta);
