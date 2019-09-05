@@ -19,7 +19,7 @@ addons:
 
 cache:
   directories:
-  - /opt/boost_1_70_0
+  - /opt/boost_1_71_0
   - build-dbg/third_party  # Relative to $TRAVIS_BUILD_DIR
   - $HOME/doxygen/doxygen-1.8.15/bin
   ccache: true

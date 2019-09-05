@@ -226,7 +226,6 @@ bool WriteHandler::Append(strings::ByteRange* src) {
   return body_mb.size() == body_mb.max_size();
 }
 
-
 class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
  public:
   ~ConnState() {
@@ -672,8 +671,6 @@ util::Status GCS::CloseWrite(bool abort_write) {
   CHECK(wh && !wh->url.empty());
 
   h2::request<h2::dynamic_body> req(abort_write ? h2::verb::delete_ : h2::verb::put, wh->url, 11);
-  h2::response<h2::dynamic_body> resp_msg;
-
   if (!abort_write) {
     auto& body = req.body();
     body = std::move(wh->body_mb);
@@ -683,21 +680,33 @@ util::Status GCS::CloseWrite(bool abort_write) {
   }
 
   req.prepare_payload();
+  using Response = h2::response<h2::dynamic_body>;
+  Response resp_msg;
 
-  VLOG(1) << "CloseWriteReq: " << req;
-  if (FLAGS_gcs_dry_write) {
-  } else {
-    error_code ec = https_client_->Send(req, &resp_msg);
-    RETURN_EC_STATUS(ec);
-    VLOG(1) << "CloseWriteResp: " << resp_msg;
-  }
-  if (resp_msg.result() != h2::status::ok) {
+  for (unsigned retries = 0; retries < 3; ++retries) {
+    resp_msg = Response{};
+    if (FLAGS_gcs_dry_write) {
+    } else {
+      VLOG(1) << "CloseWriteReq" << retries << ": " << req;
+      error_code ec = https_client_->Send(req, &resp_msg);
+      RETURN_EC_STATUS(ec);
+      VLOG(1) << "CloseWriteResp" << retries << ": " << resp_msg;
+    }
+
+    if (resp_msg.result() == h2::status::ok) {
+      break;
+    }
+
+    if (resp_msg.result() == h2::status::service_unavailable) {
+      this_fiber::sleep_for(30ms);
+      continue;
+    }
     LOG(ERROR) << "Error closing GCS file " << resp_msg << " for request: \n" << req;
   }
 
   conn_state_->emplace<absl::monostate>();
 
-  return Status::OK;
+  return resp_msg.result() == h2::status::ok ? Status::OK : HttpError(resp_msg);
 }
 
 string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
