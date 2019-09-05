@@ -108,6 +108,7 @@ class CompressHandle : public DestHandle {
   unique_ptr<fibers_ext::FiberQueue> out_queue_;
   unique_ptr<GCS> gcs_;
   fibers::fiber write_fiber_;
+  std::atomic_int fiber_state_{0};
 };
 
 class LstHandle : public DestHandle {
@@ -175,6 +176,8 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
   CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
 
+  fiber_state_ = 1;
+
   out_queue_->Run();
   gcs_.reset();
 }
@@ -203,10 +206,15 @@ void CompressHandle::Write(StringGenCb cb) {
           dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
         });
+        auto delta = base::GetMonotonicMicrosFast() - start;
         if (preempted) {
-          dest_files.IncBy("gcs-submit-preempted", base::GetMonotonicMicrosFast() - start);
+          if (fiber_state_.load(std::memory_order_relaxed) == 1) {
+            dest_files.IncBy("gcs-submit-preempted", delta);
+          } else {
+            dest_files.IncBy("gcs-submit-launching", delta);
+          }
         } else {
-          dest_files.IncBy("gcs-submit-fast", base::GetMonotonicMicrosFast() - start);
+          dest_files.IncBy("gcs-submit-fast", delta);
         }
         this_fiber::yield();
       } else {

@@ -169,7 +169,7 @@ string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
   CHECK_LE(from, to);
   string tmp{"bytes "};
 
-  if (from < to) {  // common case.
+  if (from < to) {                                  // common case.
     absl::StrAppend(&tmp, from, "-", to - 1, "/");  // content-range is inclusive.
     if (total >= 0) {
       absl::StrAppend(&tmp, total);
@@ -648,7 +648,7 @@ util::Status GCS::Write(strings::ByteRange src) {
         this_fiber::sleep_for(chrono::milliseconds(millis));
         gcs_latency->IncBy("retry", base::GetMonotonicMicrosFast() - start);
         continue;
-      
+      }  // server_error
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
     if (h2::status::service_unavailable == resp_msg.result()) {
