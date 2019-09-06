@@ -69,6 +69,8 @@ class HttpsClient {
   //! Sets number of retries for Send(...) methods.
   void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt; }
 
+  ::boost::asio::ssl::context& ssl_context() { return ssl_cntx_;}
+
  private:
   error_code HandleError(const error_code& ec);
 
@@ -98,7 +100,7 @@ class HttpsClient {
   uint32_t retry_cnt_ = 1;
 };
 
-::boost::system::error_code SslConnect(SslStream* stream, unsigned msec);
+// ::boost::system::error_code SslConnect(SslStream* stream, unsigned msec);
 
 template <typename Req, typename Resp>
 auto HttpsClient::Send(const Req& req, Resp* resp) -> error_code {

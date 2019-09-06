@@ -81,14 +81,12 @@ jobs:
   include:
   - stage: Build
     env: MATRIX_EVAL="CC=clang && CXX=clang++"
-  - env: MATRIX_EVAL="CC=gcc-5 && CXX=g++-5"
   - env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+  - env: MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
     addons:
         apt:
-          sources:
-            - ubuntu-toolchain-r-test
           packages:
-            - g++-7
+            - g++-8
   - stage: deploy
     script: |
       if [[ ($TRAVIS_BRANCH == master) &&

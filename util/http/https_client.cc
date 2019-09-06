@@ -27,6 +27,24 @@ namespace h2 = beast::http;
 namespace {
 constexpr const char kPort[] = "443";
 
+::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
+  system::error_code ec;
+  for (unsigned i = 0; i < 2; ++i) {
+    ec = stream->next_layer().ClientWaitToConnect(ms);
+    if (ec) {
+      VLOG(1) << "Error " << i << ": " << ec << "/" << ec.message() << " for socket "
+              << stream->next_layer().native_handle();
+
+      continue;
+    }
+
+    stream->handshake(asio::ssl::stream_base::client, ec);
+    return ec;
+  }
+
+  return ec;
+}
+
 }  // namespace
 
 SslContextResult CreateClientSslContext(absl::string_view cert_string) {
@@ -100,24 +118,6 @@ auto HttpsClient::DrainResponse(h2::response_parser<h2::buffer_body>* parser) ->
   VLOG_IF(1, sz > 0) << "Drained " << sz << " bytes";
 
   return error_code{};
-}
-
-::boost::system::error_code SslConnect(SslStream* stream, unsigned ms) {
-  system::error_code ec;
-  for (unsigned i = 0; i < 2; ++i) {
-    ec = stream->next_layer().ClientWaitToConnect(ms);
-    if (ec) {
-      VLOG(1) << "Error " << i << ": " << ec << "/" << ec.message() << " for socket "
-              << stream->next_layer().native_handle();
-
-      continue;
-    }
-
-    stream->handshake(asio::ssl::stream_base::client, ec);
-    return ec;
-  }
-
-  return ec;
 }
 
 }  // namespace http
