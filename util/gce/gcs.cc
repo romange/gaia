@@ -79,7 +79,7 @@ inline Status ToStatus(const ::boost::system::error_code& ec) {
             : Status::OK;
 }
 
-template <typename Body> inline Status HttpError(const h2::response<Body>& resp) {
+inline Status HttpError(const h2::header<false, h2::fields>& resp) {
   return Status(StatusCode::IO_ERROR,
                 absl::StrCat("Http error: ", resp.result_int(), " ", absl_sv(resp.reason())));
 }
@@ -128,17 +128,22 @@ bool BackoffForServerError(unsigned iteration, const h2::response<h2::dynamic_bo
   VLOG(1) << "Backend error " << iteration;
 
   // Sometimes response contains "Connection: Close" and sometimes not.
+  int32_t handle = client->native_handle();
   if (!resp.keep_alive()) {
+    LOG(INFO) << "Closing connection on socket " << handle;
     client->schedule_reconnect();
   }
 
   unsigned millis = (1 << iteration) * 1000 + (rand() % 1000);
+
+  LOG(INFO) << "Backing off for " << millis << " ms on socket " << handle;
+
   uint64_t start = GetMonotonicMicrosFast();
   this_fiber::sleep_for(chrono::milliseconds(millis));
-  uint64_t delta = GetMonotonicMicrosFast() - start;
+  uint64_t duration_ms = (GetMonotonicMicrosFast() - start) / 1000;
 
-  LOG_IF(WARNING, delta / 1000 < millis - 10) << "Wanted to sleep " << millis
-                                              << " but slept " << delta / 1000;
+  LOG_IF(WARNING, duration_ms < millis - 10) << "Wanted to sleep " << millis
+                                             << " but slept " << duration_ms;
   return true;
 }
 
@@ -650,7 +655,7 @@ util::Status GCS::Write(strings::ByteRange src) {
     error_code ec;
     unsigned retry = 0;
     uint64_t start = GetMonotonicMicrosFast();
-    for (; retry < 4; ++retry) {
+    for (; retry < 5; ++retry) {
       VLOG(1) << "UploadReq" << retry << ": " << req << " socket " << native_handle();
       if (FLAGS_gcs_dry_write) {
         resp_msg.set(h2::field::range, absl::StrCat("bytes=0-", to - 1));
@@ -671,8 +676,11 @@ util::Status GCS::Write(strings::ByteRange src) {
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
     }
-    if (h2::status::service_unavailable == resp_msg.result()) {
-      LOG(FATAL) << "Service unavailable " << resp_msg << " after " << retry << " retries";
+
+    if (h2::status::permanent_redirect != resp_msg.result()) {
+      LOG(ERROR) << "Service unavailable " << resp_msg << " after " << retry << " retries";
+
+      return HttpError(resp_msg);
     }
 
     auto it = resp_msg.find(h2::field::range);

@@ -62,7 +62,8 @@ class HttpsClient {
 
   void schedule_reconnect() { reconnect_needed_ = true; }
 
-  auto native_handle() { return client_->native_handle(); }
+  int32_t native_handle() { return client_->next_layer().native_handle(); }
+
   uint32_t retry_count() const { return retry_cnt_; }
 
   //! Sets number of retries for Send(...) methods.
