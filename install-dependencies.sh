@@ -2,7 +2,7 @@
 
 set -e
 
-apt install -y cmake libunwind-dev zip flex bison ninja-build autoconf-archive
+apt install -y cmake libunwind-dev zip libfl-dev bison ninja-build autoconf-archive
 apt install -y curl
 g++ --version
 

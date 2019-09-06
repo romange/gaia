@@ -53,6 +53,7 @@ before_install:
 install:
   - sudo $TRAVIS_BUILD_DIR/install-dependencies.sh
   - ls -l /opt/
+  - ls -l /usr/include/F*
 
 before_script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
