@@ -11,6 +11,12 @@
 #include <boost/asio/ssl/impl/src.hpp>
 #endif
 
+// libssl1.0.x has performance locking bugs that practically prevent scalable communication
+// with ssl library. It seems that libssl1.1 fixes that. libssl-dev in 18.04 installs libssl1.1.
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+  #error Please update your libssl to libssl1.1 - install libssl-dev
+#endif
+
 namespace util {
 namespace http {
 
