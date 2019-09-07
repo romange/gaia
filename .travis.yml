@@ -80,20 +80,29 @@ jobs:
   include:
   - stage: Build
     env: MATRIX_EVAL="CC=clang-7.0 && CXX=clang++-7.0"
+    compiler: clang
+    install:
+      - which clang-7.0
+      - which clang
   -
     env: MATRIX_EVAL="CC=clang-8.0 && CXX=clang++-8.0"
+    compiler: clang
     addons:
         apt:
           packages:
             - clang-8
+    install:
+      - which clang-8.0
   - # Stage Build
     env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+    compiler: gcc
   - # Stage Build
     env: MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
+    compiler: gcc
     addons:
         apt:
           packages:
-            - g++-8
+          - g++-8
   - stage: deploy
     script: |
       if [[ ($TRAVIS_BRANCH == master) &&

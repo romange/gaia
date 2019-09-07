@@ -32,7 +32,15 @@ class HttpsClient {
  public:
   using error_code = ::boost::system::error_code;
 
-  HttpsClient(absl::string_view host, IoContext* context, ::boost::asio::ssl::context* ssl_ctx);
+  /**
+   * @brief Construct a new Https Client object
+   *
+   * @param host - a domain of the service like "www.googleapis.com"
+   * @param io_context - IoContext thread in which the connection is running.
+   *                     HttpsClient should be called only from this thread.
+   * @param ssl_ctx    - SSL context for this connection.
+   */
+  HttpsClient(absl::string_view host, IoContext* io_context, ::boost::asio::ssl::context* ssl_ctx);
   HttpsClient(const HttpsClient&) = delete;
   HttpsClient(HttpsClient&&) = delete;
 
