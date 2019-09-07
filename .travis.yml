@@ -79,20 +79,17 @@ jobs:
   fast_finish: true
   include:
   - stage: Build
-    env: MATRIX_EVAL="CC=clang-7.0 && CXX=clang++-7.0"
+    env: MATRIX_EVAL="CC=clang-7 && CXX=clang++-7"
     compiler: clang
-    install:
-      - ls /usr/local/clang-7.0.0/bin
-      - which clang
   -
-    env: MATRIX_EVAL="CC=clang-8.0 && CXX=clang++-8.0"
+    env: MATRIX_EVAL="CC=clang-8 && CXX=clang++-8"
     compiler: clang
     addons:
         apt:
           packages:
             - clang-8
     install:
-      - ls /usr/lib/cache
+      - ls /usr/lib/ccache
       - ls /usr/bin/
   - # Stage Build
     env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
