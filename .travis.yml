@@ -31,6 +31,7 @@ before_install:
   # Fix for Ubuntu Xenial apt-daily.service triggering
   # https://unix.stackexchange.com/questions/315502/how-to-disable-apt-daily-service-on-ubuntu-cloud-vm-image
   - |
+    sudo ln -sf /usr/local/clang-7.0.0/bin/clang++ /usr/bin/clang++-7
     sudo systemctl stop apt-daily.timer
     sudo systemctl stop apt-daily.service &&
     sudo systemctl kill --kill-who=all apt-daily.service
@@ -52,13 +53,15 @@ before_install:
 
 install:
   - sudo $TRAVIS_BUILD_DIR/install-dependencies.sh
-  - ls -l /opt/
 
 before_script:
   - printf "leak:MallocExtension\nleak:event_base_once" > $HOME/supress.txt
   - cmake --version
   - env
   - ls build-dbg/third_party || true
+  - ls -l /opt/
+  - ls -l /usr/lib/ccache
+  - ls -l /usr/bin/
 
 script:
   - cd $TRAVIS_BUILD_DIR
@@ -88,9 +91,6 @@ jobs:
         apt:
           packages:
             - clang-8
-    install:
-      - ls /usr/lib/ccache
-      - ls /usr/bin/
   - # Stage Build
     env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
     compiler: gcc
@@ -101,6 +101,7 @@ jobs:
         apt:
           packages:
           - g++-8
+
   - stage: deploy
     script: |
       if [[ ($TRAVIS_BRANCH == master) &&
