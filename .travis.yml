@@ -82,7 +82,7 @@ jobs:
     env: MATRIX_EVAL="CC=clang-7.0 && CXX=clang++-7.0"
     compiler: clang
     install:
-      - which clang-7.0
+      - ls /usr/local/clang-7.0.0/bin
       - which clang
   -
     env: MATRIX_EVAL="CC=clang-8.0 && CXX=clang++-8.0"
@@ -92,7 +92,8 @@ jobs:
           packages:
             - clang-8
     install:
-      - which clang-8.0
+      - ls /usr/lib/cache
+      - ls /usr/bin/
   - # Stage Build
     env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
     compiler: gcc
