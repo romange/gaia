@@ -80,9 +80,11 @@ jobs:
   fast_finish: true
   include:
   - stage: Build
-    env: MATRIX_EVAL="CC=clang && CXX=clang++"
-  - env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
-  - env: MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
+    env: MATRIX_EVAL="CC=clang-7.0 && CXX=clang++-7.0"
+  - # Stage Build
+    env: MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+  - # Stage Build
+    env: MATRIX_EVAL="CC=gcc-8 && CXX=g++-8"
     addons:
         apt:
           packages:
