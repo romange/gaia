@@ -114,7 +114,7 @@ TEST_F(PeriodicTest, Thread) {
   CaptureStderr();
   for (unsigned i = 0; i < 2; ++i) {
     task->Start(f);
-    SleepForMilliseconds(25);
+    SleepForMilliseconds(50);
     EXPECT_TRUE(task->IsHanging()) << count;
     bc.Set(true);
     task->Cancel();
