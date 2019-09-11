@@ -77,7 +77,13 @@ class HttpsClient {
   //! Sets number of retries for Send(...) methods.
   void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt; }
 
-  ::boost::asio::ssl::context& ssl_context() { return ssl_cntx_;}
+  ::boost::asio::ssl::context& ssl_context() { return ssl_cntx_; }
+
+  error_code status() const {
+    namespace err = ::boost::asio::error;
+
+    return reconnect_needed_ ? err::not_connected : client_->next_layer().status();
+  }
 
  private:
   error_code HandleError(const error_code& ec);

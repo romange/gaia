@@ -18,23 +18,32 @@ class HttpsClient;
 // IoContext specific, thread-local pool that manages a set of https connections.
 class HttpsClientPool {
  public:
-  struct HandleGuard;
+  class HandleGuard;
+
   using ClientHandle = std::unique_ptr<HttpsClient, HandleGuard>;
 
   HttpsClientPool(const std::string& domain, ::boost::asio::ssl::context* ssl_ctx,
                   IoContext* io_cntx);
+
   ~HttpsClientPool();
 
-  //! Must be called withing IoContext thread. Once ClientHandle destructs, the connection returns
-  //! to the pool.
+  /*! @brief Returns https client connection from the pool.
+   *
+   * Must be called withing IoContext thread. Once ClientHandle destructs,
+   * the connection returns to the pool. GetHandle() might block the calling fiber for
+   * connect_msec_ millis in case it creates a new connection.
+   */
   ClientHandle GetHandle();
 
- private:
+  void set_connect_timeout(unsigned msec) { connect_msec_ = msec; }
 
+ private:
   using SslContext = ::boost::asio::ssl::context;
 
   SslContext& ssl_cntx_;
   IoContext& io_cntx_;
+  std::string domain_;
+  unsigned connect_msec_ = 1000;
 
   std::vector<std::unique_ptr<HttpsClient>> available_handles_;
 };
