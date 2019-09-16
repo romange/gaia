@@ -18,7 +18,15 @@ class HttpsClient;
 // IoContext specific, thread-local pool that manages a set of https connections.
 class HttpsClientPool {
  public:
-  class HandleGuard;
+  class HandleGuard {
+   public:
+    HandleGuard(HttpsClientPool* pool = nullptr) : pool_(pool) {}
+
+    void operator()(HttpsClient* client);
+
+   private:
+    HttpsClientPool* pool_;
+  };
 
   using ClientHandle = std::unique_ptr<HttpsClient, HandleGuard>;
 
@@ -36,6 +44,8 @@ class HttpsClientPool {
   ClientHandle GetHandle();
 
   void set_connect_timeout(unsigned msec) { connect_msec_ = msec; }
+
+  IoContext& io_context() { return io_cntx_; }
 
  private:
   using SslContext = ::boost::asio::ssl::context;

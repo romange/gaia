@@ -10,23 +10,16 @@ namespace util {
 
 namespace http {
 
-class HttpsClientPool::HandleGuard {
- public:
-  HandleGuard(HttpsClientPool* pool) : pool_(pool) {}
+void HttpsClientPool::HandleGuard::operator()(HttpsClient* client) {
+  CHECK(client);
 
-  void operator()(HttpsClient* client) {
-    CHECK(client);
-
-    if (client->status()) {
-      delete client;
-    } else {
-      pool_->available_handles_.emplace_back(client);
-    }
+  if (client->status()) {
+    delete client;
+  } else {
+    CHECK(pool_);
+    pool_->available_handles_.emplace_back(client);
   }
-
- private:
-  HttpsClientPool* pool_;
-};  // namespace http
+}
 
 HttpsClientPool::HttpsClientPool(const std::string& domain, ::boost::asio::ssl::context* ssl_ctx,
                                  IoContext* io_cntx)
