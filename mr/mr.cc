@@ -121,10 +121,10 @@ std::string ShardId::ToString(absl::string_view basename) const {
   return absl::visit(ShardVisitor{basename}, static_cast<const Parent&>(*this));
 }
 
-void OutputBase::SetCompress(pb::Output::CompressType ct, unsigned level) {
+void OutputBase::SetCompress(pb::Output::CompressType ct, int level) {
   auto* co = out_->mutable_compress();
   co->set_type(ct);
-  if (level) {
+  if (level != -10000) {
     co->set_level(level);
   }
 }

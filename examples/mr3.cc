@@ -26,6 +26,7 @@ using namespace util;
 DEFINE_string(compress, "gzip", "can be '', 'gzip' or 'zstd'");
 DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
+DEFINE_int32(compress_level, 1, "");
 
 using namespace mr3;
 using namespace util;
@@ -52,7 +53,7 @@ int main(int argc, char** argv) {
     if (FLAGS_compress == "gzip")
       outp.AndCompress(pb::Output::GZIP);
     else if (FLAGS_compress == "zstd") {
-      outp.AndCompress(pb::Output::ZSTD);
+      outp.AndCompress(pb::Output::ZSTD, FLAGS_compress_level);
     } else {
       LOG(FATAL) << "Unknown compress argument " << FLAGS_compress;
     }

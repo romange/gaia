@@ -28,7 +28,7 @@ class OutputBase {
 
   OutputBase(pb::Output* out) : out_(out) {}
 
-  void SetCompress(pb::Output::CompressType ct, unsigned level);
+  void SetCompress(pb::Output::CompressType ct, int level);
   void SetShardSpec(pb::ShardSpec::Type st, unsigned modn = 0);
   void FailUndefinedShard() const;
 };
@@ -77,7 +77,7 @@ template <typename T> class Output : public OutputBase {
     return *this;
   }
 
-  Output& AndCompress(pb::Output::CompressType ct, unsigned level = 0);
+  Output& AndCompress(pb::Output::CompressType ct, int level = -10000);
 
   ShardId Shard(const T& t) const {
     auto res = absl::visit(Visitor{t, modn_}, shard_op_);
@@ -95,7 +95,7 @@ template <typename T> class Output : public OutputBase {
 };
 
 template <typename OutT>
-Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, unsigned level) {
+Output<OutT>& Output<OutT>::AndCompress(pb::Output::CompressType ct, int level) {
   SetCompress(ct, level);
   return *this;
 }
