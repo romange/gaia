@@ -2,6 +2,9 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#define XXH_STATIC_LINKING_ONLY
+#include <xxhash.h>
+
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/init.h"
@@ -28,7 +31,7 @@ using namespace mr3;
 using namespace util;
 
 string ShardNameFunc(const std::string& line) {
-  absl::Dec dec(base::Fingerprint32(line) % FLAGS_num_shards, absl::kZeroPad4);
+  absl::Dec dec(XXH3_64bits(line.data(), line.size()) % FLAGS_num_shards, absl::kZeroPad4);
   return absl::StrCat("shard-", dec);
 }
 
