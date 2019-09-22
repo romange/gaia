@@ -43,10 +43,11 @@ inline absl::string_view absl_sv(beast::string_view s) {
 }
 
 inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
-                                                  const beast::string_view access_token) {
+                                                  const beast::string_view token) {
   h2::request<h2::empty_body> req(req_verb, url, 11);
   req.set(h2::field::host, kDomain);
-  req.set(h2::field::authorization, access_token);
+  string access_token_header = absl::StrCat("Bearer ", absl_sv(token));
+  req.set(h2::field::authorization, access_token_header);
   CHECK(req.keep_alive());
 
   return req;
@@ -71,6 +72,14 @@ inline bool IsUnauthorized(const h2::header<false, h2::fields>& header) {
   return it != header.end();
 }
 
+inline void SetRange(size_t from, size_t to, h2::fields* flds) {
+  string tmp = absl::StrCat("bytes=", from, "-");
+  if (to < kuint64max) {
+    absl::StrAppend(&tmp, to - 1);
+  }
+  flds->set(h2::field::range, std::move(tmp));
+}
+
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
   os << msg.reason() << endl;
   for (const auto& f : msg) {
@@ -80,6 +89,7 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
 
   return os;
 }
+
 
 using Parser = h2::response_parser<h2::buffer_body>;
 using EmptyRequest = h2::request<h2::empty_body>;
@@ -108,11 +118,13 @@ class GcsReadFile : public ReadonlyFile {
   Status Open();
 
  private:
-  system::error_code SendRequestIterative(HttpsClient* client, EmptyRequest* req);
+  system::error_code SendRequestIterative(const EmptyRequest& req, HttpsClient* client);
+  EmptyRequest PrepareReadRequest(const std::string& token) const;
+
 
   const GCE& gce_;
   HttpsClientPool* pool_;
-  string read_obj_url_;
+  const string read_obj_url_;
   size_t size_;
   size_t offs_ = 0;
 
@@ -123,54 +135,123 @@ class GcsReadFile : public ReadonlyFile {
 };
 
 Status GcsReadFile::Open() {
+  HttpsClientPool::ClientHandle handle;
+
   auto token_res = gce_.GetAccessToken(&pool_->io_context());
 
   if (!token_res.ok())
     return token_res.status;
+  string& token = token_res.obj;
 
-  HttpsClientPool::ClientHandle handle = pool_->GetHandle();
-  system::error_code ec = handle->status();
-
-  if (ec) {
-    return ToStatus(ec);
-  }
-  string access_token_header = absl::StrCat("Bearer ", token_res.obj);
-
-  auto req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header);
+  auto req = PrepareReadRequest(token);
+  system::error_code ec;
 
   for (unsigned iters = 0; iters < 3; ++iters) {
+    if (!handle) {
+      handle = pool_->GetHandle();
+      ec = handle->status();
+      if (ec) {
+        return ToStatus(ec);
+      }
+    }
     VLOG(1) << "OpenIter" << iters << ": socket " << handle->native_handle();
 
     parser_.emplace().body_limit(kuint64max);
 
-    ec = SendRequestIterative(handle.get(), &req);
+    ec = SendRequestIterative(req, handle.get());
 
-    if (!ec) {
+    if (!ec) {  // Success.
       const auto& msg = parser_->get();
       auto content_len_it = msg.find(h2::field::content_length);
       if (content_len_it != msg.end()) {
         CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &size_));
       }
+      https_handle_ = std::move(handle);
       return Status::OK;
     }
 
     if (ec == asio::error::no_permission) {
-      auto token_res = gce_.GetAccessToken(&pool_->io_context(), true);
-
+      token_res = gce_.GetAccessToken(&pool_->io_context(), true);
       if (!token_res.ok())
         return token_res.status;
-      access_token_header = absl::StrCat("Bearer ", token_res.obj);
-      req = PrepareRequest(h2::verb::get, read_obj_url_, access_token_header);
+
+      req = PrepareReadRequest(token);
+    } else if (ec != asio::error::try_again) {
+      LOG(INFO) << "socket " << handle->native_handle() << " failed with error " << ec;
+      handle.reset();
     }
   }
 
   return Status(StatusCode::IO_ERROR, "Maximum iterations reached");
 }
 
-system::error_code GcsReadFile::SendRequestIterative(HttpsClient* client, EmptyRequest* req) {
-  VLOG(1) << "Req: " << *req;
+StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
+  if (offset != offs_) {
+    return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
+  }
 
-  system::error_code ec = client->Send(*req);
+  if (parser_->is_done()) {
+    return 0;
+  }
+
+  for (unsigned iters = 0; iters < 3; ++iters) {
+    auto& body = parser_->get().body();
+    body.data = range.data();
+    auto& left_available = body.size;
+    left_available = range.size();
+
+    error_code ec = https_handle_->Read(&parser_.value());
+    if (!ec || ec == h2::error::need_buffer || ec == h2::error::partial_message) {  // Success
+      size_t http_read = range.size() - left_available;
+      DVLOG(2) << "Read " << http_read << " bytes from " << offset << " with capacity "
+               << range.size();
+
+      // This check does not happen. See here why: https://github.com/boostorg/beast/issues/1662
+      // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
+      offs_ += http_read;
+      return http_read;
+    }
+
+    if (ec == asio::ssl::error::stream_truncated) {
+      LOG(WARNING) << "Stream " << read_obj_url_ << " truncated at " << offset
+                   << "/" << size_;
+      https_handle_.reset();
+
+      RETURN_IF_ERROR(Open());
+      VLOG(1) << "Reopened the file, new size: " << size_;
+      // I do not change seq_file_->offset,file_size fields.
+      // TODO: to validate that file version has not been changed between retries.
+      continue;
+    } else {
+      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << offset << "/"
+                 << size_;
+      LOG(ERROR) << "FiberSocket status: " << https_handle_->client()->next_layer().status();
+
+      return ToStatus(ec);
+    }
+  }
+
+  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
+}
+
+// releases the system handle for this file.
+Status GcsReadFile::Close() {
+  if (!parser_) {
+    if (!parser_->is_done()) {
+      // We prefer closing the connection to draining.
+      https_handle_->schedule_reconnect();
+    }
+    parser_.reset();
+  }
+  https_handle_.reset();
+
+  return Status::OK;
+}
+
+system::error_code GcsReadFile::SendRequestIterative(const EmptyRequest& req, HttpsClient* client) {
+  VLOG(1) << "Req: " << req;
+
+  system::error_code ec = client->Send(req);
   if (ec)
     return ec;
 
@@ -196,6 +277,9 @@ system::error_code GcsReadFile::SendRequestIterative(HttpsClient* client, EmptyR
   // Parse & drain whatever comes after problematic status.
   // We must do it as long as we plan to use this connection for more requests.
   ec = client->DrainResponse(&parser_.value());
+  if (ec) {
+    return ec;
+  }
 
   if (DoesServerPushback(msg.result())) {
     this_fiber::sleep_for(1s);
@@ -209,6 +293,13 @@ system::error_code GcsReadFile::SendRequestIterative(HttpsClient* client, EmptyR
   LOG(ERROR) << "Unexpected status " << msg;
 
   return h2::error::bad_status;
+}
+
+EmptyRequest GcsReadFile::PrepareReadRequest(const std::string& token) const {
+  auto req = PrepareRequest(h2::verb::get, read_obj_url_, token);
+  if (offs_)
+    SetRange(offs_, kuint64max, &req);
+  return req;
 }
 
 }  // namespace
