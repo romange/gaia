@@ -30,6 +30,8 @@
 namespace mr3 {
 
 DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
+DEFINE_bool(local_runner_gcs_read_v2, false, "If true, use new gcs_read_file");
+
 DECLARE_uint32(gcs_connect_deadline_ms);
 
 using namespace util;
@@ -131,6 +133,7 @@ void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
 
   ssl_context = GCE::CheckedSslContext();
   api_conn_pool.emplace(GCE::kApiDomain, &ssl_context.value(), io_context);
+  api_conn_pool->set_connect_timeout(FLAGS_gcs_connect_deadline_ms);
 }
 
 auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
@@ -296,14 +299,15 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
 
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::string& filename) {
   CHECK(IsGcsPath(filename));
-  if (!per_thread_) {
-    per_thread_.reset(new PerThread);
-  }
-
   LazyGcsInit();
-
-  auto gcs = GetGcsHandle();
-  return gcs->OpenGcsFile(filename);
+  
+  if (FLAGS_local_runner_gcs_read_v2) {
+    auto pt = per_thread_.get();
+    return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
+  } else {
+    auto gcs = GetGcsHandle();
+    return gcs->OpenGcsFile(filename);
+  }
 }
 
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenLocalFile(

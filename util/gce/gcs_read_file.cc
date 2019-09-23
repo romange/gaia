@@ -99,7 +99,7 @@ class GcsReadFile : public ReadonlyFile {
   // does not own gcs object, only wraps it with ReadonlyFile interface.
   GcsReadFile(const GCE& gce, HttpsClientPool* pool, string read_obj_url)
       : gce_(gce), pool_(pool), read_obj_url_(std::move(read_obj_url)) {}
-  ~GcsReadFile();
+  virtual ~GcsReadFile() final;
 
   // Reads upto length bytes and updates the result to point to the data.
   // May use buffer for storing data. In case, EOF reached sets result.size() < length but still
@@ -131,6 +131,9 @@ class GcsReadFile : public ReadonlyFile {
 
   HttpsClientPool::ClientHandle https_handle_;
 };
+
+GcsReadFile::~GcsReadFile() {
+}
 
 Status GcsReadFile::Open() {
   HttpsClientPool::ClientHandle handle;
