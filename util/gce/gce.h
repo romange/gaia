@@ -29,6 +29,8 @@ class GCE {
   const std::string& refresh_token() const { return refresh_token_; }
 
   static const char* GoogleCert();
+  static const char* kApiDomain;
+
   static ::boost::asio::ssl::context CheckedSslContext();
 
   StatusObject<std::string> GetAccessToken(IoContext* context, bool force_refresh = false) const;

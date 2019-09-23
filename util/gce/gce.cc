@@ -85,6 +85,8 @@ TBj0/VLZjmmx6BEP3ojY+x1J96relc8geMJgEtslQIxq/H5COEBkEveegeGTLg==
 )";
 }
 
+const char* GCE::kApiDomain = "www.googleapis.com";
+
 asio::ssl::context GCE::CheckedSslContext() {
   auto res = http::CreateClientSslContext(GCE::GoogleCert());
   asio::ssl::context* ssl_cntx = absl::get_if<asio::ssl::context>(&res);

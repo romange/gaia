@@ -27,8 +27,6 @@ namespace {
 
 // TODO: to factor out common utilities/constants to a separate file.
 
-constexpr char kDomain[] = "www.googleapis.com";
-
 string BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   string read_obj_url{"/storage/v1/b/"};
   absl::StrAppend(&read_obj_url, bucket, "/o/");
@@ -45,7 +43,7 @@ inline absl::string_view absl_sv(beast::string_view s) {
 inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
                                                   const beast::string_view token) {
   h2::request<h2::empty_body> req(req_verb, url, 11);
-  req.set(h2::field::host, kDomain);
+  req.set(h2::field::host, GCE::kApiDomain);
   string access_token_header = absl::StrCat("Bearer ", absl_sv(token));
   req.set(h2::field::authorization, access_token_header);
   CHECK(req.keep_alive());

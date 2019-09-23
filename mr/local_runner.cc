@@ -21,6 +21,9 @@
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/gce/gcs.h"
+#include "util/gce/gcs_read_file.h"
+#include "util/http/https_client_pool.h"
+
 #include "util/stats/varz_stats.h"
 #include "util/zlib_source.h"
 
@@ -40,10 +43,16 @@ using namespace intrusive;
 
 }  // namespace
 
+ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
+  os << stats.cache_bytes << "/" << stats.disk_bytes << "/" << stats.read_prefetch_cnt << "/"
+     << stats.preempt_cnt;
+  return os;
+}
+
 struct LocalRunner::Impl {
  public:
   Impl(IoContextPool* p, const string& d)
-      : io_pool_(p), data_dir(d), fq_pool(0, 128),
+      : io_pool_(p), data_dir(d), fq_pool_(0, 128),
         varz_stats_("local-runner", [this] { return GetStats(); }) {}
 
   uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
@@ -57,29 +66,32 @@ struct LocalRunner::Impl {
 
   /// The functions below are called from IO threads.
   void ExpandGCS(absl::string_view glob, ExpandCb cb);
-  util::StatusObject<file::ReadonlyFile*> OpenReadFile(const std::string& filename,
-                                                       file::FiberReadOptions::Stats* stats);
+
+  StatusObject<file::ReadonlyFile*> OpenLocalFile(const std::string& filename,
+                                                  file::FiberReadOptions::Stats* stats);
+
+  StatusObject<file::ReadonlyFile*> OpenGcsFile(const std::string& filename);
   void ShutDown();
 
   RawContext* NewContext();
 
-  // TODO: to make members below private.
-  // private:
+  void Break() { stop_signal_.store(true, std::memory_order_seq_cst); }
+  void UpdateLocalStats(const file::FiberReadOptions::Stats& stats);
 
+ private:
   void LazyGcsInit();
+  util::VarzValue::Map GetStats() const;
 
   IoContextPool* io_pool_;
   string data_dir;
-  fibers_ext::FiberQueueThreadPool fq_pool;
+  fibers_ext::FiberQueueThreadPool fq_pool_;
   std::atomic_bool stop_signal_{false};
-  std::atomic_ulong file_cache_hit_bytes{0};
-  const pb::Operator* current_op = nullptr;
+  std::atomic_ulong file_cache_hit_bytes_{0};
+  const pb::Operator* current_op_ = nullptr;
 
-  fibers::mutex gce_mu;
-  std::unique_ptr<GCE> gce_handle;
+  fibers::mutex gce_mu_;
+  std::unique_ptr<GCE> gce_handle_;
 
- private:
-  util::VarzValue::Map GetStats() const;
 
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
@@ -87,6 +99,9 @@ struct LocalRunner::Impl {
     base::Histogram record_fetch_hist;
 
     absl::optional<asio::ssl::context> ssl_context;
+    absl::optional<http::HttpsClientPool> api_conn_pool;
+
+    void SetupGce(IoContext* io_context);
   };
 
   struct handle_keeper {
@@ -107,6 +122,16 @@ struct LocalRunner::Impl {
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
+
+void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
+  if (ssl_context) {
+    return;
+  }
+  CHECK(io_context);
+
+  ssl_context = GCE::CheckedSslContext();
+  api_conn_pool.emplace(GCE::kApiDomain, &ssl_context.value(), io_context);
+}
 
 auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   auto* pt = per_thread_.get();
@@ -130,7 +155,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   IoContext* io_context = io_pool_->GetThisContext();
   CHECK(io_context) << "Must run from IO context thread";
 
-  GCS* gcs = new GCS(*gce_handle, &pt->ssl_context.value(), io_context);
+  GCS* gcs = new GCS(*gce_handle_, &pt->ssl_context.value(), io_context);
   CHECK_STATUS(gcs->Connect(FLAGS_gcs_connect_deadline_ms));
 
   return unique_ptr<GCS, handle_keeper>(gcs, pt);
@@ -216,7 +241,7 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
 
 void LocalRunner::Impl::Start(const pb::Operator* op) {
   CHECK(!dest_mgr_);
-  current_op = op;
+  current_op_ = op;
   string out_dir = file_util::JoinPath(data_dir, op->output().name());
   if (util::IsGcsPath(out_dir)) {
     LazyGcsInit();  // Initializes gce handle.
@@ -225,10 +250,10 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   }
 
   lock_guard<mutex> lk(dest_mgr_mu_);
-  dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool));
+  dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool_));
 
   if (util::IsGcsPath(out_dir)) {
-    dest_mgr_->set_gce(gce_handle.get());
+    dest_mgr_->set_gce(gce_handle_.get());
   }
 }
 
@@ -243,7 +268,7 @@ void LocalRunner::Impl::End(ShardFileMap* out_files) {
 
   lock_guard<mutex> lk(dest_mgr_mu_);
   dest_mgr_.reset();
-  current_op = nullptr;
+  current_op_ = nullptr;
 }
 
 void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
@@ -259,62 +284,85 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   bool recursive = absl::EndsWith(glob, "**");
   if (recursive) {
     path.remove_suffix(2);
+  } else if (absl::EndsWith(glob, "*")) {
+    path.remove_suffix(1);
   }
+
   auto gcs = GetGcsHandle();
   bool fs_mode = !recursive;
   auto status = gcs->List(bucket, path, fs_mode, cb2);
   CHECK_STATUS(status);
 }
 
-util::StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenReadFile(
-    const std::string& filename, file::FiberReadOptions::Stats* stats) {
+StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::string& filename) {
+  CHECK(IsGcsPath(filename));
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
 
-  if (util::IsGcsPath(filename)) {
-    LazyGcsInit();
+  LazyGcsInit();
 
-    auto gcs = GetGcsHandle();
-    return gcs->OpenGcsFile(filename);
+  auto gcs = GetGcsHandle();
+  return gcs->OpenGcsFile(filename);
+}
+
+StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenLocalFile(
+    const std::string& filename, file::FiberReadOptions::Stats* stats) {
+  if (!per_thread_) {
+    per_thread_.reset(new PerThread);
   }
+  CHECK(!IsGcsPath(filename));
 
   file::FiberReadOptions opts;
   opts.prefetch_size = FLAGS_local_runner_prefetch_size;
   opts.stats = stats;
 
-  return file::OpenFiberReadFile(filename, &fq_pool, opts);
+  return file::OpenFiberReadFile(filename, &fq_pool_, opts);
 }
 
 void LocalRunner::Impl::LazyGcsInit() {
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
-  if (!per_thread_->ssl_context) {
-    per_thread_->ssl_context = GCE::CheckedSslContext();
-  }
+  per_thread_->SetupGce(io_pool_->GetThisContext());
 
   {
-    std::lock_guard<fibers::mutex> lk(gce_mu);
-    if (!gce_handle) {
-      gce_handle.reset(new GCE);
-      CHECK_STATUS(gce_handle->Init());
+    std::lock_guard<fibers::mutex> lk(gce_mu_);
+    if (!gce_handle_) {
+      gce_handle_.reset(new GCE);
+      CHECK_STATUS(gce_handle_->Init());
     }
   }
 }
 
 void LocalRunner::Impl::ShutDown() {
-  if (per_thread_) {
-    VLOG(1) << "Histogram Latency: " << per_thread_->record_fetch_hist.ToString();
+  fq_pool_.Shutdown();
 
-    per_thread_->gcs_handles.clear();
-  }
+  auto cb_per_thread = [this](IoContext& ) {
+    if (per_thread_) {
+      auto pt = per_thread_.get();
+      VLOG(1) << "Histogram Latency: " << pt->record_fetch_hist.ToString();
+
+      per_thread_.reset();
+    }
+  };
+
+  io_pool_->AwaitFiberOnAll(cb_per_thread);
+
+  auto cached_bytes = file_cache_hit_bytes_.load();
+  LOG_IF(INFO, cached_bytes) << "File cached hit bytes " << cached_bytes;
 }
 
 RawContext* LocalRunner::Impl::NewContext() {
-  CHECK_NOTNULL(current_op);
+  CHECK_NOTNULL(current_op_);
 
   return new detail::LocalContext(dest_mgr_.get());
+}
+
+void LocalRunner::Impl::UpdateLocalStats(const file::FiberReadOptions::Stats& stats) {
+  VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats;
+
+  file_cache_hit_bytes_.fetch_add(stats.cache_bytes, std::memory_order_relaxed);
 }
 
 /* LocalRunner implementation
@@ -326,24 +374,15 @@ LocalRunner::LocalRunner(IoContextPool* pool, const std::string& data_dir)
 LocalRunner::~LocalRunner() {}
 
 void LocalRunner::Init() {
-  if (!util::IsGcsPath(impl_->data_dir)) {
-    file_util::RecursivelyCreateDir(impl_->data_dir, 0750);
-  }
 }
 
 void LocalRunner::Shutdown() {
-  // TODO: to move it to Impl.
-  impl_->fq_pool.Shutdown();
-  impl_->io_pool_->AwaitFiberOnAll([this](IoContext&) { impl_->ShutDown(); });
-
-  LOG(INFO) << "File cached hit bytes " << impl_->file_cache_hit_bytes.load();
+  impl_->ShutDown();
 }
 
 void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
-RawContext* LocalRunner::CreateContext() {
-  return impl_->NewContext();
-}
+RawContext* LocalRunner::CreateContext() { return impl_->NewContext(); }
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
@@ -364,17 +403,20 @@ void LocalRunner::ExpandGlob(const std::string& glob, ExpandCb cb) {
   }
 }
 
-ostream& operator<<(ostream& os, const file::FiberReadOptions::Stats& stats) {
-  os << stats.cache_bytes << "/" << stats.disk_bytes << "/" << stats.read_prefetch_cnt << "/"
-     << stats.preempt_cnt;
-  return os;
-}
 
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                                      RawSinkCb cb) {
   file::FiberReadOptions::Stats stats;
-  auto fl_res = impl_->OpenReadFile(filename, &stats);
+  bool is_gcs = IsGcsPath(filename);
+
+  StatusObject<file::ReadonlyFile*> fl_res;
+  if (is_gcs) {
+    fl_res = impl_->OpenGcsFile(filename);
+  } else {
+    fl_res = impl_->OpenLocalFile(filename, &stats);
+  }
+
   if (!fl_res.ok()) {
     LOG(FATAL) << "Skipping " << filename << " with " << fl_res.status;
     return 0;
@@ -395,14 +437,14 @@ size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
       break;
   }
 
-  VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats;
-  impl_->file_cache_hit_bytes.fetch_add(stats.cache_bytes, std::memory_order_relaxed);
+  if (!is_gcs)
+    impl_->UpdateLocalStats(stats);
 
   return cnt;
 }
 
 void LocalRunner::Stop() {
-  CHECK_NOTNULL(impl_)->stop_signal_.store(true, std::memory_order_seq_cst);
+  CHECK_NOTNULL(impl_)->Break();
 }
 
 }  // namespace mr3
