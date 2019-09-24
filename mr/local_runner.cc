@@ -84,6 +84,7 @@ struct LocalRunner::Impl {
  private:
   void LazyGcsInit();
   util::VarzValue::Map GetStats() const;
+  void InitGCE();
 
   IoContextPool* io_pool_;
   string data_dir;
@@ -229,7 +230,6 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
 VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
 
-
   auto start = base::GetMonotonicMicrosFast();
   unsigned out_gcs_count = 0;
   {
@@ -302,7 +302,6 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   current_op_ = op;
   string out_dir = file_util::JoinPath(data_dir, op->output().name());
   if (util::IsGcsPath(out_dir)) {
-    LazyGcsInit();  // Initializes gce handle.
   } else if (!file::Exists(out_dir)) {
     CHECK(file_util::RecursivelyCreateDir(out_dir, 0750)) << "Could not create dir " << out_dir;
   }
@@ -311,6 +310,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool_));
 
   if (util::IsGcsPath(out_dir)) {
+    InitGCE();
     dest_mgr_->set_gce(gce_handle_.get());
   }
 }
@@ -386,13 +386,15 @@ void LocalRunner::Impl::LazyGcsInit() {
   }
   per_thread_->SetupGce(io_pool_->GetThisContext());
 
-  {
-    std::lock_guard<fibers::mutex> lk(gce_mu_);
-    if (!gce_handle_) {
-      gce_handle_.reset(new GCE);
-      CHECK_STATUS(gce_handle_->Init());
-    }
-  }
+  InitGCE();
+}
+
+void LocalRunner::Impl::InitGCE() {
+  std::lock_guard<fibers::mutex> lk(gce_mu_);
+  if (gce_handle_)
+    return;
+  gce_handle_.reset(new GCE);
+  CHECK_STATUS(gce_handle_->Init());
 }
 
 void LocalRunner::Impl::ShutDown() {
