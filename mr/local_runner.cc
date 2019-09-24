@@ -78,7 +78,8 @@ struct LocalRunner::Impl {
   RawContext* NewContext();
 
   void Break() { stop_signal_.store(true, std::memory_order_seq_cst); }
-  void UpdateLocalStats(const file::FiberReadOptions::Stats& stats);
+
+  class Source;
 
  private:
   void LazyGcsInit();
@@ -88,12 +89,11 @@ struct LocalRunner::Impl {
   string data_dir;
   fibers_ext::FiberQueueThreadPool fq_pool_;
   std::atomic_bool stop_signal_{false};
-  std::atomic_ulong file_cache_hit_bytes_{0};
+  std::atomic_ulong file_cache_hit_bytes_{0}, input_gcs_conn_{0};
   const pb::Operator* current_op_ = nullptr;
 
   fibers::mutex gce_mu_;
   std::unique_ptr<GCE> gce_handle_;
-
 
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
@@ -121,9 +121,71 @@ struct LocalRunner::Impl {
 
   mutable std::mutex dest_mgr_mu_;
   std::unique_ptr<DestFileSet> dest_mgr_;
+
+  friend class Source;
+};
+
+class LocalRunner::Impl::Source {
+ public:
+  Source(LocalRunner::Impl* impl, const string& fn) : impl_(impl), fname_(fn) {}
+
+  Status Open();
+
+  size_t Process(pb::WireFormat::Type type, RawSinkCb cb);
+
+ private:
+  LocalRunner::Impl* impl_;
+  const string fname_;
+  file::FiberReadOptions::Stats stats_;
+
+  std::unique_ptr<file::ReadonlyFile> rd_file_;
+  bool is_gcs_ = false;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
+
+Status LocalRunner::Impl::Source::Open() {
+  is_gcs_ = IsGcsPath(fname_);
+
+  StatusObject<file::ReadonlyFile*> fl_res;
+  if (is_gcs_) {
+    fl_res = impl_->OpenGcsFile(fname_);
+  } else {
+    fl_res = impl_->OpenLocalFile(fname_, &stats_);
+  }
+
+  if (fl_res.ok()) {
+    rd_file_.reset(fl_res.obj);
+  }
+  return fl_res.status;
+}
+
+size_t LocalRunner::Impl::Source::Process(pb::WireFormat::Type type, RawSinkCb cb) {
+  LOG(INFO) << "Processing file " << fname_;
+
+  size_t cnt = 0;
+  switch (type) {
+    case pb::WireFormat::TXT:
+      cnt = impl_->ProcessText(rd_file_.release(), cb);
+      break;
+    case pb::WireFormat::LST:
+      cnt = impl_->ProcessLst(rd_file_.release(), cb);
+      break;
+    default:
+      LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
+      break;
+  }
+
+  if (is_gcs_) {
+    impl_->input_gcs_conn_.fetch_sub(1, std::memory_order_acq_rel);
+  } else {  // local file
+    VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats_;
+
+    impl_->file_cache_hit_bytes_.fetch_add(stats_.cache_bytes, std::memory_order_relaxed);
+  }
+
+  return cnt;
+}
 
 void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
   if (ssl_context) {
@@ -166,7 +228,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
 
 VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
-  std::atomic<uint32_t> input_gcs_conn{0};
+
 
   auto start = base::GetMonotonicMicrosFast();
   unsigned out_gcs_count = 0;
@@ -177,14 +239,7 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
     }
   }
 
-  io_pool_->AwaitOnAll([&](IoContext&) {
-    auto* pt = per_thread_.get();
-    if (pt) {
-      input_gcs_conn += pt->gcs_handles.size();
-    }
-  });
-
-  map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn.load()));
+  map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn_.load()));
   map.emplace_back("output-gcs-connections", VarzValue::FromInt(out_gcs_count));
   map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
@@ -300,7 +355,8 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::string& filename) {
   CHECK(IsGcsPath(filename));
   LazyGcsInit();
-  
+
+  input_gcs_conn_.fetch_add(1, std::memory_order_acq_rel);
   if (FLAGS_local_runner_gcs_read_v2) {
     auto pt = per_thread_.get();
     return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
@@ -342,7 +398,7 @@ void LocalRunner::Impl::LazyGcsInit() {
 void LocalRunner::Impl::ShutDown() {
   fq_pool_.Shutdown();
 
-  auto cb_per_thread = [this](IoContext& ) {
+  auto cb_per_thread = [this](IoContext&) {
     if (per_thread_) {
       auto pt = per_thread_.get();
       VLOG(1) << "Histogram Latency: " << pt->record_fetch_hist.ToString();
@@ -363,12 +419,6 @@ RawContext* LocalRunner::Impl::NewContext() {
   return new detail::LocalContext(dest_mgr_.get());
 }
 
-void LocalRunner::Impl::UpdateLocalStats(const file::FiberReadOptions::Stats& stats) {
-  VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats;
-
-  file_cache_hit_bytes_.fetch_add(stats.cache_bytes, std::memory_order_relaxed);
-}
-
 /* LocalRunner implementation
 ********************************************/
 
@@ -377,12 +427,9 @@ LocalRunner::LocalRunner(IoContextPool* pool, const std::string& data_dir)
 
 LocalRunner::~LocalRunner() {}
 
-void LocalRunner::Init() {
-}
+void LocalRunner::Init() {}
 
-void LocalRunner::Shutdown() {
-  impl_->ShutDown();
-}
+void LocalRunner::Shutdown() { impl_->ShutDown(); }
 
 void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
 
@@ -407,48 +454,17 @@ void LocalRunner::ExpandGlob(const std::string& glob, ExpandCb cb) {
   }
 }
 
-
 // Read file and fill queue. This function must be fiber-friendly.
 size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                                      RawSinkCb cb) {
-  file::FiberReadOptions::Stats stats;
-  bool is_gcs = IsGcsPath(filename);
+  Impl::Source src(impl_.get(), filename);
 
-  StatusObject<file::ReadonlyFile*> fl_res;
-  if (is_gcs) {
-    fl_res = impl_->OpenGcsFile(filename);
-  } else {
-    fl_res = impl_->OpenLocalFile(filename, &stats);
-  }
-
-  if (!fl_res.ok()) {
-    LOG(FATAL) << "Skipping " << filename << " with " << fl_res.status;
-    return 0;
-  }
-
-  LOG(INFO) << "Processing file " << filename;
-  std::unique_ptr<file::ReadonlyFile> read_file(fl_res.obj);
-  size_t cnt = 0;
-  switch (type) {
-    case pb::WireFormat::TXT:
-      cnt = impl_->ProcessText(read_file.release(), cb);
-      break;
-    case pb::WireFormat::LST:
-      cnt = impl_->ProcessLst(read_file.release(), cb);
-      break;
-    default:
-      LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
-      break;
-  }
-
-  if (!is_gcs)
-    impl_->UpdateLocalStats(stats);
+  CHECK_STATUS(src.Open()) << filename;
+  size_t cnt = src.Process(type, std::move(cb));
 
   return cnt;
 }
 
-void LocalRunner::Stop() {
-  CHECK_NOTNULL(impl_)->Break();
-}
+void LocalRunner::Stop() { CHECK_NOTNULL(impl_)->Break(); }
 
 }  // namespace mr3
