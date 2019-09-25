@@ -12,10 +12,12 @@
 
 #include "util/gce/gce.h"
 #include "util/gce/gcs.h"
+#include "util/gce/gcs_read_file.h"
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 #include "util/http/https_client.h"
+#include "util/http/https_client_pool.h"
 
 using namespace std;
 using namespace boost;
@@ -41,12 +43,13 @@ static asio::ssl::context CheckedSslContext() {
   return std::move(*ssl_cntx);
 }
 
-void DownloadFile(StringPiece bucket, StringPiece obj_path, GCS* gcs) {
+void DownloadFile(StringPiece bucket, StringPiece obj_path, const GCE& gce,
+                  http::HttpsClientPool* pool) {
   constexpr size_t kBufSize = 1 << 16;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
   string full_path = GCS::ToGcsPath(bucket, obj_path);
 
-  StatusObject<file::ReadonlyFile*> st_file = gcs->OpenGcsFile(full_path);
+  StatusObject<file::ReadonlyFile*> st_file = OpenGcsReadFile(full_path, gce, pool);
   CHECK_STATUS(st_file.status);
   std::unique_ptr<file::ReadonlyFile> file{st_file.obj};
 
@@ -72,16 +75,16 @@ void DownloadConsumer(const GCE& gce, IoContext* io_context, FileQ* q) {
   string obj_path;
 
   asio::ssl::context ssl_cntx = CheckedSslContext();
+  http::HttpsClientPool api_pool(GCE::kApiDomain, &ssl_cntx, io_context);
+  api_pool.set_connect_timeout(2000);
 
-  GCS gcs(gce, &ssl_cntx, io_context);
-  CHECK_STATUS(gcs.Connect(2000));
   while (true) {
     fibers::channel_op_status st = q->pop(obj_path);
     if (st == fibers::channel_op_status::closed)
       break;
     CHECK_EQ(fibers::channel_op_status::success, st);
 
-    DownloadFile(FLAGS_bucket, obj_path, &gcs);
+    DownloadFile(FLAGS_bucket, obj_path, gce, &api_pool);
   }
 }
 

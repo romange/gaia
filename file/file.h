@@ -50,25 +50,31 @@ class ReadonlyFile {
   virtual int Handle() const = 0;
 };
 
-// Wrapper class for system functions which handle basic file operations.
-// The operations are virtual to enable subclassing, if there is a need for
-// different filesystem/file-abstraction support.
+/*! @brief Abstract class for write, append only file (sink).
+ *
+ * Used for abstracting different append-only implementations including
+ * local posix files, network based files etc. Each implementation may have different threading
+ * guarantees. The default file::Open implementation returns non thread safe posix file.
+ */
 class WriteFile {
  public:
-  // Flush and Close access to a file handle and delete this File class object.
-  // Returns true on success.
+  /*! @brief Flushes remaining data, closes access to a file handle and deletes the object.
+   *
+   * Important: deletes "this" instance object as well. Unfortunately it's kept this way due
+   * to historical reasons.
+  */
   virtual bool Close() = 0;
 
-  // Opens a file. Should not be called directly.
+  //! Opens a file. Should not be called directly. Usually are called by factory functions.
   virtual bool Open() = 0;
 
   virtual util::Status Write(const uint8* buffer, uint64 length) MUST_USE_RESULT = 0 ;
 
-  util::Status Write(StringPiece slice) MUST_USE_RESULT {
+  util::Status Write(const absl::string_view slice) MUST_USE_RESULT {
     return Write(reinterpret_cast<const uint8*>(slice.data()), slice.size());
   }
 
-  // Returns the file name given during Create(...) call.
+  //! Returns the file name given during Create(...) call.
   const std::string& create_file_name() const { return create_file_name_; }
 
  protected:
