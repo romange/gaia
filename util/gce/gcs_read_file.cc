@@ -7,11 +7,11 @@
 #include <boost/beast/http/parser.hpp>
 #include <boost/fiber/operations.hpp>
 
-#include "absl/strings/str_cat.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
 
 #include "util/gce/gcs.h"
+#include "util/gce/detail/gcs_utils.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
@@ -36,39 +36,7 @@ string BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   return read_obj_url;
 }
 
-inline absl::string_view absl_sv(beast::string_view s) {
-  return absl::string_view{s.data(), s.size()};
-}
 
-inline h2::request<h2::empty_body> PrepareRequest(h2::verb req_verb, const beast::string_view url,
-                                                  const beast::string_view token) {
-  h2::request<h2::empty_body> req(req_verb, url, 11);
-  req.set(h2::field::host, GCE::kApiDomain);
-  string access_token_header = absl::StrCat("Bearer ", absl_sv(token));
-  req.set(h2::field::authorization, access_token_header);
-  CHECK(req.keep_alive());
-
-  return req;
-}
-
-inline Status ToStatus(const system::error_code& ec) {
-  return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
-            : Status::OK;
-}
-
-inline bool DoesServerPushback(h2::status st) {
-  return st == h2::status::too_many_requests ||
-         h2::to_status_class(st) == h2::status_class::server_error;
-}
-
-inline bool IsUnauthorized(const h2::header<false, h2::fields>& header) {
-  if (header.result() != h2::status::unauthorized) {
-    return false;
-  }
-  auto it = header.find("WWW-Authenticate");
-
-  return it != header.end();
-}
 
 inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   string tmp = absl::StrCat("bytes=", from, "-");
@@ -152,7 +120,7 @@ Status GcsReadFile::Open() {
       handle = pool_->GetHandle();
       ec = handle->status();
       if (ec) {
-        return ToStatus(ec);
+        return detail::ToStatus(ec);
       }
     }
     VLOG(1) << "OpenIter" << iters << ": socket " << handle->native_handle();
@@ -165,7 +133,7 @@ Status GcsReadFile::Open() {
       const auto& msg = parser_->get();
       auto content_len_it = msg.find(h2::field::content_length);
       if (content_len_it != msg.end()) {
-        CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &size_));
+        CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &size_));
       }
       https_handle_ = std::move(handle);
       return Status::OK;
@@ -228,7 +196,7 @@ StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByte
                  << size_;
       LOG(ERROR) << "FiberSocket status: " << https_handle_->client()->next_layer().status();
 
-      return ToStatus(ec);
+      return detail::ToStatus(ec);
     }
   }
 
@@ -282,12 +250,12 @@ system::error_code GcsReadFile::SendRequestIterative(const EmptyRequest& req, Ht
     return ec;
   }
 
-  if (DoesServerPushback(msg.result())) {
+  if (detail::DoesServerPushback(msg.result())) {
     this_fiber::sleep_for(1s);
     return asio::error::try_again;  // retry
   }
 
-  if (IsUnauthorized(msg)) {
+  if (detail::IsUnauthorized(msg)) {
     return asio::error::no_permission;
   }
 
@@ -297,7 +265,7 @@ system::error_code GcsReadFile::SendRequestIterative(const EmptyRequest& req, Ht
 }
 
 EmptyRequest GcsReadFile::PrepareReadRequest(const std::string& token) const {
-  auto req = PrepareRequest(h2::verb::get, read_obj_url_, token);
+  auto req = detail::PrepareRequest(h2::verb::get, read_obj_url_, token);
   if (offs_)
     SetRange(offs_, kuint64max, &req);
   return req;

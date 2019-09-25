@@ -30,7 +30,7 @@
 namespace mr3 {
 
 DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
-DEFINE_bool(local_runner_gcs_read_v2, false, "If true, use new gcs_read_file");
+DEFINE_bool(local_runner_gcs_read_v2, true, "If true, use new gcs_read_file");
 
 DECLARE_uint32(gcs_connect_deadline_ms);
 
