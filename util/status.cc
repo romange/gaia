@@ -21,12 +21,11 @@ void Status::AddErrorMsg(StatusCode::Code code, const std::string& msg) {
   VLOG(2) << msg;
 }
 
-void Status::AddErrorMsg(const std::string& msg) {
-  AddErrorMsg(StatusCode::INTERNAL_ERROR, msg);
-}
+void Status::AddErrorMsg(const std::string& msg) { AddErrorMsg(StatusCode::INTERNAL_ERROR, msg); }
 
 void Status::AddError(const Status& status) {
-  if (status.ok()) return;
+  if (status.ok())
+    return;
   AddErrorMsg(status.code(), status.ToString());
 }
 
@@ -60,11 +59,14 @@ std::ostream& operator<<(std::ostream& o, const Status& status) {
   return o;
 }
 
-bool StatusFailPrintImpl(::util::Status st) {
+namespace detail {
+
+bool StatusFailPrintImpl(const Status& st) {
   LOG_IF(ERROR, !st.ok()) << "Status error " << st;
 
   return !st.ok();
 }
 
-}  // namespace util
+}  // namespace detail
 
+}  // namespace util

@@ -26,22 +26,21 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
+h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
+                                                  const bb_str_view token) {
+  h2::request<h2::empty_body> req(req_verb, url, 11);
+  req.set(h2::field::host, GCE::kApiDomain);
+
+  AddBearer(absl_sv(token), &req);
+  return req;
+}
 
 GcsFileBase::~GcsFileBase() {}
 
-Status GcsFileBase::OpenGeneric(unsigned num_iterations) {
-  HttpsClientPool::ClientHandle handle;
-
-  auto token_res = gce_.GetAccessToken(&pool_->io_context());
-
-  if (!token_res.ok())
-    return token_res.status;
-  string& token = token_res.obj;
-
-  auto req = PrepareRequest(token);
-
+StatusObject<HttpsClientPool::ClientHandle> GcsFileBase::SendGeneric(
+  unsigned num_iterations, Request req) {
   system::error_code ec;
-
+  HttpsClientPool::ClientHandle handle;
   for (unsigned iters = 0; iters < num_iterations; ++iters) {
     if (!handle) {
       handle = pool_->GetHandle();
@@ -57,16 +56,15 @@ Status GcsFileBase::OpenGeneric(unsigned num_iterations) {
     ec = SendRequestIterative(req, handle.get());
 
     if (!ec) {  // Success.
-      https_handle_ = std::move(handle);
-      return OnSuccess();
+      return handle;
     }
 
     if (ec == asio::error::no_permission) {
-      token_res = gce_.GetAccessToken(&pool_->io_context(), true);
+      auto token_res = gce_.RefreshAccessToken(&pool_->io_context());
       if (!token_res.ok())
         return token_res.status;
 
-      req = PrepareRequest(token);
+      AddBearer(token_res.obj, &req);
     } else if (ec != asio::error::try_again) {
       LOG(INFO) << "socket " << handle->native_handle() << " failed with error " << ec;
       handle.reset();
@@ -76,7 +74,7 @@ Status GcsFileBase::OpenGeneric(unsigned num_iterations) {
   return Status(StatusCode::IO_ERROR, "Maximum iterations reached");
 }
 
-auto GcsFileBase::SendRequestIterative(const EmptyRequest& req, HttpsClient* client) -> error_code {
+auto GcsFileBase::SendRequestIterative(const Request& req, HttpsClient* client) -> error_code {
   VLOG(1) << "Req: " << req;
 
   system::error_code ec = client->Send(req);

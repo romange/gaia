@@ -24,8 +24,6 @@ using file::ReadonlyFile;
 
 namespace {
 
-// TODO: to factor out common utilities/constants to a separate file.
-
 string BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   string read_obj_url{"/storage/v1/b/"};
   absl::StrAppend(&read_obj_url, bucket, "/o/");
@@ -50,6 +48,7 @@ class GcsReadFile : public ReadonlyFile, private detail::GcsFileBase {
   // does not own gcs object, only wraps it with ReadonlyFile interface.
   GcsReadFile(const GCE& gce, HttpsClientPool* pool, string read_obj_url)
       : detail::GcsFileBase(gce, pool), read_obj_url_(std::move(read_obj_url)) {}
+
   virtual ~GcsReadFile() final;
 
   // Reads upto length bytes and updates the result to point to the data.
@@ -67,29 +66,32 @@ class GcsReadFile : public ReadonlyFile, private detail::GcsFileBase {
   Status Open();
 
  private:
-  system::error_code SendRequestIterative(const EmptyRequest& req, HttpsClient* client);
-
-  EmptyRequest PrepareRequest(const std::string& token) const final;
-  Status OnSuccess() final;
-
   const string read_obj_url_;
+  HttpsClientPool::ClientHandle https_handle_;
+
   size_t size_;
   size_t offs_ = 0;
 };
 
 GcsReadFile::~GcsReadFile() {}
 
-Status GcsReadFile::OnSuccess() {
-  const auto& msg = parser_->get();
+Status GcsReadFile::Open() {
+  string token = gce_.access_token();
+
+  auto req = detail::PrepareGenericRequest(h2::verb::get, read_obj_url_, token);
+  if (offs_)
+    SetRange(offs_, kuint64max, &req);
+  auto handle_res = SendGeneric(3, req);
+  if (!handle_res.ok())
+    return handle_res.status;
+
+  const auto& msg = parser()->get();
   auto content_len_it = msg.find(h2::field::content_length);
   if (content_len_it != msg.end()) {
     CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &size_));
   }
+  https_handle_ = std::move(handle_res.obj);
   return Status::OK;
-}
-
-Status GcsReadFile::Open() {
-  return OpenGeneric(3);
 }
 
 StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
@@ -97,17 +99,17 @@ StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByte
     return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
   }
 
-  if (parser_->is_done()) {
+  if (parser()->is_done()) {
     return 0;
   }
 
   for (unsigned iters = 0; iters < 3; ++iters) {
-    auto& body = parser_->get().body();
+    auto& body = parser()->get().body();
     body.data = range.data();
     auto& left_available = body.size;
     left_available = range.size();
 
-    error_code ec = https_handle_->Read(&parser_.value());
+    error_code ec = https_handle_->Read(parser());
     if (!ec || ec == h2::error::need_buffer || ec == h2::error::partial_message) {  // Success
       size_t http_read = range.size() - left_available;
       DVLOG(2) << "Read " << http_read << " bytes from " << offset << " with capacity "
@@ -141,26 +143,18 @@ StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByte
 
 // releases the system handle for this file.
 Status GcsReadFile::Close() {
-  if (!parser_) {
-    if (!parser_->is_done()) {
+  if (https_handle_ && parser()) {
+    if (!parser()->is_done()) {
       // We prefer closing the connection to draining.
       https_handle_->schedule_reconnect();
     }
-    parser_.reset();
   }
   https_handle_.reset();
 
   return Status::OK;
 }
 
-auto GcsReadFile::PrepareRequest(const std::string& token) const -> EmptyRequest {
-  auto req = detail::PrepareGenericRequest(h2::verb::get, read_obj_url_, token);
-  if (offs_)
-    SetRange(offs_, kuint64max, &req);
-  return req;
-}
-
-}  // namespace util
+}  // namespace
 
 StatusObject<ReadonlyFile*> OpenGcsReadFile(absl::string_view full_path, const GCE& gce,
                                             HttpsClientPool* pool,

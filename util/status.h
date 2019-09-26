@@ -17,27 +17,22 @@ class Status {
   constexpr Status() noexcept {}
 
   // copy c'tor makes copy of error detail so Status can be returned by value
-  Status(const Status& status) : error_detail_(
-    status.error_detail_ ? new ErrorDetail(*status.error_detail_) : nullptr) {
-  }
+  Status(const Status& status)
+      : error_detail_(status.error_detail_ ? new ErrorDetail(*status.error_detail_) : nullptr) {}
 
   // Move c'tor.
-  Status(Status&& st) noexcept : error_detail_(std::move(st.error_detail_)) {
-  }
+  Status(Status&& st) noexcept : error_detail_(std::move(st.error_detail_)) {}
 
   // c'tor for error case - is this useful for anything other than CANCELLED?
-  Status(StatusCode::Code code)
-    : error_detail_(new ErrorDetail(code)) {
-  }
+  Status(StatusCode::Code code) : error_detail_(new ErrorDetail(code)) {}
 
   // c'tor for error case
   Status(StatusCode::Code code, std::string error_msg)
-    : error_detail_(new ErrorDetail(code, std::move(error_msg))) {
-  }
+      : error_detail_(new ErrorDetail(code, std::move(error_msg))) {}
 
   // c'tor for internal error
-  Status(std::string error_msg) : error_detail_(
-    new ErrorDetail(StatusCode::INTERNAL_ERROR, std::move(error_msg))) {}
+  Status(std::string error_msg)
+      : error_detail_(new ErrorDetail(StatusCode::INTERNAL_ERROR, std::move(error_msg))) {}
 
   // same as copy c'tor
   Status& operator=(const Status& status) {
@@ -70,7 +65,8 @@ class Status {
   void GetErrorMsg(std::string* msg) const;
 
   std::string ToString() const {
-    std::string msg; GetErrorMsg(&msg);
+    std::string msg;
+    GetErrorMsg(&msg);
     return msg;
   }
 
@@ -82,30 +78,27 @@ class Status {
   static const Status CANCELLED;
 
   friend std::ostream& operator<<(std::ostream& o, const Status& status);
- private:
 
+ private:
   static Status ByCode(StatusCode::Code code) { return Status(code); }
 
   struct ErrorDetail {
     StatusCode::Code error_code;  // anything other than OK
     std::vector<std::string> error_msgs;
 
-    ErrorDetail(StatusCode::Code code)
-      : error_code(code) {}
-    ErrorDetail(StatusCode::Code code, std::string msg)
-      : error_code(code) {
-        error_msgs.push_back(std::move(msg));
+    ErrorDetail(StatusCode::Code code) : error_code(code) {}
+    ErrorDetail(StatusCode::Code code, std::string msg) : error_code(code) {
+      error_msgs.push_back(std::move(msg));
     }
   };
 
   std::unique_ptr<ErrorDetail> error_detail_;
 };
 
-
 // Sometimes functions need to return both data object and status.
 // It's inconvenient to set this data object by reference via argument parameter.
 // StatusObject should help with this problem.
-template<typename T> struct StatusObject {
+template <typename T> struct StatusObject {
   Status status;
   T obj;
 
@@ -127,33 +120,50 @@ template<typename T> struct StatusObject {
   std::string ToString() const { return status.ToString(); }
 };
 
-template<typename T> StatusObject<T>& StatusObject<T>::operator=(StatusObject<T>&& o) noexcept {
+template <typename T> StatusObject<T>& StatusObject<T>::operator=(StatusObject<T>&& o) noexcept {
   status = std::move(o.status);
   obj = std::move(o.obj);
   return *this;
 }
 
-// some generally useful macros
-#define RETURN_IF_ERROR(stmt) \
-  do { \
-    auto __status__ = (stmt); \
-    if (UNLIKELY(!__status__.ok())) return __status__; \
-  } while (false)
-
+namespace detail {
 
 // Returns true if status failed.
-bool StatusFailPrintImpl(::util::Status st);
+bool StatusFailPrintImpl(const Status& st);
 
-#define CHECK_STATUS(stmt) \
-  LOG_IF(FATAL, UNLIKELY(StatusFailPrintImpl(stmt))) << "status check failed on <" #stmt ">"
+void PrintFatal(const char* file, unsigned line_num, const Status& st);
 
-#define GET_UNLESS_ERROR(var, stmt) \
-  decltype((stmt).obj) var; \
-  do { \
-    auto __res__ = (stmt); \
-    if (UNLIKELY(!__res__.ok())) return __res__.status; \
-    var = std::move(__res__.obj); \
+template<typename T> T CheckedGet(const char* file, unsigned line_num, StatusObject<T>&& st_obj) {
+  if (!st_obj.ok()) {
+    PrintFatal(file, line_num, st_obj.status);
+  }
+  return std::move(st_obj.obj);
+}
+
+}  // namespace detail
+
+// some generally useful macros
+#define RETURN_IF_ERROR(stmt)       \
+  do {                              \
+    auto __status__ = (stmt);       \
+    if (UNLIKELY(!__status__.ok())) \
+      return __status__;            \
   } while (false)
 
 
+#define GET_UNLESS_ERROR(var, stmt) \
+  decltype((stmt).obj) var;         \
+  do {                              \
+    auto __res__ = (stmt);          \
+    if (UNLIKELY(!__res__.ok()))    \
+      return __res__.status;        \
+    var = std::move(__res__.obj);   \
+  } while (false)
+
 }  // namespace util
+
+#define CHECK_STATUS(stmt) \
+  LOG_IF(FATAL, UNLIKELY(::util::detail::StatusFailPrintImpl(stmt))) << \
+         "status check failed on <" #stmt ">"
+
+#define CHECKED_GET(stmt) ::util::detail::CheckedGet(__FILE__, __LINE__, stmt)

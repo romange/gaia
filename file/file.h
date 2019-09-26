@@ -92,11 +92,11 @@ struct OpenOptions {
   bool append = false;
 };
 
-// Factory method to create a new writable file object. Calls Open on the
-// resulting object to open the file.
+//! Factory method to create a new writable file object. Calls Open on the
+//! resulting object to open the file.
 WriteFile* Open(StringPiece file_name, OpenOptions opts = OpenOptions());
 
-// Deletes the file returning true iff successful.
+//! Deletes the file returning true iff successful.
 bool Delete(StringPiece name);
 
 bool Exists(StringPiece name);

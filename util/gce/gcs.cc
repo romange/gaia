@@ -301,10 +301,8 @@ Status GCS::Connect(unsigned msec) {
     return ToStatus(ec);
   }
 
-  auto res = gce_.GetAccessToken(&io_context_);
-  if (!res.ok())
-    return res.status;
-  access_token_header_ = absl::StrCat("Bearer ", res.obj);
+  string token = gce_.access_token();
+  access_token_header_ = absl::StrCat("Bearer ", token);
 
   VLOG(1) << "GCS::Connect OK " << native_handle();
 
@@ -822,7 +820,7 @@ auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSe
 }
 
 Status GCS::RefreshToken(Request* req) {
-  auto res = gce_.GetAccessToken(&io_context_, true);
+  auto res = gce_.RefreshAccessToken(&io_context_);
   if (!res.ok())
     return res.status;
 

@@ -33,7 +33,10 @@ class GCE {
 
   static ::boost::asio::ssl::context CheckedSslContext();
 
-  StatusObject<std::string> GetAccessToken(IoContext* context, bool force_refresh = false) const;
+  //! Returns cached access_token.
+  std::string access_token() const;
+
+  StatusObject<std::string> RefreshAccessToken(IoContext* context) const;
   bool is_prod_env() const { return is_prod_env_; }
 
   void Test_InjectAcessToken(std::string access_token);

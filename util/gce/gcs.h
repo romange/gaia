@@ -22,7 +22,10 @@
 namespace util {
 
 namespace http {
+
 class HttpsClient;
+class HttpsClientPool;
+
 }  // namespace http
 
 class IoContext;
@@ -116,5 +119,16 @@ class GCS {
 };
 
 bool IsGcsPath(absl::string_view path);
+
+/**
+ * @brief Opens a new GCS file for writes.
+ *
+ * @param full_path - aka "gs://somebucket/path_to_obj"
+ * @param gce
+ * @param pool - https connection pool connected to google api server.
+ * @return StatusObject<file::WriteFile*>
+ */
+StatusObject<file::WriteFile*> OpenGcsWriteFile(
+    absl::string_view full_path, const GCE& gce, http::HttpsClientPool* pool);
 
 }  // namespace util

@@ -217,13 +217,12 @@ util::Status GCE::ReadDevCreds(const std::string& root_path) {
   return Status::OK;
 }
 
-StatusObject<std::string> GCE::GetAccessToken(IoContext* context, bool force_refresh) const {
-  if (!force_refresh) {
-    std::lock_guard<fibers::mutex> lk(mu_);
-    if (!access_token_.empty())
-      return access_token_;
-  }
+std::string GCE::access_token() const {
+  std::lock_guard<fibers::mutex> lk(mu_);
+  return access_token_;
+}
 
+StatusObject<std::string> GCE::RefreshAccessToken(IoContext* context) const {
   h2::response<h2::string_body> resp;
   error_code ec;
 

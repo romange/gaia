@@ -26,16 +26,8 @@ inline absl::string_view absl_sv(const bb_str_view s) {
   return absl::string_view{s.data(), s.size()};
 }
 
-inline h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
-                                                         const bb_str_view token) {
-  h2::request<h2::empty_body> req(req_verb, url, 11);
-  req.set(h2::field::host, GCE::kApiDomain);
-
-  std::string access_token_header = absl::StrCat("Bearer ", absl_sv(token));
-  req.set(h2::field::authorization, access_token_header);
-
-  return req;
-}
+h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
+                                                  const bb_str_view token);
 
 inline Status ToStatus(const ::boost::system::error_code& ec) {
   return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
@@ -56,30 +48,36 @@ inline bool IsUnauthorized(const h2::header<false, h2::fields>& header) {
   return it != header.end();
 }
 
+inline void AddBearer(absl::string_view token, h2::header<true, h2::fields>* req) {
+  std::string token_header = absl::StrCat("Bearer ", token);
+  req->set(h2::field::authorization, token_header);
+}
+
 class GcsFileBase {
  public:
+  using Parser = h2::response_parser<h2::buffer_body>;
+  using Request = h2::request<h2::empty_body>;
+  using ClientHandle = http::HttpsClientPool::ClientHandle;
+
   GcsFileBase(const GCE& gce, http::HttpsClientPool* pool) : gce_(gce), pool_(pool) {}
 
-  virtual ~GcsFileBase();
+  ~GcsFileBase();
+
+  //! Can be called only SendGeneric returned success.
+  Parser* parser() { return parser_.has_value() ? &parser_.value() : nullptr; }
+
+  StatusObject<ClientHandle> SendGeneric(unsigned num_iterations, Request req);
 
  protected:
-  using EmptyRequest = h2::request<h2::empty_body>;
   using error_code = ::boost::system::error_code;
 
-  Status OpenGeneric(unsigned num_iterations);
-
-  virtual EmptyRequest PrepareRequest(const std::string& token) const = 0;
-  virtual Status OnSuccess() = 0;
-
-  using OptParser = absl::optional<h2::response_parser<h2::buffer_body>>;
-  OptParser parser_;
-  http::HttpsClientPool::ClientHandle https_handle_;
-
- private:
-  error_code SendRequestIterative(const EmptyRequest& req, http::HttpsClient* client);
 
   const GCE& gce_;
+ private:
+  error_code SendRequestIterative(const Request& req, http::HttpsClient* client);
+
   http::HttpsClientPool* const pool_;
+  absl::optional<Parser> parser_;
 };
 
 }  // namespace detail
