@@ -12,7 +12,6 @@
 
 #include "util/gce/gce.h"
 #include "util/gce/gcs.h"
-#include "util/gce/gcs_read_file.h"
 
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"

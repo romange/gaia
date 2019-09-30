@@ -60,7 +60,7 @@ class HttpsClient {
    */
   template <typename Req, typename Resp> error_code Send(const Req& req, Resp* resp);
 
-  template <typename Parser> error_code ReadHeader(Parser* parser);
+  error_code ReadHeader(::boost::beast::http::basic_parser<false>* parser);
   template <typename Parser> error_code Read(Parser* parser);
 
   error_code DrainResponse(
@@ -150,7 +150,8 @@ template <typename Req> auto HttpsClient::Send(const Req& req) -> error_code {
 }
 
 // Read methods should not reconnect since they assume some state (i.e. reading http request).
-template <typename Parser> auto HttpsClient::ReadHeader(Parser* parser) -> error_code {
+inline auto HttpsClient::ReadHeader(::boost::beast::http::basic_parser<false>* parser)
+    -> error_code {
   error_code ec;
 
   ::boost::beast::http::read_header(*client_, tmp_buffer_, *parser, ec);
