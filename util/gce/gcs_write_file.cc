@@ -7,6 +7,7 @@
 
 #include "util/gce/gcs.h"
 
+#include <boost/fiber/operations.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
 // #include <boost/beast/http/parser.hpp>
 
@@ -27,7 +28,21 @@ using file::WriteFile;
 
 namespace {
 
-class GcsWriteFile : public WriteFile, detail::GcsFileBase {
+class ApiSenderDynamicBody : public detail::ApiSenderBase {
+ public:
+  using Parser = h2::response_parser<h2::dynamic_body>;
+
+  using ApiSenderBase::ApiSenderBase;
+
+  //! Can be called only SendGeneric returned success.
+  Parser* parser() { return parser_.has_value() ? &parser_.value() : nullptr; }
+
+ private:
+  error_code SendRequestIterative(const Request& req, http::HttpsClient* client) final;
+  absl::optional<Parser> parser_;
+};
+
+class GcsWriteFile : public WriteFile, private ApiSenderDynamicBody {
  public:
   /**
    * @brief Construct a new Gcs Write File object.
@@ -37,7 +52,7 @@ class GcsWriteFile : public WriteFile, detail::GcsFileBase {
    * @param pool - https connection pool connected to google api server.
    */
   GcsWriteFile(absl::string_view name, const GCE& gce, HttpsClientPool* pool)
-      : WriteFile(name), detail::GcsFileBase(gce, pool) {}
+      : WriteFile(name), ApiSenderDynamicBody(gce, pool) {}
 
   bool Close() final;
 
@@ -50,6 +65,46 @@ class GcsWriteFile : public WriteFile, detail::GcsFileBase {
 bool GcsWriteFile::Close() { return true; }
 
 bool GcsWriteFile::Open() { return true; }
+
+auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient* client)
+    -> error_code {
+  VLOG(1) << "Req: " << req;
+
+  system::error_code ec = client->Send(req);
+  if (ec)
+    return ec;
+
+  parser_.emplace(); // .body_limit(kuint64max);
+  ec = client->Read(&parser_.value());
+  if (ec) {
+    return ec;
+  }
+
+  if (!parser_->keep_alive()) {
+    client->schedule_reconnect();
+    LOG(INFO) << "Scheduling reconnect due to conn-close header";
+  }
+
+  const auto& msg = parser_->get();
+  VLOG(1) << "HeaderResp: " << msg;
+
+  if (msg.result() == h2::status::ok) {
+    return error_code{};  // all is good.
+  }
+
+  if (detail::DoesServerPushback(msg.result())) {
+    this_fiber::sleep_for(1s);
+    return asio::error::try_again;  // retry
+  }
+
+  if (detail::IsUnauthorized(msg)) {
+    return asio::error::no_permission;
+  }
+
+  LOG(ERROR) << "Unexpected status " << msg;
+
+  return h2::error::bad_status;
+}
 
 }  // namespace
 
@@ -66,6 +121,11 @@ StatusObject<file::WriteFile*> OpenGcsWriteFile(absl::string_view full_path, con
   auto req = detail::PrepareGenericRequest(h2::verb::post, url, token);
   h2::response<h2::dynamic_body> resp_msg;
   req.prepare_payload();
+
+  ApiSenderDynamicBody sender(gce, pool);
+  auto res = sender.SendGeneric(3, std::move(req));
+  if (!res.ok())
+    return res.status;
 
   return nullptr;
   #if 0

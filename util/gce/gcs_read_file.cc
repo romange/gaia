@@ -40,13 +40,13 @@ inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   flds->set(h2::field::range, std::move(tmp));
 }
 
-class GcsReadFile : public ReadonlyFile, private detail::GcsFileBase {
+class GcsReadFile : public ReadonlyFile, private detail::ApiSenderBufferBody {
  public:
   using error_code = ::boost::system::error_code;
 
   // does not own gcs object, only wraps it with ReadonlyFile interface.
   GcsReadFile(const GCE& gce, HttpsClientPool* pool, string read_obj_url)
-      : detail::GcsFileBase(gce, pool), read_obj_url_(std::move(read_obj_url)) {}
+      : detail::ApiSenderBufferBody(gce, pool), read_obj_url_(std::move(read_obj_url)) {}
 
   virtual ~GcsReadFile() final;
 
