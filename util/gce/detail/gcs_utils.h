@@ -53,32 +53,42 @@ inline void AddBearer(absl::string_view token, h2::header<true, h2::fields>* req
   req->set(h2::field::authorization, token_header);
 }
 
-class GcsFileBase {
+class ApiSenderBase {
  public:
-  using Parser = h2::response_parser<h2::buffer_body>;
   using Request = h2::request<h2::empty_body>;
   using ClientHandle = http::HttpsClientPool::ClientHandle;
 
-  GcsFileBase(const GCE& gce, http::HttpsClientPool* pool) : gce_(gce), pool_(pool) {}
+  ApiSenderBase(const GCE& gce, http::HttpsClientPool* pool) : gce_(gce), pool_(pool) {}
 
-  ~GcsFileBase();
-
-  //! Can be called only SendGeneric returned success.
-  Parser* parser() { return parser_.has_value() ? &parser_.value() : nullptr; }
+  virtual ~ApiSenderBase();
 
   StatusObject<ClientHandle> SendGeneric(unsigned num_iterations, Request req);
 
  protected:
   using error_code = ::boost::system::error_code;
 
-
   const GCE& gce_;
+
  private:
-  error_code SendRequestIterative(const Request& req, http::HttpsClient* client);
+  virtual error_code SendRequestIterative(const Request& req, http::HttpsClient* client) = 0;
 
   http::HttpsClientPool* const pool_;
+};
+
+class ApiSenderBufferBody : public ApiSenderBase {
+ public:
+  using Parser = h2::response_parser<h2::buffer_body>;
+
+  using ApiSenderBase::ApiSenderBase;
+
+  //! Can be called only SendGeneric returned success.
+  Parser* parser() { return parser_.has_value() ? &parser_.value() : nullptr; }
+
+ private:
+  error_code SendRequestIterative(const Request& req, http::HttpsClient* client) final;
   absl::optional<Parser> parser_;
 };
+
 
 }  // namespace detail
 }  // namespace util

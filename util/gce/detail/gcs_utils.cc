@@ -35,10 +35,10 @@ h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_st
   return req;
 }
 
-GcsFileBase::~GcsFileBase() {}
+ApiSenderBase::~ApiSenderBase() {}
 
-StatusObject<HttpsClientPool::ClientHandle> GcsFileBase::SendGeneric(
-  unsigned num_iterations, Request req) {
+StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned num_iterations,
+                                                                       Request req) {
   system::error_code ec;
   HttpsClientPool::ClientHandle handle;
   for (unsigned iters = 0; iters < num_iterations; ++iters) {
@@ -50,8 +50,6 @@ StatusObject<HttpsClientPool::ClientHandle> GcsFileBase::SendGeneric(
       }
     }
     VLOG(1) << "OpenIter" << iters << ": socket " << handle->native_handle();
-
-    parser_.emplace().body_limit(kuint64max);
 
     ec = SendRequestIterative(req, handle.get());
 
@@ -74,13 +72,15 @@ StatusObject<HttpsClientPool::ClientHandle> GcsFileBase::SendGeneric(
   return Status(StatusCode::IO_ERROR, "Maximum iterations reached");
 }
 
-auto GcsFileBase::SendRequestIterative(const Request& req, HttpsClient* client) -> error_code {
+auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* client)
+    -> error_code {
   VLOG(1) << "Req: " << req;
 
   system::error_code ec = client->Send(req);
   if (ec)
     return ec;
 
+  parser_.emplace().body_limit(kuint64max);
   ec = client->ReadHeader(&parser_.value());
 
   if (ec) {
