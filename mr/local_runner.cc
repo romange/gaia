@@ -21,7 +21,6 @@
 #include "util/asio/io_context_pool.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/gce/gcs.h"
-#include "util/gce/gcs_read_file.h"
 #include "util/http/https_client_pool.h"
 
 #include "util/stats/varz_stats.h"

@@ -1,7 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include "util/gce/gcs_read_file.h"
+#include "util/gce/gcs.h"
 
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/parser.hpp>
@@ -10,7 +10,6 @@
 #include "strings/escaping.h"
 
 #include "util/gce/detail/gcs_utils.h"
-#include "util/gce/gcs.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
