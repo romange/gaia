@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4)
+﻿cmake_minimum_required(VERSION 3.4)
 
 # package information
 set(PACKAGE_NAME      "gaia")
@@ -15,6 +15,7 @@ set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
 
 option (ONLY_THIRD_PARTY "Build third party only")
+option (USE_SYSTEM_BOOST "Allow finding boost from system")
 
 # Check target architecture
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)

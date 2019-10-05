@@ -1,4 +1,4 @@
-set(THIRD_PARTY_DIR "${CMAKE_CURRENT_BINARY_DIR}/third_party")
+﻿set(THIRD_PARTY_DIR "${CMAKE_CURRENT_BINARY_DIR}/third_party")
 
 SET_DIRECTORY_PROPERTIES(PROPERTIES EP_PREFIX ${THIRD_PARTY_DIR})
 
@@ -278,14 +278,17 @@ add_third_party(
 
 # set(Boost_DEBUG ON)
 set(Boost_USE_MULTITHREADED ON)
-SET(Boost_NO_SYSTEM_PATHS ON)
-SET(Boost_NO_BOOST_CMAKE ON)
+if(NOT USE_SYSTEM_BOOST)
+ set(Boost_NO_SYSTEM_PATHS ON)
+ set(Boost_REQUIRED_VERSION 1.68.0)
+endif(NOT USE_SYSTEM_BOOST)
+set(Boost_NO_BOOST_CMAKE ON)
 
 set(BOOST_ROOT /usr/local)
-find_package(Boost 1.68.0 QUIET COMPONENTS coroutine fiber context system thread)
+find_package(Boost ${Boost_REQUIRED_VERSION} QUIET COMPONENTS coroutine fiber context system thread)
 if (NOT Boost_FOUND)
   set(BOOST_ROOT /opt/boost)
-  find_package(Boost 1.68.0 REQUIRED COMPONENTS coroutine fiber context system thread)
+  find_package(Boost ${Boost_REQUIRED_VERSION} REQUIRED COMPONENTS coroutine fiber context system thread)
 endif()
 Message("Found Boost ${Boost_LIBRARY_DIRS} ${Boost_LIB_VERSION}")
 
