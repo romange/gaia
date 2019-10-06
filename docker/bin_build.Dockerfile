@@ -11,7 +11,7 @@ ARG IMAGE_TAG
 COPY ./CMakeLists.txt /src/
 COPY ./cmake /src/cmake
 WORKDIR /build
-RUN echo "PATH IS: $PATH"
+RUN echo "PATH IS: $PATH" && cmake --version
 RUN echo "IMAGE_TAG ${IMAGE_TAG}" && cmake -L -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
                                     -DONLY_THIRD_PARTY=ON -GNinja /src
 

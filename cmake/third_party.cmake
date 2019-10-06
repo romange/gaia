@@ -153,7 +153,7 @@ add_third_party(
   gtest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG release-1.8.1
-  GIT_SHALLOW 1
+  # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
   LIB libgtest.a libgmock.a
 )
 
@@ -193,7 +193,7 @@ add_third_party(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
     GIT_TAG v3.9.0
-    GIT_SHALLOW 1
+    # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
     PATCH_COMMAND <SOURCE_DIR>/autogen.sh
 
     CONFIGURE_COMMAND <SOURCE_DIR>/configure --with-zlib=no  --with-tests=no
@@ -287,9 +287,9 @@ if (NOT Boost_FOUND)
   set(BOOST_ROOT /opt/boost)
   find_package(Boost 1.68.0 REQUIRED COMPONENTS coroutine fiber context system thread)
 endif()
-Message("Found Boost ${Boost_LIBRARY_DIRS} ${Boost_LIB_VERSION}")
+Message(STATUS "Found Boost ${Boost_LIBRARY_DIRS} ${Boost_LIB_VERSION} ${Boost_VERSION}")
 
-if(Boost_VERSION GREATER_EQUAL 107100)
+if(NOT Boost_VERSION LESS 107100)
   add_definitions(-DBOOST_BEAST_SEPARATE_COMPILATION -DBOOST_ASIO_SEPARATE_COMPILATION)
 endif()
 

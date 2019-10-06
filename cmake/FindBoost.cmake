@@ -1487,7 +1487,7 @@ if(WIN32)
     INTERFACE_COMPILE_DEFINITIONS "BOOST_ALL_NO_LIB")
 endif()
 
-if ("${CMAKE_VERSION}" STRLESS "3.12")
+if (CMAKE_VERSION VERSION_LESS "3.12")
   set(_Boost_CMP0074 "OLD")
 else()
   cmake_policy(GET CMP0074 _Boost_CMP0074)
@@ -1645,7 +1645,7 @@ if(Boost_INCLUDE_DIR)
   set(Boost_VERSION_STRING "${Boost_VERSION_MAJOR}.${Boost_VERSION_MINOR}.${Boost_VERSION_PATCH}")
 
   # Define final Boost_VERSION
-  if ("${CMAKE_VERSION}" STRLESS "3.15")
+  if (CMAKE_VERSION VERSION_LESS "3.15")
     set(_Boost_CMP0093 "OLD")
   else()
     cmake_policy(GET CMP0093 _Boost_CMP0093
