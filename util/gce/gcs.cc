@@ -23,12 +23,14 @@
 #include "util/http/https_client.h"
 #include "util/stats/varz_stats.h"
 
-DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
 DEFINE_bool(gcs_dry_write, false,
             "If set true do not really perform upload requests."
             "Still creates gcs connections for upload.");
 
 namespace util {
+
+DECLARE_uint32(gcs_upload_buf_log_size);
+
 using namespace std;
 using namespace boost;
 

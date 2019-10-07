@@ -67,11 +67,9 @@ class ApiSenderBase {
  protected:
   using error_code = ::boost::system::error_code;
 
-  const GCE& gce_;
-
- private:
   virtual error_code SendRequestIterative(const Request& req, http::HttpsClient* client) = 0;
 
+  const GCE& gce_;
   http::HttpsClientPool* const pool_;
 };
 
