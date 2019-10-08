@@ -1,6 +1,6 @@
 # To build a binary using this docker file run, for example:
 # docker build -f docker/bin_build.Dockerfile  --build-arg IMAGE_TAG=18_1_71_0 --build-arg TARGET=mr3 .
-ARG IMAGE_TAG=18
+ARG IMAGE_TAG=18_1_71_0
 
 FROM romange/boost-dev:${IMAGE_TAG} as third_party
 ARG IMAGE_TAG
@@ -20,7 +20,7 @@ RUN ninja -j4 protobuf_project glog_project sparsehash_project gperf_project zst
 
 FROM third_party as src
 COPY ./ /src/
-RUN mkdir /pkg && cmake -L -DONLY_THIRD_PARTY=OFF -GNinja /src
+RUN mkdir /pkg && cmake -L -DONLY_THIRD_PARTY=OFF -DBUILD_DOCS=OFF -GNinja /src
 
 FROM src as bin
 # Now really building the target. Previous containers will be reused between the builds.

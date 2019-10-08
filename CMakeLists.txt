@@ -14,7 +14,8 @@ set(VERSION_MAJOR 0)
 set(VERSION_MINOR 1)
 set(VERSION_PATCH 0)
 
-option (ONLY_THIRD_PARTY "Build third party only")
+option (ONLY_THIRD_PARTY "Build third party only" OFF)
+option (BUILD_DOCS "Generate documentation " ON)
 
 # Check target architecture
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -56,5 +57,8 @@ if (NOT ONLY_THIRD_PARTY)
   add_subdirectory(file)
   add_subdirectory(mr)
   add_subdirectory(examples)
-  add_subdirectory(doc)
+
+  if (BUILD_DOCS)
+    add_subdirectory(doc)
+  endif()
 endif()
