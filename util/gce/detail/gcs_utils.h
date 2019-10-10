@@ -5,7 +5,7 @@
 #pragma once
 
 #include <boost/beast/http/buffer_body.hpp>
-#include <boost/beast/http/empty_body.hpp>
+#include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/parser.hpp>
 
 #include "absl/strings/str_cat.h"
@@ -26,8 +26,8 @@ inline absl::string_view absl_sv(const bb_str_view s) {
   return absl::string_view{s.data(), s.size()};
 }
 
-h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
-                                                  const bb_str_view token);
+h2::request<h2::dynamic_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
+                                                    const bb_str_view token);
 
 inline Status ToStatus(const ::boost::system::error_code& ec) {
   return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
@@ -55,7 +55,7 @@ inline void AddBearer(absl::string_view token, h2::header<true, h2::fields>* req
 
 class ApiSenderBase {
  public:
-  using Request = h2::request<h2::empty_body>;
+  using Request = h2::request<h2::dynamic_body>;
   using ClientHandle = http::HttpsClientPool::ClientHandle;
 
   ApiSenderBase(const GCE& gce, http::HttpsClientPool* pool) : gce_(gce), pool_(pool) {}

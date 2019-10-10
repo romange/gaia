@@ -10,6 +10,7 @@
 #include <boost/beast/http/dynamic_body.hpp>
 #include <boost/fiber/operations.hpp>
 
+#include "absl/strings/strip.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
 
@@ -29,6 +30,27 @@ namespace h2 = detail::h2;
 using file::WriteFile;
 
 namespace {
+
+//! [from, to) limited range out of total. If total is < 0 then it's unknown.
+string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
+  CHECK_LE(from, to);
+  string tmp{"bytes "};
+
+  if (from < to) {                                  // common case.
+    absl::StrAppend(&tmp, from, "-", to - 1, "/");  // content-range is inclusive.
+    if (total >= 0) {
+      absl::StrAppend(&tmp, total);
+    } else {
+      tmp.push_back('*');
+    }
+  } else {
+    // We can write empty ranges only when we finalize the file and total is known.
+    CHECK_GE(total, 0);
+    absl::StrAppend(&tmp, "*/", total);
+  }
+
+  return tmp;
+}
 
 class ApiSenderDynamicBody : public detail::ApiSenderBase {
  public:
@@ -68,6 +90,7 @@ class GcsWriteFile : public WriteFile, protected ApiSenderDynamicBody {
 
   string obj_url_;
   beast::multi_buffer body_mb_;
+  size_t uploaded_ = 0;
 };
 
 GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_url,
@@ -113,6 +136,40 @@ size_t GcsWriteFile::FillBuf(const uint8* buffer, size_t length) {
 }
 
 Status GcsWriteFile::Upload() {
+  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
+
+  size_t body_size = body_mb_.size();
+  CHECK_GT(body_size, 0);
+  CHECK_EQ(0, body_size % (1U << 18)) << body_size;  // Must be multiple of 256KB.
+
+  size_t to = uploaded_ + body_size;
+
+  req.body() = std::move(body_mb_);
+  req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, -1));
+  req.set(h2::field::content_type, "application/octet-stream");
+  req.prepare_payload();
+
+  CHECK_EQ(0, body_mb_.size());
+
+  auto res = SendGeneric(3, std::move(req));
+  if (!res.ok())
+    return res.status;
+
+  Parser* upload_parser = CHECK_NOTNULL(parser());
+  const auto& resp_msg = upload_parser->get();
+  auto it = resp_msg.find(h2::field::range);
+  CHECK(it != resp_msg.end()) << resp_msg;
+
+  absl::string_view range = detail::absl_sv(it->value());
+  CHECK(absl::ConsumePrefix(&range, "bytes="));
+  size_t pos = range.find('-');
+  CHECK_LT(pos, range.size());
+  size_t uploaded_pos = 0;
+  CHECK(absl::SimpleAtoi(range.substr(pos + 1), &uploaded_pos));
+  CHECK_EQ(uploaded_pos + 1, to);
+
+  uploaded_ = to;
+
   return Status::OK;
 }
 
@@ -138,7 +195,8 @@ auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient*
   const auto& msg = parser_->get();
   VLOG(1) << "HeaderResp: " << msg;
 
-  if (msg.result() == h2::status::ok) {
+  // 308 or http ok are both good responses.
+  if (msg.result() == h2::status::ok || msg.result() == h2::status::permanent_redirect) {
     return error_code{};  // all is good.
   }
 

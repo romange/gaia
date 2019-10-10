@@ -26,9 +26,9 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
-h2::request<h2::empty_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
-                                                  const bb_str_view token) {
-  h2::request<h2::empty_body> req(req_verb, url, 11);
+h2::request<h2::dynamic_body> PrepareGenericRequest(h2::verb req_verb, const bb_str_view url,
+                                                    const bb_str_view token) {
+  h2::request<h2::dynamic_body> req(req_verb, url, 11);
   req.set(h2::field::host, GCE::kApiDomain);
 
   AddBearer(absl_sv(token), &req);
