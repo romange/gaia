@@ -67,6 +67,11 @@ bool StatusFailPrintImpl(const Status& st) {
   return !st.ok();
 }
 
+void PrintFatal(const char* file, unsigned line_num, const Status& st) {
+  string msg = st.ToString();
+  ::google::LogMessage{file, int(line_num), google::GLOG_FATAL}.stream() << msg;
+}
+
 }  // namespace detail
 
 }  // namespace util

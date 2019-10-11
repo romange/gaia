@@ -118,16 +118,21 @@ void Run(const GCE& gce, IoContext* context) {
   CHECK_STATUS(gcs.Connect(2000));
 
   if (!FLAGS_upload.empty()) {
-    auto status = gcs.OpenForWrite(FLAGS_bucket, FLAGS_upload);
-    CHECK_STATUS(status);
+    string upload_path = GCS::ToGcsPath(FLAGS_bucket, FLAGS_upload);
+    LOG(INFO) << "Uploading data to " << upload_path;
+
+    asio::ssl::context ssl_cntx = CheckedSslContext();
+    http::HttpsClientPool api_pool(GCE::kApiDomain, &ssl_cntx, context);
+    api_pool.set_connect_timeout(2000);
+
+    file::WriteFile* wfile = CHECKED_GET(OpenGcsWriteFile(upload_path, gce, &api_pool));
 
     string contents(1 << 16, 'a');
-    strings::MutableByteRange range(reinterpret_cast<uint8_t*>(&contents.front()), contents.size());
     for (size_t i = 0; i < 100; ++i) {
-      status = gcs.Write(range);
+      auto status = wfile->Write(contents);
       CHECK_STATUS(status);
     }
-    CHECK_STATUS(gcs.CloseWrite(false));
+    CHECK(wfile->Close());
     return;
   }
 

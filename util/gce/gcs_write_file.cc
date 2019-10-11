@@ -101,9 +101,31 @@ GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_ur
   CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
 }
 
-bool GcsWriteFile::Close() { return true; }
+bool GcsWriteFile::Close() {
+  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
+  req.body() = std::move(body_mb_);
+  size_t to = uploaded_ + req.body().size();
 
-bool GcsWriteFile::Open() { return true; }
+  req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, to));
+  req.prepare_payload();
+
+  auto res = SendGeneric(3, std::move(req));
+  if (res.ok()) {
+    VLOG(1) << "Finalized file " << obj_url_ << " " << uploaded_ << "/"  << to;
+  } else {
+    LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n" << req
+               << ", status " << res.status;
+  }
+  delete this;
+
+  return res.ok();
+}
+
+bool GcsWriteFile::Open() {
+  LOG(FATAL) << "Should not be called";
+
+  return true;
+}
 
 Status GcsWriteFile::Write(const uint8* buffer, uint64 length) {
   CHECK_GT(length, 0);
@@ -136,14 +158,13 @@ size_t GcsWriteFile::FillBuf(const uint8* buffer, size_t length) {
 }
 
 Status GcsWriteFile::Upload() {
-  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
-
   size_t body_size = body_mb_.size();
   CHECK_GT(body_size, 0);
   CHECK_EQ(0, body_size % (1U << 18)) << body_size;  // Must be multiple of 256KB.
 
   size_t to = uploaded_ + body_size;
 
+  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
   req.body() = std::move(body_mb_);
   req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, -1));
   req.set(h2::field::content_type, "application/octet-stream");
@@ -154,6 +175,7 @@ Status GcsWriteFile::Upload() {
   auto res = SendGeneric(3, std::move(req));
   if (!res.ok())
     return res.status;
+  VLOG(1) << "Uploaded range " << uploaded_ << "/" << to << " for " << obj_url_;
 
   Parser* upload_parser = CHECK_NOTNULL(parser());
   const auto& resp_msg = upload_parser->get();
@@ -175,7 +197,8 @@ Status GcsWriteFile::Upload() {
 
 auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient* client)
     -> error_code {
-  VLOG(1) << "Req: " << req;
+  const Request::header_type& header = req;
+  VLOG(1) << "Req: " << header;
 
   system::error_code ec = client->Send(req);
   if (ec)
@@ -243,6 +266,7 @@ StatusObject<file::WriteFile*> OpenGcsWriteFile(absl::string_view full_path, con
     return Status(StatusCode::PARSE_ERROR, "Can not find location header");
   }
   string upload_id = string(it->value());
+
   return new GcsWriteFile(full_path, gce, std::move(upload_id), pool);
 }
 

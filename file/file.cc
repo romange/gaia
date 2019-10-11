@@ -81,16 +81,12 @@ class LocalFileImpl : public WriteFile {
 
   LocalFileImpl(const LocalFileImpl&) = delete;
 
-  virtual ~LocalFileImpl();
-
-  // Return true if file exists.  Returns false if file does not exist or if an
-  // error is encountered.
-  // virtual bool Exists() const;
+  virtual ~LocalFileImpl() override;
 
   // File handling methods.
-  virtual bool Open();
-  // virtual bool Delete();
-  virtual bool Close();
+  bool Open() override;
+
+  bool Close() override;
 
   Status Write(const uint8* buffer, uint64 length) final;
 
