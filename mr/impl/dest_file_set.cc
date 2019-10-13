@@ -87,7 +87,15 @@ inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
   };
 }
 
+::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path) {
+  auto* wf = file::Open(path);
+  CHECK(wf);
+  return wf;
+}
+
 class CompressHandle : public DestHandle {
+  void AppendThreadLocal(const std::string& val);
+
  public:
   CompressHandle(DestFileSet* owner, const ShardId& sid);
   ~CompressHandle() override;
@@ -126,26 +134,48 @@ class LstHandle : public DestHandle {
   boost::fibers::mutex mu_;
 };
 
-CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid)
-    : DestHandle(owner, sid), compress_out_buf_(new StringSink) {
+CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {
   static std::default_random_engine rnd;
 
   // Randomize when we flush first for each handle. That should define uniform flushing cycle
   // for all handles.
   start_delta_ = rnd() % (kBufLimit - 1);
-  auto level = owner->output().compress().level();
-  if (owner->output().compress().type() == pb::Output::GZIP) {
-    compress_sink_.reset(new ZlibSink(compress_out_buf_, level));
-  } else if (owner->output().compress().type() == pb::Output::ZSTD) {
-    std::unique_ptr<ZStdSink> zsink{new ZStdSink(compress_out_buf_)};
-    CHECK_STATUS(zsink->Init(level));
-    compress_sink_ = std::move(zsink);
+
+  if (owner->output().has_compress()) {
+    compress_out_buf_ = new StringSink;
+    auto level = owner->output().compress().level();
+    if (owner->output().compress().type() == pb::Output::GZIP) {
+      compress_sink_.reset(new ZlibSink(compress_out_buf_, level));
+    } else if (owner->output().compress().type() == pb::Output::ZSTD) {
+      std::unique_ptr<ZStdSink> zsink{new ZStdSink(compress_out_buf_)};
+      CHECK_STATUS(zsink->Init(level));
+      compress_sink_ = std::move(zsink);
+    } else {
+      LOG(FATAL) << "Unsupported format " << owner->output().compress().ShortDebugString();
+    }
   }
 }
 
 CompressHandle::~CompressHandle() {
   if (write_fiber_.joinable()) {
     write_fiber_.join();
+  }
+}
+
+void CompressHandle::AppendThreadLocal(const std::string& str) {
+  auto status = write_file_->Write(str);
+  CHECK_STATUS(status);
+
+  if (raw_limit_ == kuint64max)  // No output size limit
+    return;
+
+  raw_size_ += str.size();
+  if (raw_size_ >= raw_limit_) {
+    CHECK(write_file_->Close());
+    ++sub_shard_;
+    raw_size_ = 0;
+    full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
+    write_file_ = OpenThreadLocal(owner_->output(), full_path_);
   }
 }
 
@@ -157,8 +187,7 @@ void CompressHandle::Open() {
     out_queue_.reset(new fibers_ext::FiberQueue(32));
     write_fiber_ = io_context.LaunchFiber([this, &io_context] { GcsWriteFiber(&io_context); });
   } else {
-    write_file_ = Await([&] { return file::Open(full_path_); });
-    CHECK(write_file_);
+    OpenLocalFile();
   }
 }
 
@@ -196,68 +225,73 @@ void CompressHandle::Write(StringGenCb cb) {
     if (!tmp_str)
       break;
 
-    std::unique_lock<fibers::mutex> lk(zmu_);
+    if (compress_sink_) {
+      std::unique_lock<fibers::mutex> lk(zmu_);
 
-    strings::ByteRange br = strings::ToByteRange(*tmp_str);
-    CHECK_STATUS(compress_sink_->Append(br));
-    if (compress_out_buf_->contents().size() >= kBufLimit - start_delta_) {
+      strings::ByteRange br = strings::ToByteRange(*tmp_str);
+      CHECK_STATUS(compress_sink_->Append(br));
+
+      if (start_delta_ + compress_out_buf_->contents().size() < kBufLimit)
+        continue;
+
       tmp_str->clear();
       tmp_str->swap(compress_out_buf_->contents());
-
-      lk.unlock();
-
-      if (out_queue_) {
-        auto start = base::GetMonotonicMicrosFast();
-        auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
-
-        auto cb = [start, this, str = std::move(*tmp_str)] {
-          dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
-          if (FLAGS_local_runner_gcs_write_v2) {
-            CHECK_STATUS(write_file_->Write(str));
-          } else {
-            CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-          }
-        };
-
-        bool preempted = out_queue_->Add(std::move(cb));
-
-        auto delta = base::GetMonotonicMicrosFast() - start;
-        if (preempted) {
-          if (fiber_state == 1) {
-            dest_files.IncBy("gcs-submit-preempted", delta);
-          } else {
-            dest_files.IncBy("gcs-submit-launching", delta);
-          }
-        } else {
-          dest_files.IncBy("gcs-submit-fast", delta);
-        }
-        this_fiber::yield();
-      } else {
-        // TODO: To support io_context based write-files like with GCS.
-        owner_->pool()->Add(queue_index_, WriteCb(std::move(*tmp_str), write_file_));
-      }
       start_delta_ = 0;
+    }
+
+    if (out_queue_) {
+      auto start = base::GetMonotonicMicrosFast();
+      auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
+
+      auto cb = [start, this, str = std::move(*tmp_str)] {
+        dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
+        if (FLAGS_local_runner_gcs_write_v2) {
+          CHECK_STATUS(write_file_->Write(str));
+        } else {
+          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+        }
+      };
+
+      bool preempted = out_queue_->Add(std::move(cb));
+
+      auto delta = base::GetMonotonicMicrosFast() - start;
+      if (preempted) {
+        if (fiber_state == 1) {
+          dest_files.IncBy("gcs-submit-preempted", delta);
+        } else {
+          dest_files.IncBy("gcs-submit-launching", delta);
+        }
+      } else {
+        dest_files.IncBy("gcs-submit-fast", delta);
+      }
+      this_fiber::yield();
+    } else {
+      owner_->pool()->Add(queue_index_,
+                          [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
     }
   }
 }
 
 void CompressHandle::Close(bool abort_write) {
   if (!abort_write) {
-    CHECK_STATUS(compress_sink_->Flush());
+    if (compress_sink_) {
+      CHECK_STATUS(compress_sink_->Flush());
 
-    auto& buf = compress_out_buf_->contents();
-    if (!buf.empty()) {
-      // Flush the rest of compressed data.
-      if (out_queue_) {  // GCS flow.
-        out_queue_->Add([this, str = std::move(buf)] {
-          if (FLAGS_local_runner_gcs_write_v2) {
-            CHECK_STATUS(write_file_->Write(str));
-          } else {
-            CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-          }
-        });
-      } else {
-        owner_->pool()->Add(queue_index_, WriteCb(std::move(buf), write_file_));
+      auto& buf = compress_out_buf_->contents();
+      if (!buf.empty()) {
+        // Flush the rest of compressed data.
+        if (out_queue_) {  // GCS flow.
+          out_queue_->Add([this, str = std::move(buf)] {
+            if (FLAGS_local_runner_gcs_write_v2) {
+              CHECK_STATUS(write_file_->Write(str));
+            } else {
+              CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+            }
+          });
+        } else {
+          owner_->pool()->Add(queue_index_,
+                              [this, str = std::move(buf)] { AppendThreadLocal(str); });
+        }
       }
     }
   }
@@ -267,16 +301,14 @@ void CompressHandle::Close(bool abort_write) {
     if (FLAGS_local_runner_gcs_write_v2) {
       // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
       // the pending writes.
-      out_queue_->Add([this] {
-        CHECK(write_file_->Close());
-      });
+      out_queue_->Add([this] { CHECK(write_file_->Close()); });
     } else {
       out_queue_->Add([this, abort_write] { CHECK_STATUS(gcs_->CloseWrite(abort_write)); });
     }
     out_queue_->Shutdown();
     write_file_ = nullptr;
   } else {
-    DestHandle::Close(abort_write);
+    CloseWriteFile(abort_write);
   }
 }
 
@@ -298,7 +330,8 @@ void LstHandle::Write(StringGenCb cb) {
 
 void LstHandle::Open() {
   CHECK(!owner_->output().has_compress());
-  DestHandle::Open();
+  OpenLocalFile();
+
   namespace gpb = google::protobuf;
 
   util::Sink* fs = new file::Sink{write_file_, DO_NOT_TAKE_OWNERSHIP};
@@ -319,11 +352,7 @@ void LstHandle::Open() {
 void LstHandle::Close(bool abort_write) {
   CHECK_STATUS(lst_writer_->Flush());
 
-  DestHandle::Close(abort_write);
-}
-
-bool AllowCompressHandle(const pb::Output::Compress& pb_cmpr) {
-  return !(FLAGS_dest_file_force_gzfile && pb_cmpr.type() == pb::Output::GZIP);
+  CloseWriteFile(abort_write);
 }
 
 }  // namespace
@@ -348,18 +377,17 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
     if (is_local_fs) {
       string shard_name = sid.ToString(absl::string_view{});
       absl::string_view dir_name = file_util::DirName(shard_name);
-      if (dir_name.size() != shard_name.size()) {
+      if (dir_name.size() != shard_name.size()) {  // If dir name is present in a shard name.
         string sub_dir = file_util::JoinPath(root_dir_, dir_name);
         CHECK_STATUS(file_util::CreateSubDirIfNeeded(sub_dir)) << sub_dir;
       }
     }
     if (pb_out_.format().type() == pb::WireFormat::LST) {
       dh.reset(new LstHandle{this, sid});
-    } else if (pb_out_.has_compress() && pb_out_.format().type() == pb::WireFormat::TXT &&
-               (is_gcs_dest_ || AllowCompressHandle(pb_out_.compress()))) {
+    } else if (pb_out_.format().type() == pb::WireFormat::TXT) {
       dh.reset(new CompressHandle{this, sid});
     } else {
-      dh.reset(new DestHandle{this, sid});
+      LOG(FATAL) << "Unsupported format " << pb_out_.format().ShortDebugString();
     }
     if (pb_out_.shard_spec().has_max_raw_size_mb()) {
       dh->set_raw_limit(size_t(1U << 20) * pb_out_.shard_spec().max_raw_size_mb());
@@ -431,63 +459,17 @@ DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), 
   queue_index_ = base::Murmur32(full_path_, 120577U);
 }
 
-void DestHandle::AppendThreadLocal(const std::string& str) {
-  auto status = write_file_->Write(str);
-  CHECK_STATUS(status);
-
-  if (raw_limit_ < kuint64max) {
-    raw_size_ += str.size();
-    if (raw_size_ >= raw_limit_) {
-      CHECK(write_file_->Close());
-      ++sub_shard_;
-      raw_size_ = 0;
-      full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
-      write_file_ = OpenThreadLocal(owner_->output(), full_path_);
-    }
-  }
-}
-
-::file::WriteFile* DestHandle::OpenThreadLocal(const pb::Output& output, const std::string& path) {
-  if (output.has_compress()) {
-    if (output.compress().type() == pb::Output::GZIP) {
-      CHECK(!util::IsGcsPath(path));
-
-      file::GzipFile* gzres = file::GzipFile::Create(path, output.compress().level());
-      CHECK(gzres->Open());
-      return gzres;
-    }
-    LOG(FATAL) << "Not supported " << output.compress().ShortDebugString();
-  }
-
-  auto* wf = file::Open(path);
-  CHECK(wf);
-  return wf;
-}
-
-void DestHandle::Write(StringGenCb cb) {
-  absl::optional<string> tmp_str;
-  while (true) {
-    tmp_str = cb();
-    if (!tmp_str)
-      break;
-    owner_->pool()->Add(queue_index_,
-                        [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
-  }
-}
-
-void DestHandle::Open() {
+void DestHandle::OpenLocalFile() {
   VLOG(1) << "Creating file " << full_path_;
-  StringPiece dirname = file_util::DirName(full_path_);
 
-  // TODO: change for all functions expecting null-terminated string to explicitly accept it.
-  // I call again RecursivelyCreateDir because shards may
-  // have subdirectories specified by the user.
-  file_util::RecursivelyCreateDir(string(dirname), 0755);
-
+  // I can not use OpenFiberWriteFile here since it supports only synchronous semantics of
+  // writing data (i.e. Write(StringPiece) where ownership stays with owner).
+  // To support asynchronous writes we need to design an abstract class AsyncWriteFile
+  // which should take ownership over data chunks that are passed to it for writing.
   write_file_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
 }
 
-void DestHandle::Close(bool abort_write) {
+void DestHandle::CloseWriteFile(bool abort_write) {
   if (!write_file_)
     return;
 

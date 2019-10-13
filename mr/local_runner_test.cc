@@ -75,8 +75,15 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
   op_.mutable_output()->mutable_shard_spec()->set_max_raw_size_mb(1);
 
   std::unique_ptr<RawContext> context{runner_->CreateContext()};
+  std::default_random_engine rd(10);
+
   for (unsigned i = 0; i < 2000; ++i) {
-    context->TEST_Write(kShard0, string(1000, 'a'));
+    string v(1000, 'a');
+
+    for (unsigned j = 0; j < v.size(); ++j) {
+      v[j] = rd() % 256;
+    }
+    context->TEST_Write(kShard0, std::move(v));
   }
 
   context->Flush();
