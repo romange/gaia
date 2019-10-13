@@ -55,7 +55,7 @@ class HttpsClientPool {
   std::string domain_;
   unsigned connect_msec_ = 1000;
 
-  std::vector<std::unique_ptr<HttpsClient>> available_handles_;
+  std::vector<HttpsClient*> available_handles_;
 };
 
 }  // namespace http

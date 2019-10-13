@@ -123,6 +123,9 @@ bool IsGcsPath(absl::string_view path);
 /**
  * @brief Opens a new GCS file for writes.
  *
+ * Must be called from the IO thread that manages 'pool'. All accesses to this file
+ * must be done from the same IO thread.
+ *
  * @param full_path - aka "gs://somebucket/path_to_obj"
  * @param gce
  * @param pool - https connection pool connected to google api server.

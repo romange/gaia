@@ -26,6 +26,7 @@ namespace mr3 {
 util::VarzMapAverage5m dest_files("dest-files-set");
 
 DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
+DEFINE_bool(local_runner_gcs_write_v2, false, "");
 
 namespace detail {
 
@@ -169,12 +170,17 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
 
   static thread_local asio::ssl::context ssl_context = GCE::CheckedSslContext();
 
-  absl::string_view bucket, path;
-  CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
+  if (FLAGS_local_runner_gcs_write_v2) {
+    write_file_ =
+        CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+  } else {
+    absl::string_view bucket, path;
+    CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
 
-  gcs_.reset(new util::GCS(*owner_->gce(), &ssl_context, io_context));
-  CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
-  CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
+    gcs_.reset(new util::GCS(*owner_->gce(), &ssl_context, io_context));
+    CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
+    CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
+  }
 
   fiber_state_ = 1;
 
@@ -204,10 +210,17 @@ void CompressHandle::Write(StringGenCb cb) {
         auto start = base::GetMonotonicMicrosFast();
         auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
 
-        bool preempted = out_queue_->Add([start, this, str = std::move(*tmp_str)] {
+        auto cb = [start, this, str = std::move(*tmp_str)] {
           dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
-          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-        });
+          if (FLAGS_local_runner_gcs_write_v2) {
+            CHECK_STATUS(write_file_->Write(str));
+          } else {
+            CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+          }
+        };
+
+        bool preempted = out_queue_->Add(std::move(cb));
+
         auto delta = base::GetMonotonicMicrosFast() - start;
         if (preempted) {
           if (fiber_state == 1) {
@@ -237,21 +250,31 @@ void CompressHandle::Close(bool abort_write) {
       // Flush the rest of compressed data.
       if (out_queue_) {  // GCS flow.
         out_queue_->Add([this, str = std::move(buf)] {
-          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+          if (FLAGS_local_runner_gcs_write_v2) {
+            CHECK_STATUS(write_file_->Write(str));
+          } else {
+            CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
+          }
         });
       } else {
-        owner_->pool()->Add(queue_index_,
-                          WriteCb(std::move(buf), write_file_));
+        owner_->pool()->Add(queue_index_, WriteCb(std::move(buf), write_file_));
       }
     }
   }
 
   if (out_queue_) {
     // Send GCS closure callback and signal the queue to finish file but do not block on it.
-    out_queue_->Add([this, abort_write] {
-      CHECK_STATUS(gcs_->CloseWrite(abort_write));
-    });
+    if (FLAGS_local_runner_gcs_write_v2) {
+      // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
+      // the pending writes.
+      out_queue_->Add([this] {
+        CHECK(write_file_->Close());
+      });
+    } else {
+      out_queue_->Add([this, abort_write] { CHECK_STATUS(gcs_->CloseWrite(abort_write)); });
+    }
     out_queue_->Shutdown();
+    write_file_ = nullptr;
   } else {
     DestHandle::Close(abort_write);
   }
@@ -400,7 +423,6 @@ size_t DestFileSet::HandleCount() const {
 
   return dest_files_.size();
 }
-
 
 DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), sid_(sid) {
   CHECK(owner_);

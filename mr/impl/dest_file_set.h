@@ -16,6 +16,9 @@
 namespace util {
 class IoContextPool;
 class GCE;
+
+namespace http { class HttpsClientPool; }
+
 }  // namespace util
 
 namespace mr3 {
@@ -54,13 +57,21 @@ class DestFileSet {
 
   size_t HandleCount() const;
 
-  // Closes the handle but leaves it in the map.
-  // GatherAll will still return it.
+  /// Closes the handle but leaves it in the map.
+  /// GatherAll will still return it.
   void CloseHandle(const ShardId& key);
 
   const pb::Output& output() const { return pb_out_; }
 
-  void set_gce(const util::GCE* gce) { gce_ = gce;}
+  void set_gce(const util::GCE* gce,
+               std::function<util::http::HttpsClientPool*()> pool_accessor) {
+    gce_ = gce;
+    pool_accessor_ = pool_accessor;
+  }
+
+  /// Returns thread local instance of pool managing api connections to GCE.
+  util::http::HttpsClientPool* GetGceApiPool() { return pool_accessor_(); }
+
   const util::GCE* gce() const { return gce_;}
 
   bool is_gcs_dest() const { return is_gcs_dest_; }
@@ -73,6 +84,7 @@ class DestFileSet {
   mutable ::boost::fibers::mutex mu_;
 
   const util::GCE* gce_ = nullptr;
+  std::function<util::http::HttpsClientPool*()> pool_accessor_;
 
   util::IoContextPool& io_pool_;
   util::fibers_ext::FiberQueueThreadPool& fq_;

@@ -102,6 +102,8 @@ GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_ur
 }
 
 bool GcsWriteFile::Close() {
+  CHECK(pool_->io_context().InContextThread());
+
   h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
   req.body() = std::move(body_mb_);
   size_t to = uploaded_ + req.body().size();

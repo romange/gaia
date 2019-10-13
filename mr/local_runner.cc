@@ -37,6 +37,7 @@ using namespace util;
 using namespace boost;
 using namespace std;
 using detail::DestFileSet;
+using http::HttpsClientPool;
 
 namespace {
 
@@ -101,7 +102,7 @@ struct LocalRunner::Impl {
     base::Histogram record_fetch_hist;
 
     absl::optional<asio::ssl::context> ssl_context;
-    absl::optional<http::HttpsClientPool> api_conn_pool;
+    absl::optional<HttpsClientPool> api_conn_pool;
 
     void SetupGce(IoContext* io_context);
   };
@@ -310,7 +311,14 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
 
   if (util::IsGcsPath(out_dir)) {
     InitGCE();
-    dest_mgr_->set_gce(gce_handle_.get());
+
+    auto api_pool_cb = [this] {
+      auto& opt_pool = per_thread_.get()->api_conn_pool;
+      CHECK(opt_pool.has_value());
+      return &opt_pool.value();
+    };
+
+    dest_mgr_->set_gce(gce_handle_.get(), api_pool_cb);
   }
 }
 

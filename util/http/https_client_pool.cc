@@ -25,11 +25,16 @@ HttpsClientPool::HttpsClientPool(const std::string& domain, ::boost::asio::ssl::
                                  IoContext* io_cntx)
     : ssl_cntx_(*ssl_ctx), io_cntx_(*io_cntx), domain_(domain) {}
 
-HttpsClientPool::~HttpsClientPool() {}
+HttpsClientPool::~HttpsClientPool() {
+  for (auto* ptr : available_handles_) {
+    delete ptr;
+  }
+}
 
 auto HttpsClientPool::GetHandle() -> ClientHandle {
   while (!available_handles_.empty()) {
-    auto ptr = std::move(available_handles_.back());
+    std::unique_ptr<HttpsClient> ptr{std::move(available_handles_.back())};
+
     available_handles_.pop_back();
 
     if (ptr->status()) {
