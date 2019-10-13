@@ -325,11 +325,13 @@ StatusObject<ReadonlyFile*> OpenFiberReadFile(StringPiece name,
   return new FiberReadFile(opts, res.obj, tp);
 }
 
-WriteFile* OpenFiberWriteFile(StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
-                              const FiberWriteOptions& opts) {
+StatusObject<WriteFile*> OpenFiberWriteFile(StringPiece name,
+                                            util::fibers_ext::FiberQueueThreadPool* tp,
+                                            const FiberWriteOptions& opts) {
   WriteFile* wf = Open(name, opts);
   if (!wf)
-    return nullptr;
+    return Status(StatusCode::IO_ERROR, "Can not create a file");
+
   ssize_t hash = -1;
   if (opts.consistent_thread)
     hash = base::MurmurHash3_x86_32(reinterpret_cast<const uint8_t*>(name.data()), name.size(), 1);

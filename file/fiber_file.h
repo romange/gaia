@@ -30,7 +30,8 @@ struct FiberWriteOptions : public OpenOptions {
   bool consistent_thread = true;  // whether to send the write request to the same pool-thread.
 };
 
-WriteFile* OpenFiberWriteFile(StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
-                              const FiberWriteOptions& opts = FiberWriteOptions()) MUST_USE_RESULT;
+util::StatusObject<WriteFile*>
+OpenFiberWriteFile(StringPiece name, util::fibers_ext::FiberQueueThreadPool* tp,
+                   const FiberWriteOptions& opts = FiberWriteOptions()) MUST_USE_RESULT;
 
 }  // namespace file
