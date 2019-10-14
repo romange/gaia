@@ -17,7 +17,9 @@ namespace util {
 class IoContextPool;
 class GCE;
 
-namespace http { class HttpsClientPool; }
+namespace http {
+class HttpsClientPool;
+}
 
 }  // namespace util
 
@@ -63,8 +65,10 @@ class DestFileSet {
 
   const pb::Output& output() const { return pb_out_; }
 
-  void set_gce(const util::GCE* gce,
-               std::function<util::http::HttpsClientPool*()> pool_accessor) {
+  // HttpsClientPool is thread-local so we need to fetch different instances depending
+  // on the thread.
+  using PoolAccessorCb = std::function<util::http::HttpsClientPool*()>;
+  void set_gce(const util::GCE* gce, PoolAccessorCb pool_accessor) {
     gce_ = gce;
     pool_accessor_ = pool_accessor;
   }
@@ -72,11 +76,11 @@ class DestFileSet {
   /// Returns thread local instance of pool managing api connections to GCE.
   util::http::HttpsClientPool* GetGceApiPool() { return pool_accessor_(); }
 
-  const util::GCE* gce() const { return gce_;}
+  const util::GCE* gce() const { return gce_; }
 
   bool is_gcs_dest() const { return is_gcs_dest_; }
 
-  util::IoContextPool* io_pool() { return &io_pool_;}
+  util::IoContextPool* io_pool() { return &io_pool_; }
 
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
@@ -84,13 +88,12 @@ class DestFileSet {
   mutable ::boost::fibers::mutex mu_;
 
   const util::GCE* gce_ = nullptr;
-  std::function<util::http::HttpsClientPool*()> pool_accessor_;
+  PoolAccessorCb pool_accessor_;
 
   util::IoContextPool& io_pool_;
   util::fibers_ext::FiberQueueThreadPool& fq_;
   bool is_gcs_dest_ = false;
 };
-
 
 /*! \class mr3::detail::DestHandle
     \brief Thread-safe handle that abstracts away compression/file formats and disk systems.
@@ -121,7 +124,7 @@ class DestHandle {
   virtual void Close(bool abort_write);
 
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
-  const std::string full_path() const { return full_path_;}
+  const std::string full_path() const { return full_path_; }
 
  protected:
   template <typename Func> auto Await(Func&& f) {

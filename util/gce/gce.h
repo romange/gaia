@@ -26,6 +26,8 @@ class GCE {
   const std::string& client_id() const { return client_id_; }
   const std::string& client_secret() const { return client_secret_; }
   const std::string& account_id() const { return account_id_; }
+
+  // refresh_token is used for refreshing an access token.
   const std::string& refresh_token() const { return refresh_token_; }
 
   static const char* GoogleCert();
@@ -34,6 +36,7 @@ class GCE {
   static ::boost::asio::ssl::context CheckedSslContext();
 
   //! Returns cached access_token.
+  //! Must be called after RefreshAccessToken has been called.
   std::string access_token() const;
 
   StatusObject<std::string> RefreshAccessToken(IoContext* context) const;

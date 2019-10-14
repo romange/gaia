@@ -173,6 +173,7 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   if (FLAGS_local_runner_gcs_write_v2) {
     write_file_ =
         CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+    CHECK(write_file_);
   } else {
     absl::string_view bucket, path;
     CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));

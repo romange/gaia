@@ -82,9 +82,9 @@ struct LocalRunner::Impl {
   class Source;
 
  private:
-  void LazyGcsInit();
+  void LazyGcsInit();   // Called from IO threads.
+
   util::VarzValue::Map GetStats() const;
-  void InitGCE();
 
   IoContextPool* io_pool_;
   string data_dir;
@@ -310,7 +310,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool_));
 
   if (util::IsGcsPath(out_dir)) {
-    InitGCE();
+    io_pool_->AwaitFiberOnAll([this](IoContext&) { LazyGcsInit();});
 
     auto api_pool_cb = [this] {
       auto& opt_pool = per_thread_.get()->api_conn_pool;
@@ -391,17 +391,15 @@ void LocalRunner::Impl::LazyGcsInit() {
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
-  per_thread_->SetupGce(io_pool_->GetThisContext());
+  auto* io_context = io_pool_->GetThisContext();
+  per_thread_->SetupGce(io_context);
 
-  InitGCE();
-}
-
-void LocalRunner::Impl::InitGCE() {
   std::lock_guard<fibers::mutex> lk(gce_mu_);
   if (gce_handle_)
     return;
   gce_handle_.reset(new GCE);
   CHECK_STATUS(gce_handle_->Init());
+  CHECK_STATUS(gce_handle_->RefreshAccessToken(io_context).status);
 }
 
 void LocalRunner::Impl::ShutDown() {

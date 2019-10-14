@@ -251,6 +251,8 @@ StatusObject<file::WriteFile*> OpenGcsWriteFile(absl::string_view full_path, con
   strings::AppendEncodedUrl(obj_path, &url);
   string token = gce.access_token();
 
+  CHECK(!token.empty());
+
   auto req = detail::PrepareGenericRequest(h2::verb::post, url, token);
   req.prepare_payload();
 
