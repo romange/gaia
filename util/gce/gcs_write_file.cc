@@ -104,18 +104,20 @@ GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_ur
 bool GcsWriteFile::Close() {
   CHECK(pool_->io_context().InContextThread());
 
-  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
+  Request req(h2::verb::put, obj_url_, 11);
   req.body() = std::move(body_mb_);
   size_t to = uploaded_ + req.body().size();
 
   req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, to));
   req.prepare_payload();
 
+  Request::header_type header = req;
+
   auto res = SendGeneric(3, std::move(req));
   if (res.ok()) {
     VLOG(1) << "Finalized file " << obj_url_ << " " << uploaded_ << "/"  << to;
   } else {
-    LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n" << req
+    LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n" << header
                << ", status " << res.status;
   }
   delete this;
@@ -234,7 +236,10 @@ auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient*
   if (detail::IsUnauthorized(msg)) {
     return asio::error::no_permission;
   } else if (msg.result() == h2::status::gone) {
-    LOG(INFO) << "Closing(" << client->native_handle() << ") with " << msg;
+    const Request::header_type& header = req;
+
+    LOG(INFO) << "Closing(" << client->native_handle() << ") with " << msg << " for request "
+              << header;
 
     this_fiber::sleep_for(1s);
 

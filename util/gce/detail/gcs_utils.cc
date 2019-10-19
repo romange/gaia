@@ -83,13 +83,16 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* client)
     -> error_code {
   system::error_code ec = client->Send(req);
-  if (ec)
+  if (ec) {
+    LOG(INFO) << "Error sending request " << ec;
     return ec;
+  }
 
   parser_.emplace().body_limit(kuint64max);
   ec = client->ReadHeader(&parser_.value());
 
   if (ec) {
+    LOG(INFO) << "Error reading response " << ec;
     return ec;
   }
 
