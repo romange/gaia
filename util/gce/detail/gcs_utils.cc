@@ -49,7 +49,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         return detail::ToStatus(ec);
       }
     }
-    VLOG(1) << "OpenIter" << iters << ": socket " << handle->native_handle();
+    VLOG(1) << "ReqIter " << iters << ": socket " << handle->native_handle();
 
     ec = SendRequestIterative(req, handle.get());
 
@@ -64,8 +64,12 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 
       AddBearer(token_res.obj, &req);
     } else if (ec != asio::error::try_again) {
-      LOG(INFO) << "socket " << handle->native_handle() << " failed with error " << ec;
+      LOG(INFO) << "ReqIter " << iters << ": socket " << handle->native_handle()
+                << " failed with error " << ec << "/" << ec.message();
       handle.reset();
+    } else {
+      LOG(INFO) << "ReqIter " << iters << ": socket " << handle->native_handle()
+                << " retrying.";
     }
   }
 
