@@ -33,9 +33,10 @@ HttpsClientPool::~HttpsClientPool() {
 
 auto HttpsClientPool::GetHandle() -> ClientHandle {
   while (!available_handles_.empty()) {
-    std::unique_ptr<HttpsClient> ptr{std::move(available_handles_.back())};
+    // Pulling the oldest handles first.
+    std::unique_ptr<HttpsClient> ptr{std::move(available_handles_.front())};
 
-    available_handles_.pop_back();
+    available_handles_.pop_front();
 
     if (ptr->status()) {
       continue;  // we just throw a connection with error status.
@@ -47,6 +48,7 @@ auto HttpsClientPool::GetHandle() -> ClientHandle {
 
   // available_handles_ are empty - create a new connection.
   std::unique_ptr<HttpsClient> client(new HttpsClient{domain_, &io_cntx_, &ssl_cntx_});
+  client->set_retry_count(retry_cnt_);
 
   auto ec = client->Connect(connect_msec_);
 

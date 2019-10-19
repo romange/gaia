@@ -199,12 +199,11 @@ Status GcsWriteFile::Upload() {
 
 auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient* client)
     -> error_code {
-  const Request::header_type& header = req;
-  VLOG(1) << "Req: " << header;
-
   system::error_code ec = client->Send(req);
-  if (ec)
+  if (ec) {
+    VLOG(1) << "Error sending to socket " << client->native_handle() << " " << ec;
     return ec;
+  }
 
   parser_.emplace();  // .body_limit(kuint64max);
   ec = client->Read(&parser_.value());
@@ -218,7 +217,7 @@ auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient*
   }
 
   const auto& msg = parser_->get();
-  VLOG(1) << "HeaderResp: " << msg;
+  VLOG(1) << "HeaderResp(" << client->native_handle() << "): " << msg;
 
   // 308 or http ok are both good responses.
   if (msg.result() == h2::status::ok || msg.result() == h2::status::permanent_redirect) {

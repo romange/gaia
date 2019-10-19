@@ -197,6 +197,7 @@ void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
   ssl_context = GCE::CheckedSslContext();
   api_conn_pool.emplace(GCE::kApiDomain, &ssl_context.value(), io_context);
   api_conn_pool->set_connect_timeout(FLAGS_gcs_connect_deadline_ms);
+  api_conn_pool->set_retry_count(3);
 }
 
 auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {

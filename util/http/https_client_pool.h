@@ -5,6 +5,7 @@
 #pragma once
 
 #include <boost/asio/ssl/context.hpp>
+#include <deque>
 #include <memory>
 
 namespace util {
@@ -45,6 +46,9 @@ class HttpsClientPool {
 
   void set_connect_timeout(unsigned msec) { connect_msec_ = msec; }
 
+  //! Sets number of retries for https client handles.
+  void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt; }
+
   IoContext& io_context() { return io_cntx_; }
 
  private:
@@ -53,9 +57,9 @@ class HttpsClientPool {
   SslContext& ssl_cntx_;
   IoContext& io_cntx_;
   std::string domain_;
-  unsigned connect_msec_ = 1000;
+  unsigned connect_msec_ = 1000, retry_cnt_ = 1;
 
-  std::vector<HttpsClient*> available_handles_;
+  std::deque<HttpsClient*> available_handles_;  // Using queue to allow round-robin access.
 };
 
 }  // namespace http

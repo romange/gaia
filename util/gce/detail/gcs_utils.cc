@@ -41,6 +41,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
                                                                        Request req) {
   system::error_code ec;
   HttpsClientPool::ClientHandle handle;
+
   for (unsigned iters = 0; iters < num_iterations; ++iters) {
     if (!handle) {
       handle = pool_->GetHandle();
@@ -65,13 +66,14 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         return token_res.status;
 
       AddBearer(token_res.obj, &req);
-    } else if (ec != asio::error::try_again) {
+    } else if (ec == asio::error::try_again) {
+      ++num_iterations;
+      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
+                << " retrying.";
+    } else {
       LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
                 << " failed with error " << ec << "/" << ec.message();
       handle.reset();
-    } else {
-      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
-                << " retrying.";
     }
   }
 
