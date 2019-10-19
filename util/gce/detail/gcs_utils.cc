@@ -49,7 +49,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         return detail::ToStatus(ec);
       }
     }
-    VLOG(1) << "ReqIter " << iters << ": socket " << handle->native_handle();
+    VLOG(1) << "ReqIter " << iters << ": socket " << handle->native_handle() << " " << req;
 
     ec = SendRequestIterative(req, handle.get());
 
@@ -78,8 +78,6 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 
 auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* client)
     -> error_code {
-  VLOG(1) << "Req: " << req;
-
   system::error_code ec = client->Send(req);
   if (ec)
     return ec;
@@ -97,7 +95,7 @@ auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* 
   }
 
   const auto& msg = parser_->get();
-  VLOG(1) << "HeaderResp: " << msg;
+  VLOG(1) << "HeaderResp(" << client->native_handle() << "): " << msg;
 
   // Partial content can appear because of the previous reconnect.
   if (msg.result() == h2::status::ok || msg.result() == h2::status::partial_content) {
