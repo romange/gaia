@@ -47,7 +47,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
       handle = pool_->GetHandle();
       ec = handle->status();
       if (ec) {
-        return detail::ToStatus(ec);
+        return ToStatus(ec);
       }
     }
     const Request::header_type& header = req;
@@ -69,7 +69,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     } else if (ec == asio::error::try_again) {
       ++num_iterations;
       LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
-                << " retrying.";
+                << " retrying";
     } else {
       LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
                 << " failed with error " << ec << "/" << ec.message();
@@ -113,12 +113,14 @@ auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* 
     return ec;
   }
 
-  if (detail::DoesServerPushback(msg.result())) {
+  if (DoesServerPushback(msg.result())) {
+    LOG(INFO) << "Retrying(" << client->native_handle() << ") with " << msg;
+
     this_fiber::sleep_for(1s);
     return asio::error::try_again;  // retry
   }
 
-  if (detail::IsUnauthorized(msg)) {
+  if (IsUnauthorized(msg)) {
     return asio::error::no_permission;
   }
 

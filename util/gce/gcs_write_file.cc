@@ -225,12 +225,20 @@ auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient*
   }
 
   if (detail::DoesServerPushback(msg.result())) {
+    LOG(INFO) << "Retrying(" << client->native_handle() << ") with " << msg;
+
     this_fiber::sleep_for(1s);
     return asio::error::try_again;  // retry
   }
 
   if (detail::IsUnauthorized(msg)) {
     return asio::error::no_permission;
+  } else if (msg.result() == h2::status::gone) {
+    LOG(INFO) << "Closing(" << client->native_handle() << ") with " << msg;
+
+    this_fiber::sleep_for(1s);
+
+    return system::errc::make_error_code(system::errc::connection_refused);
   }
 
   LOG(ERROR) << "Unexpected status " << msg;
