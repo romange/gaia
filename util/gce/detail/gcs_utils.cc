@@ -64,11 +64,11 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 
       AddBearer(token_res.obj, &req);
     } else if (ec != asio::error::try_again) {
-      LOG(INFO) << "ReqIter " << iters << ": socket " << handle->native_handle()
+      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
                 << " failed with error " << ec << "/" << ec.message();
       handle.reset();
     } else {
-      LOG(INFO) << "ReqIter " << iters << ": socket " << handle->native_handle()
+      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
                 << " retrying.";
     }
   }
