@@ -49,7 +49,9 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         return detail::ToStatus(ec);
       }
     }
-    VLOG(1) << "ReqIter " << iters << ": socket " << handle->native_handle() << " " << req;
+    const Request::header_type& header = req;
+
+    VLOG(1) << "ReqIter " << iters << ": socket " << handle->native_handle() << " " << header;
 
     ec = SendRequestIterative(req, handle.get());
 
