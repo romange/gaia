@@ -19,6 +19,7 @@
 #include "strings/escaping.h"
 #include "util/asio/fiber_socket.h"
 #include "util/asio/io_context.h"
+#include "util/gce/detail/gcs_utils.h"
 #include "util/http/beast_rj_utils.h"
 #include "util/http/https_client.h"
 #include "util/stats/varz_stats.h"
@@ -43,14 +44,6 @@ static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
 
-unique_ptr<VarzQps> gcs_writes;
-unique_ptr<VarzMapAverage5m> gcs_latency;
-
-once_flag gcs_write_set_flag;
-
-inline absl::string_view absl_sv(beast::string_view s) {
-  return absl::string_view{s.data(), s.size()};
-}
 
 class GcsFile : public file::ReadonlyFile {
  public:
@@ -83,7 +76,8 @@ inline Status ToStatus(const ::boost::system::error_code& ec) {
 
 inline Status HttpError(const h2::header<false, h2::fields>& resp) {
   return Status(StatusCode::IO_ERROR,
-                absl::StrCat("Http error: ", resp.result_int(), " ", absl_sv(resp.reason())));
+                absl::StrCat("Http error: ", resp.result_int(), " ",
+                detail::absl_sv(resp.reason())));
 }
 
 #define RETURN_EC_STATUS(x)                                 \
@@ -292,10 +286,7 @@ GCS::~GCS() {
 }
 
 Status GCS::Connect(unsigned msec) {
-  std::call_once(gcs_write_set_flag, [] {
-    gcs_writes.reset(new VarzQps("gcs-writes"));
-    gcs_latency.reset(new VarzMapAverage5m("gcs-latency"));
-  });
+  detail::InitVarzStats();
 
   auto ec = https_client_->Connect(msec);
   if (ec) {
@@ -671,7 +662,7 @@ util::Status GCS::Write(strings::ByteRange src) {
         break;
 
       if (BackoffForServerError(retry, resp_msg, https_client_.get())) {
-        gcs_latency->IncBy("retry", GetMonotonicMicrosFast() - start);
+        detail::gcs_latency->IncBy("retry", GetMonotonicMicrosFast() - start);
         continue;
       }
       LOG(FATAL) << "Unexpected response: " << resp_msg;
@@ -685,7 +676,7 @@ util::Status GCS::Write(strings::ByteRange src) {
 
     auto it = resp_msg.find(h2::field::range);
     CHECK(it != resp_msg.end()) << resp_msg;
-    absl::string_view range = absl_sv(it->value());
+    absl::string_view range = detail::absl_sv(it->value());
     CHECK(absl::ConsumePrefix(&range, "bytes="));
     size_t pos = range.find('-');
     CHECK_LT(pos, range.size());
@@ -699,8 +690,8 @@ util::Status GCS::Write(strings::ByteRange src) {
     CHECK_EQ(0, wh->body_mb.size());
     // CHECK_EQ(wh->body_mb.capacity(), wh->body_mb.max_size());
 
-    gcs_writes->Inc();
-    gcs_latency->IncBy("write", GetMonotonicMicrosFast() - start);
+    detail::gcs_writes->Inc();
+    detail::gcs_latency->IncBy("write", GetMonotonicMicrosFast() - start);
 
     if (src.empty())
       break;
@@ -812,7 +803,7 @@ auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSe
       auto content_len_it = msg.find(h2::field::content_length);
       size_t content_sz = 0;
       if (content_len_it != msg.end()) {
-        CHECK(absl::SimpleAtoi(absl_sv(content_len_it->value()), &content_sz));
+        CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &content_sz));
       }
       return content_sz;
     }

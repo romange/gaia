@@ -7,6 +7,7 @@
 #include <boost/fiber/operations.hpp>
 
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "util/http/https_client.h"
 
 namespace util {
@@ -15,6 +16,9 @@ namespace detail {
 using namespace boost;
 using namespace http;
 using namespace ::std;
+
+unique_ptr<VarzQps> gcs_writes;
+unique_ptr<VarzMapAverage5m> gcs_latency;
 
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
   os << msg.reason() << endl;
@@ -35,6 +39,11 @@ h2::request<h2::dynamic_body> PrepareGenericRequest(h2::verb req_verb, const bb_
   return req;
 }
 
+ApiSenderBase::ApiSenderBase(const char* name, const GCE& gce, http::HttpsClientPool* pool)
+    : name_(name), gce_(gce), pool_(pool) {
+  InitVarzStats();
+}
+
 ApiSenderBase::~ApiSenderBase() {}
 
 StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned num_iterations,
@@ -42,6 +51,10 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
   system::error_code ec;
   HttpsClientPool::ClientHandle handle;
 
+  uint64_t start = base::GetMonotonicMicrosFast();
+
+  // for now we may increase num_iterations indefinitely in some case.
+  // TODO: to refine this logic.
   for (unsigned iters = 0; iters < num_iterations; ++iters) {
     if (!handle) {
       handle = pool_->GetHandle();
@@ -57,6 +70,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     ec = SendRequestIterative(req, handle.get());
 
     if (!ec) {  // Success.
+      detail::gcs_latency->IncBy(name_, base::GetMonotonicMicrosFast() - start);
       return handle;
     }
 
@@ -68,12 +82,17 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
       AddBearer(token_res.obj, &req);
     } else if (ec == asio::error::try_again) {
       ++num_iterations;
-      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
-                << " retrying";
+      LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle() << " retrying";
     } else {
       LOG(INFO) << "RespIter " << iters << ": socket " << handle->native_handle()
-                << " failed with error " << ec << "/" << ec.message();
+                << " failed with error " << ec << "/" << ec.message() << " "
+                << ERR_GET_REASON(ec.value());
       handle.reset();
+      if (ec.category() == asio::error::get_ssl_category()) {
+        // if (ERR_GET_REASON(ec.value()) == SSL_R_WRONG_VERSION_NUMBER) {
+        ++num_iterations;
+        //}
+      }
     }
   }
 
@@ -130,6 +149,15 @@ auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* 
   LOG(ERROR) << "Unexpected status " << msg;
 
   return h2::error::bad_status;
+}
+
+static once_flag gcs_write_set_flag;
+
+void InitVarzStats() {
+  std::call_once(gcs_write_set_flag, [] {
+    gcs_writes.reset(new VarzQps("gcs-writes"));
+    gcs_latency.reset(new VarzMapAverage5m("gcs-latency"));
+  });
 }
 
 }  // namespace detail

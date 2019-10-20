@@ -95,7 +95,7 @@ class GcsWriteFile : public WriteFile, protected ApiSenderDynamicBody {
 
 GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_url,
                            HttpsClientPool* pool)
-    : WriteFile(name), ApiSenderDynamicBody(gce, pool), obj_url_(std::move(obj_url)),
+    : WriteFile(name), ApiSenderDynamicBody("write", gce, pool), obj_url_(std::move(obj_url)),
       body_mb_(1 << FLAGS_gcs_upload_buf_log_size) {
   CHECK(!obj_url_.empty());
   CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
@@ -268,7 +268,7 @@ StatusObject<file::WriteFile*> OpenGcsWriteFile(absl::string_view full_path, con
   auto req = detail::PrepareGenericRequest(h2::verb::post, url, token);
   req.prepare_payload();
 
-  ApiSenderDynamicBody sender(gce, pool);
+  ApiSenderDynamicBody sender("start_write", gce, pool);
   auto res = sender.SendGeneric(3, std::move(req));
   if (!res.ok())
     return res.status;

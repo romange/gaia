@@ -46,7 +46,7 @@ class GcsReadFile : public ReadonlyFile, private detail::ApiSenderBufferBody {
 
   // does not own gcs object, only wraps it with ReadonlyFile interface.
   GcsReadFile(const GCE& gce, HttpsClientPool* pool, string read_obj_url)
-      : detail::ApiSenderBufferBody(gce, pool), read_obj_url_(std::move(read_obj_url)) {}
+      : detail::ApiSenderBufferBody("read", gce, pool), read_obj_url_(std::move(read_obj_url)) {}
 
   virtual ~GcsReadFile() final;
 

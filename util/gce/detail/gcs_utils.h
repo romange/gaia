@@ -13,6 +13,7 @@
 
 #include "util/gce/gce.h"
 #include "util/http/https_client_pool.h"
+#include "util/stats/varz_stats.h"
 #include "util/status.h"
 
 namespace util {
@@ -58,7 +59,7 @@ class ApiSenderBase {
   using Request = h2::request<h2::dynamic_body>;
   using ClientHandle = http::HttpsClientPool::ClientHandle;
 
-  ApiSenderBase(const GCE& gce, http::HttpsClientPool* pool) : gce_(gce), pool_(pool) {}
+  ApiSenderBase(const char* name, const GCE& gce, http::HttpsClientPool* pool);
 
   virtual ~ApiSenderBase();
 
@@ -69,6 +70,7 @@ class ApiSenderBase {
 
   virtual error_code SendRequestIterative(const Request& req, http::HttpsClient* client) = 0;
 
+  const char* name_;
   const GCE& gce_;
   http::HttpsClientPool* const pool_;
 };
@@ -87,6 +89,11 @@ class ApiSenderBufferBody : public ApiSenderBase {
   absl::optional<Parser> parser_;
 };
 
+
+extern ::std::unique_ptr<VarzQps> gcs_writes;
+extern ::std::unique_ptr<VarzMapAverage5m> gcs_latency;
+
+void InitVarzStats();
 
 }  // namespace detail
 }  // namespace util
