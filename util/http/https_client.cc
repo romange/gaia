@@ -50,7 +50,8 @@ constexpr const char kPort[] = "443";
 SslContextResult CreateClientSslContext(absl::string_view cert_string) {
   system::error_code ec;
   asio::ssl::context cntx{asio::ssl::context::tlsv12_client};
-
+  cntx.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
+                   asio::ssl::context::single_dh_use);
   cntx.set_verify_mode(asio::ssl::verify_peer, ec);
   if (ec) {
     return SslContextResult(ec);

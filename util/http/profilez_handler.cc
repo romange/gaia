@@ -114,7 +114,7 @@ static void HandleHeapProfile(bool enable, StringResponse* response) {
     HeapProfilerStop();
     body.append(
         "<h3>Heap profiling is off, master!</h3> \n"
-        "<img src='https://m.popkey.co/770e6b/4Mm5x.gif'>\n");
+        "<img src='https://i.giphy.com/media/l0IykG0AM7911MrCM/giphy.webp'>\n");
   }
 }
 
@@ -122,10 +122,11 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   bool enable = false;
   bool heap = false;
   for (const auto& k_v : args) {
-    if (k_v.first == "profile" && k_v.second == "on")
-      enable = true;
-    if (k_v.first == "heap" && k_v.second == "on") {
+    if (k_v.first == "profile") {
+      enable = (k_v.second == "on");
+    } else if (k_v.first == "heap") {
       heap = true;
+      enable = (k_v.second == "on");
     }
   }
 

@@ -13,7 +13,11 @@ namespace http {
 void HttpsClientPool::HandleGuard::operator()(HttpsClient* client) {
   CHECK(client);
 
+  CHECK_GT(pool_->existing_handles_, 0);
+
   if (client->status()) {
+    VLOG(1) << "Deleting client " << client->native_handle() << " due to " << client->status();
+    --pool_->existing_handles_;
     delete client;
   } else {
     CHECK(pool_);
@@ -42,17 +46,22 @@ auto HttpsClientPool::GetHandle() -> ClientHandle {
       continue;  // we just throw a connection with error status.
     }
 
+    VLOG(1) << "Reusing https client " << ptr->native_handle();
+
     // pass it further with custom deleter.
     return ClientHandle(ptr.release(), HandleGuard{this});
   }
 
   // available_handles_ are empty - create a new connection.
+  VLOG(1) << "Creating a new https client";
+
   std::unique_ptr<HttpsClient> client(new HttpsClient{domain_, &io_cntx_, &ssl_cntx_});
   client->set_retry_count(retry_cnt_);
 
   auto ec = client->Connect(connect_msec_);
 
   LOG_IF(WARNING, ec) << "HttpsClientPool: Could not connect " << ec;
+  ++existing_handles_;
 
   return ClientHandle{client.release(), HandleGuard{this}};
 }

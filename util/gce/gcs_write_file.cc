@@ -115,7 +115,7 @@ bool GcsWriteFile::Close() {
 
   auto res = SendGeneric(3, std::move(req));
   if (res.ok()) {
-    VLOG(1) << "Finalized file " << obj_url_ << " " << uploaded_ << "/"  << to;
+    VLOG(1) << "Closed file " << header;
   } else {
     LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n" << header
                << ", status " << res.status;

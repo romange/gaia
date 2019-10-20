@@ -232,16 +232,17 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
 
   auto start = base::GetMonotonicMicrosFast();
-  unsigned out_gcs_count = 0;
-  {
-    lock_guard<std::mutex> lk(dest_mgr_mu_);
-    if (dest_mgr_) {
-      out_gcs_count = dest_mgr_->HandleCount();
+  std::atomic_uint total_gcs_connections{0};
+
+  io_pool_->AwaitOnAll([&](IoContext&) {
+    auto& maybe_pool = per_thread_.get()->api_conn_pool;
+    if (maybe_pool.has_value()) {
+      total_gcs_connections.fetch_add(maybe_pool->handles_count(), std::memory_order_acq_rel);
     }
-  }
+  });
 
   map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn_.load()));
-  map.emplace_back("output-gcs-connections", VarzValue::FromInt(out_gcs_count));
+  map.emplace_back("total-gcs-connections", VarzValue::FromInt(total_gcs_connections.load()));
   map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return map;
