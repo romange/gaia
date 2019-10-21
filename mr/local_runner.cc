@@ -57,7 +57,7 @@ struct LocalRunner::Impl {
       : io_pool_(p), data_dir(d), fq_pool_(0, 128),
         varz_stats_("local-runner", [this] { return GetStats(); }) {}
 
-  uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
+  uint64_t ProcessText(const string& fname,  file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
   /// Called from the main thread orchestrating the pipeline run.
@@ -167,7 +167,7 @@ size_t LocalRunner::Impl::Source::Process(pb::WireFormat::Type type, RawSinkCb c
   size_t cnt = 0;
   switch (type) {
     case pb::WireFormat::TXT:
-      cnt = impl_->ProcessText(rd_file_.release(), cb);
+      cnt = impl_->ProcessText(fname_, rd_file_.release(), cb);
       break;
     case pb::WireFormat::LST:
       cnt = impl_->ProcessLst(rd_file_.release(), cb);
@@ -248,7 +248,7 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   return map;
 }
 
-uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
+uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -257,6 +257,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
 
   uint64_t cnt = 0;
   uint64_t start = base::GetMonotonicMicrosFast();
+  
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;

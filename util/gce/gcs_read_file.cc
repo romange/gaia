@@ -80,6 +80,7 @@ Status GcsReadFile::Open() {
   auto req = detail::PrepareGenericRequest(h2::verb::get, read_obj_url_, token);
   if (offs_)
     SetRange(offs_, kuint64max, &req);
+
   auto handle_res = SendGeneric(3, req);
   if (!handle_res.ok())
     return handle_res.status;
@@ -94,39 +95,58 @@ Status GcsReadFile::Open() {
 }
 
 StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByteRange& range) {
+  CHECK(!range.empty());
+
   if (offset != offs_) {
     return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
   }
 
+  // We can not cache parser() into local var because Open() below recreates the parser instance.
   if (parser()->is_done()) {
     return 0;
   }
 
-  for (unsigned iters = 0; iters < 3; ++iters) {
+  size_t read_sofar = 0;
+  while(read_sofar < range.size()) {
+    // We keep body references inside the loop because Open() that might be called here,
+    // will recreate the parser from the point the connections disconnected.
     auto& body = parser()->get().body();
-    body.data = range.data();
     auto& left_available = body.size;
-    left_available = range.size();
+    body.data = range.data() + read_sofar;
+    left_available = range.size() - read_sofar;
 
-    error_code ec = https_handle_->Read(parser());
-    if (!ec || ec == h2::error::need_buffer || ec == h2::error::partial_message) {  // Success
-      size_t http_read = range.size() - left_available;
+    error_code ec = https_handle_->Read(parser());  // decreases left_available.
+    size_t http_read = (range.size() - read_sofar) - left_available;
+
+    if (!ec || ec == h2::error::need_buffer) {  // Success
       DVLOG(2) << "Read " << http_read << " bytes from " << offset << " with capacity "
-               << range.size();
+               << range.size() << "ec: " << ec;
 
       // This check does not happen. See here why: https://github.com/boostorg/beast/issues/1662
       // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
       offs_ += http_read;
-      return http_read;
+
+      CHECK(left_available == 0 || !ec);
+      return http_read + read_sofar;
+    }
+
+    if (ec == h2::error::partial_message) {
+      offs_ += http_read;
+      VLOG(1) << "Got partial_message, socket status: "
+              << https_handle_->client()->next_layer().status() << ", socket "
+              << https_handle_->native_handle();
+
+      // advance the destination buffer as well.
+      read_sofar += http_read;
+      ec = asio::ssl::error::stream_truncated;
     }
 
     if (ec == asio::ssl::error::stream_truncated) {
-      LOG(WARNING) << "Stream " << read_obj_url_ << " truncated at " << offset << "/" << size_;
+      VLOG(1) << "Stream " << read_obj_url_ << " truncated at " << offs_ << "/" << size_;
       https_handle_.reset();
 
       RETURN_IF_ERROR(Open());
       VLOG(1) << "Reopened the file, new size: " << size_;
-      // I do not change seq_file_->offset,file_size fields.
       // TODO: to validate that file version has not been changed between retries.
       continue;
     } else {
@@ -137,7 +157,7 @@ StatusObject<size_t> GcsReadFile::Read(size_t offset, const strings::MutableByte
     }
   }
 
-  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
+  return read_sofar;
 }
 
 // releases the system handle for this file.

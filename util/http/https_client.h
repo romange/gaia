@@ -22,7 +22,55 @@ class FiberSyncSocket;
 
 namespace http {
 
-using SslStream = ::boost::asio::ssl::stream<FiberSyncSocket>;
+class SslStream {
+  using Impl = ::boost::asio::ssl::stream<FiberSyncSocket>;
+
+ public:
+  using next_layer_type = Impl::next_layer_type;
+  using lowest_layer_type = Impl::lowest_layer_type;
+  using error_code = boost::system::error_code;
+
+  SslStream(FiberSyncSocket&& arg, ::boost::asio::ssl::context& ctx)
+      : wrapped_(std::move(arg), ctx) {}
+
+  // To support socket requirements.
+  next_layer_type& next_layer() { return wrapped_.next_layer(); }
+  lowest_layer_type& lowest_layer() { return wrapped_.lowest_layer(); }
+
+  // (fiber) SyncRead interface:
+  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
+  template <typename MBS> size_t read_some(const MBS& bufs, error_code& ec) {
+    size_t res = wrapped_.read_some(bufs, ec);
+    last_err_ = ec;
+    return res;
+  }
+
+  //! To calm SyncReadStream compile-checker we provide exception-enabled interface without
+  //! implementing it.
+  template <typename MBS> size_t read_some(const MBS& bufs);
+
+  //! SyncWrite interface:
+  //! https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
+  template <typename BS> size_t write_some(const BS& bufs, error_code& ec) {
+    size_t res = wrapped_.write_some(bufs, ec);
+    last_err_ = ec;
+    return res;
+  }
+
+  //! To calm SyncWriteStream compile-checker we provide exception-enabled interface without
+  //! implementing it.
+  template <typename BS> size_t write_some(const BS& bufs);
+
+  void handshake(Impl::handshake_type type, error_code& ec) {
+    wrapped_.handshake(type, ec);
+  }
+
+  const error_code& last_error() const { return last_err_;}
+
+ private:
+  Impl wrapped_;
+  error_code last_err_;
+};
 
 // Waiting for std::expected to arrive. Meanwhile we use this interface.
 using SslContextResult = absl::variant<::boost::system::error_code, ::boost::asio::ssl::context>;
@@ -90,7 +138,7 @@ class HttpsClient {
 
   bool IsError(const error_code& ec) const {
     using err = ::boost::beast::http::error;
-    return ec && ec != err::need_buffer && ec != err::partial_message;
+    return ec && ec != err::need_buffer;
   }
 
   error_code ReconnectIfNeeded() {
@@ -120,10 +168,12 @@ template <typename Req, typename Resp>
 auto HttpsClient::Send(const Req& req, Resp* resp) -> error_code {
   namespace h2 = ::boost::beast::http;
   error_code ec;
+
   for (uint32_t i = 0; i < retry_cnt_; ++i) {
     ec = Send(req);
     if (IsError(ec))  // Send already retries.
       break;
+
     h2::read(*client_, tmp_buffer_, *resp, ec);
     if (!IsError(ec)) {
       return ec;
