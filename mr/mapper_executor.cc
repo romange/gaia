@@ -265,7 +265,7 @@ util::VarzValue::Map MapperExecutor::GetStats() const {
   LOG(INFO) << "MapperExecutor::GetStats";
 
   pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
-    LOG(INFO) << "MapperExecutor::GetStats CB";
+    VLOG(1) << "MapperExecutor::GetStats CB";
 
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
@@ -276,8 +276,8 @@ util::VarzValue::Map MapperExecutor::GetStats() const {
     }
   });
 
-  res.emplace_back("parse_errors", util::VarzValue::FromInt(parse_errors.load()));
-  res.emplace_back("records_read", util::VarzValue::FromInt(record_read.load()));
+  res.emplace_back("parse-errors", util::VarzValue::FromInt(parse_errors.load()));
+  res.emplace_back("records-read", util::VarzValue::FromInt(record_read.load()));
 
   return res;
 }

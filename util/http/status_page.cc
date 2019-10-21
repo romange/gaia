@@ -43,7 +43,7 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
   VarzListNode::IterateValues([&varz](const string& nm, const string& val) {
     absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
   });
-  absl::StrAppend(&varz, "current_time: ", time(nullptr), ",\n");
+  absl::StrAppend(&varz, "\"current-time\": ", time(nullptr), ",\n");
   varz.resize(varz.size() - 2);
 
   for (const auto& k_v : args) {
