@@ -104,11 +104,6 @@ class DestFileSet {
 */
 class DestHandle {
   friend class DestFileSet;
-
-  void AppendThreadLocal(const std::string& val);
-
-  static ::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path);
-
  public:
   virtual ~DestHandle() {}
 
@@ -118,10 +113,10 @@ class DestHandle {
 
   //! Writes 0 or many string records according to what cb returns.
   //! When cb is out of records, it will returns absl::nullopt.
-  virtual void Write(StringGenCb cb);
+  virtual void Write(StringGenCb cb) = 0;
 
   // Thread-safe. Called from multiple threads/do_contexts.
-  virtual void Close(bool abort_write);
+  virtual void Close(bool abort_write) = 0;
 
   void set_raw_limit(size_t raw_limit) { raw_limit_ = raw_limit; }
   const std::string full_path() const { return full_path_; }
@@ -134,7 +129,10 @@ class DestHandle {
   DestHandle(DestFileSet* owner, const ShardId& sid);
   DestHandle(const DestHandle&) = delete;
 
-  virtual void Open();
+  virtual void Open() = 0;
+
+  void OpenLocalFile();
+  void CloseWriteFile(bool abort_write);
 
   DestFileSet* owner_;
   ShardId sid_;
