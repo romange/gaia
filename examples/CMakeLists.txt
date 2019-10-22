@@ -27,3 +27,5 @@ cxx_link(mrgrep mr3_lib http_v2 TRDP::re2)
 
 add_executable(osmium_road_length osmium_road_length.cc)
 cxx_link(osmium_road_length base TRDP::libosmium)
+
+add_subdirectory(wordcount)
