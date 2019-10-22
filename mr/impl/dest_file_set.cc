@@ -234,9 +234,11 @@ void CompressHandle::Write(StringGenCb cb) {
     if (!tmp_str)
       break;
 
-    if (compress_sink_) {
-      std::unique_lock<fibers::mutex> lk(zmu_);
+    // We must lock both the compression and the enquing calls because the order of writing
+    // compressed chunks is important and we need to preserve transactional semantics.
+    std::unique_lock<fibers::mutex> lk(zmu_);
 
+    if (compress_sink_) {
       strings::ByteRange br = strings::ToByteRange(*tmp_str);
       CHECK_STATUS(compress_sink_->Append(br));
 
