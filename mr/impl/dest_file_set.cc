@@ -26,7 +26,7 @@ namespace mr3 {
 util::VarzMapAverage5m dest_files("dest-files-set");
 
 DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
-DEFINE_bool(local_runner_gcs_write_v2, false, "");
+DEFINE_bool(local_runner_gcs_write_v2, true, "");
 
 namespace detail {
 
@@ -118,6 +118,7 @@ class CompressHandle : public DestHandle {
   unique_ptr<GCS> gcs_;
   fibers::fiber write_fiber_;
   std::atomic_int fiber_state_{0};
+  ::file::WriteFile* gcs_file_ = nullptr;
 };
 
 class LstHandle : public DestHandle {
@@ -200,9 +201,9 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   static thread_local asio::ssl::context ssl_context = GCE::CheckedSslContext();
 
   if (FLAGS_local_runner_gcs_write_v2) {
-    write_file_ =
+    gcs_file_ =
         CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
-    CHECK(write_file_);
+    CHECK(gcs_file_);
   } else {
     absl::string_view bucket, path;
     CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
@@ -219,8 +220,8 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
   // the pending writes.
   if (FLAGS_local_runner_gcs_write_v2) {
-    CHECK(write_file_->Close());
-    write_file_ = nullptr;
+    CHECK(gcs_file_->Close());
+    gcs_file_ = nullptr;
   }
   gcs_.reset();
 }
@@ -269,7 +270,7 @@ void CompressHandle::Write(StringGenCb cb) {
         } else {
           dest_files.IncBy("gcs-submit-launching", delta);
         }
-      } else {
+      } else {  // if(out_queue_)
         dest_files.IncBy("gcs-submit-fast", delta);
       }
       this_fiber::yield();
@@ -293,7 +294,7 @@ void CompressHandle::Close(bool abort_write) {
         if (out_queue_) {  // GCS flow.
           out_queue_->Add([this, str = std::move(buf)] {
             if (FLAGS_local_runner_gcs_write_v2) {
-              CHECK_STATUS(write_file_->Write(str));
+              CHECK_STATUS(gcs_file_->Write(str));
             } else {
               CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
             }
