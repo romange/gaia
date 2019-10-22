@@ -1,6 +1,9 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
+// Parses WET files https://commoncrawl.org/the-data/get-started/#WET-Format from
+// common crawl dataset. For example, check out file
+// s3://commoncrawl/crawl-data/CC-MAIN-2018-22/segments/1526794863277.18/wet/CC-MAIN-20180520092830-20180520112830-00000.warc.wet.gz
 #include <re2/re2.h>
 
 #include "absl/strings/str_cat.h"
