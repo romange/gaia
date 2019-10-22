@@ -135,7 +135,8 @@ class HttpsClient {
 
  private:
   error_code HandleError(const error_code& ec);
-
+  bool HandleWriteError(const error_code& ec);
+  
   bool IsError(const error_code& ec) const {
     using err = ::boost::beast::http::error;
     return ec && ec != err::need_buffer;
@@ -190,10 +191,9 @@ template <typename Req> auto HttpsClient::Send(const Req& req) -> error_code {
     if (IsError(ec))
       continue;
     ::boost::beast::http::write(*client_, req, ec);
-    if (IsError(ec)) {
-      reconnect_needed_ = true;
-    } else {
-      return ec;
+
+    if (HandleWriteError(ec)) {
+      break;
     }
   }
   return HandleError(ec);

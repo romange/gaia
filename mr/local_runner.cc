@@ -257,7 +257,7 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
 
   uint64_t cnt = 0;
   uint64_t start = base::GetMonotonicMicrosFast();
-  
+
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
@@ -273,7 +273,9 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
     cb(std::move(tmp));
     start = base::GetMonotonicMicrosFast();
   }
-  VLOG(1) << "ProcessText Read " << cnt << " items";
+  VLOG(1) << "ProcessText Read " << cnt << " items from " << fname;
+
+  CHECK_STATUS(lr.status()) << "Line reader failed on file " << fname;
 
   return cnt;
 }

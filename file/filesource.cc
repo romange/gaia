@@ -138,6 +138,8 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
     auto s = source_->Read(range);
     if (!s.ok()) {
       LOG(ERROR) << "LineReader read error " << s.status << " at line " << line_num_;
+      status_ = s.status;
+
       return false;
     }
 

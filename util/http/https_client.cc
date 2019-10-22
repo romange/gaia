@@ -121,5 +121,15 @@ auto HttpsClient::DrainResponse(h2::response_parser<h2::buffer_body>* parser) ->
   return error_code{};
 }
 
+bool HttpsClient::HandleWriteError(const error_code& ec) {
+  if (!ec)
+    return true;
+
+  LOG(WARNING) << "Write returned error " << ec << "/" << ec.message();
+  reconnect_needed_ = true;
+
+  return false;
+}
+
 }  // namespace http
 }  // namespace util

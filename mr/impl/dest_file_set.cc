@@ -255,7 +255,7 @@ void CompressHandle::Write(StringGenCb cb) {
       auto cb = [start, this, str = std::move(*tmp_str)] {
         dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
         if (FLAGS_local_runner_gcs_write_v2) {
-          CHECK_STATUS(write_file_->Write(str));
+          CHECK_STATUS(gcs_file_->Write(str));
         } else {
           CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
         }

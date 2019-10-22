@@ -66,6 +66,8 @@ public:
   // Returns true if new line was found or false if end of stream was reached.
   bool Next(StringPiece* result, std::string* scratch = nullptr);
 
+  util::Status status() const { return status_; }
+
 private:
   void Init(uint32_t buf_log);
 
@@ -77,6 +79,7 @@ private:
   Ownership ownership_;
   uint32_t page_size_;
   std::string scratch_;
+  util::Status status_;
 
   static constexpr uint64_t kEofMask = 1ULL << 63;
 };
