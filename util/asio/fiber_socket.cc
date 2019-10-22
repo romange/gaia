@@ -93,7 +93,7 @@ void FiberSocketImpl::Shutdown(error_code& ec) {
 void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
   status_ = ec;
   if (ec) {
-    VLOG(1) << "Setting socket status to " << ec << "/" << ec.message() << " at " << where;
+    VSOCK(1) << "Setting status to " << ec << "/" << ec.message() << " at " << where;
   }
 }
 

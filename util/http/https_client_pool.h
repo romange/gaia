@@ -5,6 +5,7 @@
 #pragma once
 
 #include <boost/asio/ssl/context.hpp>
+#include <deque>
 #include <memory>
 
 namespace util {
@@ -40,12 +41,19 @@ class HttpsClientPool {
    * Must be called withing IoContext thread. Once ClientHandle destructs,
    * the connection returns to the pool. GetHandle() might block the calling fiber for
    * connect_msec_ millis in case it creates a new connection.
+   * Note that all allocated handles must be destroyed before destroying their parent pool.
    */
   ClientHandle GetHandle();
 
   void set_connect_timeout(unsigned msec) { connect_msec_ = msec; }
 
+  //! Sets number of retries for https client handles.
+  void set_retry_count(uint32_t cnt) { retry_cnt_ = cnt; }
+
   IoContext& io_context() { return io_cntx_; }
+
+  //! Number of existing handles created by this pool.
+  unsigned handles_count() const { return existing_handles_; }
 
  private:
   using SslContext = ::boost::asio::ssl::context;
@@ -53,9 +61,10 @@ class HttpsClientPool {
   SslContext& ssl_cntx_;
   IoContext& io_cntx_;
   std::string domain_;
-  unsigned connect_msec_ = 1000;
+  unsigned connect_msec_ = 1000, retry_cnt_ = 1;
+  int existing_handles_ = 0;
 
-  std::vector<HttpsClient*> available_handles_;
+  std::deque<HttpsClient*> available_handles_;  // Using queue to allow round-robin access.
 };
 
 }  // namespace http

@@ -4,10 +4,12 @@
 #include "mr/joiner_executor.h"
 
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "mr/impl/table_impl.h"
 #include "mr/pipeline.h"
 #include "mr/runner.h"
 #include "util/asio/io_context_pool.h"
+#include "util/stats/varz_stats.h"
 
 namespace mr3 {
 
@@ -51,6 +53,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   CHECK_EQ(tb->op().type(), pb::Operator::GROUP);
   if (inputs.empty())
     return;
+  util::VarzFunction varz_func("joiner", [this] { return GetStats(); });
 
   CheckInputs(inputs);
 
@@ -93,6 +96,19 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   }
 
   runner_->OperatorEnd(out_files);
+}
+
+util::VarzValue::Map JoinerExecutor::GetStats() const {
+  util::VarzValue::Map res;
+
+  uint64_t latency = 0;
+  uint64_t cnt = finish_shard_latency_cnt_.load(std::memory_order_acquire);
+  if (cnt) {  // not 100% correct but will do for this.
+    latency = finish_shard_latency_sum_.load(std::memory_order_relaxed) / cnt;
+  }
+  res.emplace_back("finish-latency-usec", util::VarzValue::FromInt(latency));
+
+  return res;
 }
 
 void JoinerExecutor::CheckInputs(const std::vector<const InputBase*>& inputs) {
@@ -151,7 +167,11 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       SetMetaData(*ii.fspec, raw_context.get());
       cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
     }
+    auto start = base::GetMonotonicMicrosFast();
     handler_wrapper->OnShardFinish();
+    finish_shard_latency_sum_.fetch_add(base::GetMonotonicMicrosFast() - start,
+                                        std::memory_order_relaxed);
+    finish_shard_latency_cnt_.fetch_add(1, std::memory_order_acq_rel);
   }
   VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
 

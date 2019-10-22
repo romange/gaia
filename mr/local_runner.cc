@@ -57,7 +57,7 @@ struct LocalRunner::Impl {
       : io_pool_(p), data_dir(d), fq_pool_(0, 128),
         varz_stats_("local-runner", [this] { return GetStats(); }) {}
 
-  uint64_t ProcessText(file::ReadonlyFile* fd, RawSinkCb cb);
+  uint64_t ProcessText(const string& fname,  file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
   /// Called from the main thread orchestrating the pipeline run.
@@ -82,9 +82,9 @@ struct LocalRunner::Impl {
   class Source;
 
  private:
-  void LazyGcsInit();
+  void LazyGcsInit();   // Called from IO threads.
+
   util::VarzValue::Map GetStats() const;
-  void InitGCE();
 
   IoContextPool* io_pool_;
   string data_dir;
@@ -167,7 +167,7 @@ size_t LocalRunner::Impl::Source::Process(pb::WireFormat::Type type, RawSinkCb c
   size_t cnt = 0;
   switch (type) {
     case pb::WireFormat::TXT:
-      cnt = impl_->ProcessText(rd_file_.release(), cb);
+      cnt = impl_->ProcessText(fname_, rd_file_.release(), cb);
       break;
     case pb::WireFormat::LST:
       cnt = impl_->ProcessLst(rd_file_.release(), cb);
@@ -197,6 +197,7 @@ void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
   ssl_context = GCE::CheckedSslContext();
   api_conn_pool.emplace(GCE::kApiDomain, &ssl_context.value(), io_context);
   api_conn_pool->set_connect_timeout(FLAGS_gcs_connect_deadline_ms);
+  api_conn_pool->set_retry_count(3);
 }
 
 auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
@@ -231,22 +232,23 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
 
   auto start = base::GetMonotonicMicrosFast();
-  unsigned out_gcs_count = 0;
-  {
-    lock_guard<std::mutex> lk(dest_mgr_mu_);
-    if (dest_mgr_) {
-      out_gcs_count = dest_mgr_->HandleCount();
+  std::atomic_uint total_gcs_connections{0};
+
+  io_pool_->AwaitOnAll([&](IoContext&) {
+    auto& maybe_pool = per_thread_.get()->api_conn_pool;
+    if (maybe_pool.has_value()) {
+      total_gcs_connections.fetch_add(maybe_pool->handles_count(), std::memory_order_acq_rel);
     }
-  }
+  });
 
   map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn_.load()));
-  map.emplace_back("output-gcs-connections", VarzValue::FromInt(out_gcs_count));
+  map.emplace_back("total-gcs-connections", VarzValue::FromInt(total_gcs_connections.load()));
   map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return map;
 }
 
-uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
+uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
@@ -255,6 +257,7 @@ uint64_t LocalRunner::Impl::ProcessText(file::ReadonlyFile* fd, RawSinkCb cb) {
 
   uint64_t cnt = 0;
   uint64_t start = base::GetMonotonicMicrosFast();
+  
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
@@ -310,7 +313,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool_));
 
   if (util::IsGcsPath(out_dir)) {
-    InitGCE();
+    io_pool_->AwaitFiberOnAll([this](IoContext&) { LazyGcsInit();});
 
     auto api_pool_cb = [this] {
       auto& opt_pool = per_thread_.get()->api_conn_pool;
@@ -391,17 +394,15 @@ void LocalRunner::Impl::LazyGcsInit() {
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
-  per_thread_->SetupGce(io_pool_->GetThisContext());
+  auto* io_context = io_pool_->GetThisContext();
+  per_thread_->SetupGce(io_context);
 
-  InitGCE();
-}
-
-void LocalRunner::Impl::InitGCE() {
   std::lock_guard<fibers::mutex> lk(gce_mu_);
   if (gce_handle_)
     return;
   gce_handle_.reset(new GCE);
   CHECK_STATUS(gce_handle_->Init());
+  CHECK_STATUS(gce_handle_->RefreshAccessToken(io_context).status);
 }
 
 void LocalRunner::Impl::ShutDown() {

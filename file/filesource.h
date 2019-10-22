@@ -59,7 +59,7 @@ public:
 
   ~LineReader();
 
-  uint64 line_num() const { return line_num_;}
+  uint64 line_num() const { return line_num_ & (kEofMask - 1);}
 
   // Sets the result to point to null-terminated line.
   // Empty lines are also returned.
@@ -70,13 +70,15 @@ private:
   void Init(uint32_t buf_log);
 
   util::Source* source_;
-  Ownership ownership_;
-  uint64 line_num_ = 0;
+  uint64 line_num_ = 0;   // MSB bit means EOF was reached.
   std::unique_ptr<char[]> buf_;
   char* next_, *end_;
 
+  Ownership ownership_;
   uint32_t page_size_;
   std::string scratch_;
+
+  static constexpr uint64_t kEofMask = 1ULL << 63;
 };
 
 class CsvReader {

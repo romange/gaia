@@ -7,6 +7,7 @@
 #include <boost/fiber/unbuffered_channel.hpp>
 
 #include "mr/operator_executor.h"
+#include "util/stats/varz_value.h"
 
 namespace mr3 {
 
@@ -38,9 +39,13 @@ class JoinerExecutor : public OperatorExecutor {
 
   void JoinerFiber();
 
+  util::VarzValue::Map GetStats() const;
+
   ::boost::fibers::unbuffered_channel<ShardInput> input_q_;
 
   static thread_local std::unique_ptr<PerIoStruct> per_io_;
+
+  std::atomic<uint64_t> finish_shard_latency_sum_{0}, finish_shard_latency_cnt_{0};
 };
 
 }  // namespace mr3

@@ -113,7 +113,7 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
       return true;
     }
 
-    if (end_ != next_) {
+    if (next_ != end_) {
       // Our internal buffer was not empty, but we did not find EOL yet.
       // Now we've reach end of buffer, so we must copy the data to accomodate the broken line.
       if (!use_scratch) {
@@ -126,20 +126,27 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
         scratch->append(next_, end_);
       }
       next_ = end_;
-      if (end_ != eof_page)
+      if (end_ != eof_page) {
+        // It's EOF since we've read least than page size.
+        line_num_ |= kEofMask;
         break;
+      }
     }
 
     strings::MutableByteRange range{reinterpret_cast<uint8_t*>(buf_.get()),
                                     /* -1 to allow sentinel */ page_size_ - 1};
     auto s = source_->Read(range);
     if (!s.ok()) {
+      LOG(ERROR) << "LineReader read error " << s.status << " at line " << line_num_;
       return false;
     }
 
-    if (s.obj == 0)
+    if (s.obj == 0) {
+      line_num_ |= kEofMask;
       break;
+    }
 
+    LOG_IF(ERROR, line_num_ & kEofMask) << "LineReader: read data after EOF was reached";
     next_ = buf_.get();
     end_ = next_ + s.obj;
     *end_ = '\n';  // sentinel.
@@ -148,8 +155,11 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
   if (use_scratch) {
     *result = *scratch;
     ++line_num_;
+
     return true;
   }
+
+  DCHECK(line_num_ & kEofMask);
   return false;
 }
 

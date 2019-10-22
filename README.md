@@ -19,39 +19,49 @@ in c++14 on linux systems. The focus is mostly for backend development, data pro
 I will gradually add explanations for most crucial blocks in this library.
 
 
-## Building, Setting Up
+## Setting Up & Building
 1. abseil is integrated as submodule. To fetch abseil run:
 
        git submodule update --init --recursive
-2. Dependencies setup:
 
-       sudo ./install-dependencies.sh
-3. Build setup:
+2. Building using docker.
+   Short version - running asio_fibers example.
+   There is no need to install dependencies on a host machine.
 
-       ./blaze.sh -ninja -release
+    ```bash
+       > docker build -t asio_fibers -f docker/bin_build.Dockerfile --build-arg TARGET=asio_fibers
+       > docker run --network host asio_fibers --logtostderr  # server process, from shell A
+       > docker run --network host asio_fibers --connect=localhost --count 10000 --num_connections=4  # client process from shell B
+    ```
+
+   For a longer version please see [this document](doc/docker_build.md).
+
+3. Building on host machine directly. Currently requires Ubuntu 18.04.
+
+   ```bash
+   > sudo ./install-dependencies.sh
+   > ./blaze.sh -ninja -release
+   > cd build-opt && ninja -j4 asio_fibers
+
+   ```
    *third_party* folder is checked out under build directories.
-4. To build, just run ninja:
 
-       cd build-opt && ninja -j4 asio_fibers
-5. To check raw ASIO & fibers in action, run from 2 tabs:
+   Then, from 2 tabs run:
 
-       server> ./asio_fibers --logtostderr
-       client> ./asio_fibers --connect=localhost --count 100000 --num_connections=8
+   ```bash
+     server> ./asio_fibers --logtostderr
+     client> ./asio_fibers --connect=localhost --count 100000 --num_connections=4
+   ```
 
-To use abseil code use `#include "absl/..."`.
-Third_party packages have `TRDP::` prefix in `CMakeLists.txt`. absl libraries have prefix
-`absl_...`.
 
 
 ## Single node Mapreduce
 GAIA library provides a very efficient multi-threaded mapreduce framework for batch processing.
 It supports out of the box json parsing, compressed formats (gzip, zstd),
-local disk and GCS (Google Cloud Storage) IO. Using GAIA MR it's possible to map,
+local disk I/O and GCS (Google Cloud Storage). Using GAIA MR it's possible to map,
 re-shard (partition), join and group multiple sources of data very efficiently.
 Fibers in GAIA allowed maximizing pipeline execution and balance IO
-with CPU workloads in parallel. The example below shows how to process text files and re-shard them
-based on an imaginary "year" column for each CSV row. Please check out [this tutorial](doc/mr3.md)
-to learn more about GAIA MR.
+with CPU workloads in parallel. The example below shows how to process text files and re-shard them based on an imaginary "year" column for each CSV row. Please check out [this tutorial](doc/mr3.md) to learn more about GAIA MR.
 
 ~~~~~~~~~~cpp
 #include "absl/strings/str_cat.h"
@@ -142,3 +152,8 @@ Unfortunately, Google's version has some bugs, which I fixed (waiting for review
 
 ## Tests
 GAIA uses googletest+gmock unit-test environment.
+
+## Conventions
+To use abseil code use `#include "absl/..."`.
+Third_party packages have `TRDP::` prefix in `CMakeLists.txt`. absl libraries have prefix
+`absl_...`.

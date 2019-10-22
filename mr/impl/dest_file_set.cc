@@ -202,6 +202,7 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   if (FLAGS_local_runner_gcs_write_v2) {
     write_file_ =
         CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+    CHECK(write_file_);
   } else {
     absl::string_view bucket, path;
     CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
@@ -214,6 +215,13 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   fiber_state_ = 1;
 
   out_queue_->Run();
+
+  // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
+  // the pending writes.
+  if (FLAGS_local_runner_gcs_write_v2) {
+    CHECK(write_file_->Close());
+    write_file_ = nullptr;
+  }
   gcs_.reset();
 }
 
@@ -273,6 +281,8 @@ void CompressHandle::Write(StringGenCb cb) {
 }
 
 void CompressHandle::Close(bool abort_write) {
+  VLOG(1) << "CompressHandle::Close";
+
   if (!abort_write) {
     if (compress_sink_) {
       CHECK_STATUS(compress_sink_->Flush());
@@ -300,13 +310,13 @@ void CompressHandle::Close(bool abort_write) {
     // Send GCS closure callback and signal the queue to finish file but do not block on it.
     if (FLAGS_local_runner_gcs_write_v2) {
       // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
-      // the pending writes.
-      out_queue_->Add([this] { CHECK(write_file_->Close()); });
+      // the pending writes. We close inside GcsWriteFiber.
     } else {
       out_queue_->Add([this, abort_write] { CHECK_STATUS(gcs_->CloseWrite(abort_write)); });
     }
+
+    /// Notifies but does not block for shutdown. We block when waiting for GcsWriteFiber to exit.
     out_queue_->Shutdown();
-    write_file_ = nullptr;
   } else {
     CloseWriteFile(abort_write);
   }
