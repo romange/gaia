@@ -6,6 +6,7 @@
 // s3://commoncrawl/crawl-data/CC-MAIN-2018-22/segments/1526794863277.18/wet/CC-MAIN-20180520092830-20180520112830-00000.warc.wet.gz
 #include <re2/re2.h>
 
+#include <boost/beast/websocket/detail/utf8_checker.hpp>
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/hash.h"
@@ -27,6 +28,7 @@ DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
 DEFINE_int32(compress_level, 1, "");
 
+using namespace boost;
 using namespace mr3;
 using namespace util;
 using re2::RE2;
@@ -55,6 +57,8 @@ WarcMapper::WarcMapper() {
 }
 
 void WarcMapper::Do(string line, mr3::DoContext<string>* cntx) {
+  absl::StripAsciiWhitespace(&line);
+
   switch (state_) {
     case INIT:
       if (line == "WARC/1.0") {
@@ -105,11 +109,14 @@ void WarcMapper::HandlePage(string str, mr3::DoContext<string>* cntx) {
   }
   if (str == "WARC/1.0") {  // reset
     state_ = START;
-    LOG_IF(INFO, empty_cnt_ != 2) << "Empty lines: " << empty_cnt_;
-
-    LOG_IF(INFO, cur_page_len_ != content_len_)
-        << "Finished content: " << cur_page_len_ << "/" << content_len_;
   } else {
+    beast::websocket::detail::utf8_checker ut8checker;
+
+    if (!ut8checker.write(reinterpret_cast<const uint8_t*>(str.data()), str.size())) {
+      cntx->raw()->Inc("invalid-utf8");
+      return;
+    }
+
     cur_page_len_ += str.size();
     RE2::GlobalReplace(&str, *re_, " ");
     cntx->Write(std::move(str));  // Write doc line
