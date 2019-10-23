@@ -285,7 +285,12 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
     LOG(FATAL) << "Lost " << bytes << " bytes, status: " << status;
   };
 
+#ifdef MR_SKIP_OBJECT_CHECKSUM
+  // NOTE(ORI): Used to read older .lst where checksum was calculated per file and not per object.
+  file::ListReader list_reader(fd, TAKE_OWNERSHIP, false, error_fn);
+#else
   file::ListReader list_reader(fd, TAKE_OWNERSHIP, true, error_fn);
+#endif
   string scratch;
   StringPiece record;
   uint64_t cnt = 0;
