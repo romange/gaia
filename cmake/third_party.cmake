@@ -252,6 +252,23 @@ add_third_party(
   CMAKE_PASS_FLAGS "-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF"
 )
 
+add_third_party(
+  pcre
+  URL  https://netix.dl.sourceforge.net/project/pcre/pcre/8.43/pcre-8.43.tar.gz
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-unicode-properties --enable-utf8
+                    --prefix=${THIRD_PARTY_LIB_DIR}/pcre
+
+)
+
+set(ENV{PKG_CONFIG_PATH} "${PCRE_LIB_DIR}/pkgconfig")
+add_third_party(
+  hyperscan
+  GIT_REPOSITORY https://github.com/intel/hyperscan/
+  GIT_TAG v5.2.0
+  CMAKE_PASS_FLAGS "-DFAT_RUNTIME=OFF -DCMAKE_PREFIX_PATH=/home/roman/clients/root/cpp2/build-opt/third_party/libs/pcre/lib/pkgconfig"
+  LIB libhs.a
+)
+
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
 add_third_party(lz4
   GIT_REPOSITORY https://github.com/lz4/lz4.git
