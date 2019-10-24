@@ -267,7 +267,7 @@ add_third_party(
   CMAKE_PASS_FLAGS "-DFAT_RUNTIME=OFF -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
                     -DCMAKE_PREFIX_PATH=${PCRE_LIB_DIR} -DPCRE_SOURCE=${THIRD_PARTY_DIR}/pcre"
   DEPENDS pcre_project
-  LIB libhs.a
+  LIB libhs.a libchimera.a
 )
 
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)

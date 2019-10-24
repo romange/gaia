@@ -4,7 +4,7 @@
 // Parses WET files https://commoncrawl.org/the-data/get-started/#WET-Format from
 // common crawl dataset. For example, check out file
 // s3://commoncrawl/crawl-data/CC-MAIN-2018-22/segments/1526794863277.18/wet/CC-MAIN-20180520092830-20180520112830-00000.warc.wet.gz
-#include <hs/hs.h>
+#include <hs/ch.h>
 #include <re2/re2.h>
 
 #include "absl/strings/str_cat.h"
@@ -84,9 +84,9 @@ class WordCountTable {
 
 class WordSplitter {
  public:
-  WordSplitter(const hs_database_t* db);
+  WordSplitter(const ch_database_t* db);
 
-  ~WordSplitter() { hs_free_scratch(scratch_); }
+  ~WordSplitter() { ch_free_scratch(scratch_); }
 
   void Do(string did, DoContext<WordCount>* cntx);
 
@@ -94,31 +94,41 @@ class WordSplitter {
 
  private:
   static int OnMatch(unsigned int id, unsigned long long from, unsigned long long to,
-                     unsigned int flags, void* context);
+                     unsigned int flags, unsigned int size, const ch_capture_t* captured,
+                     void* ctx);
+
+  struct MatchData {
+    WordSplitter* me;
+    const char* str;
+  };
+
 
   absl::optional<RE2> re_;
   WordCountTable word_table_;
-  const hs_database_t* hs_db_;
-  hs_scratch_t* scratch_ = nullptr;
+  const ch_database_t* hs_db_;
+  ch_scratch_t* scratch_ = nullptr;
 };
 
-WordSplitter::WordSplitter(const hs_database_t* db) : hs_db_(db) {
-  re_.emplace("\\p{L}+");
+WordSplitter::WordSplitter(const ch_database_t* db) : hs_db_(db) {
+  re_.emplace("(\\pL+)");
 
-  hs_error_t err = hs_alloc_scratch(hs_db_, &scratch_);
-  CHECK_EQ(HS_SUCCESS, err);
+  ch_error_t err = ch_alloc_scratch(hs_db_, &scratch_);
+  CHECK_EQ(CH_SUCCESS, err);
 }
 
 void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
-  re2::StringPiece line_re2(line), word;
+  /* re2::StringPiece line_re2(line), word;
 
   while (RE2::FindAndConsume(&line_re2, *re_, &word)) {
     LOG(INFO) << "Adding " << word;
 
     word_table_.AddWord(absl::string_view{word.begin(), word.size()}, 1);
-  }
-  hs_error_t err = hs_scan(hs_db_, line.data(), line.size(), 0, scratch_, &OnMatch, this);
-  CHECK_EQ(HS_SUCCESS, err);
+  }*/
+  MatchData md{this, line.c_str()};
+
+  ch_error_t err =
+      ch_scan(hs_db_, line.data(), line.size(), 0, scratch_, &OnMatch, nullptr, &md);
+  CHECK_EQ(CH_SUCCESS, err);
 
   if (word_table_.size() > 200000 && word_table_.MemoryUsage() > 256 * 1000000ULL) {
     word_table_.Flush(cntx);
@@ -126,14 +136,22 @@ void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
 }
 
 void WordSplitter::OnShardFinish(DoContext<WordCount>* cntx) {
-  LOG(INFO) << "OnShardFinish";
+  LOG(INFO) << "WordSplitter::OnShardFinish";
 
   word_table_.Flush(cntx);
 }
 
 int WordSplitter::OnMatch(unsigned int id, unsigned long long from, unsigned long long to,
-                          unsigned int flags, void* context) {
-  printf("from %lld, to %lld \n", from, to);
+                          unsigned int flags, unsigned int size, const ch_capture_t* captured,
+                          void* ctx) {
+  const MatchData* md = reinterpret_cast<const MatchData*>(ctx);
+  // printf("from %lld, to %lld: %.*s\n", from, to, int(to - from),
+  //       md->str + from);
+
+  StringPiece word(md->str + from, to - from);
+  VLOG(1) << "Matched: " << word;
+  md->me->word_table_.AddWord(word, 1);
+
   return 0;  // Continue
 }
 
@@ -159,13 +177,13 @@ int main(int argc, char** argv) {
   }
   CHECK(!inputs.empty());
 
-  hs_compile_error_t* hs_error = nullptr;
-  hs_database_t* db = nullptr;
-  hs_error_t err = hs_compile(FLAGS_pattern.data(), HS_FLAG_UCP | HS_FLAG_SOM_LEFTMOST,
-                              HS_MODE_BLOCK, nullptr, &db, &hs_error);
-  CHECK_EQ(HS_SUCCESS, err) << "Error compiling pattern: (" << hs_error->expression;
+  ch_compile_error_t* ch_error = nullptr;
+  ch_database_t* db = nullptr;
+  ch_error_t err =
+      ch_compile(FLAGS_pattern.data(), CH_FLAG_UCP | CH_FLAG_UTF8, CH_MODE_NOGROUPS, nullptr, &db, &ch_error);
+  CHECK_EQ(CH_SUCCESS, err) << "Error compiling pattern: (" << ch_error->expression;
   CHECK(db);
-  hs_free_compile_error(hs_error);
+  ch_free_compile_error(ch_error);
 
   Pipeline* pipeline = pm.pipeline();
 
@@ -188,7 +206,7 @@ int main(int argc, char** argv) {
   pipeline->Run(runner);
   LOG(INFO) << "After pipeline run";
 
-  hs_free_database(db);
+  ch_free_database(db);
 
   return 0;
 }
