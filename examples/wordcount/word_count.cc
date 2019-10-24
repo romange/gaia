@@ -30,7 +30,7 @@ using namespace util;
 DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
 DEFINE_int32(compress_level, 1, "");
-DEFINE_string(pattern, "foobar", "");
+DEFINE_string(pattern, "\\w++", "");
 
 using namespace boost;
 using namespace mr3;
@@ -100,6 +100,7 @@ class WordSplitter {
   struct MatchData {
     WordSplitter* me;
     const char* str;
+    DoContext<WordCount>* cntx;
   };
 
 
@@ -124,7 +125,7 @@ void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
 
     word_table_.AddWord(absl::string_view{word.begin(), word.size()}, 1);
   }*/
-  MatchData md{this, line.c_str()};
+  MatchData md{this, line.c_str(), cntx};
 
   ch_error_t err =
       ch_scan(hs_db_, line.data(), line.size(), 0, scratch_, &OnMatch, nullptr, &md);
@@ -151,6 +152,7 @@ int WordSplitter::OnMatch(unsigned int id, unsigned long long from, unsigned lon
   StringPiece word(md->str + from, to - from);
   VLOG(1) << "Matched: " << word;
   md->me->word_table_.AddWord(word, 1);
+  md->cntx->raw()->Inc("matched");
 
   return 0;  // Continue
 }
