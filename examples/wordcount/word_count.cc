@@ -8,6 +8,8 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_split.h"
+
 #include "base/hash.h"
 #include "base/init.h"
 #include "base/logging.h"
@@ -47,14 +49,37 @@ template <> class RecordTraits<WordCount> {
     return absl::StrCat(rec.word, ": ", rec.cnt);
   }
 
-  bool Parse(bool is_binary, std::string&& tmp, WordCount* res) { return true; }
+  bool Parse(bool is_binary, std::string&& tmp, WordCount* res) {
+    vector<StringPiece> v = absl::StrSplit(tmp, ':');
+    if (v.size() != 2)
+      return false;
+
+    res->word = string(v[0]);
+    return absl::SimpleAtoi(v[1], &res->cnt);
+  }
 };
+
 }  // namespace mr3
 
-/**
- * @brief Parses WARC format.
- *
- */
+class WordCountTable {
+ public:
+  WordCountTable() { word_cnts_.set_empty_key(StringPiece()); }
+  void AddWord(StringPiece word, uint64_t count) { word_cnts_[word] += count; }
+
+  void Flush(DoContext<WordCount>* cntx) {
+    for (const auto& k_v : word_cnts_) {
+      cntx->Write(WordCount{string{k_v.first}, k_v.second});
+    }
+    word_cnts_.clear();
+  }
+
+  size_t MemoryUsage() const { return word_cnts_.MemoryUsage(); }
+  size_t size() const { return word_cnts_.size(); }
+
+ private:
+  StringPieceDenseMap<uint64_t> word_cnts_;
+};
+
 class WordSplitter {
  public:
   WordSplitter();
@@ -63,38 +88,33 @@ class WordSplitter {
   void OnShardFinish(DoContext<WordCount>* cntx);
 
  private:
-  void FlushData(DoContext<WordCount>* cntx);
-
-  StringPieceDenseMap<uint64_t> word_cnts_;
-
   absl::optional<RE2> re_;
+  WordCountTable word_table_;
 };
 
-WordSplitter::WordSplitter() {
-  re_.emplace(R"((\p{L}+))");
-  word_cnts_.set_empty_key(StringPiece());
-}
-
-void WordSplitter::FlushData(DoContext<WordCount>* cntx) {
-  for (const auto& k_v : word_cnts_) {
-    cntx->Write(WordCount{string{k_v.first}, k_v.second});
-  }
-  word_cnts_.clear();
-}
+WordSplitter::WordSplitter() { re_.emplace(R"((\p{L}+))"); }
 
 void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
-  word_cnts_["foo"]++;
-  if (word_cnts_.size() > 200000 && word_cnts_.MemoryUsage() > 256 * 1000000ULL) {
-    FlushData(cntx);
+  word_table_.AddWord("foo", 1);
+  if (word_table_.size() > 200000 && word_table_.MemoryUsage() > 256 * 1000000ULL) {
+    word_table_.Flush(cntx);
   }
 }
 
-void WordSplitter::OnShardFinish(DoContext<WordCount>* cntx) {
-  if (!word_cnts_.empty()) {
-    FlushData(cntx);
+void WordSplitter::OnShardFinish(DoContext<WordCount>* cntx) { word_table_.Flush(cntx); }
+
+class WordGroupBy {
+ public:
+  void OnWordCount(WordCount wc, DoContext<WordCount>* context) {
+    word_table_.AddWord(wc.word, wc.cnt);
   }
-}
- 
+
+  void OnShardFinish(DoContext<WordCount>* cntx) { word_table_.Flush(cntx); }
+
+ private:
+  WordCountTable word_table_;
+};
+
 int main(int argc, char** argv) {
   PipelineMain pm(&argc, &argv);
 
@@ -106,13 +126,18 @@ int main(int argc, char** argv) {
 
   Pipeline* pipeline = pm.pipeline();
 
-  PTable<WordCount> word_cnts =
+  // Mapper phase
+  PTable<WordCount> intermediate_table =
       pipeline->ReadText("inp1", inputs).Map<WordSplitter>("word_splitter");
-  auto& outp = word_cnts.Write("wordcnts", pb::WireFormat::TXT)
-                   .WithModNSharding(FLAGS_num_shards, [](const WordCount& wc) {
-                     return base::Fingerprint(wc.word);
-                   });
-  outp.AndCompress(pb::Output::ZSTD, 1);
+  intermediate_table.Write("word_interim", pb::WireFormat::TXT)
+      .WithModNSharding(FLAGS_num_shards,
+                        [](const WordCount& wc) { return base::Fingerprint(wc.word); })
+      .AndCompress(pb::Output::ZSTD, 1);
+
+  // GroupBy phase
+  PTable<WordCount> word_counts = pipeline->Join<WordGroupBy>(
+      "group_by", {intermediate_table.BindWith(&WordGroupBy::OnWordCount)});
+  intermediate_table.Write("wordcounts", pb::WireFormat::TXT).AndCompress(pb::Output::ZSTD, 1);
 
   LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
 
