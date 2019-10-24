@@ -27,10 +27,9 @@ TableBase::~TableBase() {}
 
 void TableBase::SetOutput(const std::string& name, pb::WireFormat::Type type) {
   CHECK(!name.empty());
+  CHECK(!op_.has_output()) << "You can output from table only once";
 
-  if (!op_.has_output()) {
-    pipeline_->tables_.emplace_back(shared_from_this());
-  }
+  pipeline_->tables_.emplace_back(shared_from_this());
 
   auto* out = op_.mutable_output();
   out->set_name(name);
@@ -72,8 +71,9 @@ void TableBase::CheckFailIdentity() const { CHECK(defined() && is_identity_); }
 
 void TableBase::ValidateGroupInputOrDie(const TableBase* other) {
   const auto& op = other->op();
-  CHECK(!op.output().name().empty()) << "Table '" << op.op_name() << "' does not produce "
-    "output. Did you forget to call .Write(..) on it?";
+  CHECK(!op.output().name().empty()) << "Table '" << op.op_name()
+                                     << "' does not produce "
+                                        "output. Did you forget to call .Write(..) on it?";
 }
 
 }  // namespace detail

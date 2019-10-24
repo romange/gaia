@@ -317,6 +317,25 @@ TEST_F(MrTest, JoinAndReshard) {
               UnorderedElementsAre(MatchShard(0, {"2"}), MatchShard(1, {"5", "1", "1"})));
 }
 
+
+TEST_F(MrTest, JoinReduceNoSharding) {
+  vector<string> stream{"1", "2", "3", "4", "1", "2", "2", "2", "2"};
+  runner_.AddInputRecords("stream1.txt", stream);
+
+  PTable<IntVal> itable = pipeline_->ReadText("read1", "stream1.txt").As<IntVal>();
+  itable.Write("ss1", pb::WireFormat::TXT).WithModNSharding(3, [](const IntVal& iv) {
+    return iv.val;
+  });
+
+  PTable<IntVal> joined = pipeline_->Join("join_tables", {itable.BindWith(&GroupByInt::Add)});
+  joined.Write("joinw", pb::WireFormat::TXT);
+  pipeline_->Run(&runner_);
+
+  EXPECT_THAT(runner_.Table("joinw"),
+              UnorderedElementsAre(MatchShard(0, {"1"}), MatchShard(1, {"2", "1"}),
+                                   MatchShard(2, {"5"})));
+}
+
 class AddressMapper {
  public:
   void Do(string str, DoContext<tutorial::Address>* out) {

@@ -92,10 +92,15 @@ class WordSplitter {
   WordCountTable word_table_;
 };
 
-WordSplitter::WordSplitter() { re_.emplace(R"((\p{L}+))"); }
+WordSplitter::WordSplitter() { re_.emplace("(\\p{L}+)"); }
 
 void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
-  word_table_.AddWord("foo", 1);
+  re2::StringPiece line_re2(line), word;
+
+  while (RE2::FindAndConsume(&line_re2, *re_, &word)) {
+    word_table_.AddWord(absl::string_view{word.begin(), word.size()}, 1);
+  }
+
   if (word_table_.size() > 200000 && word_table_.MemoryUsage() > 256 * 1000000ULL) {
     word_table_.Flush(cntx);
   }
@@ -132,12 +137,13 @@ int main(int argc, char** argv) {
   intermediate_table.Write("word_interim", pb::WireFormat::TXT)
       .WithModNSharding(FLAGS_num_shards,
                         [](const WordCount& wc) { return base::Fingerprint(wc.word); })
-      .AndCompress(pb::Output::ZSTD, 1);
+      .AndCompress(pb::Output::ZSTD, FLAGS_compress_level);
 
   // GroupBy phase
   PTable<WordCount> word_counts = pipeline->Join<WordGroupBy>(
       "group_by", {intermediate_table.BindWith(&WordGroupBy::OnWordCount)});
-  intermediate_table.Write("wordcounts", pb::WireFormat::TXT).AndCompress(pb::Output::ZSTD, 1);
+  word_counts.Write("wordcounts", pb::WireFormat::TXT)
+      .AndCompress(pb::Output::ZSTD, FLAGS_compress_level);
 
   LocalRunner* runner = pm.StartLocalRunner(FLAGS_dest_dir);
 

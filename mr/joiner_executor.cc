@@ -75,6 +75,8 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     }
   }
 
+  LOG(INFO) << "Started joining on " << tb->op().op_name() << " with " << shard_inputs.size()
+            << " shards";
   for (auto& k_v : shard_inputs) {
     VLOG(1) << "Pushing shard " << k_v.first;
 
