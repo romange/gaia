@@ -260,12 +260,13 @@ add_third_party(
 
 )
 
-set(ENV{PKG_CONFIG_PATH} "${PCRE_LIB_DIR}/pkgconfig")
 add_third_party(
   hyperscan
   GIT_REPOSITORY https://github.com/intel/hyperscan/
   GIT_TAG v5.2.0
-  CMAKE_PASS_FLAGS "-DFAT_RUNTIME=OFF -DCMAKE_PREFIX_PATH=/home/roman/clients/root/cpp2/build-opt/third_party/libs/pcre/lib/pkgconfig"
+  CMAKE_PASS_FLAGS "-DFAT_RUNTIME=OFF -DPKG_CONFIG_USE_CMAKE_PREFIX_PATH=ON \
+                    -DCMAKE_PREFIX_PATH=${PCRE_LIB_DIR} -DPCRE_SOURCE=${THIRD_PARTY_DIR}/pcre"
+  DEPENDS pcre_project
   LIB libhs.a
 )
 
