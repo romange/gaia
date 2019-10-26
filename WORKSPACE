@@ -1,19 +1,18 @@
 workspace(name = "gaia")
 
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-http_archive(
+git_repository(
     name = "rules_foreign_cc",
-    sha256 = "353e41e99f93c0219994a7c4402a80cd04bd044703818d199c66ff82ec4ee85b",
-    strip_prefix = "rules_foreign_cc-master",
-    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/master.zip",
+    commit = "6bb0536452eaca3bad20c21ba6e7968d2eda004d",
+    remote = "https://github.com/bazelbuild/rules_foreign_cc.git",
 )
 
 load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
 
 rules_foreign_cc_dependencies()
 
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
 
 git_repository(
     name = "com_github_gflags_gflags",
