@@ -40,6 +40,8 @@ import com.google.common.base.Utf8;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.beam.sdk.values.TypeDescriptors;
+import org.apache.beam.sdk.transforms.GroupByKey;
 
 /**
  * An example that counts words in Shakespeare and includes Beam best practices.
@@ -120,7 +122,7 @@ public class WordCount {
 
       // Output each word encountered into the output PCollection.
       for (String word : words) {
-        if (!word.isEmpty()) {  
+        if (!word.isEmpty()) {
           try {
             Utf8.encodedLength(word);
           } catch(IllegalArgumentException e) {
@@ -152,6 +154,25 @@ public class WordCount {
    */
   public static class CountWords
       extends PTransform<PCollection<String>, PCollection<KV<String, Long>>> {
+
+    Boolean useCountBy;
+
+    static class ToCountsFn extends DoFn<KV<String, Iterable<Long>>, KV<String, Long>> {
+      @ProcessElement
+      public void processElement(@Element KV<String, Iterable<Long>> in,
+                                 OutputReceiver<KV<String, Long>> out) {
+         long cnt = 0;
+         for (Long l : in.getValue()) {
+           cnt += l.longValue();
+         }
+         out.output(KV.of(in.getKey(), new Long(cnt)));
+      }
+    }
+
+    CountWords(Boolean useCountBy) {
+      this.useCountBy = useCountBy;
+    }
+
     @Override
     public PCollection<KV<String, Long>> expand(PCollection<String> lines) {
 
@@ -159,7 +180,15 @@ public class WordCount {
       PCollection<String> words = lines.apply(ParDo.of(new ExtractWordsFn()));
 
       // Count the number of times each word occurs.
-      PCollection<KV<String, Long>> wordCounts = words.apply(Count.perElement());
+      PCollection<KV<String, Long>> wordCounts;
+      if (useCountBy) {
+        wordCounts = words.apply(Count.perElement());
+      } else {
+        PCollection<KV<String, Long>> wordSingle = words.apply(
+        MapElements.into(TypeDescriptors.kvs(TypeDescriptors.strings(), TypeDescriptors.longs()))
+        .via((String word) -> KV.of(word, new Long(1))));
+        wordCounts = wordSingle.apply(GroupByKey.create()).apply(ParDo.of(new ToCountsFn()));
+      }
 
       return wordCounts;
     }
@@ -192,6 +221,12 @@ public class WordCount {
     String getOutput();
 
     void setOutput(String value);
+
+    @Description("Whether to use Count.perElement")
+    @Default.Boolean(true)
+    Boolean getUseCountBy();
+
+    void setUseCountBy(Boolean value);
   }
 
   static void runWordCount(WordCountOptions options) {
@@ -200,7 +235,7 @@ public class WordCount {
     // Concepts #2 and #3: Our pipeline applies the composite CountWords transform, and passes the
     // static FormatAsTextFn() to the ParDo transform.
     p.apply("ReadLines", TextIO.read().from(options.getInputFile()))
-        .apply(new CountWords())
+        .apply(new CountWords(options.getUseCountBy()))
         .apply(MapElements.via(new FormatAsTextFn()))
         .apply("WriteCounts", TextIO.write().to(options.getOutput()));
 

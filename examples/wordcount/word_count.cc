@@ -1,9 +1,7 @@
 // Copyright 2019, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-// Parses WET files https://commoncrawl.org/the-data/get-started/#WET-Format from
-// common crawl dataset. For example, check out file
-// s3://commoncrawl/crawl-data/CC-MAIN-2018-22/segments/1526794863277.18/wet/CC-MAIN-20180520092830-20180520112830-00000.warc.wet.gz
+// Counts word frequency in the text files.
 #include <hs/ch.h>
 #include <re2/re2.h>
 
@@ -31,6 +29,8 @@ DEFINE_string(dest_dir, "~/mr_output", "");
 DEFINE_uint32(num_shards, 10, "");
 DEFINE_int32(compress_level, 1, "");
 DEFINE_string(pattern, "\\w++", "");
+DEFINE_bool(use_re2, false, "");
+DEFINE_bool(use_combine, true, "");
 
 using namespace boost;
 using namespace mr3;
@@ -103,7 +103,6 @@ class WordSplitter {
     DoContext<WordCount>* cntx;
   };
 
-
   absl::optional<RE2> re_;
   WordCountTable word_table_;
   const ch_database_t* hs_db_;
@@ -111,27 +110,30 @@ class WordSplitter {
 };
 
 WordSplitter::WordSplitter(const ch_database_t* db) : hs_db_(db) {
-  re_.emplace("(\\pL+)");
+  re_.emplace("(\\pL+)");  // Must be pL+ to divide into words.
 
   ch_error_t err = ch_alloc_scratch(hs_db_, &scratch_);
   CHECK_EQ(CH_SUCCESS, err);
 }
 
 void WordSplitter::Do(string line, DoContext<WordCount>* cntx) {
-  /* re2::StringPiece line_re2(line), word;
-
-  while (RE2::FindAndConsume(&line_re2, *re_, &word)) {
-    LOG(INFO) << "Adding " << word;
-
-    word_table_.AddWord(absl::string_view{word.begin(), word.size()}, 1);
-  }*/
   MatchData md{this, line.c_str(), cntx};
 
-  ch_error_t err =
-      ch_scan(hs_db_, line.data(), line.size(), 0, scratch_, &OnMatch, nullptr, &md);
-  CHECK_EQ(CH_SUCCESS, err);
+  if (FLAGS_use_re2) {
+    re2::StringPiece line_re2(line), word;
 
+    while (RE2::FindAndConsume(&line_re2, *re_, &word)) {
+      OnMatch(0, word.data() - md.str, word.end() - md.str, 0, 0, nullptr, &md);
+    }
+  } else {
+    ch_error_t err = ch_scan(hs_db_, line.data(), line.size(), 0, scratch_, &OnMatch, nullptr, &md);
+    CHECK_EQ(CH_SUCCESS, err);
+  }
+
+  // Check whether to flush the temp table.
   if (word_table_.size() > 200000 && word_table_.MemoryUsage() > 256 * 1000000ULL) {
+    cntx->raw()->Inc("flush");
+
     word_table_.Flush(cntx);
   }
 }
@@ -146,12 +148,14 @@ int WordSplitter::OnMatch(unsigned int id, unsigned long long from, unsigned lon
                           unsigned int flags, unsigned int size, const ch_capture_t* captured,
                           void* ctx) {
   const MatchData* md = reinterpret_cast<const MatchData*>(ctx);
-  // printf("from %lld, to %lld: %.*s\n", from, to, int(to - from),
-  //       md->str + from);
-
   StringPiece word(md->str + from, to - from);
   VLOG(1) << "Matched: " << word;
-  md->me->word_table_.AddWord(word, 1);
+
+  if (FLAGS_use_combine) {
+    md->me->word_table_.AddWord(word, 1);
+  } else {
+    md->cntx->Write(WordCount{string(word), 1});
+  }
   md->cntx->raw()->Inc("matched");
 
   return 0;  // Continue
@@ -181,8 +185,11 @@ int main(int argc, char** argv) {
 
   ch_compile_error_t* ch_error = nullptr;
   ch_database_t* db = nullptr;
-  ch_error_t err =
-      ch_compile(FLAGS_pattern.data(), CH_FLAG_UCP | CH_FLAG_UTF8, CH_MODE_NOGROUPS, nullptr, &db, &ch_error);
+
+  // CH_FLAG_UCP | CH_FLAG_UTF8 are important to produce unicode words
+  ch_error_t err = ch_compile(FLAGS_pattern.data(), CH_FLAG_UCP | CH_FLAG_UTF8, CH_MODE_NOGROUPS,
+                              nullptr, &db, &ch_error);
+
   CHECK_EQ(CH_SUCCESS, err) << "Error compiling pattern: (" << ch_error->expression;
   CHECK(db);
   ch_free_compile_error(ch_error);

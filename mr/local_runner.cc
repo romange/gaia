@@ -235,7 +235,9 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   std::atomic_uint total_gcs_connections{0};
 
   io_pool_->AwaitOnAll([&](IoContext&) {
-    auto& maybe_pool = per_thread_.get()->api_conn_pool;
+    if (!per_thread_)
+      return;
+    auto& maybe_pool = per_thread_->api_conn_pool;
     if (maybe_pool.has_value()) {
       total_gcs_connections.fetch_add(maybe_pool->handles_count(), std::memory_order_acq_rel);
     }
