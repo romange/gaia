@@ -24,6 +24,7 @@ DEFINE_int32(count, 10, "");
 DEFINE_int32(num_connections, 1, "");
 DEFINE_int32(io_threads, 0, "");
 DEFINE_uint32(deadline_msec, 10, "");
+DEFINE_int32(letter_size, -1, "Size of the message");
 
 using asio::ip::tcp;
 using rpc::Channel;
@@ -59,8 +60,13 @@ void Driver(Channel* channel, size_t index, unsigned msg_count) {
   char* start = reinterpret_cast<char*>(envelope.letter.data());
   auto tp = chrono::steady_clock::now();
   for (unsigned msg = 0; msg < msg_count; ++msg) {
-    char* next = StrAppend(start, envelope.letter.size(), index, ".", msg);
-    envelope.letter.resize(next - start);
+    if (FLAGS_letter_size > 0) {
+      envelope.letter.resize(FLAGS_letter_size);
+    } else {
+      char* next = StrAppend(start, envelope.letter.size(), index, ".", msg);
+      envelope.letter.resize(next - start);
+    }
+
 
     system::error_code ec = channel->SendSync(FLAGS_deadline_msec, &envelope);
     if (ec == asio::error::timed_out) {
