@@ -61,7 +61,7 @@ void Driver(Channel* channel, size_t index, unsigned msg_count) {
   auto tp = chrono::steady_clock::now();
   for (unsigned msg = 0; msg < msg_count; ++msg) {
     if (FLAGS_letter_size > 0) {
-      envelope.letter.resize(FLAGS_letter_size);
+      envelope.letter.resize(FLAGS_letter_size);   // Send random memory contents of size "FLAGS_letter_size"
     } else {
       char* next = StrAppend(start, envelope.letter.size(), index, ".", msg);
       envelope.letter.resize(next - start);
