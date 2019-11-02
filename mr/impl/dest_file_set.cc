@@ -372,7 +372,8 @@ void DestFileSet::CloseAllHandles(bool abort_write) {
   // This is why we need DestHandle to be shared_ptr - to guard it against destruction during
   // async ops.
   for (auto& k_v : dest_files_) {
-    k_v.second->Close(abort_write);
+    if (k_v.second)  // Can be null if was closed in the middle
+      k_v.second->Close(abort_write);
   }
 
   dest_files_.clear();  // This blocks until all the pending operations finish.

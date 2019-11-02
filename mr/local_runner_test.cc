@@ -20,6 +20,7 @@ using testing::EndsWith;
 using testing::Pair;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
+using testing::Key;
 
 class LocalRunnerTest : public testing::Test {
  protected:
@@ -50,7 +51,7 @@ class LocalRunnerTest : public testing::Test {
   std::unique_ptr<LocalRunner> runner_;
 };
 
-const ShardId kShard0{0};
+const ShardId kShard0{0}, kShard1{1};
 
 TEST_F(LocalRunnerTest, Basic) {
   ShardFileMap out_files;
@@ -125,6 +126,29 @@ TEST_F(LocalRunnerTest, Subdir) {
   context->Flush();
   runner_->OperatorEnd(&out_files);
   ASSERT_THAT(out_files, UnorderedElementsAre(MatchShard(subdir_shard, "w1/foo/bar/zed.txt")));
+}
+
+auto KeyMatch(const vector<ShardId>& arr) {
+  vector<decltype(Key(arr[0]))> res;
+  for (const auto& val : arr) {
+    res.push_back(Key(val));
+  }
+  return UnorderedElementsAreArray(res);
+};
+
+TEST_F(LocalRunnerTest, CloseShard) {
+  ShardFileMap out_files;
+  Start(pb::WireFormat::TXT);
+  std::unique_ptr<RawContext> context{runner_->CreateContext()};
+  context->TEST_Write(kShard0, "foo");
+  context->CloseShard(kShard0);
+  context->TEST_Write(kShard1, "bar");
+
+  context->Flush();
+  runner_->OperatorEnd(&out_files);
+  vector<ShardId> shards{kShard0, kShard1};
+
+  ASSERT_THAT(out_files, KeyMatch(shards));
 }
 
 }  // namespace mr3
