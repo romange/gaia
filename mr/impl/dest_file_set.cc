@@ -184,6 +184,7 @@ void CompressHandle::Write(StringGenCb cb) {
     };
 
     bool preempted = io_queue_->Add(std::move(cb));
+    lk.unlock();
 
     auto delta = base::GetMonotonicMicrosFast() - start;
     if (preempted) {
@@ -191,7 +192,7 @@ void CompressHandle::Write(StringGenCb cb) {
     } else {
       dest_files.IncBy("io-submit-fast", delta);
     }
-    // this_fiber::yield();
+    this_fiber::yield();
   }
 }
 
