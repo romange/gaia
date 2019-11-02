@@ -85,8 +85,9 @@ class DestFileSet {
 
  private:
   typedef absl::flat_hash_map<ShardId, std::unique_ptr<DestHandle>> HandleMap;
+
   HandleMap dest_files_;
-  mutable ::boost::fibers::mutex mu_;
+  mutable ::boost::fibers::mutex handles_mu_;
 
   const util::GCE* gce_ = nullptr;
   PoolAccessorCb pool_accessor_;
@@ -129,15 +130,12 @@ class DestHandle {
   DestHandle(const DestHandle&) = delete;
 
   void GcsWriteFiber(util::IoContext* io_context);
+  void WaitForPendingToFinish();  // Must be called from d-tor of each derived handle.
 
   virtual void Open() = 0;
 
-  //! Can be called from multipel threads.
-  void OpenWriteFile();
-  void CloseWriteFile(bool abort_write);
-
-  // Called only from write_file thread.
-  ::file::WriteFile* OpenThreadLocal();
+  // Called only from IO thread.
+  void OpenWriteFileLocal();
 
   DestFileSet* owner_;
   ShardId sid_;

@@ -97,15 +97,18 @@ class CompressHandle : public DestHandle {
 class LstHandle : public DestHandle {
  public:
   LstHandle(DestFileSet* owner, const ShardId& sid);
+  ~LstHandle();
 
   void Write(StringGenCb cb) final;
-  void Close(bool abort_write) override;
+  void Close(bool abort_write) final;
 
  private:
   void Open() override;
 
+  void OpenThreadLocal();
+  void CloseThreadLocal(bool abort_write);
+
   std::unique_ptr<file::ListWriter> lst_writer_;
-  boost::fibers::mutex mu_;
 };
 
 CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {
@@ -130,7 +133,9 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHan
   }
 }
 
-CompressHandle::~CompressHandle() {}
+CompressHandle::~CompressHandle() {
+  WaitForPendingToFinish();
+}
 
 void CompressHandle::AppendThreadLocal(const std::string& str) {
   auto status = CHECK_NOTNULL(write_file_)->Write(str);
@@ -145,11 +150,15 @@ void CompressHandle::AppendThreadLocal(const std::string& str) {
     ++sub_shard_;
     raw_size_ = 0;
     full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
-    write_file_ = OpenThreadLocal();
+
+    OpenWriteFileLocal();
   }
 }
 
-void CompressHandle::Open() { OpenWriteFile(); }
+void CompressHandle::Open() {
+  // Do not block on opening the file.
+  io_queue_->Add([this] { this->OpenWriteFileLocal(); });
+}
 
 // CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.
 void CompressHandle::Write(StringGenCb cb) {
@@ -184,7 +193,7 @@ void CompressHandle::Write(StringGenCb cb) {
     };
 
     bool preempted = io_queue_->Add(std::move(cb));
-    lk.unlock();
+    lk.unlock();  // unlock the transaction. Must be after io_queue_->Add call.
 
     auto delta = base::GetMonotonicMicrosFast() - start;
     if (preempted) {
@@ -229,7 +238,7 @@ void CompressHandle::Close(bool abort_write) {
       auto& buf = compress_out_buf_->contents();
       if (!buf.empty()) {
         auto start = base::GetMonotonicMicrosFast();
-        auto cb = [start, this, str = std::move(buf)] () mutable {
+        auto cb = [start, this, str = std::move(buf)]() mutable {
           WriteThreadLocal(start, std::move(str));  // Flush and write.
         };
         io_queue_->Add(std::move(cb));
@@ -237,28 +246,46 @@ void CompressHandle::Close(bool abort_write) {
     }
   }
 
-  CloseWriteFile(abort_write);
+  // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
+  // the pending writes.
+  // I do not block on Close to allow fast iteration when closing all the files.
+  // During queues shutdown they will block until this handler runs.
+  io_queue_->Add([this] {
+    if (write_file_) {
+      VLOG(1) << "Closing file " << write_file_->create_file_name();
+      CHECK(write_file_->Close());
+      write_file_ = nullptr;
+    }
+  });
+  // I can not reset write_file_ here since some write may be still pending in the IO thread.
 }
 
 LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
 
-// TODO: Support lst writing via thread_pool to avoit locks on disk I/O.
-// Instead of StringGenCb we could support vector<string> and with text case it will be 1-cell
-// vector.
+LstHandle::~LstHandle() {
+  VLOG(1) << "Destructing lst " << full_path_;
+  WaitForPendingToFinish();
+}
+
 void LstHandle::Write(StringGenCb cb) {
   absl::optional<string> tmp_str;
-  std::unique_lock<fibers::mutex> lk(mu_);
+
   while (true) {
     tmp_str = cb();
     if (!tmp_str)
       break;
-    CHECK_STATUS(lst_writer_->AddRecord(*tmp_str));
+    io_queue_->Add(
+        [this, str = std::move(*tmp_str)] { CHECK_STATUS(lst_writer_->AddRecord(str)); });
   }
 }
 
 void LstHandle::Open() {
   CHECK(!owner_->output().has_compress());
-  OpenWriteFile();
+  io_queue_->Add([this] { this->OpenThreadLocal(); });
+}
+
+void LstHandle::OpenThreadLocal() {
+  OpenWriteFileLocal();
 
   namespace gpb = google::protobuf;
 
@@ -277,10 +304,14 @@ void LstHandle::Open() {
   CHECK_STATUS(lst_writer_->Init());
 }
 
-void LstHandle::Close(bool abort_write) {
+void LstHandle::CloseThreadLocal(bool abort_write) {
   CHECK_STATUS(lst_writer_->Flush());
+  VLOG(1) << "Closing file " << write_file_->create_file_name();
+  CHECK(write_file_->Close());
+}
 
-  CloseWriteFile(abort_write);
+void LstHandle::Close(bool abort_write) {
+  io_queue_->Add([this, abort_write] { this->CloseThreadLocal(abort_write); });
 }
 
 }  // namespace
@@ -296,7 +327,7 @@ DestFileSet::~DestFileSet() {}
 // DestHandle is cached in each of the calling IO threads and the only contention happens
 // when a new handle shard is created.
 DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
-  std::lock_guard<fibers::mutex> lk(mu_);
+  std::lock_guard<fibers::mutex> lk(handles_mu_);
   auto it = dest_files_.find(sid);
   if (it == dest_files_.end()) {
     std::unique_ptr<DestHandle> dh;
@@ -311,9 +342,9 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
       }
     }
     if (pb_out_.format().type() == pb::WireFormat::LST) {
-      dh.reset(new LstHandle{this, sid});
+      dh = std::make_unique<LstHandle>(this, sid);
     } else if (pb_out_.format().type() == pb::WireFormat::TXT) {
-      dh.reset(new CompressHandle{this, sid});
+      dh = std::make_unique<CompressHandle>(this, sid);
     } else {
       LOG(FATAL) << "Unsupported format " << pb_out_.format().ShortDebugString();
     }
@@ -333,14 +364,18 @@ DestHandle* DestFileSet::GetOrCreate(const ShardId& sid) {
 }
 
 void DestFileSet::CloseAllHandles(bool abort_write) {
-  std::lock_guard<fibers::mutex> lk(mu_);
+  std::lock_guard<fibers::mutex> lk(handles_mu_);
 
-  // DestHandle::Close() does not block (on GCS) which allows us to signal all handles to close
-  // and then wait for them to actually close.
+  // DestHandle::Close() does not block which allows us to signal all handles to close
+  // without blockign on each one of them.
+  // However it may start asynchronous operations that will live after this function exits.
+  // This is why we need DestHandle to be shared_ptr - to guard it against destruction during
+  // async ops.
   for (auto& k_v : dest_files_) {
     k_v.second->Close(abort_write);
   }
-  dest_files_.clear();  // ~DestHandle() might block until all its resources finished.
+
+  dest_files_.clear();  // This blocks until all the pending operations finish.
 }
 
 std::string DestFileSet::ShardFilePath(const ShardId& key, int32 sub_shard) const {
@@ -351,12 +386,10 @@ std::string DestFileSet::ShardFilePath(const ShardId& key, int32 sub_shard) cons
 }
 
 void DestFileSet::CloseHandle(const ShardId& sid) {
-  DestHandle* dh = nullptr;
-
-  std::unique_lock<fibers::mutex> lk(mu_);
+  std::unique_lock<fibers::mutex> lk(handles_mu_);
   auto it = dest_files_.find(sid);
   CHECK(it != dest_files_.end());
-  dh = it->second.get();
+  auto dh = std::move(it->second);  // we move the handle to destroy it after the closure.
   lk.unlock();
   VLOG(1) << "Closing handle " << ShardFilePath(sid, -1);
 
@@ -367,7 +400,7 @@ std::vector<ShardId> DestFileSet::GetShards() const {
   std::vector<ShardId> res;
   res.reserve(dest_files_.size());
 
-  std::unique_lock<fibers::mutex> lk(mu_);
+  std::unique_lock<fibers::mutex> lk(handles_mu_);
   transform(begin(dest_files_), end(dest_files_), back_inserter(res),
             [](const auto& pair) { return pair.first; });
 
@@ -375,7 +408,7 @@ std::vector<ShardId> DestFileSet::GetShards() const {
 }
 
 size_t DestFileSet::HandleCount() const {
-  std::unique_lock<fibers::mutex> lk(mu_);
+  std::unique_lock<fibers::mutex> lk(handles_mu_);
 
   return dest_files_.size();
 }
@@ -398,38 +431,18 @@ DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), 
 }
 
 DestHandle::~DestHandle() {
+}
 
+void DestHandle::WaitForPendingToFinish() {
   if (net_queue_) {
     /// Signal the queue to finish processing.
     /// Notifies but does not block for shutdown. We block when waiting for GcsWriteFiber to exit.
     net_queue_->Shutdown();
     net_fiber_.join();
+  } else {
+    // We block for the io queue to process all the pending operations.
+    io_queue_->Await([] {});
   }
-}
-
-void DestHandle::OpenWriteFile() {
-  VLOG(1) << "Creating file " << full_path_;
-
-  // Do not block on opening the file.
-  io_queue_->Add([this] {
-    write_file_ = OpenThreadLocal();
-    CHECK(write_file_);
-  });
-
-}
-
-void DestHandle::CloseWriteFile(bool abort_write) {
-  // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
-  // the pending writes.
-  // I do not block on Close to allow fast iteration when closing all the files.
-  // During queues shutdown they will block until this handler runs.
-  io_queue_->Add([wf = write_file_] {
-    if (wf) {
-      VLOG(1) << "Closing file " << wf->create_file_name();
-      CHECK(wf->Close());
-    }
-  });
-  // I can not reset write_file_ here since some write may be still pending in the IO thread.
 }
 
 void DestHandle::GcsWriteFiber(IoContext* io_context) {
@@ -441,16 +454,20 @@ void DestHandle::GcsWriteFiber(IoContext* io_context) {
   net_queue_->Run();
 }
 
-::file::WriteFile* DestHandle::OpenThreadLocal() {
+void DestHandle::OpenWriteFileLocal() {
+  VLOG(1) << "Creating file " << full_path_;
+
   if (is_gcs()) {
-    return CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+    write_file_ =
+        CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
   } else {
     // I can not use OpenFiberWriteFile here since it supports only synchronous semantics of
     // writing data (i.e. Write(StringPiece) where ownership stays with owner).
     // To support asynchronous writes we need to design an abstract class AsyncWriteFile
     // which should take ownership over data chunks that are passed to it for writing.
-    return file::Open(full_path_);
+    write_file_ = file::Open(full_path_);
   }
+  CHECK(write_file_);
 }
 
 }  // namespace detail

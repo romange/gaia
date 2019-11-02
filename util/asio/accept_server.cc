@@ -152,7 +152,7 @@ void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
       ConnectionHandler::ptr_t guard(&*it);
 
       // it->Close() can preempt and meanwhile *it connection can finish and be deleted in
-      // clean_cb. That will invalidate
+      // clean_cb. That will invalidate "it".
       it->Close();
 
       ++it;
