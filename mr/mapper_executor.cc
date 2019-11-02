@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "mr/impl/table_impl.h"
 #include "mr/ptable.h"
 
@@ -258,12 +259,13 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
   VLOG(1) << "MapFiber finished " << record_num;
 }
 
-util::VarzValue::Map MapperExecutor::GetStats() const {
-  util::VarzValue::Map res;
+VarzValue::Map MapperExecutor::GetStats() const {
+  VarzValue::Map res;
   atomic<size_t> parse_errors{0}, record_read{0};
 
   LOG(INFO) << "MapperExecutor::GetStats";
 
+  auto start = base::GetMonotonicMicrosFast();
   pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
     VLOG(1) << "MapperExecutor::GetStats CB";
 
@@ -276,8 +278,9 @@ util::VarzValue::Map MapperExecutor::GetStats() const {
     }
   });
 
-  res.emplace_back("parse-errors", util::VarzValue::FromInt(parse_errors.load()));
-  res.emplace_back("records-read", util::VarzValue::FromInt(record_read.load()));
+  res.emplace_back("parse-errors", VarzValue::FromInt(parse_errors.load()));
+  res.emplace_back("records-read", VarzValue::FromInt(record_read.load()));
+  res.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return res;
 }

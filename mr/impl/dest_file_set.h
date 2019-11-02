@@ -15,6 +15,7 @@
 
 namespace util {
 class IoContextPool;
+class IoContext;
 class GCE;
 
 namespace http {
@@ -105,7 +106,7 @@ class DestFileSet {
 class DestHandle {
   friend class DestFileSet;
  public:
-  virtual ~DestHandle() {}
+  virtual ~DestHandle();
 
   //! Thread-safe. Called from multiple threads/do_contexts.
   //! Implements string generator that allows the writing thread to pull few strings at once.
@@ -122,28 +123,40 @@ class DestHandle {
   const std::string full_path() const { return full_path_; }
 
  protected:
-  template <typename Func> auto Await(Func&& f) {
-    return owner_->pool()->Await(queue_index_, std::forward<Func>(f));
-  }
+  bool is_gcs() const { return bool(net_queue_); }
 
   DestHandle(DestFileSet* owner, const ShardId& sid);
   DestHandle(const DestHandle&) = delete;
 
+  void GcsWriteFiber(util::IoContext* io_context);
+
   virtual void Open() = 0;
 
-  void OpenLocalFile();
+  //! Can be called from multipel threads.
+  void OpenWriteFile();
   void CloseWriteFile(bool abort_write);
+
+  // Called only from write_file thread.
+  ::file::WriteFile* OpenThreadLocal();
 
   DestFileSet* owner_;
   ShardId sid_;
 
+  util::fibers_ext::FiberQueue* io_queue_ = nullptr;
   ::file::WriteFile* write_file_ = nullptr;
+
   std::string full_path_;
 
   size_t raw_size_ = 0;
   size_t raw_limit_ = kuint64max;
   uint32_t sub_shard_ = 0;
   uint32_t queue_index_;
+
+  // We use FiberQueue when using network-based files to allow
+  // control over buffers queued and waiting to be written.
+  std::unique_ptr<util::fibers_ext::FiberQueue> net_queue_;
+  util::IoContext* net_context_ = nullptr;
+  ::boost::fibers::fiber net_fiber_;
 };
 
 }  // namespace detail

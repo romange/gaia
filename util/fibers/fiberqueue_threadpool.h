@@ -144,10 +144,20 @@ class FiberQueueThreadPool {
     }
   }
 
-  // Runs f on a worker pinned by "index". index does not have to be in range.
-  template <typename F> void Add(size_t index, F&& f) {
-    workers_[index % worker_size_].q->Add(std::forward<F>(f));
+
+  /**
+   * @brief Runs f on a worker pinned by "index". index does not have to be in range.
+   *
+   * @tparam F
+   * @param index
+   * @param f
+   * @return true if Add() had to preempt, false is fast path without preemptions was executed.
+   */
+  template <typename F> bool Add(size_t index, F&& f) {
+    return workers_[index % worker_size_].q->Add(std::forward<F>(f));
   }
+
+  FiberQueue* GetQueue(size_t index) { return  workers_[index % worker_size_].q.get();}
 
   void Shutdown();
 

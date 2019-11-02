@@ -71,13 +71,6 @@ string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
   return res;
 }
 
-
-::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path) {
-  auto* wf = file::Open(path);
-  CHECK(wf);
-  return wf;
-}
-
 class CompressHandle : public DestHandle {
   void AppendThreadLocal(const std::string& val);
 
@@ -92,18 +85,13 @@ class CompressHandle : public DestHandle {
 
  private:
   void Open() override;
-  void GcsWriteFiber(IoContext* io_context);
+  void WriteThreadLocal(uint64_t start_usec, string data);
 
   size_t start_delta_ = 0;
   util::StringSink* compress_out_buf_ = nullptr;
   unique_ptr<util::Sink> compress_sink_;
 
   fibers::mutex zmu_;
-  unique_ptr<fibers_ext::FiberQueue> net_queue_;
-  fibers::fiber net_fiber_;
-
-  std::atomic_int fiber_state_{0};
-  ::file::WriteFile* gcs_file_ = nullptr;
 };
 
 class LstHandle : public DestHandle {
@@ -142,14 +130,10 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHan
   }
 }
 
-CompressHandle::~CompressHandle() {
-  if (net_fiber_.joinable()) {
-    net_fiber_.join();
-  }
-}
+CompressHandle::~CompressHandle() {}
 
 void CompressHandle::AppendThreadLocal(const std::string& str) {
-  auto status = write_file_->Write(str);
+  auto status = CHECK_NOTNULL(write_file_)->Write(str);
   CHECK_STATUS(status);
 
   if (raw_limit_ == kuint64max)  // No output size limit
@@ -161,40 +145,11 @@ void CompressHandle::AppendThreadLocal(const std::string& str) {
     ++sub_shard_;
     raw_size_ = 0;
     full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
-    write_file_ = OpenThreadLocal(owner_->output(), full_path_);
+    write_file_ = OpenThreadLocal();
   }
 }
 
-void CompressHandle::Open() {
-  if (owner_->is_gcs_dest()) {
-    size_t index = queue_index_ % owner_->io_pool()->size();
-
-    IoContext& io_context = owner_->io_pool()->at(index);
-    net_queue_.reset(new fibers_ext::FiberQueue(64));
-    net_fiber_ = io_context.LaunchFiber([this, &io_context] { GcsWriteFiber(&io_context); });
-  } else {
-    OpenLocalFile();
-  }
-}
-
-void CompressHandle::GcsWriteFiber(IoContext* io_context) {
-  CHECK(io_context->InContextThread());
-
-  // We want write fiber to have higher priority and initiate write as fast as possible.
-  this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
-
-  gcs_file_ = CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
-  CHECK(gcs_file_);
-
-  fiber_state_ = 1;
-
-  net_queue_->Run();
-
-  // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
-  // the pending writes.
-  CHECK(gcs_file_->Close());
-  gcs_file_ = nullptr;
-}
+void CompressHandle::Open() { OpenWriteFile(); }
 
 // CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.
 void CompressHandle::Write(StringGenCb cb) {
@@ -206,6 +161,9 @@ void CompressHandle::Write(StringGenCb cb) {
 
     // We must lock both the compression and the enquing calls because the order of writing
     // compressed chunks is important and we need to preserve transactional semantics.
+    // It seems that compressing in the producer thread gives better performance because
+    // the system balances itself: it spends producer CPU on the compression step before
+    // enqueing it into io queue that could be full.
     std::unique_lock<fibers::mutex> lk(zmu_);
 
     if (compress_sink_) {
@@ -220,33 +178,44 @@ void CompressHandle::Write(StringGenCb cb) {
       start_delta_ = 0;
     }
 
-    if (net_queue_) {
-      auto start = base::GetMonotonicMicrosFast();
-      auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
+    auto start = base::GetMonotonicMicrosFast();
+    auto cb = [start, this, str = std::move(*tmp_str)]() mutable {
+      WriteThreadLocal(start, std::move(str));
+    };
 
-      auto cb = [start, this, str = std::move(*tmp_str)] {
-        dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
-        CHECK_STATUS(gcs_file_->Write(str));
-      };
+    bool preempted = io_queue_->Add(std::move(cb));
 
-      bool preempted = net_queue_->Add(std::move(cb));
-
-      auto delta = base::GetMonotonicMicrosFast() - start;
-      if (preempted) {
-        if (fiber_state == 1) {
-          dest_files.IncBy("gcs-submit-preempted", delta);
-        } else {
-          dest_files.IncBy("gcs-submit-launching", delta);
-        }
-      } else {
-        dest_files.IncBy("gcs-submit-fast", delta);
-      }
-      this_fiber::yield();
-    } else { // if(net_queue_)
-      owner_->pool()->Add(queue_index_,
-                          [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
+    auto delta = base::GetMonotonicMicrosFast() - start;
+    if (preempted) {
+      dest_files.IncBy("io-submit-preempted", delta);
+    } else {
+      dest_files.IncBy("io-submit-fast", delta);
     }
+    // this_fiber::yield();
   }
+}
+
+void CompressHandle::WriteThreadLocal(uint64_t start_usec, string data) {
+  dest_files.IncBy("io-deque", base::GetMonotonicMicrosFast() - start_usec);
+
+#if 0
+  if (compress_sink_) {
+    if (data.empty()) {
+      CHECK_STATUS(compress_sink_->Flush());
+    } else {
+      strings::ByteRange br = strings::ToByteRange(data);
+      CHECK_STATUS(compress_sink_->Append(br));
+
+      if (start_delta_ + compress_out_buf_->contents().size() < kBufLimit)
+        return;
+    }
+
+    data.clear();
+    data.swap(compress_out_buf_->contents());
+    start_delta_ = 0;
+  }
+#endif
+  AppendThreadLocal(data);
 }
 
 void CompressHandle::Close(bool abort_write) {
@@ -258,29 +227,16 @@ void CompressHandle::Close(bool abort_write) {
 
       auto& buf = compress_out_buf_->contents();
       if (!buf.empty()) {
-        // Flush the rest of compressed data.
-        if (net_queue_) {  // GCS flow.
-          net_queue_->Add([this, str = std::move(buf)] {
-            CHECK_STATUS(gcs_file_->Write(str));
-          });
-        } else {
-          owner_->pool()->Add(queue_index_,
-                              [this, str = std::move(buf)] { AppendThreadLocal(str); });
-        }
+        auto start = base::GetMonotonicMicrosFast();
+        auto cb = [start, this, str = std::move(buf)] () mutable {
+          WriteThreadLocal(start, std::move(str));  // Flush and write.
+        };
+        io_queue_->Add(std::move(cb));
       }
     }
   }
 
-  if (net_queue_) {
-    // Send GCS closure callback and signal the queue to finish file but do not block on it.
-    // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
-    // the pending writes. We close inside GcsWriteFiber.
-
-    /// Notifies but does not block for shutdown. We block when waiting for GcsWriteFiber to exit.
-    net_queue_->Shutdown();
-  } else {
-    CloseWriteFile(abort_write);
-  }
+  CloseWriteFile(abort_write);
 }
 
 LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
@@ -301,7 +257,7 @@ void LstHandle::Write(StringGenCb cb) {
 
 void LstHandle::Open() {
   CHECK(!owner_->output().has_compress());
-  OpenLocalFile();
+  OpenWriteFile();
 
   namespace gpb = google::protobuf;
 
@@ -428,28 +384,72 @@ DestHandle::DestHandle(DestFileSet* owner, const ShardId& sid) : owner_(owner), 
 
   full_path_ = owner_->ShardFilePath(sid, 0);
   queue_index_ = base::Murmur32(full_path_, 120577U);
+  io_queue_ = owner_->pool()->GetQueue(queue_index_);
+
+  if (owner_->is_gcs_dest()) {
+    size_t net_index = queue_index_ % owner_->io_pool()->size();
+
+    net_context_ = &owner_->io_pool()->at(net_index);
+    net_queue_.reset(new fibers_ext::FiberQueue(64));
+    net_fiber_ = net_context_->LaunchFiber([this] { GcsWriteFiber(net_context_); });
+    io_queue_ = net_queue_.get();
+  }
 }
 
-void DestHandle::OpenLocalFile() {
+DestHandle::~DestHandle() {
+
+  if (net_queue_) {
+    /// Signal the queue to finish processing.
+    /// Notifies but does not block for shutdown. We block when waiting for GcsWriteFiber to exit.
+    net_queue_->Shutdown();
+    net_fiber_.join();
+  }
+}
+
+void DestHandle::OpenWriteFile() {
   VLOG(1) << "Creating file " << full_path_;
 
-  // I can not use OpenFiberWriteFile here since it supports only synchronous semantics of
-  // writing data (i.e. Write(StringPiece) where ownership stays with owner).
-  // To support asynchronous writes we need to design an abstract class AsyncWriteFile
-  // which should take ownership over data chunks that are passed to it for writing.
-  write_file_ = Await([this] { return OpenThreadLocal(owner_->output(), full_path_); });
+  // Do not block on opening the file.
+  io_queue_->Add([this] {
+    write_file_ = OpenThreadLocal();
+    CHECK(write_file_);
+  });
+
 }
 
 void DestHandle::CloseWriteFile(bool abort_write) {
-  if (!write_file_)
-    return;
-
-  bool res = Await([this] {
-    VLOG(1) << "Closing file " << write_file_->create_file_name();
-    return write_file_->Close();
+  // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
+  // the pending writes.
+  // I do not block on Close to allow fast iteration when closing all the files.
+  // During queues shutdown they will block until this handler runs.
+  io_queue_->Add([wf = write_file_] {
+    if (wf) {
+      VLOG(1) << "Closing file " << wf->create_file_name();
+      CHECK(wf->Close());
+    }
   });
-  CHECK(res);
-  write_file_ = nullptr;
+  // I can not reset write_file_ here since some write may be still pending in the IO thread.
+}
+
+void DestHandle::GcsWriteFiber(IoContext* io_context) {
+  CHECK(io_context->InContextThread());
+
+  // We want write fiber to have higher priority and initiate write as fast as possible.
+  this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
+
+  net_queue_->Run();
+}
+
+::file::WriteFile* DestHandle::OpenThreadLocal() {
+  if (is_gcs()) {
+    return CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+  } else {
+    // I can not use OpenFiberWriteFile here since it supports only synchronous semantics of
+    // writing data (i.e. Write(StringPiece) where ownership stays with owner).
+    // To support asynchronous writes we need to design an abstract class AsyncWriteFile
+    // which should take ownership over data chunks that are passed to it for writing.
+    return file::Open(full_path_);
+  }
 }
 
 }  // namespace detail
