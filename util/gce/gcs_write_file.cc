@@ -12,12 +12,15 @@
 
 #include "absl/strings/strip.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "strings/escaping.h"
 
 #include "util/asio/io_context.h"
 #include "util/gce/detail/gcs_utils.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
+
+DECLARE_bool(gcs_dry_write);
 
 namespace util {
 
@@ -27,6 +30,7 @@ using namespace boost;
 using namespace http;
 using namespace ::std;
 namespace h2 = detail::h2;
+using base::GetMonotonicMicrosFast;
 using file::WriteFile;
 
 namespace {
@@ -87,6 +91,7 @@ class GcsWriteFile : public WriteFile, protected ApiSenderDynamicBody {
   size_t FillBuf(const uint8* buffer, size_t length);
 
   Status Upload();
+  Request PrepareRequest(size_t to, ssize_t total);
 
   string obj_url_;
   beast::multi_buffer body_mb_;
@@ -104,21 +109,20 @@ GcsWriteFile::GcsWriteFile(absl::string_view name, const GCE& gce, string obj_ur
 bool GcsWriteFile::Close() {
   CHECK(pool_->io_context().InContextThread());
 
-  Request req(h2::verb::put, obj_url_, 11);
-  req.body() = std::move(body_mb_);
-  size_t to = uploaded_ + req.body().size();
-
-  req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, to));
-  req.prepare_payload();
-
+  size_t to = uploaded_ + body_mb_.size();
+  Request req = PrepareRequest(to, to);
   Request::header_type header = req;
 
-  auto res = SendGeneric(3, std::move(req));
+  Status res;
+  if (!FLAGS_gcs_dry_write) {
+    res = SendGeneric(3, std::move(req)).status;
+  }
+
   if (res.ok()) {
     VLOG(1) << "Closed file " << header;
   } else {
-    LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n" << header
-               << ", status " << res.status;
+    LOG(ERROR) << "Error closing GCS file " << parser()->get() << " for request: \n"
+               << header << ", status " << res;
   }
   delete this;
 
@@ -168,35 +172,49 @@ Status GcsWriteFile::Upload() {
 
   size_t to = uploaded_ + body_size;
 
-  h2::request<h2::dynamic_body> req(h2::verb::put, obj_url_, 11);
-  req.body() = std::move(body_mb_);
-  req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, -1));
-  req.set(h2::field::content_type, "application/octet-stream");
-  req.prepare_payload();
+  Request req = PrepareRequest(to, -1);
 
-  CHECK_EQ(0, body_mb_.size());
+  Status res;
+  if (!FLAGS_gcs_dry_write) {
+    uint64_t start = GetMonotonicMicrosFast();
+    res = SendGeneric(3, std::move(req)).status;
+    VLOG(1) << "Uploaded range " << uploaded_ << "/" << to << " for " << obj_url_;
 
-  auto res = SendGeneric(3, std::move(req));
-  if (!res.ok())
-    return res.status;
-  VLOG(1) << "Uploaded range " << uploaded_ << "/" << to << " for " << obj_url_;
+    Parser* upload_parser = CHECK_NOTNULL(parser());
+    const auto& resp_msg = upload_parser->get();
+    auto it = resp_msg.find(h2::field::range);
+    CHECK(it != resp_msg.end()) << resp_msg;
 
-  Parser* upload_parser = CHECK_NOTNULL(parser());
-  const auto& resp_msg = upload_parser->get();
-  auto it = resp_msg.find(h2::field::range);
-  CHECK(it != resp_msg.end()) << resp_msg;
+    absl::string_view range = detail::absl_sv(it->value());
+    CHECK(absl::ConsumePrefix(&range, "bytes="));
+    size_t pos = range.find('-');
+    CHECK_LT(pos, range.size());
+    size_t uploaded_pos = 0;
+    CHECK(absl::SimpleAtoi(range.substr(pos + 1), &uploaded_pos));
+    CHECK_EQ(uploaded_pos + 1, to);
 
-  absl::string_view range = detail::absl_sv(it->value());
-  CHECK(absl::ConsumePrefix(&range, "bytes="));
-  size_t pos = range.find('-');
-  CHECK_LT(pos, range.size());
-  size_t uploaded_pos = 0;
-  CHECK(absl::SimpleAtoi(range.substr(pos + 1), &uploaded_pos));
-  CHECK_EQ(uploaded_pos + 1, to);
+    detail::gcs_writes->Inc();
+    detail::gcs_latency->IncBy("write", GetMonotonicMicrosFast() - start);
+
+    if (!res.ok())
+      return res;
+  }
 
   uploaded_ = to;
 
   return Status::OK;
+}
+
+auto GcsWriteFile::PrepareRequest(size_t to, ssize_t total) -> Request {
+  Request req(h2::verb::put, obj_url_, 11);
+  req.body() = std::move(body_mb_);
+  req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, total));
+  req.set(h2::field::content_type, "application/octet-stream");
+  req.prepare_payload();
+  
+  DCHECK_EQ(0, body_mb_.size());
+
+  return req;
 }
 
 auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient* client)

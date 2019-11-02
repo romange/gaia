@@ -114,35 +114,6 @@ inline bool DoesServerPushback(h2::status st) {
 }
 
 
-//! returns true if resp is backend error 050x. In that case, sleeps using exponential backoff
-// See https://cloud.google.com/storage/docs/exponential-backoff
-bool BackoffForServerError(unsigned iteration, const h2::response<h2::dynamic_body>& resp,
-                           http::HttpsClient* client) {
-  h2::status_class st_class = h2::to_status_class(resp.result());
-  if (st_class != h2::status_class::server_error)
-    return false;
-  VLOG(1) << "Backend error " << iteration;
-
-  // Sometimes response contains "Connection: Close" and sometimes not.
-  int32_t handle = client->native_handle();
-  if (!resp.keep_alive()) {
-    LOG(INFO) << "Closing connection on socket " << handle;
-    client->schedule_reconnect();
-  }
-
-  unsigned millis = (1 << iteration) * 1000 + (rand() % 1000);
-
-  LOG(INFO) << "Backing off for " << millis << " ms on socket " << handle;
-
-  uint64_t start = GetMonotonicMicrosFast();
-  this_fiber::sleep_for(chrono::milliseconds(millis));
-  uint64_t duration_ms = (GetMonotonicMicrosFast() - start) / 1000;
-
-  LOG_IF(WARNING, duration_ms < millis - 10) << "Wanted to sleep " << millis
-                                             << " but slept " << duration_ms;
-  return true;
-}
-
 StatusObject<size_t> GcsFile::Read(size_t offset, const strings::MutableByteRange& range) {
   if (offset != offs_) {
     return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
@@ -192,27 +163,6 @@ inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   flds->set(h2::field::range, std::move(tmp));
 }
 
-//! [from, to) limited range out of total. If total is < 0 then it's unknown.
-string ContentRangeHeader(size_t from, size_t to, ssize_t total) {
-  CHECK_LE(from, to);
-  string tmp{"bytes "};
-
-  if (from < to) {                                  // common case.
-    absl::StrAppend(&tmp, from, "-", to - 1, "/");  // content-range is inclusive.
-    if (total >= 0) {
-      absl::StrAppend(&tmp, total);
-    } else {
-      tmp.push_back('*');
-    }
-  } else {
-    // We can write empty ranges only when we finalize the file and total is known.
-    CHECK_GE(total, 0);
-    absl::StrAppend(&tmp, "*/", total);
-  }
-
-  return tmp;
-}
-
 }  // namespace
 
 std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& msg) {
@@ -235,35 +185,7 @@ template <typename Body> std::ostream& operator<<(std::ostream& os, const h2::re
   return os;
 }
 
-struct WriteHandler {
-  WriteHandler() : body_mb(1 << FLAGS_gcs_upload_buf_log_size) {}
-
-  string url;
-
-  // Returns true if flush is needed. Removes the appended data from src.
-  bool Append(strings::ByteRange* src);
-
-  beast::multi_buffer body_mb;
-  size_t uploaded = 0;
-};
-
-bool WriteHandler::Append(strings::ByteRange* src) {
-  size_t prepare_size = std::min(src->size(), body_mb.max_size() - body_mb.size());
-  auto mbs = body_mb.prepare(prepare_size);
-  size_t offs = 0;
-  for (auto mb : mbs) {
-    memcpy(mb.data(), src->data() + offs, mb.size());
-    offs += mb.size();
-  }
-  CHECK_EQ(offs, prepare_size);
-  src->remove_prefix(prepare_size);
-  body_mb.commit(prepare_size);
-
-  DCHECK_LE(body_mb.size(), body_mb.max_size());
-  return body_mb.size() == body_mb.max_size();
-}
-
-class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler, WriteHandler> {
+class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler> {
  public:
   ~ConnState() {
     if (auto* pval = absl::get_if<SeqReadHandler>(this)) {
@@ -585,162 +507,6 @@ StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) 
   VLOG(1) << "Opened gcs " << full_path << " on socket " << native_handle();
 
   return new GcsFile{this, res.obj};
-}
-
-util::Status GCS::OpenForWrite(absl::string_view bucket, absl::string_view obj_path) {
-  RETURN_IF_ERROR(PrepareConnection());
-
-  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
-  CHECK_GE(FLAGS_gcs_upload_buf_log_size, 18);
-
-  string url = "/upload/storage/v1/b/";
-  absl::StrAppend(&url, bucket, "/o?uploadType=resumable&name=");
-  strings::AppendEncodedUrl(obj_path, &url);
-
-  auto req = PrepareRequest(h2::verb::post, url, access_token_header_);
-  h2::response<h2::dynamic_body> resp_msg;
-  req.prepare_payload();
-
-  string upload_id;
-  if (FLAGS_gcs_dry_write) {
-    upload_id = "dry_write";
-  } else {
-    RETURN_IF_ERROR(SendWithToken(&req, &resp_msg));
-    if (resp_msg.result() != h2::status::ok) {
-      return HttpError(resp_msg);
-    }
-    auto it = resp_msg.find(h2::field::location);
-    if (it == resp_msg.end()) {
-      return Status(StatusCode::PARSE_ERROR, "Can not find location header");
-    }
-    upload_id = string(it->value());
-  }
-
-  WriteHandler& wh = conn_state_->emplace<WriteHandler>();
-  wh.url = std::move(upload_id);
-
-  return Status::OK;
-}
-
-util::Status GCS::Write(strings::ByteRange src) {
-  CHECK(!src.empty());
-  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
-  CHECK(wh && !wh->url.empty());
-  CHECK(io_context_.InContextThread());
-
-  while (wh->Append(&src)) {
-    h2::request<h2::dynamic_body> req(h2::verb::put, wh->url, 11);
-
-    size_t body_size = wh->body_mb.size();
-    CHECK_GT(body_size, 0);
-    CHECK_EQ(0, body_size % (1U << 18)) << body_size;  // Must be multiple of 256KB.
-
-    size_t to = wh->uploaded + body_size;
-
-    req.body() = std::move(wh->body_mb);
-    req.set(h2::field::content_range, ContentRangeHeader(wh->uploaded, to, -1));
-    req.set(h2::field::content_type, "application/octet-stream");
-    req.prepare_payload();
-
-    h2::response<h2::dynamic_body> resp_msg;
-    error_code ec;
-    unsigned retry = 0;
-    uint64_t start = GetMonotonicMicrosFast();
-    for (; retry < 5; ++retry) {
-      VLOG(1) << "UploadReq" << retry << ": " << req << " socket " << native_handle();
-      if (FLAGS_gcs_dry_write) {
-        resp_msg.set(h2::field::range, absl::StrCat("bytes=0-", to - 1));
-        resp_msg.result(h2::status::permanent_redirect);
-      } else {
-        ec = https_client_->Send(req, &resp_msg);
-        RETURN_EC_STATUS(ec);
-      }
-
-      VLOG(1) << "UploadResp" << retry << ": " << resp_msg;
-
-      if (h2::status::permanent_redirect == resp_msg.result())  // 308
-        break;
-
-      if (BackoffForServerError(retry, resp_msg, https_client_.get())) {
-        detail::gcs_latency->IncBy("retry", GetMonotonicMicrosFast() - start);
-        continue;
-      }
-      LOG(FATAL) << "Unexpected response: " << resp_msg;
-    }
-
-    if (h2::status::permanent_redirect != resp_msg.result()) {
-      LOG(ERROR) << "Service unavailable " << resp_msg << " after " << retry << " retries";
-
-      return HttpError(resp_msg);
-    }
-
-    auto it = resp_msg.find(h2::field::range);
-    CHECK(it != resp_msg.end()) << resp_msg;
-    absl::string_view range = detail::absl_sv(it->value());
-    CHECK(absl::ConsumePrefix(&range, "bytes="));
-    size_t pos = range.find('-');
-    CHECK_LT(pos, range.size());
-    size_t uploaded_pos = 0;
-    CHECK(absl::SimpleAtoi(range.substr(pos + 1), &uploaded_pos));
-    CHECK_EQ(uploaded_pos + 1, to);
-
-    // wh->body_mb = std::move(req.body());
-    // wh->body_mb.consume(body_size);
-    wh->uploaded = to;
-    CHECK_EQ(0, wh->body_mb.size());
-    // CHECK_EQ(wh->body_mb.capacity(), wh->body_mb.max_size());
-
-    detail::gcs_writes->Inc();
-    detail::gcs_latency->IncBy("write", GetMonotonicMicrosFast() - start);
-
-    if (src.empty())
-      break;
-  }
-
-  return Status::OK;
-}
-
-util::Status GCS::CloseWrite(bool abort_write) {
-  VLOG(1) << "GCS::CloseWrite " << abort_write;
-
-  WriteHandler* wh = absl::get_if<WriteHandler>(conn_state_.get());
-  CHECK(wh && !wh->url.empty());
-
-  h2::request<h2::dynamic_body> req(abort_write ? h2::verb::delete_ : h2::verb::put, wh->url, 11);
-  if (!abort_write) {
-    req.body() = std::move(wh->body_mb);
-    size_t to = wh->uploaded + req.body().size();
-
-    req.set(h2::field::content_range, ContentRangeHeader(wh->uploaded, to, to));
-  }
-
-  req.prepare_payload();
-  using Response = h2::response<h2::dynamic_body>;
-  Response resp_msg;
-
-  for (unsigned retry = 0; retry < 3; ++retry) {
-    resp_msg = Response{};
-    if (FLAGS_gcs_dry_write) {
-    } else {
-      VLOG(1) << "CloseWriteReq" << retry << ": " << req;
-      error_code ec = https_client_->Send(req, &resp_msg);
-      RETURN_EC_STATUS(ec);
-      VLOG(1) << "CloseWriteResp" << retry << ": " << resp_msg;
-    }
-
-    if (resp_msg.result() == h2::status::ok) {
-      break;
-    }
-
-    if (BackoffForServerError(retry, resp_msg, https_client_.get())) {
-      continue;
-    }
-    LOG(ERROR) << "Error closing GCS file " << resp_msg << " for request: \n" << req;
-  }
-
-  conn_state_->emplace<absl::monostate>();
-
-  return resp_msg.result() == h2::status::ok ? Status::OK : HttpError(resp_msg);
 }
 
 string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {

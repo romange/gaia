@@ -26,17 +26,8 @@ namespace mr3 {
 util::VarzMapAverage5m dest_files("dest-files-set");
 
 DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
-DEFINE_bool(local_runner_gcs_write_v2, true, "");
 
 namespace detail {
-
-// For some reason disabling dest_file_force_gzfile performs slower than
-// using GzipFile in the threadpool. I think there is something to dig here and I think
-// compress operations should not be part of the FiberQueueThreadPool workload but after spending
-// quite some time I am lowering the priority of this.
-// TODO: to implement compress directly using zlib interface an not using zlibsink/stringsink
-// abstractions.
-DEFINE_bool(dest_file_force_gzfile, true, "");
 
 using namespace boost;
 using namespace std;
@@ -80,12 +71,6 @@ string FileName(StringPiece base, const pb::Output& pb_out, int32 sub_shard) {
   return res;
 }
 
-inline auto WriteCb(std::string&& s, file::WriteFile* wf) {
-  return [b = std::move(s), wf] {
-    auto status = wf->Write(b);
-    CHECK_STATUS(status);
-  };
-}
 
 ::file::WriteFile* OpenThreadLocal(const pb::Output& output, const std::string& path) {
   auto* wf = file::Open(path);
@@ -114,9 +99,9 @@ class CompressHandle : public DestHandle {
   unique_ptr<util::Sink> compress_sink_;
 
   fibers::mutex zmu_;
-  unique_ptr<fibers_ext::FiberQueue> out_queue_;
-  unique_ptr<GCS> gcs_;
-  fibers::fiber write_fiber_;
+  unique_ptr<fibers_ext::FiberQueue> net_queue_;
+  fibers::fiber net_fiber_;
+
   std::atomic_int fiber_state_{0};
   ::file::WriteFile* gcs_file_ = nullptr;
 };
@@ -158,8 +143,8 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHan
 }
 
 CompressHandle::~CompressHandle() {
-  if (write_fiber_.joinable()) {
-    write_fiber_.join();
+  if (net_fiber_.joinable()) {
+    net_fiber_.join();
   }
 }
 
@@ -185,8 +170,8 @@ void CompressHandle::Open() {
     size_t index = queue_index_ % owner_->io_pool()->size();
 
     IoContext& io_context = owner_->io_pool()->at(index);
-    out_queue_.reset(new fibers_ext::FiberQueue(32));
-    write_fiber_ = io_context.LaunchFiber([this, &io_context] { GcsWriteFiber(&io_context); });
+    net_queue_.reset(new fibers_ext::FiberQueue(64));
+    net_fiber_ = io_context.LaunchFiber([this, &io_context] { GcsWriteFiber(&io_context); });
   } else {
     OpenLocalFile();
   }
@@ -198,32 +183,17 @@ void CompressHandle::GcsWriteFiber(IoContext* io_context) {
   // We want write fiber to have higher priority and initiate write as fast as possible.
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
 
-  static thread_local asio::ssl::context ssl_context = GCE::CheckedSslContext();
-
-  if (FLAGS_local_runner_gcs_write_v2) {
-    gcs_file_ =
-        CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
-    CHECK(gcs_file_);
-  } else {
-    absl::string_view bucket, path;
-    CHECK(GCS::SplitToBucketPath(full_path_, &bucket, &path));
-
-    gcs_.reset(new util::GCS(*owner_->gce(), &ssl_context, io_context));
-    CHECK_STATUS(gcs_->Connect(FLAGS_gcs_connect_deadline_ms));
-    CHECK_STATUS(gcs_->OpenForWrite(bucket, path));
-  }
+  gcs_file_ = CHECKED_GET(OpenGcsWriteFile(full_path_, *owner_->gce(), owner_->GetGceApiPool()));
+  CHECK(gcs_file_);
 
   fiber_state_ = 1;
 
-  out_queue_->Run();
+  net_queue_->Run();
 
   // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
   // the pending writes.
-  if (FLAGS_local_runner_gcs_write_v2) {
-    CHECK(gcs_file_->Close());
-    gcs_file_ = nullptr;
-  }
-  gcs_.reset();
+  CHECK(gcs_file_->Close());
+  gcs_file_ = nullptr;
 }
 
 // CompressHandle::Write runs in "other" threads, no necessarily where we write the data into.
@@ -250,20 +220,16 @@ void CompressHandle::Write(StringGenCb cb) {
       start_delta_ = 0;
     }
 
-    if (out_queue_) {
+    if (net_queue_) {
       auto start = base::GetMonotonicMicrosFast();
       auto fiber_state = fiber_state_.load(std::memory_order_relaxed);
 
       auto cb = [start, this, str = std::move(*tmp_str)] {
         dest_files.IncBy("gcs-deque", base::GetMonotonicMicrosFast() - start);
-        if (FLAGS_local_runner_gcs_write_v2) {
-          CHECK_STATUS(gcs_file_->Write(str));
-        } else {
-          CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-        }
+        CHECK_STATUS(gcs_file_->Write(str));
       };
 
-      bool preempted = out_queue_->Add(std::move(cb));
+      bool preempted = net_queue_->Add(std::move(cb));
 
       auto delta = base::GetMonotonicMicrosFast() - start;
       if (preempted) {
@@ -272,11 +238,11 @@ void CompressHandle::Write(StringGenCb cb) {
         } else {
           dest_files.IncBy("gcs-submit-launching", delta);
         }
-      } else {  // if(out_queue_)
+      } else {
         dest_files.IncBy("gcs-submit-fast", delta);
       }
       this_fiber::yield();
-    } else {
+    } else { // if(net_queue_)
       owner_->pool()->Add(queue_index_,
                           [this, str = std::move(*tmp_str)] { AppendThreadLocal(str); });
     }
@@ -293,13 +259,9 @@ void CompressHandle::Close(bool abort_write) {
       auto& buf = compress_out_buf_->contents();
       if (!buf.empty()) {
         // Flush the rest of compressed data.
-        if (out_queue_) {  // GCS flow.
-          out_queue_->Add([this, str = std::move(buf)] {
-            if (FLAGS_local_runner_gcs_write_v2) {
-              CHECK_STATUS(gcs_file_->Write(str));
-            } else {
-              CHECK_STATUS(gcs_->Write(strings::ToByteRange(str)));
-            }
+        if (net_queue_) {  // GCS flow.
+          net_queue_->Add([this, str = std::move(buf)] {
+            CHECK_STATUS(gcs_file_->Write(str));
           });
         } else {
           owner_->pool()->Add(queue_index_,
@@ -309,17 +271,13 @@ void CompressHandle::Close(bool abort_write) {
     }
   }
 
-  if (out_queue_) {
+  if (net_queue_) {
     // Send GCS closure callback and signal the queue to finish file but do not block on it.
-    if (FLAGS_local_runner_gcs_write_v2) {
-      // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
-      // the pending writes. We close inside GcsWriteFiber.
-    } else {
-      out_queue_->Add([this, abort_write] { CHECK_STATUS(gcs_->CloseWrite(abort_write)); });
-    }
+    // TODO: to handle abort_write by changing WriteFile interface to allow optionally drop
+    // the pending writes. We close inside GcsWriteFiber.
 
     /// Notifies but does not block for shutdown. We block when waiting for GcsWriteFiber to exit.
-    out_queue_->Shutdown();
+    net_queue_->Shutdown();
   } else {
     CloseWriteFile(abort_write);
   }

@@ -79,12 +79,8 @@ class GCS {
   // Inverse function. Returns full gcs URI that starts with "gs://"".
   static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
 
-  // Write Interface
-  util::Status OpenForWrite(absl::string_view bucket, absl::string_view obj_path);
-  util::Status Write(strings::ByteRange data);
-  util::Status CloseWrite(bool abort_write);
-
  private:
+
   using Request = ::boost::beast::http::request<::boost::beast::http::empty_body>;
   template <typename Body> using Response = ::boost::beast::http::response<Body>;
   template <typename Body> using Parser = ::boost::beast::http::response_parser<Body>;
