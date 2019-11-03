@@ -8,6 +8,8 @@
 #include <boost/fiber/scheduler.hpp>
 
 #include "base/logging.h"
+#include "base/walltime.h"
+
 #include <glog/raw_logging.h>
 
 #include "base/walltime.h"
@@ -39,7 +41,7 @@ class AsioScheduler final : public fibers::algo::algorithm_with_properties<IoFib
   std::shared_ptr<asio::io_context> io_context_;
   std::unique_ptr<asio::steady_timer> suspend_timer_;
   std::atomic_uint_fast64_t notify_cnt_{0};
-  uint64_t main_loop_wakes_{0};
+  uint64_t main_loop_wakes_{0}, worker_pick_start_ts_{0}, main_suspend_ts_;
 
   std::atomic_uint_fast32_t notify_guard_{0};
   uint32_t last_nice_level_ = 0;
@@ -177,8 +179,12 @@ void AsioScheduler::MainLoop() {
       while (io_cntx->poll())
         ;
 
+      auto start = base::GetMonotonicMicrosFast();
       // Gives up control to allow other fibers to run in the thread.
       WaitTillFibersSuspend();
+      auto delta = base::GetMonotonicMicrosFast() - start;
+      LOG_IF(INFO, delta > 100000) << "Scheduler: Took " << delta / 1000 << " ms to resume";
+
       continue;
     }
 
@@ -223,6 +229,8 @@ void AsioScheduler::WaitTillFibersSuspend() {
   mask_ |= MAIN_LOOP_SUSPEND;
 
   DVLOG(2) << "WaitTillFibersSuspend:Start";
+  main_suspend_ts_ = base::GetMonotonicMicrosFast();
+
   main_loop_ctx_->suspend();
   mask_ &= ~MAIN_LOOP_SUSPEND;
   switch_cnt_ = 0;
@@ -253,16 +261,19 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
     // run_one().
     // * main_loop_ctx_->ready_is_linked() could be linked already in the previous invocations
     // of awakened before pick_next resumed it.
-    if (nice > MAIN_NICE_LEVEL && switch_cnt_ > MAIN_SWITCH_LIMIT &&
+    if (nice > MAIN_NICE_LEVEL && (mask_ & MAIN_LOOP_SUSPEND) && switch_cnt_ > 0 &&
         !main_loop_ctx_->ready_is_linked()) {
-      DVLOG(2) << "Wake MAIN_LOOP_SUSPEND " << fibers_ext::short_id(main_loop_ctx_)
-               << ", r/s: " << ready_cnt_ << "/" << switch_cnt_;
+      uint64_t now = base::GetMonotonicMicrosFast();
+      if (now - main_suspend_ts_ > 5000) {  // 5ms {
+        DVLOG(2) << "Wake MAIN_LOOP_SUSPEND " << fibers_ext::short_id(main_loop_ctx_)
+                 << ", r/s: " << ready_cnt_ << "/" << switch_cnt_;
 
-      switch_cnt_ = 0;
-      ++ready_cnt_;
-      main_loop_ctx_->ready_link(rqueue_arr_[MAIN_NICE_LEVEL]);
-      last_nice_level_ = MAIN_NICE_LEVEL;
-      ++main_loop_wakes_;
+        switch_cnt_ = 0;
+        ++ready_cnt_;
+        main_loop_ctx_->ready_link(rqueue_arr_[MAIN_NICE_LEVEL]);
+        last_nice_level_ = MAIN_NICE_LEVEL;
+        ++main_loop_wakes_;
+      }
     }
 
     DVLOG(2) << "Ready: " << fibers_ext::short_id(ctx) << "/" << props.name()
@@ -275,6 +286,9 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
 fibers::context* AsioScheduler::pick_next() noexcept {
   fibers::context* ctx(nullptr);
   using fibers_ext::short_id;
+
+  auto now = base::GetMonotonicMicrosFast();
+  auto delta = now - worker_pick_start_ts_;
 
   for (; last_nice_level_ < IoFiberProperties::NUM_NICE_LEVELS; ++last_nice_level_) {
     auto& q = rqueue_arr_[last_nice_level_];
@@ -289,8 +303,8 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     DCHECK_GT(ready_cnt_, 0);
     --ready_cnt_;
 
-    RAW_VLOG(2, "Switching from ", short_id(), " to ", short_id(ctx), " switch_cnt(",
-             switch_cnt_, ")");
+    RAW_VLOG(2, "Switching from %x to %x switch_cnt(%d)", short_id(), short_id(ctx),
+             switch_cnt_);
     DCHECK(ctx != fibers::context::active());
 
     // Checking if we want to resume to main loop prematurely to preserve responsiveness
@@ -299,6 +313,14 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     if ((mask_ & MAIN_LOOP_SUSPEND) && last_nice_level_ > MAIN_NICE_LEVEL) {
       ++switch_cnt_;
 
+      if (delta > 10000) {
+        auto* active = fibers::context::active();
+        if (!active->is_context(fibers::type::main_context)) {
+          auto& props = static_cast<IoFiberProperties&>(*active->get_properties());
+          LOG(INFO) << props.name() << " took " << delta / 1000 << " ms";
+        }
+      }
+
       // We can not prematurely wake MAIN_LOOP_SUSPEND if ready_cnt_ == 0.
       // The reason for this is that in that case the main loop will call "run_one" during the
       // next iteration and might get stuck there because we never reached suspend_until
@@ -306,8 +328,9 @@ fibers::context* AsioScheduler::pick_next() noexcept {
       // This is why we break from MAIN_LOOP_SUSPEND inside waken call, where
       // we are sure there is at least one worker fiber, and the main loop won't stuck in run_one.
     }
+    worker_pick_start_ts_ = now;
 
-    RAW_VLOG(3, "pick_next: ", short_id(ctx));
+    RAW_VLOG(3, "pick_next: %x", short_id(ctx));
 
     return ctx;
   }

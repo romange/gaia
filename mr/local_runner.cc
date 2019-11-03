@@ -259,7 +259,6 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
 
   uint64_t cnt = 0;
   uint64_t start = base::GetMonotonicMicrosFast();
-
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
     ++cnt;
@@ -269,7 +268,7 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
         per_thread_->record_fetch_hist.Add(delta);
     }
     VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
-    if (cnt % 1000 == 0) {
+    if (cnt % 100 == 0) {
       this_fiber::yield();
     }
     cb(std::move(tmp));
@@ -293,6 +292,7 @@ uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
 #else
   file::ListReader list_reader(fd, TAKE_OWNERSHIP, true, error_fn);
 #endif
+
   string scratch;
   StringPiece record;
   uint64_t cnt = 0;

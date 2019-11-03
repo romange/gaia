@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <chrono>
 
+#include "absl/strings/str_cat.h"
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "base/walltime.h"
@@ -334,8 +335,10 @@ TEST_F(IoContextTest, YieldInIO) {
   fibers::fiber sl;
   std::atomic_bool cancel{false};
   auto cb = [&](int i) {
+    this_fiber::properties<IoFiberProperties>().set_name(absl::StrCat("CB_", i));
+
     while (!cancel) {
-      VLOG(1) << "Yield " << short_id() << " " << i;
+      VLOG(1) << "Yield " << std::hex << short_id() << " " << i;
       this_fiber::yield();
     }
   };
@@ -344,6 +347,8 @@ TEST_F(IoContextTest, YieldInIO) {
     fbs[i] = cntx.LaunchFiber(cb, i);
   }
   sl = cntx.LaunchFiber([] {
+    this_fiber::properties<IoFiberProperties>().set_name("Sleep");
+
     VLOG(1) << "Sleep " << short_id();
     this_fiber::sleep_for(10ms);
   });

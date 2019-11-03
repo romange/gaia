@@ -89,9 +89,10 @@ class IoContextPool {
   }
 
   /**
-   * @brief Runs func in all IO threads asynchronously. Blocks until all the asynchronous calls to func return.
+   * @brief Runs the funcion in all IO threads asynchronously.
+   * Blocks until all the asynchronous calls return.
    *
-   * Func must accept IoContext&.
+   * Func must accept "IoContext&" and it should not block.
    */
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());

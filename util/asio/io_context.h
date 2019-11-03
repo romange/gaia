@@ -39,6 +39,7 @@ class IoFiberProperties : public boost::fibers::fiber_properties {
 };
 
 namespace asio_ext {
+
 // Runs `f` asynchronously in io-context fiber. `f` should not block, lock on mutexes or Await.
 // Spinlocks are ok but might cause performance degradation.
 template <typename Func> void Async(::boost::asio::io_context& cntx, Func&& f) {

@@ -168,6 +168,10 @@ void CompressHandle::Write(StringGenCb cb) {
     if (!tmp_str)
       break;
 
+    if (compress_sink_) {
+      this_fiber::yield();
+    }
+
     // We must lock both the compression and the enquing calls because the order of writing
     // compressed chunks is important and we need to preserve transactional semantics.
     // It seems that compressing in the producer thread gives better performance because
@@ -201,7 +205,6 @@ void CompressHandle::Write(StringGenCb cb) {
     } else {
       dest_files.IncBy("io-submit-fast", delta);
     }
-    this_fiber::yield();
   }
 }
 
