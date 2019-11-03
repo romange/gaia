@@ -111,6 +111,7 @@ void ParseFlagz(const QueryArgs& args, h2::response<h2::string_body>* response) 
           .append(": ")
           .append(v.current_value)
           .append("\n");
+      SetMime(kTextMime, response);
     }
   }
 }
@@ -180,6 +181,8 @@ system::error_code HttpHandler::HandleRequest() {
 
   SendFunction send(*socket_);
   HandleRequestInternal(request, &send);
+
+  VLOG(1) << "HandleRequestEnd: " << send.ec;
 
   return to_asio(send.ec);
 }

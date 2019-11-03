@@ -35,11 +35,12 @@ string StatusLine(const string& name, const string& val) {
 }
 }  // namespace
 
-void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
-                     StringResponse* response) {
+void BuildStatusPage(const QueryArgs& args, const char* resource_prefix, StringResponse* response) {
   bool output_json = false;
 
   string varz;
+  auto start = base::GetMonotonicMicrosFast();
+
   VarzListNode::IterateValues([&varz](const string& nm, const string& val) {
     absl::StrAppend(&varz, "\"", nm, "\": ", val, ",\n");
   });
@@ -51,6 +52,7 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
       output_json = true;
   }
 
+  auto delta_ms = (base::GetMonotonicMicrosFast() - start) / 1000;
   if (output_json) {
     response->set(field::content_type, kJsonMime);
     response->body() = "{" + varz + "}\n";
@@ -59,7 +61,7 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
 
   string a = "<!DOCTYPE html>\n<html><head>\n";
   a += R"(<meta http-equiv='Content-Type' content='text/html; charset=UTF-8'/>
-    <link href='http://fonts.googleapis.com/css?family=Roboto:400,300' rel='stylesheet'
+    <link href='https://fonts.googleapis.com/css?family=Roboto:400,300' rel='stylesheet'
      type='text/css'>
     <link rel='stylesheet' href='{s3_path}/status_page.css'>
     <script type="text/javascript" src="{s3_path}/status_page.js"></script>
@@ -82,6 +84,7 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix,
   }
   a += StatusLine("Started on", base::PrintLocalTime(start_time));
   a += StatusLine("Uptime", GetTimerString(time(NULL) - start_time));
+  a += StatusLine("Render Latency", absl::StrCat(delta_ms, " ms"));
 
   a += R"(</div>
 </body>

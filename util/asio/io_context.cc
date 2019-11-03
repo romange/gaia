@@ -313,7 +313,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     if ((mask_ & MAIN_LOOP_SUSPEND) && last_nice_level_ > MAIN_NICE_LEVEL) {
       ++switch_cnt_;
 
-      if (delta > 10000) {
+      if (delta > 30000) {
         auto* active = fibers::context::active();
         if (!active->is_context(fibers::type::main_context)) {
           auto& props = static_cast<IoFiberProperties&>(*active->get_properties());

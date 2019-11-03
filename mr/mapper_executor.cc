@@ -268,6 +268,8 @@ VarzValue::Map MapperExecutor::GetStats() const {
   auto start = base::GetMonotonicMicrosFast();
   pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
     VLOG(1) << "MapperExecutor::GetStats CB";
+    auto delta = base::GetMonotonicMicrosFast() - start;
+    LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
 
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {

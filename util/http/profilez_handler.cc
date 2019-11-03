@@ -49,8 +49,8 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
       body.append(
           "<p> Yeah, let's profile this bitch, baby!</p> \n"
           "<img "
-          "src='https://gistcdn.githack.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/"
-          "profiler.gif'>\n");
+          "src='https://gist.githubusercontent.com/romange/4760c3eebc407755f856fec8e5b6d4c1/"
+          "raw/profiler.gif'>\n");
     }
     return;
   }
