@@ -170,7 +170,8 @@ class IoContextTest : public testing::Test {
 TEST_F(IoContextTest, Basic) {
   io_context cntx(1);  // no locking
   int i = 0;
-  asio::post(cntx, [&i] { ++i; });
+  auto cb = [&] { ++i; };
+  asio::post(cntx, cb);
   EXPECT_EQ(0, i);
   EXPECT_EQ(1, cntx.run_one());
   EXPECT_EQ(1, i);
@@ -191,6 +192,21 @@ TEST_F(IoContextTest, Stop) {
   cntx.restart();
   EXPECT_EQ(1, cntx.poll_one());
   EXPECT_EQ(2, i);
+}
+
+TEST_F(IoContextTest, DeferPost) {
+  IoContext& cntx = pool_->GetNextContext();
+  auto cb = [&] {
+    auto cb2 = [] {};
+
+    // Defer seems to use some sort of fast path in  scheduler::post_immediate_completion
+    // at boost/asio/detail/impl/scheduler.ipp:332
+    // In the multithreaded (our) case one_thread_ is always false.
+    // for defer: is_continuation = true, and for post it's false.
+    asio::defer(cntx.get_executor(), cb2);
+    asio::post(cntx.get_executor(), cb2);
+  };
+  cntx.Await(cb);
 }
 
 TEST_F(IoContextTest, FiberJoin) {
