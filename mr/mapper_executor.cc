@@ -4,6 +4,7 @@
 #include "mr/mapper_executor.h"
 
 #include "absl/strings/str_cat.h"
+#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/walltime.h"
 #include "mr/impl/table_impl.h"
@@ -205,8 +206,9 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
 }
 
 void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper) {
-  this_fiber::properties<IoFiberProperties>().set_name("MapFiber");
-  this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL);
+  auto& props = this_fiber::properties<IoFiberProperties>();
+  props.set_name("MapFiber");
+  props.SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL);
 
   PerIoStruct* aux_local = per_io_.get();
   RawContext* raw_context = aux_local->raw_context.get();
@@ -215,6 +217,9 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
   Record record;
   uint64_t record_num = 0;
   auto cb = handler_wrapper->Get(0);
+  base::Histogram hist;
+
+  uint64_t last_yield_ts = base::GetMonotonicMicrosFast();
   while (true) {
     bool is_open = record_q->Pop(record);
     if (!is_open)
@@ -240,7 +245,12 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     ++record_num;
 
+    auto now = base::GetMonotonicMicrosFast();
     if (record_num % 100 == 0) {
+      LOG_IF(INFO, now - props.resume_ts() >= 100000) << "MapFiber CallStats: " << hist.ToString();
+
+      hist.Clear();
+      last_yield_ts = base::GetMonotonicMicrosFast();
       this_fiber::yield();
     }
 
@@ -251,10 +261,12 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     VLOG_IF(1, record_num % 1000 == 0) << "Num maps " << record_num;
 
-    auto& pp = absl::get<pair<size_t, string>>(record.payload);
-    SetPosition(pp.first, raw_context);
+    auto& pos_payload = absl::get<pair<size_t, string>>(record.payload);
+    SetPosition(pos_payload.first, raw_context);
 
-    cb(std::move(pp.second));
+    cb(std::move(pos_payload.second));
+    auto delta = base::GetMonotonicMicrosFast() - now;
+    hist.Add(delta);
   }
   VLOG(1) << "MapFiber finished " << record_num;
 }

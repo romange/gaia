@@ -21,6 +21,16 @@ using fibers_ext::BlockingCounter;
 using namespace boost;
 using namespace std;
 
+class IoFiberPropertiesMgr {
+  IoFiberProperties& io_props;
+
+ public:
+  IoFiberPropertiesMgr(fibers::fiber_properties* props)
+      : io_props(*static_cast<IoFiberProperties*>(props)) {}
+
+  void set_resume_ts(uint64_t ts) { io_props.resume_ts_ = ts; }
+};
+
 namespace {
 constexpr unsigned MAIN_NICE_LEVEL = 0;
 constexpr unsigned DISPATCH_LEVEL = IoFiberProperties::NUM_NICE_LEVELS;
@@ -289,6 +299,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
 
   auto now = base::GetMonotonicMicrosFast();
   auto delta = now - worker_pick_start_ts_;
+  worker_pick_start_ts_ = now;
 
   for (; last_nice_level_ < IoFiberProperties::NUM_NICE_LEVELS; ++last_nice_level_) {
     auto& q = rqueue_arr_[last_nice_level_];
@@ -303,9 +314,10 @@ fibers::context* AsioScheduler::pick_next() noexcept {
     DCHECK_GT(ready_cnt_, 0);
     --ready_cnt_;
 
-    RAW_VLOG(2, "Switching from %x to %x switch_cnt(%d)", short_id(), short_id(ctx),
-             switch_cnt_);
+    RAW_VLOG(2, "Switching from %x to %x switch_cnt(%d)", short_id(), short_id(ctx), switch_cnt_);
     DCHECK(ctx != fibers::context::active());
+
+    IoFiberPropertiesMgr{ctx->get_properties()}.set_resume_ts(now);
 
     // Checking if we want to resume to main loop prematurely to preserve responsiveness
     // of IO loop. MAIN_NICE_LEVEL is reserved for the main loop so we count only
@@ -317,6 +329,7 @@ fibers::context* AsioScheduler::pick_next() noexcept {
         auto* active = fibers::context::active();
         if (!active->is_context(fibers::type::main_context)) {
           auto& props = static_cast<IoFiberProperties&>(*active->get_properties());
+
           LOG(INFO) << props.name() << " took " << delta / 1000 << " ms";
         }
       }
@@ -328,7 +341,6 @@ fibers::context* AsioScheduler::pick_next() noexcept {
       // This is why we break from MAIN_LOOP_SUSPEND inside waken call, where
       // we are sure there is at least one worker fiber, and the main loop won't stuck in run_one.
     }
-    worker_pick_start_ts_ = now;
 
     RAW_VLOG(3, "pick_next: %x", short_id(ctx));
 

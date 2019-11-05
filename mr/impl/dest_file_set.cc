@@ -454,6 +454,7 @@ void DestHandle::GcsWriteFiber(IoContext* io_context) {
 
   // We want write fiber to have higher priority and initiate write as fast as possible.
   this_fiber::properties<IoFiberProperties>().SetNiceLevel(1);
+  this_fiber::properties<IoFiberProperties>().set_name("GcsWriteFiber");
 
   net_queue_->Run();
 }

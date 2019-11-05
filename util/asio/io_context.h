@@ -13,7 +13,11 @@
 
 namespace util {
 
+class IoFiberPropertiesMgr;
+
 class IoFiberProperties : public boost::fibers::fiber_properties {
+  friend class IoFiberPropertiesMgr;
+
  public:
   constexpr static unsigned MAX_NICE_LEVEL = 4;
   constexpr static unsigned NUM_NICE_LEVELS = MAX_NICE_LEVEL + 1;
@@ -33,8 +37,11 @@ class IoFiberProperties : public boost::fibers::fiber_properties {
 
   const std::string& name() const { return name_; }
 
+  uint64_t resume_ts() const { return resume_ts_; }
+
  private:
   std::string name_;
+  uint64_t resume_ts_ = 0;
   unsigned nice_;
 };
 
