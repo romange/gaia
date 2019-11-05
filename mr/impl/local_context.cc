@@ -4,9 +4,14 @@
 
 #include "mr/impl/local_context.h"
 
+#include "base/walltime.h"
+#include "util/asio/io_context.h"
+
 namespace mr3 {
 
 using namespace std;
+using namespace boost;
+using namespace util;
 
 namespace detail {
 
@@ -89,6 +94,12 @@ LocalContext::LocalContext(DestFileSet* mgr) : mgr_(mgr) { CHECK(mgr_); }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   DCHECK(shard_id.is_defined()) << "Undefined shard id";
+  uint64_t msec = (base::GetMonotonicMicrosFast() -
+     this_fiber::properties<IoFiberProperties>().resume_ts()) / 1000;
+  if (msec > 100) {
+    LOG(INFO) << "Has taken " << msec << " of cpu time, yielding";
+    this_fiber::yield();
+  }
 
   auto it = custom_shard_files_.find(shard_id);
   if (it == custom_shard_files_.end()) {

@@ -37,11 +37,15 @@ class IoFiberProperties : public boost::fibers::fiber_properties {
 
   const std::string& name() const { return name_; }
 
+  //! Returns ts in usec from which fiber has been active.
+  //! The timestamp is measured by base::GetMonotonicMicrosFast() and has 100usec precision.
   uint64_t resume_ts() const { return resume_ts_; }
+
+  uint64_t awaken_ts() const { return awaken_ts_; }
 
  private:
   std::string name_;
-  uint64_t resume_ts_ = 0;
+  uint64_t resume_ts_ = 0, awaken_ts_ = 0;
   unsigned nice_;
 };
 

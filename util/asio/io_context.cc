@@ -29,6 +29,7 @@ class IoFiberPropertiesMgr {
       : io_props(*static_cast<IoFiberProperties*>(props)) {}
 
   void set_resume_ts(uint64_t ts) { io_props.resume_ts_ = ts; }
+  void set_awaken_ts(uint64_t ts) { io_props.awaken_ts_ = ts; }
 };
 
 namespace {
@@ -260,9 +261,12 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
     unsigned nice = props.nice_level();
     DCHECK_LT(nice, IoFiberProperties::NUM_NICE_LEVELS);
     rq = rqueue_arr_ + nice;
-    ++ready_cnt_;
+    ++ready_cnt_;  // increase the number of awakened/ready fibers.
     if (last_nice_level_ > nice)
       last_nice_level_ = nice;
+
+    uint64_t now = base::GetMonotonicMicrosFast();
+    IoFiberPropertiesMgr{&props}.set_awaken_ts(now);
 
     // In addition, we wake main_loop_ctx_ is too many switches ocurred
     // while it was suspended.
@@ -273,7 +277,6 @@ void AsioScheduler::awakened(fibers::context* ctx, IoFiberProperties& props) noe
     // of awakened before pick_next resumed it.
     if (nice > MAIN_NICE_LEVEL && (mask_ & MAIN_LOOP_SUSPEND) && switch_cnt_ > 0 &&
         !main_loop_ctx_->ready_is_linked()) {
-      uint64_t now = base::GetMonotonicMicrosFast();
       if (now - main_suspend_ts_ > 5000) {  // 5ms {
         DVLOG(2) << "Wake MAIN_LOOP_SUSPEND " << fibers_ext::short_id(main_loop_ctx_)
                  << ", r/s: " << ready_cnt_ << "/" << switch_cnt_;

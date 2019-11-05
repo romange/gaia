@@ -6,6 +6,7 @@
 #include <boost/fiber/mutex.hpp>
 
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "util/asio/io_context_pool.h"
 #include "util/asio/yield.h"
 #include "util/fibers/fibers_ext.h"
@@ -73,8 +74,9 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
 void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
   CHECK(wrapper->io_context.InContextThread());
-
-  this_fiber::properties<IoFiberProperties>().SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
+  auto& fiber_props = this_fiber::properties<IoFiberProperties>();
+  fiber_props.SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL - 1);
+  fiber_props.set_name("AcceptLoop");
 
   struct SharedCList {
     ConnectionHandler::ListType clist;
@@ -110,6 +112,9 @@ void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
   try {
     for (;;) {
       std::tie(handler, ec) = AcceptConnection(wrapper);
+      auto delay_msec = base::GetMonotonicMicrosFast() - fiber_props.awaken_ts();
+      LOG_IF(INFO, delay_msec > 500) << "Had " << delay_msec << " accepting connection";
+
       if (ec) {
         CHECK(!handler);
         if (ec == asio::error::try_again)

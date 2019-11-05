@@ -140,6 +140,8 @@ void JoinerExecutor::Stop() {}
 void JoinerExecutor::JoinerFiber() {}
 
 void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
+  this_fiber::properties<IoFiberProperties>().set_name("JoinerInputQ");
+
   // PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
   uint64_t cnt = 0;
@@ -162,7 +164,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
     for (const IndexedInput& ii : shard_input.second) {
       CHECK_LT(ii.index, handler_wrapper->Size());
-      auto emit_cb = handler_wrapper->Get(ii.index);
+      RawSinkCb emit_cb = handler_wrapper->Get(ii.index);
       bool is_binary = detail::IsBinary(ii.wf->type());
 
       SetFileName(is_binary, ii.fspec->url_glob(), raw_context.get());
