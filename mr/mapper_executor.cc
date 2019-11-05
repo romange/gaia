@@ -219,7 +219,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
   auto cb = handler_wrapper->Get(0);
   base::Histogram hist;
 
-  uint64_t last_yield_ts = base::GetMonotonicMicrosFast();
   while (true) {
     bool is_open = record_q->Pop(record);
     if (!is_open)
@@ -250,7 +249,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
       LOG_IF(INFO, now - props.resume_ts() >= 100000) << "MapFiber CallStats: " << hist.ToString();
 
       hist.Clear();
-      last_yield_ts = base::GetMonotonicMicrosFast();
       this_fiber::yield();
     }
 

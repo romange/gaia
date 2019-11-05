@@ -69,7 +69,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 
     ec = SendRequestIterative(req, handle.get());
 
-    if (!ec) {  // Success.
+    if (!ec) {  // Success and fast path
       detail::gcs_latency->IncBy(name_, base::GetMonotonicMicrosFast() - start);
       return handle;
     }
@@ -92,6 +92,13 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         // if (ERR_GET_REASON(ec.value()) == SSL_R_WRONG_VERSION_NUMBER) {
         ++num_iterations;
         //}
+      }
+    }
+    if (handle) {
+      auto status = handle->status();
+      if (status) {  // Should cover reconnect header request.
+        VLOG(1) << "Resetting connection due to " << status;
+        handle.reset();
       }
     }
   }
