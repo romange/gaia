@@ -267,17 +267,19 @@ template <typename OutT> class TableImplT : public TableBase {
     return HandlerBinding<Handler, ToType>::template Create<OutT>(this, ptr);
   }
 
-  template <typename GrouperType>
+  template <typename GrouperType, typename... Args>
   static std::shared_ptr<TableImplT<OutT>> AsGroup(
       const std::string& name,
-      std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> args, Pipeline* owner) {
+      std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> mapper_bindings,
+      Pipeline* owner,
+      Args&&... args) {
     pb::Operator op;
     op.set_op_name(name);
     op.set_type(pb::Operator::GROUP);
 
     std::vector<RawSinkMethodFactory<GrouperType, OutT>> factories;
 
-    for (auto& arg : args) {
+    for (auto& arg : mapper_bindings) {
       ValidateGroupInputOrDie(arg.tbase());
       op.add_input_name(arg.tbase()->op().output().name());
       factories.push_back(arg.factory());
@@ -285,8 +287,8 @@ template <typename OutT> class TableImplT : public TableBase {
 
     auto result = std::make_shared<TableImplT<OutT>>(std::move(op), owner);
     result->SetHandlerFactory(
-        [& out = result->output_, factories = std::move(factories)](RawContext* raw_ctxt) {
-          auto* ptr = new HandlerWrapper<GrouperType, OutT>(out, raw_ctxt);
+        [& out = result->output_, factories = std::move(factories), args...](RawContext* raw_ctxt) {
+          auto* ptr = new HandlerWrapper<GrouperType, OutT>(out, raw_ctxt, args...);
           for (const auto& m : factories) {
             ptr->AddFromFactory(m);
           }

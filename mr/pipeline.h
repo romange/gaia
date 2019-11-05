@@ -84,8 +84,10 @@ class Pipeline {
   // Stops/breaks the run.
   void Stop();
 
-  template <typename GrouperType, typename Out> PTable<Out> Join(const std::string& name,
-                   std::initializer_list<detail::HandlerBinding<GrouperType, Out>> args);
+  template <typename GrouperType, typename Out, typename... Args>
+  PTable<Out> Join(const std::string& name,
+                   std::initializer_list<detail::HandlerBinding<GrouperType, Out>> mapper_bindings,
+                   Args&&... args);
 
   pb::Input* mutable_input(const std::string&);
 
@@ -108,10 +110,13 @@ class Pipeline {
   RawContext::FreqMapRegistry freq_maps_;
 };
 
-template <typename GrouperType, typename OutT>
-PTable<OutT> Pipeline::Join(const std::string& name,
-                            std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> args) {
-  auto res = detail::TableImplT<OutT>::template AsGroup<GrouperType>(name, args, this);
+ template <typename GrouperType, typename OutT, typename... Args>
+PTable<OutT> Pipeline::Join
+    (const std::string& name,
+     std::initializer_list<detail::HandlerBinding<GrouperType, OutT>> mapper_bindings,
+     Args&&... args) {
+  auto res = detail::TableImplT<OutT>::template AsGroup<GrouperType>(name, mapper_bindings, this,
+                                                                     args...);
   return PTable<OutT>{res};
 }
 
