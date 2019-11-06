@@ -94,11 +94,13 @@ LocalContext::LocalContext(DestFileSet* mgr) : mgr_(mgr) { CHECK(mgr_); }
 
 void LocalContext::WriteInternal(const ShardId& shard_id, std::string&& record) {
   DCHECK(shard_id.is_defined()) << "Undefined shard id";
-  uint64_t msec = (base::GetMonotonicMicrosFast() -
-     this_fiber::properties<IoFiberProperties>().resume_ts()) / 1000;
-  if (msec > 100) {
-    LOG(INFO) << "Has taken " << msec << " of cpu time, yielding";
-    this_fiber::yield();
+  const auto* props = static_cast<IoFiberProperties*>(fibers::context::active()->get_properties());
+  if (props) {
+    uint64_t msec = (base::GetMonotonicMicrosFast() - props->resume_ts()) / 1000;
+    if (msec > 100) {
+      LOG(INFO) << "Has taken " << msec << " of cpu time, yielding";
+      this_fiber::yield();
+    }
   }
 
   auto it = custom_shard_files_.find(shard_id);

@@ -324,7 +324,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   if (util::IsGcsPath(out_dir)) {
     io_pool_->AwaitFiberOnAll([this](IoContext&) { LazyGcsInit();});
 
-    auto api_pool_cb = [this] {
+    auto api_pool_cb = [] {
       auto& opt_pool = per_thread_.get()->api_conn_pool;
       CHECK(opt_pool.has_value());
       return &opt_pool.value();
@@ -417,7 +417,7 @@ void LocalRunner::Impl::LazyGcsInit() {
 void LocalRunner::Impl::ShutDown() {
   fq_pool_.Shutdown();
 
-  auto cb_per_thread = [this](IoContext&) {
+  auto cb_per_thread = [](IoContext&) {
     if (per_thread_) {
       auto pt = per_thread_.get();
       VLOG(1) << "Histogram Latency: " << pt->record_fetch_hist.ToString();

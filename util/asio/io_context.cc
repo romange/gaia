@@ -36,8 +36,6 @@ namespace {
 constexpr unsigned MAIN_NICE_LEVEL = 0;
 constexpr unsigned DISPATCH_LEVEL = IoFiberProperties::NUM_NICE_LEVELS;
 
-// Amount of fiber switches we make before bringing back the main IO loop.
-constexpr unsigned MAIN_SWITCH_LIMIT = 100;
 constexpr unsigned NOTIFY_GUARD_SHIFT = 16;
 constexpr chrono::steady_clock::time_point STEADY_PT_MAX = chrono::steady_clock::time_point::max();
 
