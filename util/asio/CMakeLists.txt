@@ -1,4 +1,4 @@
-add_library(asio_fiber_lib io_context.cc io_context_pool.cc
+add_library(asio_fiber_lib io_context.cc io_context_pool.cc error.cc
             connection_handler.cc yield.cc accept_server.cc periodic_task.cc
             glog_asio_sink.cc fiber_socket.cc prebuilt_asio.cc)
 cxx_link(asio_fiber_lib base stats_lib fibers_ext absl_optional)

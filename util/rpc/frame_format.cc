@@ -11,6 +11,7 @@
 #include "base/endian.h"
 #include "base/logging.h"
 #include "util/asio/yield.h"
+#include "util/asio/error.h"
 
 namespace util {
 using fibers_ext::yield;
@@ -43,12 +44,12 @@ const uint32 Frame::kHeaderVal = LittleEndian::Load32(kHeader);
 
 uint8_t Frame::DecodeStart(const uint8_t* src, ::boost::system::error_code& ec) {
   if (kHeaderVal != LittleEndian::Load32(src)) {
-    ec = errc::make_error_code(errc::illegal_byte_sequence);
+    ec = make_error_code(gaia_error::bad_header);
     return 0;
   }
 
   if (src[4] >> 4 != 0) {  // version check
-    ec = errc::make_error_code(errc::illegal_byte_sequence);
+    ec = make_error_code(gaia_error::invalid_version);
     return 0;
   }
   rpc_id = UNALIGNED_LOAD64(src + 4);
