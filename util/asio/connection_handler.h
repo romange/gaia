@@ -76,13 +76,17 @@ class ConnectionHandler {
   }
 
  protected:
-  // called once after connection was initialized. Will run in io context thread of this handler.
+  //! Called once after connection was initialized. Will run in io context thread of this handler.
   virtual void OnOpenSocket() {}
 
-  // Called before ConnectionHandler destroyed but after the socket was signalled
-  // to stop and shutdown. The function implementation may block the calling fiber.
-  // Derived ConnectionHandler should clean here resources that must closed
-  // before the object is destroyed. Will run in io context thread of the socket.
+  /**
+   * @brief Called before ConnectionHandler destroyed but after the socket was signalled
+   * to stop and shutdown
+   *
+   * The function implementation may block the calling fiber.
+   * Derived ConnectionHandler should clean here resources that must closed
+   * before the object is destroyed. Will run in io context thread of the socket.
+   */
   virtual void OnCloseSocket() {}
 
   // Should not block the thread. Can fiber-block (fiber friendly).
@@ -98,7 +102,10 @@ class ConnectionHandler {
   std::atomic<std::uint32_t> use_count_{0};
 };
 
-// Abstracts away connections implementation and their life-cycle.
+/**
+ * @brief Abstracts away connections implementation and their life-cycle.
+ *
+ */
 class ListenerInterface {
  public:
   virtual ~ListenerInterface() {}

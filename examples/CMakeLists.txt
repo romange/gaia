@@ -29,3 +29,4 @@ add_executable(osmium_road_length osmium_road_length.cc)
 cxx_link(osmium_road_length base TRDP::libosmium)
 
 add_subdirectory(wordcount)
+add_subdirectory(redis)
