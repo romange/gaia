@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "absl/strings/string_view.h"
 #include "util/asio/connection_handler.h"
 
 namespace redis {
@@ -18,6 +19,9 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
 
  protected:
   boost::system::error_code HandleRequest() final;
+
+ private:
+  boost::system::error_code HandleCmd(absl::string_view cmd, boost::asio::mutable_buffer suffix);
 
   std::string line_buffer_;
 };
