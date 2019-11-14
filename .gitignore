@@ -7,3 +7,4 @@ genfiles/*
 .tags
 !third_party/include/*
 *.pyc
+/CMakeLists.txt.user
