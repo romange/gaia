@@ -64,24 +64,6 @@ inline uint64 ghtonll(uint64 x) { return x; }
 
 
 
-// ntoh* and hton* are the same thing for any size and bytesex,
-// since the function is an involution, i.e., its own inverse.
-#define gntohl(x) ghtonl(x)
-#define gntohs(x) ghtons(x)
-#define gntohll(x) ghtonll(x)
-
-/*
-#define htons(x) ghtons(x)
-#define htonl(x) ghtonl(x)
-
-#define ntohs(x) gntohs(x)
-#define ntohl(x) gntohl(x)
-*/
-
-// This one is safe to take as it's an extension
-//#define htonll(x) ghtonll(x)
-// #define ntohll(x) htonll(x)
-
 // We provide a unified FromHost API for all integral types and float,
 // double types. If variable v's type is known to be one of these types,
 // client can simply call the following function without worrying about its
