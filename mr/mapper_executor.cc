@@ -38,7 +38,8 @@ struct MapperExecutor::PerIoStruct {
   void Shutdown();
 };
 
-MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {}
+MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {
+}
 
 thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
 
@@ -50,11 +51,16 @@ void MapperExecutor::PerIoStruct::Shutdown() {
 }
 
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
-    : OperatorExecutor(pool, runner) {}
+    : OperatorExecutor(pool, runner) {
+}
 
-MapperExecutor::~MapperExecutor() { CHECK(!file_name_q_); }
+MapperExecutor::~MapperExecutor() {
+  CHECK(!file_name_q_);
+}
 
-void MapperExecutor::InitInternal() { runner_->Init(); }
+void MapperExecutor::InitInternal() {
+  runner_->Init();
+}
 
 void MapperExecutor::Stop() {
   VLOG(1) << "MapperExecutor Stop[";
@@ -226,17 +232,25 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     if (record.op != Record::RECORD) {
       switch (record.op) {
-        case Record::BINARY_FORMAT:
-          SetFileName(true, absl::get<pair<size_t, string>>(record.payload).second, raw_context);
+        case Record::BINARY_FORMAT: {
+          auto* rec = absl::get_if<pair<size_t, string>>(&record.payload);
+          CHECK(rec);
+          SetFileName(true, rec->second, raw_context);
           break;
-        case Record::TEXT_FORMAT:
-          SetFileName(false, absl::get<pair<size_t, string>>(record.payload).second, raw_context);
+        }
+        case Record::TEXT_FORMAT: {
+          auto* rec = absl::get_if<pair<size_t, string>>(&record.payload);
+          CHECK(rec);
+          SetFileName(false, rec->second, raw_context);
           break;
+        }
         case Record::METADATA:
           SetMetaData(*absl::get<const pb::Input::FileSpec*>(record.payload), raw_context);
           break;
 
-        case Record::RECORD:;
+        case Record::UNDEFINED:
+        case Record::RECORD:
+          LOG(FATAL) << "Should not happen: " << record.op;
       }
 
       continue;

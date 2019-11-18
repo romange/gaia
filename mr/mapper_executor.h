@@ -22,7 +22,7 @@ class MapperExecutor : public OperatorExecutor {
   using FileNameQueue = ::boost::fibers::buffered_channel<FileInput>;
 
   struct Record {
-    enum Operand { BINARY_FORMAT, TEXT_FORMAT, METADATA, RECORD} op;
+    enum Operand { UNDEFINED, BINARY_FORMAT, TEXT_FORMAT, METADATA, RECORD} op = UNDEFINED;
 
     // either file spec or <pos,record> pair.
     absl::variant<const pb::Input::FileSpec*, ::std::pair<size_t, ::std::string>> payload;

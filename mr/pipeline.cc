@@ -62,7 +62,7 @@ void Pipeline::Stop() {
     executor_->Stop();
 }
 
-void Pipeline::Run(Runner* runner) {
+bool Pipeline::Run(Runner* runner) {
   CHECK(!tables_.empty());
 
   for (const auto& sptr : tables_) {
@@ -94,6 +94,8 @@ void Pipeline::Run(Runner* runner) {
 
   VLOG(1) << "Before Runner::Shutdown";
   runner->Shutdown();
+
+  return !stopped_.load();
 }
 
 void Pipeline::ProcessTable(detail::TableBase* tbl) {

@@ -6,7 +6,7 @@ ColumnLimit: 100
 ---
 Language: Cpp
 AllowShortLoopsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: false
 AllowShortIfStatementsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: false
 ConstructorInitializerAllOnOneLineOrOnePerLine: false

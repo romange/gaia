@@ -79,9 +79,15 @@ class Pipeline {
     return ReadLst(name, std::vector<std::string>{glob});
   }
 
-  void Run(Runner* runner);
+  /**
+   * @brief Runs the pipeline and blocks the current thread.
+   *
+   * @param runner
+   * @return true if the pipeline has successfully finished, false if it was stopped in the middle.
+   */
+  bool Run(Runner* runner);
 
-  // Stops/breaks the run.
+  //! Stops/breaks the run.
   void Stop();
 
   template <typename GrouperType, typename Out, typename... Args>

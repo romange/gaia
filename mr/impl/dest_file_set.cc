@@ -263,7 +263,8 @@ void CompressHandle::Close(bool abort_write) {
   // I can not reset write_file_ here since some write may be still pending in the IO thread.
 }
 
-LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {}
+LstHandle::LstHandle(DestFileSet* owner, const ShardId& sid) : DestHandle(owner, sid) {
+}
 
 LstHandle::~LstHandle() {
   VLOG(1) << "Destructing lst " << full_path_;
@@ -272,14 +273,29 @@ LstHandle::~LstHandle() {
 
 void LstHandle::Write(StringGenCb cb) {
   absl::optional<string> tmp_str;
+  std::vector<string> str_vec;
+  constexpr size_t kBufSize = 2048;
+  str_vec.reserve(kBufSize);
 
   while (true) {
     tmp_str = cb();
     if (!tmp_str)
       break;
-    io_queue_->Add(
-        [this, str = std::move(*tmp_str)] { CHECK_STATUS(lst_writer_->AddRecord(str)); });
+    str_vec.push_back(std::move(*tmp_str));
+    if (str_vec.size() >= kBufSize) {
+      io_queue_->Add([this, vec = std::move(str_vec)] {
+        for (const auto& v : vec) {
+          CHECK_STATUS(lst_writer_->AddRecord(v));
+        }
+      });
+      CHECK_EQ(str_vec.capacity(), kBufSize);  // move does not deallocate the storage.
+    }
   }
+  io_queue_->Add([this, vec = std::move(str_vec)] {
+    for (const auto& v : vec) {
+      CHECK_STATUS(lst_writer_->AddRecord(v));
+    }
+  });
 }
 
 void LstHandle::Open() {
@@ -325,7 +341,8 @@ DestFileSet::DestFileSet(const std::string& root_dir, const pb::Output& out,
   is_gcs_dest_ = util::IsGcsPath(root_dir_);
 }
 
-DestFileSet::~DestFileSet() {}
+DestFileSet::~DestFileSet() {
+}
 
 // DestHandle is cached in each of the calling IO threads and the only contention happens
 // when a new handle shard is created.
