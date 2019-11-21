@@ -14,7 +14,7 @@
 // libssl1.0.x has performance locking bugs that practically prevent scalable communication
 // with ssl library. It seems that libssl1.1 fixes that. libssl-dev in 18.04 installs libssl1.1.
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
-  #warning Please update your libssl to libssl1.1 - install libssl-dev
+#warning Please update your libssl to libssl1.1 - install libssl-dev
 #endif
 
 namespace util {
@@ -50,24 +50,37 @@ constexpr const char kPort[] = "443";
 SslContextResult CreateClientSslContext(absl::string_view cert_string) {
   system::error_code ec;
   asio::ssl::context cntx{asio::ssl::context::tlsv12_client};
-  cntx.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-                   asio::ssl::context::single_dh_use);
+  cntx.set_options(boost::asio::ssl::context::default_workarounds |
+                   boost::asio::ssl::context::no_compression | boost::asio::ssl::context::no_sslv2 |
+                   boost::asio::ssl::context::no_sslv3 | boost::asio::ssl::context::no_tlsv1 |
+                   boost::asio::ssl::context::no_tlsv1_1);
   cntx.set_verify_mode(asio::ssl::verify_peer, ec);
   if (ec) {
     return SslContextResult(ec);
   }
-
   cntx.add_certificate_authority(asio::buffer(cert_string.data(), cert_string.size()), ec);
   if (ec) {
     return SslContextResult(ec);
   }
+  SSL_CTX* ssl_cntx = cntx.native_handle();
+
+	/*long flags = SSL_CTX_get_options(ssl_cntx);
+	flags |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+	SSL_CTX_set_options(ssl_cntx, flags);
+*/
+#if 1   // Try AES-GCM
+  constexpr char kCiphers[] = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256";
+  CHECK_EQ(1, SSL_CTX_set_cipher_list(ssl_cntx, kCiphers));
+  CHECK_EQ(1, SSL_CTX_set_ecdh_auto(ssl_cntx, 1));
+#endif
 
   return SslContextResult(std::move(cntx));
 }
 
 HttpsClient::HttpsClient(absl::string_view host, IoContext* context,
                          ::boost::asio::ssl::context* ssl_ctx)
-    : io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {}
+    : io_context_(*context), ssl_cntx_(*ssl_ctx), host_name_(host) {
+}
 
 auto HttpsClient::Connect(unsigned msec) -> error_code {
   CHECK(io_context_.InContextThread());
