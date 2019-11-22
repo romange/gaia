@@ -39,7 +39,6 @@ class GCS {
  public:
   using ListBucketResult = util::StatusObject<std::vector<std::string>>;
   using ReadObjectResult = util::StatusObject<size_t>;
-  using OpenSeqResult = util::StatusObject<size_t>;  // Total size of the object.
   using ListObjectResult = util::Status;
   using error_code = ::boost::system::error_code;
 
@@ -61,16 +60,6 @@ class GCS {
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
 
-  // Read API
-
-  OpenSeqResult OpenSequential(absl::string_view bucket, absl::string_view path);
-  ReadObjectResult ReadSequential(const strings::MutableByteRange& range);
-  util::Status CloseSequential();
-
-  bool IsBusy() const;
-
-  util::StatusObject<file::ReadonlyFile*> OpenGcsFile(absl::string_view full_path);
-
   // Input: full gcs uri path that starts with "gs://"
   // returns bucket and object paths accordingly.
   static bool SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
@@ -88,29 +77,18 @@ class GCS {
   // Parser can not be reset, so we use absl::optional to workaround.
   using ReusableParser = absl::optional<Parser<boost::beast::http::buffer_body>>;
 
-  class ConnState;
-
   util::Status RefreshToken(Request* req);
 
   std::string BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
   util::Status PrepareConnection();
   util::Status ClearConnState();
 
-  OpenSeqResult OpenSequentialInternal(Request* req, ReusableParser* parser);
-
   //! Higher level function. Handles auth token expiration use-case.
   template <typename RespBody> util::Status SendWithToken(Request* req, Response<RespBody>* resp);
-
-  // Returns true if the request succeeded and the response is ok.
-  // Returns false if we had an intermittent error and need to retry.
-  // Returns error status if we are completely screwed.
-  util::StatusObject<bool> SendRequestIterative(Request* req,
-                                                Parser<::boost::beast::http::buffer_body>* parser);
 
   uint32_t native_handle();
 
   std::string access_token_header_;
-  std::unique_ptr<ConnState> conn_state_;
   std::unique_ptr<http::HttpsClient> https_client_;
 };
 

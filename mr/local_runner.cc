@@ -29,7 +29,6 @@
 namespace mr3 {
 
 DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
-DEFINE_bool(local_runner_gcs_read_v2, true, "If true, use new gcs_read_file");
 
 DECLARE_uint32(gcs_connect_deadline_ms);
 
@@ -208,10 +207,6 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   CHECK(pt->ssl_context.has_value());
 
   for (auto it = pt->gcs_handles.begin(); it != pt->gcs_handles.end(); ++it) {
-    if ((*it)->IsBusy()) {
-      continue;
-    }
-
     auto res = std::move(*it);
     it->swap(pt->gcs_handles.back());
     pt->gcs_handles.pop_back();
@@ -376,13 +371,8 @@ StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::stri
   LazyGcsInit();
 
   input_gcs_conn_.fetch_add(1, std::memory_order_acq_rel);
-  if (FLAGS_local_runner_gcs_read_v2) {
-    auto pt = per_thread_.get();
-    return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
-  } else {
-    auto gcs = GetGcsHandle();
-    return gcs->OpenGcsFile(filename);
-  }
+  auto pt = per_thread_.get();
+  return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
 }
 
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenLocalFile(

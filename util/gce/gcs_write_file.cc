@@ -20,9 +20,12 @@
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
-DECLARE_bool(gcs_dry_write);
 
 namespace util {
+
+DEFINE_bool(gcs_dry_write, false,
+            "If set true do not really perform upload requests."
+            "Still creates gcs connections for upload.");
 
 DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
 
@@ -211,7 +214,7 @@ auto GcsWriteFile::PrepareRequest(size_t to, ssize_t total) -> Request {
   req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, total));
   req.set(h2::field::content_type, "application/octet-stream");
   req.prepare_payload();
-  
+
   DCHECK_EQ(0, body_mb_.size());
 
   return req;

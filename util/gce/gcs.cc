@@ -24,10 +24,6 @@
 #include "util/http/https_client.h"
 #include "util/stats/varz_stats.h"
 
-DEFINE_bool(gcs_dry_write, false,
-            "If set true do not really perform upload requests."
-            "Still creates gcs connections for upload.");
-
 namespace util {
 
 DECLARE_uint32(gcs_upload_buf_log_size);
@@ -38,36 +34,10 @@ using namespace boost;
 namespace h2 = beast::http;
 namespace rj = rapidjson;
 
-using base::GetMonotonicMicrosFast;
-
 static constexpr char kDomain[] = "www.googleapis.com";
 
 namespace {
 
-
-class GcsFile : public file::ReadonlyFile {
- public:
-  // does not own gcs object, only wraps it with ReadonlyFile interface.
-  GcsFile(GCS* gcs, size_t sz) : gcs_(gcs), size_(sz) {}
-  ~GcsFile();
-
-  // Reads upto length bytes and updates the result to point to the data.
-  // May use buffer for storing data. In case, EOF reached sets result.size() < length but still
-  // returns Status::OK.
-  StatusObject<size_t> Read(size_t offset, const strings::MutableByteRange& range) final;
-
-  // releases the system handle for this file.
-  Status Close() final;
-
-  size_t Size() const final { return size_; }
-
-  int Handle() const final { return -1; }
-
- private:
-  GCS* gcs_;
-  size_t size_;
-  size_t offs_ = 0;
-};
 
 inline Status ToStatus(const ::boost::system::error_code& ec) {
   return ec ? Status(StatusCode::IO_ERROR, absl::StrCat(ec.value(), ": ", ec.message()))
@@ -108,51 +78,6 @@ template <typename Msg> inline bool IsUnauthorized(const Msg& msg) {
   return it != msg.end();
 }
 
-inline bool DoesServerPushback(h2::status st) {
-  return st == h2::status::too_many_requests ||
-         h2::to_status_class(st) == h2::status_class::server_error;
-}
-
-
-StatusObject<size_t> GcsFile::Read(size_t offset, const strings::MutableByteRange& range) {
-  if (offset != offs_) {
-    return Status(StatusCode::INVALID_ARGUMENT, "Only sequential access supported");
-  }
-  auto res = gcs_->ReadSequential(range);
-  if (!res.ok()) {
-    return res.status;
-  }
-
-  offs_ += res.obj;
-  return res.obj;
-}
-
-Status GcsFile::Close() {
-  Status st;
-  if (gcs_) {
-    st = gcs_->CloseSequential();
-    gcs_ = nullptr;
-  }
-  return st;
-}
-
-GcsFile::~GcsFile() {
-  if (gcs_) {
-    LOG(WARNING) << "Close was not called";
-    Close();
-  }
-}
-
-struct SeqReadHandler {
-  SeqReadHandler(string url) : read_obj_url(std::move(url)) {}
-
-  string read_obj_url;
-  size_t offset = 0, file_size = 0;
-  uint32_t errors = 0;
-
-  using OptParser = absl::optional<h2::response_parser<h2::buffer_body>>;
-  OptParser parser;
-};
 
 //! [from, to) range. If to is kuint64max - then the range is unlimited from above.
 inline void SetRange(size_t from, size_t to, h2::fields* flds) {
@@ -185,19 +110,8 @@ template <typename Body> std::ostream& operator<<(std::ostream& os, const h2::re
   return os;
 }
 
-class GCS::ConnState : public absl::variant<absl::monostate, SeqReadHandler> {
- public:
-  ~ConnState() {
-    if (auto* pval = absl::get_if<SeqReadHandler>(this)) {
-      if (pval->parser) {
-        LOG(ERROR) << "File was not closed";
-      }
-    }
-  }
-};
-
 GCS::GCS(const GCE& gce, asio::ssl::context* ssl_cntx, IoContext* io_context)
-    : gce_(gce), io_context_(*io_context), conn_state_(new ConnState),
+    : gce_(gce), io_context_(*io_context),
       https_client_(new http::HttpsClient(kDomain, io_context, ssl_cntx)) {
   https_client_->set_retry_count(3);
 }
@@ -222,17 +136,6 @@ Status GCS::Connect(unsigned msec) {
   VLOG(1) << "GCS::Connect OK " << native_handle();
 
   return Status::OK;
-}
-
-Status GCS::CloseSequential() {
-  CHECK(io_context_.InContextThread());
-  return ClearConnState();
-}
-
-bool GCS::IsBusy() const {
-  bool is_empty = absl::holds_alternative<absl::monostate>(*conn_state_);
-
-  return !is_empty;
 }
 
 auto GCS::ListBuckets() -> ListBucketResult {
@@ -372,142 +275,6 @@ auto GCS::Read(absl::string_view bucket, absl::string_view obj_path, size_t ofs,
   return range.size() - left_available;  // how much written
 }
 
-StatusObject<bool> GCS::SendRequestIterative(Request* req, Parser<h2::buffer_body>* parser) {
-  VLOG(1) << "Req: " << *req;
-
-  error_code ec = https_client_->Send(*req);
-  RETURN_EC_STATUS(ec);
-
-  ec = https_client_->ReadHeader(parser);
-
-  if (ec) {
-    LOG(ERROR) << "Socket error: " << ec << "/" << ec.message();
-    VLOG(1) << "FiberSocket status: " << https_client_->client()->next_layer().status();
-
-    return false;  // need to retry
-  }
-
-  const auto& msg = parser->get();
-  VLOG(1) << "HeaderResp: " << msg;
-  if (!parser->keep_alive()) {
-    https_client_->schedule_reconnect();
-    LOG(INFO) << "Scheduling reconnect due to conn-close header";
-  }
-
-  // Partial content can appear because of the previous reconnect.
-  if (msg.result() == h2::status::ok || msg.result() == h2::status::partial_content) {
-    return true;  // all is good.
-  }
-
-  // Parse & drain whatever comes after problematic status.
-  // We must do it as long as we plan to use this connection for more requests.
-  RETURN_EC_STATUS(https_client_->DrainResponse(parser));
-
-  if (DoesServerPushback(msg.result())) {
-    this_fiber::sleep_for(1s);
-    return false;  // retry
-  }
-
-  if (IsUnauthorized(msg)) {
-    auto st = RefreshToken(req);
-    if (!st.ok())
-      return st;
-    return false;
-  }
-
-  LOG(ERROR) << "Unexpected status " << msg;
-
-  return Status(StatusCode::INTERNAL_ERROR, "Unexpected http response");
-}
-
-auto GCS::OpenSequential(absl::string_view bucket, absl::string_view obj_path) -> OpenSeqResult {
-  RETURN_IF_ERROR(PrepareConnection());
-
-  CHECK(absl::holds_alternative<absl::monostate>(*conn_state_));
-
-  string read_obj_url = BuildGetObjUrl(bucket, obj_path);
-  auto req = PrepareRequest(h2::verb::get, read_obj_url, access_token_header_);
-
-  SeqReadHandler& handler = conn_state_->emplace<SeqReadHandler>(read_obj_url);
-
-  OpenSeqResult res = OpenSequentialInternal(&req, &handler.parser);
-  if (!res.ok()) {
-    conn_state_->emplace<absl::monostate>();
-    return res.status;
-  }
-
-  handler.file_size = res.obj;
-
-  return res.obj;
-}
-
-auto GCS::ReadSequential(const strings::MutableByteRange& range) -> ReadObjectResult {
-  SeqReadHandler* handler = absl::get_if<SeqReadHandler>(conn_state_.get());
-  CHECK(handler && https_client_);
-
-  if (handler->parser->is_done()) {
-    return 0;
-  }
-
-  for (unsigned iters = 0; iters < 3; ++iters) {
-    auto& body = handler->parser->get().body();
-    body.data = range.data();
-    auto& left_available = body.size;
-    left_available = range.size();
-
-    error_code ec = https_client_->Read(&handler->parser.value());
-    if (!ec || ec == h2::error::need_buffer || ec == h2::error::partial_message) {
-      size_t http_read = range.size() - left_available;
-      DVLOG(2) << "Read " << http_read << " bytes from " << handler->offset << " with capacity "
-               << range.size();
-
-      // This check does not happen. See here why: https://github.com/boostorg/beast/issues/1662
-      // DCHECK_EQ(sz_read, http_read) << " " << range.size() << "/" << left_available;
-      handler->offset += http_read;
-      return http_read;
-    }
-
-    if (ec == asio::ssl::error::stream_truncated) {
-      LOG(WARNING) << "Stream " << handler->read_obj_url << " truncated at " << handler->offset
-                   << "/" << handler->file_size;
-
-      auto req = PrepareRequest(h2::verb::get, handler->read_obj_url, access_token_header_);
-      SetRange(handler->offset, kuint64max, &req);
-      OpenSeqResult res = OpenSequentialInternal(&req, &handler->parser);
-
-      if (!res.ok())
-        return res.status;
-      VLOG(1) << "Reopened the file, new size: " << handler->offset + res.obj;
-      // I do not change seq_file_->offset,file_size fields.
-      // TODO: to validate that file version has not been changed between retries.
-      continue;
-    } else {
-      LOG(ERROR) << "ec: " << ec << "/" << ec.message() << " at " << handler->offset << "/"
-                 << handler->file_size;
-      LOG(ERROR) << "FiberSocket status: " << https_client_->client()->next_layer().status();
-
-      return ToStatus(ec);
-    }
-  }
-
-  return Status(StatusCode::INTERNAL_ERROR, "Maximum iterations reached");
-}
-
-StatusObject<file::ReadonlyFile*> GCS::OpenGcsFile(absl::string_view full_path) {
-  CHECK(!IsBusy()) << "Can not open " << full_path << " before closing the previous one ";
-
-  absl::string_view bucket, obj_path;
-  CHECK(GCS::SplitToBucketPath(full_path, &bucket, &obj_path));
-
-  auto res = OpenSequential(bucket, obj_path);
-  if (!res.ok()) {
-    return res.status;
-  }
-
-  VLOG(1) << "Opened gcs " << full_path << " on socket " << native_handle();
-
-  return new GcsFile{this, res.obj};
-}
 
 string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path) {
   string read_obj_url{"/storage/v1/b/"};
@@ -529,54 +296,9 @@ Status GCS::PrepareConnection() {
 }
 
 util::Status GCS::ClearConnState() {
-  if (auto seq_ptr = absl::get_if<SeqReadHandler>(conn_state_.get())) {
-    VLOG(1) << "Close::SeqReadHandler";
-
-    CHECK(https_client_);
-    error_code ec;
-
-    if (seq_ptr->parser) {
-      ec = https_client_->DrainResponse(&seq_ptr->parser.value());
-      if (ec) {
-        https_client_->schedule_reconnect();
-      }
-    }
-
-    conn_state_->emplace<absl::monostate>();
-    return Status::OK;
-  }
-
   return Status::OK;
 }
 
-auto GCS::OpenSequentialInternal(Request* req, ReusableParser* parser) -> OpenSeqResult {
-  Status err_st;
-  for (unsigned iters = 0; iters < 3; ++iters) {
-    VLOG(1) << "OpenSequentialInternal" << iters << ": socket " << native_handle();
-
-    parser->emplace();
-    parser->value().body_limit(kuint64max);
-
-    auto status_obj = SendRequestIterative(req, &parser->value());
-    if (!status_obj.ok()) {
-      err_st = status_obj.status;
-      continue;
-    }
-    bool success = status_obj.obj;
-
-    if (success) {
-      const auto& msg = (*parser)->get();
-      auto content_len_it = msg.find(h2::field::content_length);
-      size_t content_sz = 0;
-      if (content_len_it != msg.end()) {
-        CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &content_sz));
-      }
-      return content_sz;
-    }
-  }
-
-  return err_st;
-}
 
 Status GCS::RefreshToken(Request* req) {
   auto res = gce_.RefreshAccessToken(&io_context_);
