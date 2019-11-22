@@ -41,8 +41,8 @@ constexpr const char kPort[] = "443";
     stream->handshake(asio::ssl::stream_base::client, ec);
     if (!ec) {
       auto* cipher = SSL_get_current_cipher(stream->native_handle());
-      VLOG(1) << "SSL handshake success " << i << ", chosen "
-              << SSL_CIPHER_get_name(cipher) << "/" << SSL_CIPHER_get_version(cipher);
+      VLOG(1) << "SSL handshake success " << i << ", chosen " << SSL_CIPHER_get_name(cipher) << "/"
+              << SSL_CIPHER_get_version(cipher);
     }
     return ec;
   }

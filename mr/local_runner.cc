@@ -266,7 +266,6 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     if (!FLAGS_local_runner_raw_shortcut_read) {
       string tmp{result};
-      ++cnt;
       if (VLOG_IS_ON(1)) {
         int64_t delta = base::GetMonotonicMicrosFast() - start;
         if (delta > 5)  // Filter out uninteresting fast Next calls.
@@ -278,7 +277,7 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
       start = base::GetMonotonicMicrosFast();
     }
 
-    if (cnt % 100 == 0) {
+    if (++cnt % 100 == 0) {
       this_fiber::yield();
     }
   }

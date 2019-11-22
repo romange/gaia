@@ -4,6 +4,8 @@
 
 #include "file/filesource.h"
 
+#include <cstring>
+
 #include "base/logging.h"
 #include "file/file.h"
 #include "strings/split.h"
@@ -88,9 +90,7 @@ bool LineReader::Next(StringPiece* result, std::string* scratch) {
   const char* const eof_page = buf_.get() + page_size_ - 1;
   while (true) {
     // Common case: search of EOL.
-    char* ptr = next_;
-    while (*ptr != '\n')
-      ++ptr;
+    char* ptr =  reinterpret_cast<char*>(rawmemchr(next_, '\n'));
 
     if (ptr < end_) {  // Found EOL.
       ++line_num_;
