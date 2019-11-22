@@ -29,7 +29,9 @@
 namespace mr3 {
 
 DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
-
+DEFINE_bool(local_runner_raw_shortcut_read, false,
+            "If true, reads the input without parsing it "
+            "into records and calling mappers. Used for testing the IO read path.");
 DECLARE_uint32(gcs_connect_deadline_ms);
 
 using namespace util;
@@ -54,9 +56,10 @@ struct LocalRunner::Impl {
  public:
   Impl(IoContextPool* p, const string& d)
       : io_pool_(p), data_dir(d), fq_pool_(0, 128),
-        varz_stats_("local-runner", [this] { return GetStats(); }) {}
+        varz_stats_("local-runner", [this] { return GetStats(); }) {
+  }
 
-  uint64_t ProcessText(const string& fname,  file::ReadonlyFile* fd, RawSinkCb cb);
+  uint64_t ProcessText(const string& fname, file::ReadonlyFile* fd, RawSinkCb cb);
   uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
 
   /// Called from the main thread orchestrating the pipeline run.
@@ -76,12 +79,14 @@ struct LocalRunner::Impl {
 
   RawContext* NewContext();
 
-  void Break() { stop_signal_.store(true, std::memory_order_seq_cst); }
+  void Break() {
+    stop_signal_.store(true, std::memory_order_seq_cst);
+  }
 
   class Source;
 
  private:
-  void LazyGcsInit();   // Called from IO threads.
+  void LazyGcsInit();  // Called from IO threads.
 
   util::VarzValue::Map GetStats() const;
 
@@ -109,9 +114,12 @@ struct LocalRunner::Impl {
   struct handle_keeper {
     PerThread* per_thread;
 
-    handle_keeper(PerThread* pt) : per_thread(pt) {}
+    handle_keeper(PerThread* pt) : per_thread(pt) {
+    }
 
-    void operator()(GCS* gcs) { per_thread->gcs_handles.emplace_back(gcs); }
+    void operator()(GCS* gcs) {
+      per_thread->gcs_handles.emplace_back(gcs);
+    }
   };
 
   unique_ptr<GCS, handle_keeper> GetGcsHandle();
@@ -127,7 +135,8 @@ struct LocalRunner::Impl {
 
 class LocalRunner::Impl::Source {
  public:
-  Source(LocalRunner::Impl* impl, const string& fn) : impl_(impl), fname_(fn) {}
+  Source(LocalRunner::Impl* impl, const string& fn) : impl_(impl), fname_(fn) {
+  }
 
   Status Open();
 
@@ -247,12 +256,26 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
 
 uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile* fd, RawSinkCb cb) {
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
+  uint64_t cnt = 0;
+
+  if (FLAGS_local_runner_raw_shortcut_read) {
+    constexpr size_t kBufSize = 1 << 17;
+    std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+    strings::MutableByteRange mb(buf.get(), kBufSize);
+    for (;; ++cnt) {
+      size_t res = CHECKED_GET(src->Read(mb));
+      if (res < kBufSize)
+        break;
+      if (cnt % 10 == 0)
+        this_fiber::yield();
+    };
+    return cnt;
+  }
 
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
 
-  uint64_t cnt = 0;
   uint64_t start = base::GetMonotonicMicrosFast();
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     string tmp{result};
@@ -317,7 +340,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   dest_mgr_.reset(new DestFileSet(out_dir, op->output(), io_pool_, &fq_pool_));
 
   if (util::IsGcsPath(out_dir)) {
-    io_pool_->AwaitFiberOnAll([this](IoContext&) { LazyGcsInit();});
+    io_pool_->AwaitFiberOnAll([this](IoContext&) { LazyGcsInit(); });
 
     auto api_pool_cb = [] {
       auto& opt_pool = per_thread_.get()->api_conn_pool;
@@ -432,17 +455,26 @@ RawContext* LocalRunner::Impl::NewContext() {
 ********************************************/
 
 LocalRunner::LocalRunner(IoContextPool* pool, const std::string& data_dir)
-    : impl_(new Impl(pool, data_dir)) {}
+    : impl_(new Impl(pool, data_dir)) {
+}
 
-LocalRunner::~LocalRunner() {}
+LocalRunner::~LocalRunner() {
+}
 
-void LocalRunner::Init() {}
+void LocalRunner::Init() {
+}
 
-void LocalRunner::Shutdown() { impl_->ShutDown(); }
+void LocalRunner::Shutdown() {
+  impl_->ShutDown();
+}
 
-void LocalRunner::OperatorStart(const pb::Operator* op) { impl_->Start(op); }
+void LocalRunner::OperatorStart(const pb::Operator* op) {
+  impl_->Start(op);
+}
 
-RawContext* LocalRunner::CreateContext() { return impl_->NewContext(); }
+RawContext* LocalRunner::CreateContext() {
+  return impl_->NewContext();
+}
 
 void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
@@ -474,6 +506,8 @@ size_t LocalRunner::ProcessInputFile(const std::string& filename, pb::WireFormat
   return cnt;
 }
 
-void LocalRunner::Stop() { CHECK_NOTNULL(impl_)->Break(); }
+void LocalRunner::Stop() {
+  CHECK_NOTNULL(impl_)->Break();
+}
 
 }  // namespace mr3
