@@ -3,24 +3,55 @@
 //
 #include "file/file.h"
 
-#include <memory>
 #include <gmock/gmock.h>
+#include <memory>
 
-#include "file/file_util.h"
-#include "file/gzip_file.h"
-#include "file/lz4_file.h"
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "file/file_util.h"
+#include "file/filesource.h"
+#include "file/gzip_file.h"
+#include "file/lz4_file.h"
+
 #include "util/sinksource.h"
 #include "util/zlib_source.h"
 
 using testing::ElementsAre;
 
 using std::string;
+
 namespace file {
+using util::StatusObject;
+
+class RingSource : public util::Source {
+ public:
+  RingSource(size_t sz, const string& buf) : read_size_(sz), buf_(buf) {
+    CHECK_LE(read_size_, buf_.size());
+    CHECK(!buf_.empty());
+  }
+
+ protected:
+  StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) final;
+
+  size_t index_ = 0;
+  size_t read_size_;
+  const string& buf_;
+};
+
+StatusObject<size_t> RingSource::ReadInternal(const strings::MutableByteRange& range) {
+  size_t sz = std::min(read_size_, range.size());
+  sz = std::min(sz, size_t(buf_.size() - index_));
+
+  memcpy(range.data(), buf_.data() + index_, sz);
+  index_ += sz;
+  if (index_ >= buf_.size()) {
+    index_ = 0;
+  }
+  return sz;
+}
 
 class FileTest : public ::testing::Test {
-protected:
+ protected:
 };
 
 TEST_F(FileTest, CompressGzipFile) {
@@ -118,7 +149,6 @@ TEST_F(FileTest, UniquePtr) {
   std::unique_ptr<WriteFile> file(Open(base::GetTestTempPath("foo.txt")));
 }
 
-
 constexpr size_t kStrLen = 1 << 17;
 
 static void BM_GZipFile(benchmark::State& state) {
@@ -149,5 +179,23 @@ static void BM_ZipSink(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_ZipSink)->Range(8, 32);
+
+static void BM_LineReader(benchmark::State& state) {
+  string buffer;
+  const size_t line_sz = state.range(0);
+  for (size_t i = 0; i < 1000; ++i) {
+    buffer.append(string(line_sz, 'a')).append("\n");
+  }
+  RingSource rs(97, buffer);
+  LineReader lr(&rs, DO_NOT_TAKE_OWNERSHIP);
+  StringPiece line;
+
+  while (state.KeepRunning()) {
+    CHECK(lr.Next(&line));
+    CHECK_EQ(line_sz, line.size());
+  }
+}
+BENCHMARK(BM_LineReader)->Range(100, 4000);
+
 
 }  // namespace file

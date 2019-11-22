@@ -100,7 +100,13 @@ class Source {
   Source() {}
   virtual ~Source() {}
 
-
+  /**
+   * @brief Reads source into mutable range.
+   *
+   * @return StatusObject<size_t> containing error Status if an error has happenned.
+   * Returns number of read bytes if status is ok. If bytes read is smaller than range.size()
+   * then source reached EOF.
+   */
   StatusObject<size_t> Read(const strings::MutableByteRange& range);
 
   void Prepend(const strings::ByteRange& range) {
@@ -108,6 +114,9 @@ class Source {
   }
 
  protected:
+  //! ReadInternal actually reads the data and is called by Read(). ReadInternal may return
+  //! less than range.size(), Read takes care of it and makes sure that range is fully filled
+  //! if possible.
   virtual StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) = 0;
 
  private:

@@ -258,39 +258,29 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
   std::unique_ptr<util::Source> src(file::Source::Uncompressed(fd));
   uint64_t cnt = 0;
 
-  if (FLAGS_local_runner_raw_shortcut_read) {
-    constexpr size_t kBufSize = 1 << 17;
-    std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
-    strings::MutableByteRange mb(buf.get(), kBufSize);
-    for (;; ++cnt) {
-      size_t res = CHECKED_GET(src->Read(mb));
-      if (res < kBufSize)
-        break;
-      if (cnt % 10 == 0)
-        this_fiber::yield();
-    };
-    return cnt;
-  }
-
   file::LineReader lr(src.release(), TAKE_OWNERSHIP);
   StringPiece result;
   string scratch;
 
   uint64_t start = base::GetMonotonicMicrosFast();
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
-    string tmp{result};
-    ++cnt;
-    if (VLOG_IS_ON(1)) {
-      int64_t delta = base::GetMonotonicMicrosFast() - start;
-      if (delta > 5)  // Filter out uninteresting fast Next calls.
-        per_thread_->record_fetch_hist.Add(delta);
+    if (!FLAGS_local_runner_raw_shortcut_read) {
+      string tmp{result};
+      ++cnt;
+      if (VLOG_IS_ON(1)) {
+        int64_t delta = base::GetMonotonicMicrosFast() - start;
+        if (delta > 5)  // Filter out uninteresting fast Next calls.
+          per_thread_->record_fetch_hist.Add(delta);
+      }
+      VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
+
+      cb(std::move(tmp));
+      start = base::GetMonotonicMicrosFast();
     }
-    VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
+
     if (cnt % 100 == 0) {
       this_fiber::yield();
     }
-    cb(std::move(tmp));
-    start = base::GetMonotonicMicrosFast();
   }
   VLOG(1) << "ProcessText Read " << cnt << " items from " << fname;
 

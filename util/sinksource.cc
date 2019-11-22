@@ -36,17 +36,24 @@ StatusObject<size_t> Source::Read(const strings::MutableByteRange& range) {
     read = prepend_buf_.size();
     prepend_buf_.clear();
     DCHECK_LT(read, range.size());
+
   }
   if (eof_)
     return read;
 
-  auto res = ReadInternal(range.subpiece(read));
-  if (!res.ok())
-    return res;
+  auto lrange = range.subpiece(read);
+  while (true) {
+    auto res = ReadInternal(lrange);
+    if (!res.ok())
+      return res;
 
-  eof_ = res.obj == 0;
-
-  return res.obj + read;
+    read += res.obj;
+    eof_ = res.obj == 0;
+    if (eof_ || res.obj == lrange.size())
+      break;
+    lrange = lrange.subpiece(res.obj);
+  }
+  return read;
 }
 
 StatusObject<size_t> StringSource::ReadInternal(const strings::MutableByteRange& range) {
