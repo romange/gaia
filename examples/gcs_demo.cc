@@ -33,15 +33,6 @@ using FileQ = fibers::buffered_channel<string>;
 
 string ca_cert;
 
-static asio::ssl::context CheckedSslContext() {
-  auto res = http::CreateClientSslContext(ca_cert);
-
-  asio::ssl::context* ssl_cntx = absl::get_if<asio::ssl::context>(&res);
-  CHECK(ssl_cntx) << absl::get<system::error_code>(res);
-
-  return std::move(*ssl_cntx);
-}
-
 void DownloadFile(StringPiece bucket, StringPiece obj_path, const GCE& gce,
                   http::HttpsClientPool* pool) {
   constexpr size_t kBufSize = 1 << 16;
@@ -73,7 +64,7 @@ void DownloadFile(StringPiece bucket, StringPiece obj_path, const GCE& gce,
 void DownloadConsumer(const GCE& gce, IoContext* io_context, FileQ* q) {
   string obj_path;
 
-  asio::ssl::context ssl_cntx = CheckedSslContext();
+  asio::ssl::context ssl_cntx = GCE::CheckedSslContext();
   http::HttpsClientPool api_pool(GCE::kApiDomain, &ssl_cntx, io_context);
   api_pool.set_connect_timeout(2000);
 
@@ -95,7 +86,7 @@ void Download(const GCE& gce, IoContextPool* pool) {
         [&](IoContext& io_context) { DownloadConsumer(gce, &io_context, &file_q); });
   });
   IoContext& io_context = pool->GetNextContext();
-  asio::ssl::context ssl_cntx = CheckedSslContext();
+  asio::ssl::context ssl_cntx = GCE::CheckedSslContext();
 
   auto producer = [&] {
     GCS gcs(gce, &ssl_cntx, &io_context);
@@ -112,7 +103,7 @@ void Download(const GCE& gce, IoContextPool* pool) {
 }
 
 void Run(const GCE& gce, IoContext* context) {
-  asio::ssl::context ssl_cntx = CheckedSslContext();
+  asio::ssl::context ssl_cntx = GCE::CheckedSslContext();
 
   GCS gcs(gce, &ssl_cntx, context);
   CHECK_STATUS(gcs.Connect(2000));
@@ -121,7 +112,7 @@ void Run(const GCE& gce, IoContext* context) {
     string upload_path = GCS::ToGcsPath(FLAGS_bucket, FLAGS_upload);
     LOG(INFO) << "Uploading data to " << upload_path;
 
-    asio::ssl::context ssl_cntx = CheckedSslContext();
+    asio::ssl::context ssl_cntx = GCE::CheckedSslContext();
     http::HttpsClientPool api_pool(GCE::kApiDomain, &ssl_cntx, context);
     api_pool.set_connect_timeout(2000);
 

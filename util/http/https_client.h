@@ -67,6 +67,8 @@ class SslStream {
 
   const error_code& last_error() const { return last_err_;}
 
+  auto native_handle() { return wrapped_.native_handle(); }
+
  private:
   Impl wrapped_;
   error_code last_err_;
@@ -136,7 +138,7 @@ class HttpsClient {
  private:
   error_code HandleError(const error_code& ec);
   bool HandleWriteError(const error_code& ec);
-  
+
   bool IsError(const error_code& ec) const {
     using err = ::boost::beast::http::error;
     return ec && ec != err::need_buffer;

@@ -124,15 +124,9 @@ Status GCE::ParseDefaultConfig() {
 }
 
 Status GCE::Init() {
-  string tmp_str;
-  if (!file_util::ReadFileToString("/etc/ssl/certs/ca-certificates.crt", &tmp_str)) {
-    return Status("Could not find certificates");
-  }
   system::error_code ec;
-  ssl_ctx_.reset(new SslContext{asio::ssl::context::tlsv12_client});
-  ssl_ctx_->set_verify_mode(asio::ssl::verify_peer);
-  ssl_ctx_->add_certificate_authority(asio::buffer(tmp_str), ec);
-  RETURN_ON_ERROR;
+  asio::ssl::context ssl_context = CheckedSslContext();
+  ssl_ctx_.reset(new SslContext{std::move(ssl_context)});
 
   string root_path = file_util::ExpandPath("~/.config/gcloud/");
   string gce_file = absl::StrCat(root_path, "gce");
@@ -149,6 +143,7 @@ Status GCE::Init() {
   };
 
   if (file::Exists(gce_file)) {
+    string tmp_str;
     CHECK(file_util::ReadFileToString(gce_file, &tmp_str));
     is_prod_env_ = (tmp_str == "True");
   } else {

@@ -39,6 +39,11 @@ constexpr const char kPort[] = "443";
     }
 
     stream->handshake(asio::ssl::stream_base::client, ec);
+    if (!ec) {
+      auto* cipher = SSL_get_current_cipher(stream->native_handle());
+      VLOG(1) << "SSL handshake success " << i << ", chosen "
+              << SSL_CIPHER_get_name(cipher) << "/" << SSL_CIPHER_get_version(cipher);
+    }
     return ec;
   }
 
@@ -64,15 +69,13 @@ SslContextResult CreateClientSslContext(absl::string_view cert_string) {
   }
   SSL_CTX* ssl_cntx = cntx.native_handle();
 
-	/*long flags = SSL_CTX_get_options(ssl_cntx);
-	flags |= SSL_OP_CIPHER_SERVER_PREFERENCE;
-	SSL_CTX_set_options(ssl_cntx, flags);
-*/
-#if 1   // Try AES-GCM
+  long flags = SSL_CTX_get_options(ssl_cntx);
+  flags |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+  SSL_CTX_set_options(ssl_cntx, flags);
+
   constexpr char kCiphers[] = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256";
   CHECK_EQ(1, SSL_CTX_set_cipher_list(ssl_cntx, kCiphers));
   CHECK_EQ(1, SSL_CTX_set_ecdh_auto(ssl_cntx, 1));
-#endif
 
   return SslContextResult(std::move(cntx));
 }
@@ -98,6 +101,13 @@ auto HttpsClient::InitSslClient() -> error_code {
     return ec;
   client_.reset(new SslStream(FiberSyncSocket{host_name_, kPort, &io_context_}, ssl_cntx_));
   client_->next_layer().set_keep_alive(true);
+
+  if (SSL_set_tlsext_host_name(client_->native_handle(), host_name_.c_str()) != 1) {
+    char buf[128];
+    ERR_error_string_n(::ERR_peek_last_error(), buf, sizeof(buf));
+
+    LOG(FATAL) << "Could not set hostname: " << buf;
+  }
 
   ec = SslConnect(client_.get(), reconnect_msec_);
   if (!ec) {
