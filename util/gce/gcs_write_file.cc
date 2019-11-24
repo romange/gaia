@@ -30,11 +30,11 @@ DEFINE_bool(gcs_dry_write, false,
 DEFINE_uint32(gcs_upload_buf_log_size, 20, "Upload buffer size is 2^k of this parameter.");
 
 using namespace boost;
-using namespace http;
 using namespace ::std;
 namespace h2 = detail::h2;
 using base::GetMonotonicMicrosFast;
 using file::WriteFile;
+using http::HttpsClientPool;
 
 namespace {
 
@@ -220,7 +220,7 @@ auto GcsWriteFile::PrepareRequest(size_t to, ssize_t total) -> Request {
   return req;
 }
 
-auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, HttpsClient* client)
+auto ApiSenderDynamicBody::SendRequestIterative(const Request& req, http::HttpsClient* client)
     -> error_code {
   system::error_code ec = client->Send(req);
   if (ec) {

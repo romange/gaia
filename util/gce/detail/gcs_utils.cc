@@ -14,7 +14,7 @@ namespace util {
 namespace detail {
 
 using namespace boost;
-using namespace http;
+using http::HttpsClientPool;
 using namespace ::std;
 
 unique_ptr<VarzQps> gcs_writes;
@@ -106,7 +106,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
   return Status(StatusCode::IO_ERROR, "Maximum iterations reached");
 }
 
-auto ApiSenderBufferBody::SendRequestIterative(const Request& req, HttpsClient* client)
+auto ApiSenderBufferBody::SendRequestIterative(const Request& req, http::HttpsClient* client)
     -> error_code {
   system::error_code ec = client->Send(req);
   if (ec) {

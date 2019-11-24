@@ -16,10 +16,10 @@
 namespace util {
 
 using namespace boost;
-using namespace http;
 using namespace ::std;
 namespace h2 = beast::http;
 using file::ReadonlyFile;
+using http::HttpsClientPool;
 
 namespace {
 
