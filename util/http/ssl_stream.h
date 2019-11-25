@@ -51,6 +51,11 @@ class Engine {
   // Put input data that was read from the transport.
   boost::asio::const_buffer put_input(const boost::asio::const_buffer& data);
 
+  void GetWriteBuf(boost::asio::mutable_buffer* mbuf);
+
+  //! sz should be less or equal to the size returned by GetWriteBuf.
+  void CommitWriteBuf(size_t sz);
+
   // Map an error::eof code returned by the underlying transport according to
   // the type and state of the SSL session. Returns a const reference to the
   // error code object, suitable for passing to a completion handler.
@@ -194,20 +199,20 @@ std::size_t SslStream::io(Stream& next_layer, const Operation& op, boost::system
 
   boost::system::error_code io_ec;
   std::size_t bytes_transferred = 0;
+  boost::asio::mutable_buffer mb;
+  size_t read_sz;
+
   do {
     switch (op(engine_, ec, bytes_transferred)) {
       case engine::want_input_and_retry:
-
-        // If the input buffer is empty then we need to read some more data from
-        // the underlying transport.
-        if (input_.size() == 0) {
-          input_ = boost::asio::buffer(input_buffer_, next_layer.read_some(input_buffer_, io_ec));
-          if (!ec)
-            ec = io_ec;
+        engine_.GetWriteBuf(&mb);
+        read_sz = next_layer.read_some(mb, io_ec);
+        if (io_ec) {
+          ec = io_ec;
+          break;
         }
 
-        // Pass the new input data to the engine.
-        input_ = engine_.put_input(input_);
+        engine_.CommitWriteBuf(read_sz);
 
         // Try the operation again.
         continue;

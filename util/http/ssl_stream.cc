@@ -23,23 +23,20 @@ std::size_t io_fun(Stream& next_layer, const Operation& op, SslStream* core,
   std::size_t bytes_transferred = 0;
   using asio::ssl::detail::engine;
   DVLOG(1) << "io_fun::start";
-
+  asio::mutable_buffer mb;
+  size_t read_sz;
   do
     switch (op(core->engine_, ec, bytes_transferred)) {
       case engine::want_input_and_retry:
         DVLOG(2) << "want_input_and_retry";
-
-        // If the input buffer is empty then we need to read some more data from
-        // the underlying transport.
-        if (core->input_.size() == 0) {
-          core->input_ =
-              asio::buffer(core->input_buffer_, next_layer.read_some(core->input_buffer_, io_ec));
-          if (!ec)
-            ec = io_ec;
+        core->engine_.GetWriteBuf(&mb);
+        read_sz = next_layer.read_some(mb, io_ec);
+        if (io_ec) {
+          ec = io_ec;
+          break;
         }
 
-        // Pass the new input data to the engine.
-        core->input_ = core->engine_.put_input(core->input_);
+        core->engine_.CommitWriteBuf(read_sz);
 
         // Try the operation again.
         continue;
@@ -225,6 +222,18 @@ asio::const_buffer Engine::put_input(const asio::const_buffer& data) {
   int length = ::BIO_write(ext_bio_, data.data(), static_cast<int>(data.size()));
 
   return asio::buffer(data + (length > 0 ? static_cast<std::size_t>(length) : 0));
+}
+
+void Engine::GetWriteBuf(asio::mutable_buffer* mbuf) {
+  char* buf = nullptr;
+
+  int res = BIO_nwrite0(ext_bio_, &buf);
+  CHECK_GE(res, 0);
+  *mbuf = asio::mutable_buffer{buf, size_t(res)};
+}
+
+void Engine::CommitWriteBuf(size_t sz) {
+  CHECK_EQ(sz, BIO_nwrite(ext_bio_, nullptr, sz));
 }
 
 const system::error_code& Engine::map_error_code(system::error_code& ec) const {
