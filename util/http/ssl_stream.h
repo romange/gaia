@@ -11,6 +11,7 @@ namespace util {
 namespace http {
 
 namespace detail {
+
 class Engine {
  public:
   using verify_mode = ::boost::asio::ssl::verify_mode;
@@ -23,13 +24,10 @@ class Engine {
   ~Engine();
 
   // Get the underlying implementation in the native type.
-  SSL* native_handle();
+  SSL* native_handle() { return ssl_; }
 
   // Set the peer verification mode.
   boost::system::error_code set_verify_mode(verify_mode v, boost::system::error_code& ec);
-
-  // Set the peer verification depth.
-  boost::system::error_code set_verify_depth(int depth, boost::system::error_code& ec);
 
   // Perform an SSL handshake using either SSL_connect (client-side) or
   // SSL_accept (server-side).
@@ -112,9 +110,16 @@ class SslStream {
   // (fiber) SyncRead interface:
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
   template <typename MBS> size_t read_some(const MBS& bufs, error_code& ec) {
-    namespace detail = ::boost::asio::ssl::detail;
+    namespace a = ::boost::asio;
 
-    size_t res = io(next_layer_, detail::read_op<MBS>(bufs), ec);
+    auto cb = [&](detail::Engine& eng, error_code& ec, size_t& bytes_transferred) {
+      a::mutable_buffer buffer =
+          a::detail::buffer_sequence_adapter<a::mutable_buffer, MBS>::first(bufs);
+
+      return eng.read(buffer, ec, bytes_transferred);
+    };
+
+    size_t res = io(next_layer_, cb, ec);
     last_err_ = ec;
     return res;
   }
@@ -126,9 +131,15 @@ class SslStream {
   //! SyncWrite interface:
   //! https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
   template <typename BS> size_t write_some(const BS& bufs, error_code& ec) {
-    namespace detail = ::boost::asio::ssl::detail;
+    namespace a = ::boost::asio;
+    auto cb = [&](detail::Engine& eng, error_code& ec, size_t& bytes_transferred) {
+      a::const_buffer buffer =
+          a::detail::buffer_sequence_adapter<a::const_buffer, BS>::first(bufs);
 
-    size_t res = io(next_layer_, detail::write_op<BS>(bufs), ec);
+      return eng.write(buffer, ec, bytes_transferred);
+    };
+
+    size_t res = io(next_layer_, cb, ec);
     last_err_ = ec;
     return res;
   }
@@ -149,7 +160,7 @@ class SslStream {
 
   // private:
   // The SSL engine.
-  ::boost::asio::ssl::detail::engine engine_;
+  detail::Engine engine_;
 
   // Buffer space used to prepare output intended for the transport.
   std::vector<unsigned char> output_buffer_space_;
@@ -183,7 +194,7 @@ std::size_t SslStream::io(Stream& next_layer, const Operation& op, boost::system
 
   boost::system::error_code io_ec;
   std::size_t bytes_transferred = 0;
-  do
+  do {
     switch (op(engine_, ec, bytes_transferred)) {
       case engine::want_input_and_retry:
 
@@ -230,7 +241,7 @@ std::size_t SslStream::io(Stream& next_layer, const Operation& op, boost::system
         engine_.map_error_code(ec);
         return bytes_transferred;
     }
-  while (!ec);
+  } while (!ec);
 
   // Operation failed. Return result to caller.
   engine_.map_error_code(ec);
