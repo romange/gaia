@@ -29,7 +29,7 @@ class FilePrinter {
   using FieldDescriptor = ::google::protobuf::FieldDescriptor;
   using Descriptor = ::google::protobuf::Descriptor;
 
-  using FieldPrinterPredicate = std::function<::google::protobuf::TextFormat::FieldValuePrinter*(
+  using FieldPrinterFactory = std::function<::google::protobuf::TextFormat::FieldValuePrinter*(
       const FieldDescriptor& fd)>;
 
   FilePrinter();
@@ -46,7 +46,7 @@ class FilePrinter {
     options_ = options;
   }
 
-  void RegisterFieldPrinter(FieldPrinterPredicate pred) {
+  void RegisterFieldPrinter(FieldPrinterFactory pred) {
     field_printer_cb_ = pred;
   }
 
@@ -67,6 +67,8 @@ class FilePrinter {
  private:
   class PrintTask;
 
+  // TODO: to replace this logic with IoContextPool.
+  // We can use OpenFiberReadFile to read via fiber-friendly files.
   struct PrintSharedData {
     std::mutex m;
     const plang::Expr* expr = nullptr;
@@ -84,11 +86,11 @@ class FilePrinter {
   PrintSharedData shared_data_;
   Pb2JsonOptions options_;
 
-  typedef std::pair<FieldPrinterPredicate,
+  typedef std::pair<FieldPrinterFactory,
                     std::unique_ptr<::google::protobuf::TextFormat::FieldValuePrinter>>
       FieldPrinterType;
 
-  FieldPrinterPredicate field_printer_cb_;
+  FieldPrinterFactory field_printer_cb_;
   uint64_t count_ = 0;
 };
 

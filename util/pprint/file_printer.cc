@@ -192,6 +192,7 @@ auto FilePrinter::GetDescriptor() const -> const Descriptor* {
 Status FilePrinter::Run() {
   StringPiece record;
   while (true) {
+    // Reads raw record from the file.
     util::StatusObject<bool> res = Next(&record);
     if (!res.ok())
       return res.status;

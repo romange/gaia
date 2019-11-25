@@ -12,9 +12,7 @@
 
 namespace util {
 
-
 namespace detail {
-
 
 void SingleProducerTaskPoolBase::ThreadInfo::Join() {
   if (d.thread_id) {

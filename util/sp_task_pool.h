@@ -4,8 +4,8 @@
 #ifndef _UTIL_SP_TASK_POOL_H
 #define _UTIL_SP_TASK_POOL_H
 
-// Used by pprint_utils.
-
+// Deprecated class. Used by pprint_utils.
+//
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -21,7 +21,6 @@
 #include "base/event_count.h"
 #include "base/type_traits.h"
 #include "absl/utility/utility.h"   // for absl::apply
-// #include "base/walltime.h"  // for GetMonotonicJiffies
 
 /*
   Single producer high performant Task Pool, designed to route work to worker threads.
@@ -79,7 +78,6 @@ namespace detail {
 */
 class SingleProducerTaskPoolBase {
  public:
-  // typedef void (*TaskCb)(void* arg, void* shared);
 
   // Does not take ownership over shared_data.
   // per_thread_capacity - is queue capacity per each thread.
@@ -123,9 +121,6 @@ class SingleProducerTaskPoolBase {
     virtual bool IsQueueEmpty() const = 0;
     virtual unsigned QueueSize() const = 0;
     virtual ~ThreadLocalInterface();
-
-    // uint64 queue_delay_jiffies = 0;  // total delay in jiffies (100usec).
-    // uint64 queue_delay_count = 0;
   };
 
   std::string base_name_;
@@ -183,10 +178,8 @@ class SingleProducerTaskPool : public detail::SingleProducerTaskPoolBase {
 
   struct CallItem {
     TaskArgs args;
-    // int64 ts;
 
     template <typename... Args> CallItem(Args&&... a) : args(std::forward<Args>(a)...) {
-      // ts = base::GetMonotonicJiffies();
     }
 
     CallItem() {
