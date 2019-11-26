@@ -65,6 +65,7 @@ class IoContextPool {
    * The 'func' must accept IoContext& as its argument.
    */
   template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AsyncOnAll(Func&& func) {
+    CheckRunningState();
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
       // func must be copied, it can not be moved, because we dsitribute it into multiple
@@ -81,6 +82,7 @@ class IoContextPool {
    */
   template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
   void AsyncOnAll(Func&& func) {
+    CheckRunningState();
     for (unsigned i = 0; i < size(); ++i) {
       IoContext& context = context_arr_[i];
       // Copy func on purpose, see above.
@@ -156,6 +158,7 @@ class IoContextPool {
 
  private:
   void WrapLoop(size_t index, fibers_ext::BlockingCounter* bc);
+  void CheckRunningState();
 
   typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
 
