@@ -43,6 +43,10 @@ void IoContextPool::WrapLoop(size_t index, fibers_ext::BlockingCounter* bc) {
   VLOG(1) << "Finished io thread " << index;
 }
 
+void IoContextPool::CheckRunningState() {
+  CHECK_EQ(RUN, state_);
+}
+
 void IoContextPool::Run() {
   CHECK_EQ(STOPPED, state_);
 
