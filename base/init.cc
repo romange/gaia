@@ -4,6 +4,8 @@
 
 #include "base/init.h"
 
+#include <atomic>
+
 #include "absl/debugging/failure_signal_handler.h"
 #include "absl/debugging/symbolize.h"
 #include "base/logging.h"
@@ -36,8 +38,13 @@ void ModuleInitializer::RunFtors(bool is_ctor) {
 
 #undef MainInitGuard
 
+static std::atomic_bool main_run_once{false};
+
 MainInitGuard::MainInitGuard(int* argc, char*** argv) {
   // MallocExtension::Initialize();
+  if (main_run_once.exchange(true))
+    return;
+
   google::ParseCommandLineFlags(argc, argv, true);
   google::InitGoogleLogging((*argv)[0]);
 
@@ -57,6 +64,9 @@ MainInitGuard::MainInitGuard(int* argc, char*** argv) {
 }
 
 MainInitGuard::~MainInitGuard() {
+  if (!main_run_once.exchange(false))
+    return;
+
   __internal__::ModuleInitializer::RunFtors(false);
   base::DestroyJiffiesTimer();
   google::ShutdownGoogleLogging();
