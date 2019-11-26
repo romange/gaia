@@ -38,11 +38,11 @@ void ModuleInitializer::RunFtors(bool is_ctor) {
 
 #undef MainInitGuard
 
-static std::atomic_bool main_run_once{false};
+static std::atomic<int> main_init_guard_count{0};
 
 MainInitGuard::MainInitGuard(int* argc, char*** argv) {
   // MallocExtension::Initialize();
-  if (main_run_once.exchange(true))
+  if (main_init_guard_count.fetch_add(1))
     return;
 
   google::ParseCommandLineFlags(argc, argv, true);
@@ -64,7 +64,9 @@ MainInitGuard::MainInitGuard(int* argc, char*** argv) {
 }
 
 MainInitGuard::~MainInitGuard() {
-  if (!main_run_once.exchange(false))
+  int count = main_init_guard_count.fetch_add(-1);
+  CHECK_GT(count, 0);
+  if (count > 1)
     return;
 
   __internal__::ModuleInitializer::RunFtors(false);
