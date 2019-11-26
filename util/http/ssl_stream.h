@@ -24,7 +24,9 @@ class Engine {
   ~Engine();
 
   // Get the underlying implementation in the native type.
-  SSL* native_handle() { return ssl_; }
+  SSL* native_handle() {
+    return ssl_;
+  }
 
   // Set the peer verification mode.
   boost::system::error_code set_verify_mode(verify_mode v, boost::system::error_code& ec);
@@ -55,6 +57,9 @@ class Engine {
 
   //! sz should be less or equal to the size returned by GetWriteBuf.
   void CommitWriteBuf(size_t sz);
+
+  void GetReadBuf(boost::asio::const_buffer* cbuf);
+  void AdvanceRead(size_t sz);
 
   // Map an error::eof code returned by the underlying transport according to
   // the type and state of the SSL session. Returns a const reference to the
@@ -124,7 +129,7 @@ class SslStream {
       return eng.read(buffer, ec, bytes_transferred);
     };
 
-    size_t res = io(next_layer_, cb, ec);
+    size_t res = IoLoop(cb, ec);
     last_err_ = ec;
     return res;
   }
@@ -138,13 +143,12 @@ class SslStream {
   template <typename BS> size_t write_some(const BS& bufs, error_code& ec) {
     namespace a = ::boost::asio;
     auto cb = [&](detail::Engine& eng, error_code& ec, size_t& bytes_transferred) {
-      a::const_buffer buffer =
-          a::detail::buffer_sequence_adapter<a::const_buffer, BS>::first(bufs);
+      a::const_buffer buffer = a::detail::buffer_sequence_adapter<a::const_buffer, BS>::first(bufs);
 
       return eng.write(buffer, ec, bytes_transferred);
     };
 
-    size_t res = io(next_layer_, cb, ec);
+    size_t res = IoLoop(cb, ec);
     last_err_ = ec;
     return res;
   }
@@ -163,94 +167,42 @@ class SslStream {
     return engine_.native_handle();
   }
 
-  // private:
-  // The SSL engine.
-  detail::Engine engine_;
-
-  // Buffer space used to prepare output intended for the transport.
-  std::vector<unsigned char> output_buffer_space_;
-
-  // A buffer that may be used to prepare output intended for the transport.
-  const boost::asio::mutable_buffer output_buffer_;
-
-  // Buffer space used to read input intended for the engine.
-  std::vector<unsigned char> input_buffer_space_;
-
-  // A buffer that may be used to read input intended for the engine.
-  const boost::asio::mutable_buffer input_buffer_;
-
-  // The buffer pointing to the engine's unconsumed input.
-  boost::asio::const_buffer input_;
 
  private:
-  enum { max_tls_record_size = 17 * 1024 };
+  using want = detail::Engine::want;
 
-  template <typename Stream, typename Operation>
-  std::size_t io(Stream& next_layer, const Operation& op, boost::system::error_code& ec);
+  template <typename Operation>
+  std::size_t IoLoop(const Operation& op, boost::system::error_code& ec);
 
+  void IoHandler(want op_code, boost::system::error_code& ec);
+
+  detail::Engine engine_;
   FiberSyncSocket next_layer_;
 
   error_code last_err_;
 };
 
-template <typename Stream, typename Operation>
-std::size_t SslStream::io(Stream& next_layer, const Operation& op, boost::system::error_code& ec) {
+template <typename Operation>
+std::size_t SslStream::IoLoop(const Operation& op, boost::system::error_code& ec) {
   using engine = ::boost::asio::ssl::detail::engine;
 
-  boost::system::error_code io_ec;
   std::size_t bytes_transferred = 0;
-  boost::asio::mutable_buffer mb;
-  size_t read_sz;
+  want op_code = engine::want_nothing;
 
   do {
-    switch (op(engine_, ec, bytes_transferred)) {
-      case engine::want_input_and_retry:
-        engine_.GetWriteBuf(&mb);
-        read_sz = next_layer.read_some(mb, io_ec);
-        if (io_ec) {
-          ec = io_ec;
-          break;
-        }
+    op_code = op(engine_, ec, bytes_transferred);
+    if (ec)
+      break;
+    IoHandler(op_code, ec);
+  } while (!ec && int(op_code) < 0);
 
-        engine_.CommitWriteBuf(read_sz);
-
-        // Try the operation again.
-        continue;
-
-      case engine::want_output_and_retry:
-
-        // Get output data from the engine and write it to the underlying
-        // transport.
-        boost::asio::write(next_layer, engine_.get_output(output_buffer_), io_ec);
-        if (!ec)
-          ec = io_ec;
-
-        // Try the operation again.
-        continue;
-
-      case engine::want_output:
-
-        // Get output data from the engine and write it to the underlying
-        // transport.
-        boost::asio::write(next_layer, engine_.get_output(output_buffer_), io_ec);
-        if (!ec)
-          ec = io_ec;
-
-        // Operation is complete. Return result to caller.
-        engine_.map_error_code(ec);
-        return bytes_transferred;
-
-      default:
-
-        // Operation is complete. Return result to caller.
-        engine_.map_error_code(ec);
-        return bytes_transferred;
-    }
-  } while (!ec);
-
-  // Operation failed. Return result to caller.
-  engine_.map_error_code(ec);
-  return 0;
+  if (ec) {
+    // Operation failed. Return result to caller.
+    engine_.map_error_code(ec);
+    return 0;
+  } else {
+    return bytes_transferred;
+  }
 }
 
 }  // namespace http

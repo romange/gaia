@@ -14,74 +14,6 @@ namespace http {
 using namespace boost;
 using asio::ssl::detail::stream_core;
 
-namespace {
-
-template <typename Stream, typename Operation>
-std::size_t io_fun(Stream& next_layer, const Operation& op, SslStream* core,
-                   system::error_code& ec) {
-  system::error_code io_ec;
-  std::size_t bytes_transferred = 0;
-  using asio::ssl::detail::engine;
-  DVLOG(1) << "io_fun::start";
-  asio::mutable_buffer mb;
-  size_t read_sz;
-  do
-    switch (op(core->engine_, ec, bytes_transferred)) {
-      case engine::want_input_and_retry:
-        DVLOG(2) << "want_input_and_retry";
-        core->engine_.GetWriteBuf(&mb);
-        read_sz = next_layer.read_some(mb, io_ec);
-        if (io_ec) {
-          ec = io_ec;
-          break;
-        }
-
-        core->engine_.CommitWriteBuf(read_sz);
-
-        // Try the operation again.
-        continue;
-
-      case engine::want_output_and_retry:
-        DVLOG(2) << "engine::want_output_and_retry";
-
-        // Get output data from the engine and write it to the underlying
-        // transport.
-        asio::write(next_layer, core->engine_.get_output(core->output_buffer_), io_ec);
-        if (!ec)
-          ec = io_ec;
-
-        // Try the operation again.
-        continue;
-
-      case engine::want_output:
-        DVLOG(2) << "engine::want_output";
-
-        // Get output data from the engine and write it to the underlying
-        // transport.
-        asio::write(next_layer, core->engine_.get_output(core->output_buffer_), io_ec);
-        if (!ec)
-          ec = io_ec;
-
-        // Operation is complete. Return result to caller.
-        core->engine_.map_error_code(ec);
-        return bytes_transferred;
-
-      default:
-        DVLOG(2) << "core->engine_.map_error_code";
-
-        // Operation is complete. Return result to caller.
-        core->engine_.map_error_code(ec);
-        return bytes_transferred;
-    }
-  while (!ec);
-
-  // Operation failed. Return result to caller.
-  core->engine_.map_error_code(ec);
-  return 0;
-}
-
-}  // namespace
-
 namespace detail {
 
 using asio::ssl::stream_base;
@@ -236,6 +168,18 @@ void Engine::CommitWriteBuf(size_t sz) {
   CHECK_EQ(sz, BIO_nwrite(ext_bio_, nullptr, sz));
 }
 
+void Engine::GetReadBuf(asio::const_buffer* cbuf) {
+  char* buf = nullptr;
+
+  int res = BIO_nread0(ext_bio_, &buf);
+  CHECK_GE(res, 0);
+  *cbuf = asio::const_buffer{buf, size_t(res)};
+}
+
+void Engine::AdvanceRead(size_t sz) {
+  CHECK_EQ(sz, BIO_nread(ext_bio_, nullptr, sz));
+}
+
 const system::error_code& Engine::map_error_code(system::error_code& ec) const {
   // We only want to map the error::eof code.
   if (ec != asio::error::eof)
@@ -265,10 +209,7 @@ const system::error_code& Engine::map_error_code(system::error_code& ec) const {
 }  // namespace detail
 
 SslStream::SslStream(FiberSyncSocket&& arg, asio::ssl::context& ctx)
-    : engine_(ctx.native_handle()), output_buffer_space_(max_tls_record_size),
-      output_buffer_(asio::buffer(output_buffer_space_)),
-      input_buffer_space_(max_tls_record_size),
-      input_buffer_(asio::buffer(input_buffer_space_)), next_layer_(std::move(arg)) {
+    : engine_(ctx.native_handle()), next_layer_(std::move(arg)) {
 }
 
 void SslStream::handshake(Impl::handshake_type type, error_code& ec) {
@@ -278,7 +219,44 @@ void SslStream::handshake(Impl::handshake_type type, error_code& ec) {
     return eng.handshake(type, ec);
   };
 
-  io_fun(next_layer_, cb, this, ec);
+  IoLoop(cb, ec);
+}
+
+void SslStream::IoHandler(want op_code, system::error_code& ec) {
+  using asio::ssl::detail::engine;
+  DVLOG(1) << "io_fun::start";
+  asio::mutable_buffer mb;
+  asio::const_buffer cbuf;
+  size_t buf_size;
+
+  switch (op_code) {
+    case engine::want_input_and_retry:
+      DVLOG(2) << "want_input_and_retry";
+      engine_.GetWriteBuf(&mb);
+      buf_size = next_layer_.read_some(mb, ec);
+      if (!ec) {
+        engine_.CommitWriteBuf(buf_size);
+      }
+      break;
+
+    case engine::want_output_and_retry:
+    case engine::want_output:
+
+      DVLOG(2) << "engine::want_output"
+               << (op_code == engine::want_output_and_retry ? "_and_retry" : "");
+      engine_.GetReadBuf(&cbuf);
+
+      // Get output data from the engine and write it to the underlying
+      // transport.
+
+      asio::write(next_layer_, cbuf, ec);
+      if (!ec) {
+        engine_.AdvanceRead(cbuf.size());
+      }
+      break;
+
+    default:;
+  }
 }
 
 }  // namespace http
