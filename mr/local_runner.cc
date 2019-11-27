@@ -263,11 +263,9 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
   string scratch;
 
   uint64_t start = base::GetMonotonicMicrosFast();
-  string record;
-
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     if (!FLAGS_local_runner_raw_shortcut_read) {
-      record.assign(result.data(), result.size());
+      string record{result};
 
       if (VLOG_IS_ON(1)) {
         int64_t delta = base::GetMonotonicMicrosFast() - start;

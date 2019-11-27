@@ -47,11 +47,6 @@ class Engine {
   want read(const boost::asio::mutable_buffer& data, boost::system::error_code& ec,
             std::size_t& bytes_transferred);
 
-  // Get output data to be written to the transport.
-  boost::asio::mutable_buffer get_output(const boost::asio::mutable_buffer& data);
-
-  // Put input data that was read from the transport.
-  boost::asio::const_buffer put_input(const boost::asio::const_buffer& data);
 
   void GetWriteBuf(boost::asio::mutable_buffer* mbuf);
 
@@ -166,7 +161,6 @@ class SslStream {
   auto native_handle() {
     return engine_.native_handle();
   }
-
 
  private:
   using want = detail::Engine::want;

@@ -12,6 +12,7 @@
 #include "file/filesource.h"
 #include "file/gzip_file.h"
 #include "file/lz4_file.h"
+#include "file/test_util.h"
 
 #include "util/sinksource.h"
 #include "util/zlib_source.h"
@@ -22,33 +23,6 @@ using std::string;
 
 namespace file {
 using util::StatusObject;
-
-class RingSource : public util::Source {
- public:
-  RingSource(size_t sz, const string& buf) : read_size_(sz), buf_(buf) {
-    CHECK_LE(read_size_, buf_.size());
-    CHECK(!buf_.empty());
-  }
-
- protected:
-  StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) final;
-
-  size_t index_ = 0;
-  size_t read_size_;
-  const string& buf_;
-};
-
-StatusObject<size_t> RingSource::ReadInternal(const strings::MutableByteRange& range) {
-  size_t sz = std::min(read_size_, range.size());
-  sz = std::min(sz, size_t(buf_.size() - index_));
-
-  memcpy(range.data(), buf_.data() + index_, sz);
-  index_ += sz;
-  if (index_ >= buf_.size()) {
-    index_ = 0;
-  }
-  return sz;
-}
 
 class FileTest : public ::testing::Test {
  protected:

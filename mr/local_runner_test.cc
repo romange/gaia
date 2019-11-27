@@ -9,6 +9,8 @@
 #include "mr/do_context.h"
 
 #include "file/file_util.h"
+#include "file/test_util.h"
+#include "file/filesource.h"
 #include "util/asio/io_context_pool.h"
 #include "util/plang/addressbook.pb.h"
 
@@ -150,5 +152,34 @@ TEST_F(LocalRunnerTest, CloseShard) {
 
   ASSERT_THAT(out_files, KeyMatch(shards));
 }
+
+using benchmark::DoNotOptimize;
+
+static void BM_ReadTextAndPassIt(benchmark::State& state) {
+  string buffer;
+  const size_t line_sz = state.range(0);
+  for (size_t i = 0; i < 1000; ++i) {
+    buffer.append(string(line_sz, 'a')).append("\n");
+  }
+  RawSinkCb cb = [](string&& val) {
+    string tmp = std::move(val);
+    DoNotOptimize(tmp);
+  };
+
+  file::RingSource rs(197, buffer);
+  file::LineReader lr(&rs, DO_NOT_TAKE_OWNERSHIP);
+  StringPiece line;
+
+  string scratch;
+  string record;
+  while (state.KeepRunning()) {
+    CHECK(lr.Next(&line, &scratch));
+    // record.assign(line.data(), line.size());
+    string record{line};
+
+    cb(std::move(record));
+  }
+}
+BENCHMARK(BM_ReadTextAndPassIt)->Range(100, 4000);
 
 }  // namespace mr3

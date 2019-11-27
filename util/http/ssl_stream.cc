@@ -144,18 +144,6 @@ Engine::want Engine::read(const asio::mutable_buffer& data, system::error_code& 
   return perform(&Engine::do_read, data.data(), data.size(), ec, &bytes_transferred);
 }
 
-asio::mutable_buffer Engine::get_output(const asio::mutable_buffer& data) {
-  int length = ::BIO_read(ext_bio_, data.data(), static_cast<int>(data.size()));
-
-  return asio::buffer(data, length > 0 ? static_cast<std::size_t>(length) : 0);
-}
-
-asio::const_buffer Engine::put_input(const asio::const_buffer& data) {
-  int length = ::BIO_write(ext_bio_, data.data(), static_cast<int>(data.size()));
-
-  return asio::buffer(data + (length > 0 ? static_cast<std::size_t>(length) : 0));
-}
-
 void Engine::GetWriteBuf(asio::mutable_buffer* mbuf) {
   char* buf = nullptr;
 

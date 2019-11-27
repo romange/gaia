@@ -2,8 +2,8 @@ add_library(file file.cc file_util.cc filesource.cc gzip_file.cc list_file.cc li
             meta_map_block.cc compressors.cc lst2_impl.cc)
 cxx_link(file base strings util TRDP::lz4 TRDP::crc32c)
 
-add_library(test_util test_util.cc)
-target_link_libraries(test_util base file gaia_gtest_main)
+add_library(file_test_util test_util.cc)
+target_link_libraries(file_test_util base file gaia_gtest_main)
 
 cxx_proto_lib(proto_writer_test DEPENDS addressbook_proto)
 
@@ -23,7 +23,7 @@ add_library(fiber_file fiber_file.cc)
 cxx_link(fiber_file file fibers_ext)
 
 
-cxx_test(file_test file lz4_file LABELS CI)
-cxx_test(list_file_test file test_util LABELS CI)
+cxx_test(file_test file lz4_file file_test_util LABELS CI)
+cxx_test(list_file_test file file_test_util LABELS CI)
 cxx_test(proto_writer_test proto_writer proto_writer_test_proto LABELS CI)
 

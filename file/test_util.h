@@ -3,6 +3,7 @@
 
 #include <string>
 #include "file/file.h"
+#include "util/sinksource.h"
 
 // When running unittests, get the directory containing the source code.
 std::string TestSourceDir();
@@ -44,6 +45,22 @@ public:
    int Handle() const { return 0; }
  private:
   bool returned_partial_ = false;
+};
+
+/**
+ * @brief Infinite source that wraps itself around the provided buffer.
+ *
+ */
+class RingSource : public util::Source {
+ public:
+  RingSource(size_t sz, const std::string& buf);
+
+ protected:
+  util::StatusObject<size_t> ReadInternal(const strings::MutableByteRange& range) final;
+
+  size_t index_ = 0;
+  size_t read_size_;
+  const std::string& buf_;
 };
 
 }  // namespace file

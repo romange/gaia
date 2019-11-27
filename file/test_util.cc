@@ -9,15 +9,16 @@
 namespace {
 
 using std::string;
-using util::StatusObject;
 using util::Status;
 using util::StatusCode;
+using util::StatusObject;
 
 // Creates a temporary directory on demand and deletes it when the process
 // quits.
 class TempDirDeleter {
  public:
-  TempDirDeleter() {}
+  TempDirDeleter() {
+  }
   ~TempDirDeleter() {
     if (!name_.empty()) {
       file_util::DeleteRecursively(name_);
@@ -50,10 +51,8 @@ string TestTempDir() {
 
 namespace file {
 
-
-
-StatusObject<size_t>
-    ReadonlyStringFile::Read(size_t offset, const strings::MutableByteRange& range) {
+StatusObject<size_t> ReadonlyStringFile::Read(size_t offset,
+                                              const strings::MutableByteRange& range) {
   if (contents_.size() <= offset)
     return Status(StatusCode::RUNTIME_ERROR, "Beyond string size");
   size_t length = range.size();
@@ -71,6 +70,23 @@ StatusObject<size_t>
 
   memcpy(range.begin(), contents_.data() + offset, length);
   return length;
+}
+
+RingSource::RingSource(size_t sz, const string& buf) : read_size_(sz), buf_(buf) {
+  CHECK_LE(read_size_, buf_.size());
+  CHECK(!buf_.empty());
+}
+
+StatusObject<size_t> RingSource::ReadInternal(const strings::MutableByteRange& range) {
+  size_t sz = std::min(read_size_, range.size());
+  sz = std::min(sz, size_t(buf_.size() - index_));
+
+  memcpy(range.data(), buf_.data() + index_, sz);
+  index_ += sz;
+  if (index_ >= buf_.size()) {
+    index_ = 0;
+  }
+  return sz;
 }
 
 }  // namespace file
