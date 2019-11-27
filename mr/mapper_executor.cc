@@ -222,7 +222,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
   Record record;
   uint64_t record_num = 0;
-  auto cb = handler_wrapper->Get(0);
+  RawSinkCb cb = handler_wrapper->Get(0);
   base::Histogram hist;
 
   while (true) {
@@ -260,7 +260,7 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
     auto now = base::GetMonotonicMicrosFast();
     if (record_num % 100 == 0) {
-      LOG_IF(INFO, now - props.resume_ts() >= 100000) << "MapFiber CallStats: " << hist.ToString();
+      VLOG_IF(1, now - props.resume_ts() >= 100000) << "MapFiber CallStats: " << hist.ToString();
 
       hist.Clear();
       this_fiber::yield();
@@ -277,8 +277,10 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     SetPosition(pos_payload.first, raw_context);
 
     cb(std::move(pos_payload.second));
-    auto delta = base::GetMonotonicMicrosFast() - now;
-    hist.Add(delta);
+    if (VLOG_IS_ON(1)) {
+      auto delta = base::GetMonotonicMicrosFast() - now;
+      hist.Add(delta);
+    }
   }
   VLOG(1) << "MapFiber finished " << record_num;
 }

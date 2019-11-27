@@ -263,9 +263,12 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
   string scratch;
 
   uint64_t start = base::GetMonotonicMicrosFast();
+  string record;
+
   while (!stop_signal_.load(std::memory_order_relaxed) && lr.Next(&result, &scratch)) {
     if (!FLAGS_local_runner_raw_shortcut_read) {
-      string tmp{result};
+      record.assign(result.data(), result.size());
+
       if (VLOG_IS_ON(1)) {
         int64_t delta = base::GetMonotonicMicrosFast() - start;
         if (delta > 5)  // Filter out uninteresting fast Next calls.
@@ -273,7 +276,7 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
       }
       VLOG_IF(2, cnt % 1000 == 0) << "Read " << cnt << " items";
 
-      cb(std::move(tmp));
+      cb(std::move(record));
       start = base::GetMonotonicMicrosFast();
     }
 
