@@ -18,7 +18,13 @@ class LocalRunner;
 
 class PipelineMain {
 public:
+  //! This sets up MR pipeline object and all its dependencies like IO pool.
+  PipelineMain();
+
+  //! This c'tor runs MainInitGuard as part of its initialization flow and then
+  // everything that PipelineMain() does.
   PipelineMain(int* argc, char*** argv);
+
   ~PipelineMain();
 
   util::IoContextPool* pool() { return pool_.get(); }
@@ -28,7 +34,10 @@ public:
   LocalRunner* StartLocalRunner(const std::string& root_dir, bool stop_on_break = true);
 
 private:
-  std::unique_ptr<MainInitGuard> guard_;
+  void Init();
+
+  std::unique_ptr<MainInitGuard> guard_;  // Must be first to be destructed last.
+
   std::unique_ptr<util::IoContextPool> pool_;
   std::unique_ptr<Pipeline> pipeline_;
   std::unique_ptr<util::AcceptServer> acc_server_;

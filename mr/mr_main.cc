@@ -18,8 +18,16 @@ DEFINE_int32(http_port, 8080, "Port number.");
 
 using namespace util;
 
-PipelineMain::PipelineMain(int* argc, char*** argv)
-    : guard_(new MainInitGuard{argc, argv}), pool_(new IoContextPool) {
+PipelineMain::PipelineMain() {
+  Init();
+}
+
+PipelineMain::PipelineMain(int* argc, char*** argv) : guard_(new MainInitGuard{argc, argv}) {
+  Init();
+}
+
+void PipelineMain::Init() {
+  pool_.reset(new IoContextPool);
   pool_->Run();
   pipeline_.reset(new Pipeline(pool_.get()));
 
