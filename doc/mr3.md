@@ -24,16 +24,14 @@ from each other. In general any mr3 stream is represented as unordered, possibly
 list of records using C++ handle `PTable<MyRecordType>`. In this case it's just unsharded `PTable<string>`.
 In addition, the input files could be read from the local disk or from gcs storage. For example,
 ```console
-./gsod_group gs://kushkush/gsod/gsod-shards-0
+./gsod_group gs://kushkush/gsod/gsod-shards-0*
 ```
 
 or
 ```console
 ./gsod_group '/tmp/gsod/gsod-shards-0*'
 ```
-are both valid invocations.
-The framework will expand GCS prefix or a bash glob accordingly. Note, that globs are currently not supported for GCS,
-only prefixes.
+are both valid invocations. The framework will expand GCS prefix or a bash glob accordingly. Note, that the framework currently supports GCS globs with '*' at the end, or '**' for the recursive glob.
 
 Then we instruct our pipeline to run our mapper to parse each line into a meaningful record.
 In this case our files are in CSV format and we decided that
