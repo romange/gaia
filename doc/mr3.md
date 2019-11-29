@@ -1,9 +1,7 @@
 ## GSOD weather - tutorial
 
-[gsod_group.cc](../examples/gsod_group.cc) file demonstrates a map/reshard/group pattern
-that often is needed when processing large datasets. The framework provides just partitioning (resharding),
-while joining (or grouping) is done in user code. This way, unlike in `Beam` or similar frameworks,
-the developer has more control on how to reduce unnecesary I/O.
+[gsod_group.cc](https://github.com/romange/gaia/blob/master/examples/gsod_group.cc) file demonstrates a map/reshard/group pattern that often is needed when processing large datasets. The framework provides just partitioning (resharding),
+while joining (or grouping) is done in the user code. This way, unlike in `Beam` or similar frameworks, the developer has more control on how to reduce unnecesary I/O.
 
 ### Preliminaries
 The first example we will cover is processing of
@@ -42,16 +40,13 @@ To make our own C++ class `GsodRecord` serializable within `mr3` we must special
 They will be used later when our mapper outputs the extracted records using `DoContext<GsodRecord>`.
 
 Our mapper is expected to have a hook method `void Do(InputType val, mr3::DoContext<OutputType>* context)`.
-In our case `InputType` is `std::string` since we process string table and `OutputType=GsodRecord`.
-Please note that the framework determines based on the signature of `GsodMapper::Do` the type of the
-result table `PTable<GsodRecord>`.
+In our case `InputType` is `std::string` since we process string table and `OutputType` is `GsodRecord`. Please note that the framework determines based on the signature of `GsodMapper::Do` the type of the result table `PTable<GsodRecord>`.
 
 The mapper can output as many records as it wishes upon each input record it processes or
 not output at all. This allows to filter, expand or do other transformations on the data.
 
 In addition, a mapper can have `void OnShardFinish(DoContext<OutputType>* context);` hook that
-will be called when the mapper has finished processing a batch of records scheduled by the framework.
-Anyway, in our case `GsodMapper` just outputs a single `GsodRecord` record per input line.
+will be called when the mapper has finished processing a batch of records scheduled by the framework. Anyway, in this case `GsodMapper` just outputs a single `GsodRecord` record per input line.
 
 ~~~~~~~~~~cpp
 StringTable ss = pipeline->ReadText("gsod", inputs).set_skip_header(1);
@@ -71,11 +66,7 @@ records.Write("gsod_map", pb::WireFormat::TXT)
 
 This line instructs the framework to reshard the mapped table of GsodRecords by year into 10 shards.
 The final shards will also be compressed. Resharding is crucial to bring records of particular
-property together so that we could load them into RAM. Since we used ModN sharding it most likely that
-each file shard will contain multiple years of data but every unique year will be hold by exactly
-one file shard. The developer is expected to choose shards count in such way that the input data divided
-by number of shards will be less than `total RAM available` / `number of cores on the machine`.
-The number of shards is bounded from above by file limit of the system (
+property together so that we could load them into RAM. Since we used ModN sharding it most likely that each file shard will contain multiple years of data but every unique year will be hold by exactly one file shard. The developer is expected to choose shards count in such way that the input data divided by number of shards will be less than `total RAM available` / `number of cores on the machine`. The number of shards is bounded from above by file limit of the system (
   it's usually less than 10K though it's customizable). Producing only few shards
 is also not very good, because it might affect the level of parallelism when running the next operator.
 
