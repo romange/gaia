@@ -38,7 +38,8 @@ struct FiberSocketImpl::ClientData {
   fibers::mutex connect_mu;
   chrono::steady_clock::duration connect_duration = chrono::seconds(2);
 
-  ClientData(IoContext* io) : io_cntx(io) {}
+  ClientData(IoContext* io) : io_cntx(io) {
+  }
 };
 
 FiberSocketImpl::~FiberSocketImpl() {
@@ -49,7 +50,8 @@ FiberSocketImpl::~FiberSocketImpl() {
 }
 
 FiberSocketImpl::FiberSocketImpl(socket_t&& sock, size_t rbuf_size)
-    : rbuf_size_(rbuf_size), sock_(std::move(sock)), rbuf_(new uint8_t[rbuf_size]) {}
+    : rbuf_size_(rbuf_size), sock_(std::move(sock)), rbuf_(new uint8_t[rbuf_size]) {
+}
 
 // Creates a client socket.
 FiberSocketImpl::FiberSocketImpl(const std::string& hname, const std::string& port, IoContext* cntx,
@@ -102,6 +104,8 @@ void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
 }
 
 void FiberSocketImpl::WakeWorker() {
+  // This notify function is efficient and usually awakes worker fiber that 
+  // is indeed suspended.
   clientsock_data_->worker_ev.notify();
 }
 
@@ -165,6 +169,9 @@ void FiberSocketImpl::ClientWorker() {
       }
       continue;
     }
+
+    this_fiber::yield();
+
     VLOG(3) << "BeforeCvReadWait";
     auto should_iterate = [this] {
       return !is_open() || (read_state_ == READ_IDLE && rslice_.size() != rbuf_size_);
@@ -177,8 +184,8 @@ void FiberSocketImpl::ClientWorker() {
   VLOG(1) << "FiberSocketReadExit";
 }
 
-ABSL_MUST_USE_RESULT system::error_code
-OpenAndConfigure(bool keep_alive, asio::ip::tcp::socket& sock) {
+ABSL_MUST_USE_RESULT system::error_code OpenAndConfigure(bool keep_alive,
+                                                         asio::ip::tcp::socket& sock) {
   using namespace asio::ip;
   system::error_code ec;
 
@@ -231,8 +238,8 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
   asio::steady_timer timer(asio_io_cntx, clientsock_data_->connect_duration);
   timer.async_wait([&](const system::error_code& ec) {
     if (!ec) {  // Successfully expired.
-      VSOCK(1) << "Cancelling after "
-              << detail::ms_duration(clientsock_data_->connect_duration) << " millis.";
+      VSOCK(1) << "Cancelling after " << detail::ms_duration(clientsock_data_->connect_duration)
+               << " millis.";
       sock_.cancel();
     }
   });
@@ -247,7 +254,8 @@ system::error_code FiberSocketImpl::Reconnect(const std::string& hname,
     sock_.async_connect(remote_dest, fibers_ext::yield[ec]);
 
     // If we succeeded - break the loop.
-    // Also, for operation aborted we do not iterate since it means we went over connect_duration limit.
+    // Also, for operation aborted we do not iterate since it means we went over connect_duration
+    // limit.
     if (!ec || ec == asio::error::operation_aborted)
       break;
     VSOCK(2) << "Connect iteration " << result_index << ", error " << ec;

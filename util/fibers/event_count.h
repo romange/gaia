@@ -23,6 +23,8 @@ class EventCount {
   using spinlock_lock_t = ::boost::fibers::detail::spinlock_lock;
   using wait_queue_t = ::boost::fibers::context::wait_queue_t;
 
+  //! Please note that we must use spinlock_lock_t because we suspend and unlock atomically
+  // and fibers lib supports only this type for that.
   ::boost::fibers::detail::spinlock wait_queue_splk_{};
   wait_queue_t wait_queue_{};
 
