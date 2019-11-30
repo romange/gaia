@@ -6,7 +6,7 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include "util/asio/asio_utils.h"
-#include "util/asio/detail/fiber_socket_impl.hpp"
+#include "util/asio/detail/fiber_socket_impl.h"
 
 namespace util {
 

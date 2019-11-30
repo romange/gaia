@@ -9,6 +9,7 @@
 #include "absl/base/attributes.h"
 #include "base/logging.h"
 #include "util/asio/io_context.h"
+#include "util/fibers/event_count.h"
 
 #define VSOCK(verbosity) VLOG(verbosity) << "sock[" << native_handle() << "] "
 #define DVSOCK(verbosity) DVLOG(verbosity) << "sock[" << native_handle() << "] "
@@ -29,7 +30,9 @@ using socket_t = FiberSocketImpl::next_layer_type;
 
 struct FiberSocketImpl::ClientData {
   ::boost::fibers::fiber worker;
-  fibers_ext::condition_variable_any cv_st, worker_cv;
+  fibers_ext::condition_variable_any cv_st;
+  fibers_ext::EventCount worker_ev;
+
   IoContext* io_cntx;
 
   fibers::mutex connect_mu;
@@ -75,7 +78,8 @@ void FiberSocketImpl::Shutdown(error_code& ec) {
     VSOCK(1) << "Sock Shutdown ";
     if (clientsock_data_) {
       DVSOCK(1) << "Sock Closed";
-      clientsock_data_->worker_cv.notify_one();
+      WakeWorker();
+
       if (clientsock_data_->worker.joinable())
         clientsock_data_->worker.join();
       DVSOCK(1) << "Worker Joined";
@@ -97,7 +101,9 @@ void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
   }
 }
 
-void FiberSocketImpl::WakeWorker() { clientsock_data_->worker_cv.notify_one(); }
+void FiberSocketImpl::WakeWorker() {
+  clientsock_data_->worker_ev.notify();
+}
 
 void FiberSocketImpl::InitiateConnection() {
   CHECK(!clientsock_data_ && (&io_cntx_->raw_context() == &sock_.get_executor().context()));
@@ -164,9 +170,7 @@ void FiberSocketImpl::ClientWorker() {
       return !is_open() || (read_state_ == READ_IDLE && rslice_.size() != rbuf_size_);
     };
 
-    fibers::mutex mu;
-    std::unique_lock<fibers::mutex> lock(mu);
-    clientsock_data_->worker_cv.wait(lock, should_iterate);
+    clientsock_data_->worker_ev.await(should_iterate);
 
     VLOG(3) << "WorkerIteration: ";
   }

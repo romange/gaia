@@ -6,8 +6,9 @@
 // https://software.intel.com/en-us/forums/intel-threading-building-blocks/topic/299245
 #pragma once
 
+#include <boost/fiber/mutex.hpp>
+
 #include "base/macros.h"
-#include "util/fibers/condition_variable.h"
 
 namespace util {
 namespace fibers_ext {
