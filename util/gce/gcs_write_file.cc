@@ -139,7 +139,6 @@ bool GcsWriteFile::Open() {
 }
 
 Status GcsWriteFile::Write(const uint8* buffer, uint64 length) {
-  CHECK_GT(length, 0);
   CHECK(pool_->io_context().InContextThread());
 
   while (length) {
