@@ -26,6 +26,8 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Started http server on port " << port;
 
   RespListener resp_listener;
+  resp_listener.Init();
+
   port = server->AddListener(FLAGS_port, &resp_listener);
   LOG(INFO) << "Started redis server on port " << port;
   server->Run();

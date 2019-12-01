@@ -11,14 +11,14 @@
 namespace redis {
 
 class RespParser;
-
+class Command;
 /**
  * @brief Server side handler that talks RESP (REdis Serialization Protocol)
  *
  */
 class RespConnectionHandler : public ::util::ConnectionHandler {
  public:
-  RespConnectionHandler(util::IoContext* context);
+  RespConnectionHandler(const std::vector<Command>& commands, util::IoContext* context);
 
  protected:
   boost::system::error_code HandleRequest() final;
@@ -38,11 +38,26 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
   std::vector<ReqState> states_;
   std::string line_buffer_;
   ::boost::asio::mutable_buffer bulk_str_;
+  const std::vector<Command>& commands_;
 };
 
 class RespListener : public ::util::ListenerInterface {
  public:
+  using Args = std::vector<absl::string_view>;
+
+  RespListener();
+  ~RespListener();
+
+  void Init();
+
   util::ConnectionHandler* NewConnection(util::IoContext& context) final;
+
+ private:
+  ::boost::system::error_code PrintCommands(const Args& args, util::FiberSyncSocket* s);
+  ::boost::system::error_code Ping(const Args& args, util::FiberSyncSocket* s);
+
+
+  std::vector<Command> commands_;
 };
 
 }  // namespace redis
