@@ -1,2 +1,2 @@
-add_executable(redis_toy_server redis_toy_server.cc resp_connection_handler.cc)
-cxx_link(redis_toy_server base http_v2)
+add_executable(redis_toy_server redis_toy_server.cc resp_parser.cc resp_connection_handler.cc)
+cxx_link(redis_toy_server base http_v2 absl_variant)
