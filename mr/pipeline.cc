@@ -134,8 +134,8 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
     }
   }
 
-  auto cb = [this](string k, FrequencyMap<uint32_t>* ptr) {
-    auto res = freq_maps_.emplace(std::move(k), ptr);
+  auto cb = [this](string k, AnyFreqMap&& any) {
+    auto res = freq_maps_.emplace(std::move(k), std::move(any));
     CHECK(res.second) << "Frequency map " << k
                       << " was created more than once across the pipeline run.";
   };
@@ -148,13 +148,6 @@ pb::Input* Pipeline::mutable_input(const std::string& name) {
   CHECK(it != inputs_.end());
 
   return it->second->mutable_msg();
-}
-
-const FrequencyMap<uint32_t>* Pipeline::GetFreqMap(const std::string& map_id) const {
-  auto it = freq_maps_.find(map_id);
-  if (it == freq_maps_.end())
-    return nullptr;
-  return it->second.get();
 }
 
 Runner::~Runner() {}

@@ -26,21 +26,18 @@ void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) 
 
   // Merge frequency maps. We aggregate counters for all the contexts.
   for (auto& k_v : raw_context->freq_maps_) {
-    auto& uptr = freq_maps_[k_v.first];
-    if (uptr) {
-      auto& sum_map = *uptr;
-      for (auto& map_value : *k_v.second) {
-        sum_map[map_value.first] += map_value.second;
-      }
+    auto& any = freq_maps_[k_v.first];
+    if (any.has_value()) {
+      any.Add(k_v.second);
     } else {
-      uptr.swap(k_v.second);  // steal the map.
+      any = std::move(k_v.second); // steal the map.
     }
   }
 }
 
-void OperatorExecutor::ExtractFreqMap(function<void(string, FrequencyMap<uint32_t>*)> cb) {
+void OperatorExecutor::ExtractFreqMap(function<void(string, AnyFreqMap&&)> cb) {
   for (auto& k_v : freq_maps_) {
-    cb(k_v.first, k_v.second.release());
+    cb(k_v.first, std::move(k_v.second));
   }
   freq_maps_.clear();
 }
