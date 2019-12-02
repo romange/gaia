@@ -134,7 +134,7 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
     }
   }
 
-  auto cb = [this](string k, AnyFreqMap&& any) {
+  auto cb = [this](string k, detail::FreqMapWrapper&& any) {
     auto res = freq_maps_.emplace(std::move(k), std::move(any));
     CHECK(res.second) << "Frequency map " << k
                       << " was created more than once across the pipeline run.";

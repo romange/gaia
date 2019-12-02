@@ -96,15 +96,11 @@ struct ShardVisitor {
 
 }  // namespace
 
-void AnyFreqMap::CheckType(const std::type_info& t) const {
-  CHECK(t == any_.type()) << "Mismatch between " << t.name() << " and " << any_.type().name();
-}
-
 RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 
 RawContext::~RawContext() {}
 
-const AnyFreqMap *
+const detail::FreqMapWrapper *
 RawContext::FindMaterializedFreqMapStatisticNotNull(const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
   if (it == finalized_maps_->end()) {

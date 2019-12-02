@@ -37,7 +37,7 @@ class OperatorExecutor : public std::enable_shared_from_this<OperatorExecutor> {
   // Stops the executor in the middle.
   virtual void Stop() = 0;
 
-  void ExtractFreqMap(std::function<void(std::string, AnyFreqMap&&)> cb);
+  void ExtractFreqMap(std::function<void(std::string, detail::FreqMapWrapper&&)> cb);
  protected:
   void RegisterContext(RawContext* context);
 

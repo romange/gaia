@@ -6,8 +6,8 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/types/any.h"
 
+#include "mr/impl/freq_map_wrapper.h"
 #include "mr/mr_types.h"
 #include "mr/output.h"
 #include "strings/unique_strings.h"
@@ -42,49 +42,6 @@ template <> struct RecordTraits<std::string> {
   }
 };
 
-template<typename T> using FrequencyMap = absl::flat_hash_map<T, size_t>;
-
-class AnyFreqMap {
-public:
-  template <class T>
-  AnyFreqMap(FrequencyMap<T>&& m) : any_(std::move(m)) {}
-
-  AnyFreqMap() {}
-
-  bool has_value() const { return any_.has_value(); }
-  std::type_info type() const;
-  void Add(const AnyFreqMap& other) { extra_functions_->Add(other, this); }
-  template <class T> FrequencyMap<T>& Cast() {
-    CheckType(typeid(FrequencyMap<T>));
-    return *absl::any_cast<FrequencyMap<T>>(&any_);
-  }
-  template <class T> const FrequencyMap<T>& Cast() const {
-    CheckType(typeid(FrequencyMap<T>));
-    return *absl::any_cast<FrequencyMap<T>>(&any_);
-  }
-
-private:
-  class ExtraFunctions {
-  public:
-    virtual void Add(const AnyFreqMap& other, AnyFreqMap *that) = 0;
-    virtual ~ExtraFunctions() {}
-  };
-
-  template <class T>
-  class ExtraFunctionsImpl {
-  public:
-    void Add(const AnyFreqMap& other, AnyFreqMap *that) override {
-      for (auto& map_value : other.Cast<T>())
-        (that->Cast<T>())[map_value.first] += map_value.second;
-    }
-  };
-
-  void CheckType(const std::type_info&) const;
-
-  absl::any any_;
-  std::unique_ptr<ExtraFunctions> extra_functions_;
-};
-
 /** RawContext and its wrapper DoContext<T> provide bidirectional interface from user classes
  *  to the framework.
  *  RawContextis created per IO Context thread. In other words, RawContext is thread-local but
@@ -97,7 +54,7 @@ class RawContext {
   //! std/absl monostate is an empty class that gives variant optional semantics.
   using InputMetaData = absl::variant<absl::monostate, int64_t, std::string>;
   using FreqMapRegistry =
-    absl::flat_hash_map<std::string, AnyFreqMap>;
+    absl::flat_hash_map<std::string, detail::FreqMapWrapper>;
 
   RawContext();
 
@@ -135,9 +92,9 @@ class RawContext {
   //! map_id must be unique for each map across the whole pipeline run.
   template <class T>
   FrequencyMap<T>&  GetFreqMapStatistic(const std::string& map_id) {
-    auto res = freq_maps_.emplace(map_id, AnyFreqMap());
+    auto res = freq_maps_.emplace(map_id, detail::FreqMapWrapper());
     if (res.second) {
-      res.first->second = AnyFreqMap(FrequencyMap<T>());
+      res.first->second = detail::FreqMapWrapper(FrequencyMap<T>());
     }
     return res.first->second.Cast<T>();
   }
@@ -146,7 +103,7 @@ class RawContext {
   template <class T>
   const FrequencyMap<T>* FindMaterializedFreqMapStatistic(
       const std::string& map_id) const {
-    const AnyFreqMap *ptr = FindMaterializedFreqMapStatisticNotNull(map_id);
+    const detail::FreqMapWrapper *ptr = FindMaterializedFreqMapStatisticNotNull(map_id);
     return ptr->Cast<T>();
   }
 
@@ -158,7 +115,7 @@ class RawContext {
     WriteInternal(shard_id, std::move(record));
   }
 
-  const AnyFreqMap *FindMaterializedFreqMapStatisticNotNull(const std::string&) const;
+  const detail::FreqMapWrapper *FindMaterializedFreqMapStatisticNotNull(const std::string&) const;
 
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
