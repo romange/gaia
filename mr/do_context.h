@@ -88,8 +88,6 @@ class RawContext {
   const InputMetaData& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
-  //! TODO: to make GetMutableMap templated to support various keys.
-  //! map_id must be unique for each map across the whole pipeline run.
   template <class T>
   FrequencyMap<T>&  GetFreqMapStatistic(const std::string& map_id) {
     auto res = freq_maps_.emplace(map_id, detail::FreqMapWrapper());
