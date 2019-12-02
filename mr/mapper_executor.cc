@@ -99,7 +99,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   util::VarzFunction varz_func("mapper-executor", [this] { return GetStats(); });
 
-  file_name_q_.reset(new FileNameQueue{2});
+  file_name_q_.reset(new FileNameQueue{16});
   runner_->OperatorStart(&tb->op());
 
   // As long as we do not block in the function we can use AwaitOnAll.
