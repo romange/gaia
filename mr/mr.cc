@@ -100,21 +100,14 @@ RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 
 RawContext::~RawContext() {}
 
-FrequencyMap<uint32_t>& RawContext::GetFreqMapStatistic(const std::string& map_id) {
-  auto res = freq_maps_.emplace(map_id, nullptr);
-  if (res.second) {
-    res.first->second.reset(new FrequencyMap<uint32_t>);
-  }
-  return *res.first->second;
-}
-
-const FrequencyMap<uint32_t>* RawContext::FindMaterializedFreqMapStatistic(
-    const std::string& map_id) const {
+const detail::FreqMapWrapper *
+RawContext::FindMaterializedFreqMapStatisticImpl(const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
-  if (it == finalized_maps_->end())
+  if (it == finalized_maps_->end()) {
     return nullptr;
-  else
-    return it->second.get();
+  } else {
+    return &it->second;
+  }
 }
 
 std::string ShardId::ToString(absl::string_view basename) const {

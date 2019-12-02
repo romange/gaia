@@ -7,6 +7,7 @@
 
 #include "absl/container/flat_hash_map.h"
 
+#include "mr/impl/freq_map_wrapper.h"
 #include "mr/mr_types.h"
 #include "mr/output.h"
 #include "strings/unique_strings.h"
@@ -41,8 +42,6 @@ template <> struct RecordTraits<std::string> {
   }
 };
 
-template<typename T> using FrequencyMap = absl::flat_hash_map<T, size_t>;
-
 /** RawContext and its wrapper DoContext<T> provide bidirectional interface from user classes
  *  to the framework.
  *  RawContextis created per IO Context thread. In other words, RawContext is thread-local but
@@ -54,7 +53,8 @@ class RawContext {
  public:
   //! std/absl monostate is an empty class that gives variant optional semantics.
   using InputMetaData = absl::variant<absl::monostate, int64_t, std::string>;
-  using FreqMapRegistry = absl::flat_hash_map<std::string, std::unique_ptr<FrequencyMap<uint32_t>>>;
+  using FreqMapRegistry =
+    absl::flat_hash_map<std::string, detail::FreqMapWrapper>;
 
   RawContext();
 
@@ -88,12 +88,22 @@ class RawContext {
   const InputMetaData& meta_data() const { return metadata_;}
   bool is_binary() const { return is_binary_; }
 
-  //! TODO: to make GetMutableMap templated to support various keys.
-  //! map_id must be unique for each map across the whole pipeline run.
-  FrequencyMap<uint32_t>&  GetFreqMapStatistic(const std::string& map_id);
+  template <class T>
+  FrequencyMap<T>&  GetFreqMapStatistic(const std::string& map_id) {
+    auto res = freq_maps_.emplace(map_id, detail::FreqMapWrapper());
+    if (res.second) {
+      res.first->second = detail::FreqMapWrapper(FrequencyMap<T>());
+    }
+    return res.first->second.Cast<T>();
+  }
 
   // Finds the map produced by operators in the previous steps
-  const FrequencyMap<uint32_t>* FindMaterializedFreqMapStatistic(const std::string& map_id) const;
+  template <class T>
+  const FrequencyMap<T>* FindMaterializedFreqMapStatistic(
+      const std::string& map_id) const {
+    const detail::FreqMapWrapper *ptr = FindMaterializedFreqMapStatisticImpl(map_id);
+    return ptr->Cast<T>();
+  }
 
   const ShardId& current_shard() const { return current_shard_;}
 
@@ -102,6 +112,8 @@ class RawContext {
     ++item_writes_;
     WriteInternal(shard_id, std::move(record));
   }
+
+  const detail::FreqMapWrapper *FindMaterializedFreqMapStatisticImpl(const std::string&) const;
 
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
@@ -151,7 +163,8 @@ template <typename T> class DoContext {
 
   void CloseShard(const ShardId& sid) { raw()->CloseShard(sid); }
 
- private:
+private:
+
   Output<T> out_;
   RawContext* context_;
   RecordTraits<T> rt_;

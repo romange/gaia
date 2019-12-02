@@ -203,7 +203,7 @@ class IntMapper {
     IntVal iv;
     CHECK(safe_strto32(a.val, &iv.val)) << a.val;
     cntx->Write(iv);
-    auto& map = cntx->raw()->GetFreqMapStatistic("int_map");
+    auto& map = cntx->raw()->GetFreqMapStatistic<int>("int_map");
     ++map[iv.val];
   }
 };
@@ -234,7 +234,7 @@ TEST_F(MrTest, MapAB) {
 
   EXPECT_THAT(runner_.Table("table"), ElementsAre(MatchShard(1, expected)));
   EXPECT_THAT(runner_.Table("final_table"), ElementsAre(MatchShard(3, elements)));
-  auto* int_map = pipeline_->GetFreqMap("int_map");
+  auto* int_map = pipeline_->GetFreqMap<int>("int_map");
   ASSERT_TRUE(int_map);
   EXPECT_THAT(*int_map, UnorderedElementsAre(Pair(1, 1), Pair(2, 1), Pair(3, 1), Pair(4, 1)));
 }

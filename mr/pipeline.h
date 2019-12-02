@@ -97,7 +97,13 @@ class Pipeline {
 
   pb::Input* mutable_input(const std::string&);
 
-  const FrequencyMap<uint32_t>* GetFreqMap(const std::string& map_id) const;
+  template <class T>
+  const FrequencyMap<T>* GetFreqMap(const std::string& map_id) const {
+    auto it = freq_maps_.find(map_id);
+    if (it == freq_maps_.end())
+      return nullptr;
+    return &it->second.Cast<T>();
+  }
  private:
   PInput<std::string> Read(const std::string& name, pb::WireFormat::Type format,
                            const InputSpec& globs);
