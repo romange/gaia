@@ -103,7 +103,7 @@ class RawContext {
   template <class T>
   const FrequencyMap<T>* FindMaterializedFreqMapStatistic(
       const std::string& map_id) const {
-    const detail::FreqMapWrapper *ptr = FindMaterializedFreqMapStatisticNotNull(map_id);
+    const detail::FreqMapWrapper *ptr = FindMaterializedFreqMapStatisticImpl(map_id);
     return ptr->Cast<T>();
   }
 
@@ -115,7 +115,7 @@ class RawContext {
     WriteInternal(shard_id, std::move(record));
   }
 
-  const detail::FreqMapWrapper *FindMaterializedFreqMapStatisticNotNull(const std::string&) const;
+  const detail::FreqMapWrapper *FindMaterializedFreqMapStatisticImpl(const std::string&) const;
 
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;

@@ -101,7 +101,7 @@ RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
 RawContext::~RawContext() {}
 
 const detail::FreqMapWrapper *
-RawContext::FindMaterializedFreqMapStatisticNotNull(const std::string& map_id) const {
+RawContext::FindMaterializedFreqMapStatisticImpl(const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);
   if (it == finalized_maps_->end()) {
     return nullptr;
