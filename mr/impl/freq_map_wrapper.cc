@@ -1,3 +1,6 @@
+// Copyright 2019, Hagana 159.  All rights reserved.
+// Author: Ori Brostovski (oribrost@gmail.com)
+//
 #include "mr/impl/freq_map_wrapper.h"
 
 #include "base/logging.h"
