@@ -48,48 +48,52 @@ system::error_code RespConnectionHandler::HandleRequest() {
   RespParser parser;
 
   system::error_code ec;
-  num_commands_ = 1;
+  num_args_ = 1;
   IoState io_state = IoState::READ_EOL;
-  CHECK(states_.empty());
+  // CHECK(states_.empty());
+  req_state_ = CmdState::INIT;
 
-  states_.push_back(ReqState::INIT);
-
+  // states_.push_back(CmdState::INIT);
   VLOG(1) << "RespConnectionHandler::HandleRequest";
 
-  while (num_commands_ > 0) {
-    if (io_state == IoState::READ_EOL) {
-      auto dest_buf = parser.GetDestBuf();
-      if (dest_buf.size() < 2) {
-        return system::errc::make_error_code(system::errc::no_buffer_space);
-      }
+  while (args_.size() < num_args_) {
+    switch (io_state) {
+      case IoState::READ_EOL: {
+        auto dest_buf = parser.GetDestBuf();
+        if (dest_buf.size() < 2) {
+          return system::errc::make_error_code(system::errc::no_buffer_space);
+        }
 
-      size_t read_sz =
-          socket_->read_some(asio::mutable_buffer{dest_buf.data(), dest_buf.size()}, ec);
-      if (ec)
-        return ec;
-      RespParser::ParseStatus status = parser.WriteCommit(read_sz, &cmd);
-      if (status == RespParser::LINE_FINISHED) {
-        io_state = IoState::HANDLE_STRING;
+        size_t read_sz =
+            socket_->read_some(asio::mutable_buffer{dest_buf.data(), dest_buf.size()}, ec);
+        if (ec)
+          return ec;
+        RespParser::ParseStatus status = parser.WriteCommit(read_sz, &cmd);
+        if (status == RespParser::LINE_FINISHED) {
+          io_state = IoState::HANDLE_STRING;
+        }
+        break;
       }
-      continue;
-    } else if (io_state == IoState::READ_N) {
-      asio::read(*socket_, bulk_str_, ec);
-      if (ec)
-        return ec;
-      io_state = IoState::HANDLE_STRING;
-    } else {
-      CHECK(io_state == IoState::HANDLE_STRING);
-      ErrorState es = HandleNextString(cmd, &parser);
-      system::error_code* ec = absl::get_if<system::error_code>(&es);
-      if (ec)
-        return *ec;
-      IoState next_state = absl::get<IoState>(es);
-      if (next_state != IoState::READ_EOL || parser.ParseNext(&cmd) != RespParser::LINE_FINISHED) {
-        io_state = next_state;
+      case IoState::READ_N:
+        asio::read(*socket_, bulk_str_, ec);
+        if (ec)
+          return ec;
+        io_state = IoState::HANDLE_STRING;
+        ABSL_FALLTHROUGH_INTENDED;
+      case IoState::HANDLE_STRING: {
+        ErrorState es = HandleNextString(cmd, &parser);
+        system::error_code* ec = absl::get_if<system::error_code>(&es);
+        if (ec)
+          return *ec;
+        IoState next_state = absl::get<IoState>(es);
+        if (next_state != IoState::READ_EOL || parser.ParseNext(&cmd) == RespParser::MORE_DATA) {
+          io_state = next_state;
+        }
       }
     }
   }
-  CHECK(states_.empty());
+  ec = HandleCommand();
+  args_.clear();
 
   VLOG(1) << "Finished";
 
@@ -98,24 +102,21 @@ system::error_code RespConnectionHandler::HandleRequest() {
 
 auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser* parser)
     -> ErrorState {
-  CHECK(!states_.empty());
-
   VLOG(1) << "Blob: |" << blob << "|";
   system::error_code ec;
   namespace errc = system::errc;
 
-  ReqState st = states_.back();
-  states_.pop_back();
-  switch (st) {
-    case ReqState::INIT:
+  switch (req_state_) {
+    case CmdState::INIT:
+      req_state_ = CmdState::ARG_START;
       if (blob[0] == '*') {
         blob.remove_prefix(1);
-        if (!absl::SimpleAtoi(blob, &num_commands_))
+        if (!absl::SimpleAtoi(blob, &num_args_))
           return errc::make_error_code(errc::invalid_argument);
-        states_.push_back(ReqState::INIT);
         return IoState::READ_EOL;
       }
-
+      ABSL_FALLTHROUGH_INTENDED;
+    case CmdState::ARG_START:
       if (blob[0] == '$') {
         blob.remove_prefix(1);
         if (!absl::SimpleAtoi(blob, &bulk_size_))
@@ -128,47 +129,42 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         if (bulk_size_ <= buf.size()) {
           memcpy(ptr, buf.data(), bulk_size_);
           parser->Consume(bulk_size_);
-          blob = line_buffer_;
-        } else {
-          memcpy(ptr, buf.data(), buf.size());
-          parser->Reset();
-          bulk_str_ = asio::mutable_buffer{ptr + buf.size(), bulk_size_ - buf.size()};
-          VLOG(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
-          states_.push_back(ReqState::COMMAND_FINISH);
+          args_.push_back(std::move(line_buffer_));
 
-          return IoState::READ_N;
+          return IoState::READ_EOL;
         }
+        memcpy(ptr, buf.data(), buf.size());
+        parser->Reset();
+        bulk_str_ = asio::mutable_buffer{ptr + buf.size(), bulk_size_ - buf.size()};
+        VLOG(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
+        return IoState::READ_N;
       }
-      ec = HandleCommand(blob);
-      if (ec)
-        return ec;
+      ABSL_FALLTHROUGH_INTENDED;
+    case CmdState::ARG_END:
+      args_.push_back(string{blob});
       return IoState::READ_EOL;
-
-    case ReqState::COMMAND_FINISH:
-      ec = HandleCommand(blob);
-      if (ec)
-        return ec;
-      return IoState::READ_EOL;
+    default:
+      LOG(FATAL) << "BUG";
   }
 
   return system::error_code{};
 }
 
-system::error_code RespConnectionHandler::HandleCommand(absl::string_view cmd) {
-  CHECK_GT(num_commands_, 0);
+system::error_code RespConnectionHandler::HandleCommand() {
+  CHECK_EQ(num_args_, args_.size());
+  CHECK_GT(num_args_, 0);
 
-  LOG(INFO) << "Command: " << cmd;
-  --num_commands_;
+  LOG(INFO) << "Command: " << absl::StrJoin(args_, " ");
 
-  std::vector<absl::string_view> parts = absl::StrSplit(cmd, " ", absl::SkipWhitespace{});
-  string upper = absl::AsciiStrToUpper(parts[0]);
-  parts[0] = upper;
+  absl::AsciiStrToUpper(&args_.front());
+  const auto& upper = args_.front();
 
   for (size_t i = 0; i < commands_.size(); ++i) {
     if (upper == commands_[i].name()) {
-      return commands_[i].Call(parts, &socket_.value());
+      return commands_[i].Call(args_, &socket_.value());
     }
   }
+
   return errc::make_error_code(errc::invalid_argument);
 }
 
@@ -207,8 +203,7 @@ system::error_code RespListener::Ping(const Args& args, util::FiberSyncSocket* s
   const char kReply[] = "+PONG\r\n";
 
   system::error_code ec;
-  asio::write(*s, asio::buffer(kReply, sizeof(kReply)- 1), ec);
-
+  asio::write(*s, asio::buffer(kReply, sizeof(kReply) - 1), ec);
 
   return ec;
 }

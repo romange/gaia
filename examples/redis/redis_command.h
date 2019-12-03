@@ -41,7 +41,7 @@ enum CommandFlags {
 
 class Command {
  public:
-  using Args = std::vector<absl::string_view>;
+  using Args = std::vector<std::string>;
   using CommandFunction =
       std::function< ::boost::system::error_code(const Args&, util::FiberSyncSocket*)>;
 
