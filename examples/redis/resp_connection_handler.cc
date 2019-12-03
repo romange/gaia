@@ -48,18 +48,48 @@ system::error_code RespConnectionHandler::HandleRequest() {
   RespParser parser;
 
   system::error_code ec;
-  num_args_ = 1;
   IoState io_state = IoState::READ_EOL;
-  // CHECK(states_.empty());
   cmd_state_ = CmdState::INIT;
 
   // states_.push_back(CmdState::INIT);
   VLOG(1) << "RespConnectionHandler::HandleRequest";
 
   while (true) {
-    switch (io_state) {
+    if (cmd_state_ == CmdState::INIT) {
+      if (!args_.empty()) {
+        CHECK_EQ(args_.size(), num_args_);
+        ec = HandleCommand();
+        if (ec)
+          return ec;
+        args_.clear();
+        if (parser.ReadEof())
+          break;
+      }
+      num_args_ = 1;
+    }
+    ec = HandleIoState(&parser, &io_state);
+    if (ec)
+      break;
+  }
+
+  VLOG(1) << "Finished";
+
+  return ec;
+}
+
+system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoState* state) {
+  absl::string_view cmd;
+
+  system::error_code ec;
+  while (true) {
+    switch (*state) {
       case IoState::READ_EOL: {
-        auto dest_buf = parser.GetDestBuf();
+        if (parser->ParseNext(&cmd) == RespParser::LINE_FINISHED) {
+          *state = IoState::HANDLE_STRING;
+          break;
+        }
+
+        auto dest_buf = parser->GetDestBuf();
         if (dest_buf.size() < 2) {
           return system::errc::make_error_code(system::errc::no_buffer_space);
         }
@@ -68,45 +98,29 @@ system::error_code RespConnectionHandler::HandleRequest() {
             socket_->read_some(asio::mutable_buffer{dest_buf.data(), dest_buf.size()}, ec);
         if (ec)
           return ec;
-        RespParser::ParseStatus status = parser.WriteCommit(read_sz, &cmd);
-        if (status == RespParser::LINE_FINISHED) {
-          io_state = IoState::HANDLE_STRING;
-        }
+        parser->WriteCommit(read_sz);
+
         break;
       }
       case IoState::READ_N:
-        CHECK(parser.ReadEof());
+        CHECK(parser->ReadEof());
         asio::read(*socket_, bulk_str_, ec);
         if (ec)
           return ec;
-        io_state = IoState::READ_EOL;
+        *state = IoState::READ_EOL;
         break;
+
       case IoState::HANDLE_STRING: {
-        ErrorState es = HandleNextString(cmd, &parser);
-        system::error_code* ec = absl::get_if<system::error_code>(&es);
-        if (ec)
-          return *ec;
-        IoState next_state = absl::get<IoState>(es);
-        if (next_state != IoState::READ_EOL || parser.ParseNext(&cmd) == RespParser::MORE_DATA) {
-          io_state = next_state;
-        }
-        break;
+        ErrorState es = HandleNextString(cmd, parser);
+        system::error_code* ec2 = absl::get_if<system::error_code>(&es);
+        if (ec2)
+          return *ec2;
+
+        *state = absl::get<IoState>(es);
+        return ec;
       }
     }
-
-    if (args_.size() == num_args_) {
-      ec = HandleCommand();
-      if (ec)
-        return ec;
-      args_.clear();
-      num_args_ = 1;
-      cmd_state_ = CmdState::INIT;
-    }
   }
-
-  VLOG(1) << "Finished";
-
-  return ec;
 }
 
 auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser* parser)
@@ -148,19 +162,16 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         VLOG(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
 
         return IoState::READ_N;
-      } else {
-        args_.push_back(string{blob});
-        VLOG(1) << "Pushed " << args_.back();
-        cmd_state_ = CmdState::ARG_START;
-        return IoState::READ_EOL;
       }
-      break;
+      line_buffer_ = string{blob};
+      blob = absl::string_view{};
+      ABSL_FALLTHROUGH_INTENDED;
     case CmdState::EMPTY_EXPECTED:
       if (!blob.empty())
         return errc::make_error_code(errc::illegal_byte_sequence);
       args_.push_back(std::move(line_buffer_));
       VLOG(1) << "Pushed " << args_.back();
-      cmd_state_ = CmdState::ARG_START;
+      cmd_state_ = args_.size() < num_args_ ? CmdState::ARG_START : CmdState::INIT;
 
       return IoState::READ_EOL;
       break;

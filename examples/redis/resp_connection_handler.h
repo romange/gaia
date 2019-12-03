@@ -28,13 +28,15 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
 
   using ErrorState = absl::variant<boost::system::error_code, IoState>;
 
+  boost::system::error_code HandleIoState(RespParser* parser, IoState* state);
+
   ErrorState HandleNextString(absl::string_view blob, RespParser* parser);
   boost::system::error_code HandleCommand();
 
   uint32_t num_args_ = 1;
   uint32_t bulk_size_ = 0;
 
-  enum class CmdState : uint8_t { INIT = 1, ARG_START = 2, EMPTY_EXPECTED = 4 };
+  enum class CmdState : uint8_t { INIT = 1, ARG_START = 2, EMPTY_EXPECTED = 4};
   CmdState cmd_state_ = CmdState::INIT;
   std::string line_buffer_;
   ::boost::asio::mutable_buffer bulk_str_;

@@ -8,7 +8,7 @@ namespace redis {
 
 namespace {
 
-uint8_t* ParseLine(uint8_t* buf, const uint8_t* end, absl::string_view* res) {
+uint8_t* ParseLine(uint8_t* buf, const uint8_t* end) {
   uint8_t* start = buf;
 
   while (start < end) {
@@ -19,8 +19,7 @@ uint8_t* ParseLine(uint8_t* buf, const uint8_t* end, absl::string_view* res) {
 
     if (next[1] == '\n') {
       next[0] = '\0';
-      *res = absl::string_view{reinterpret_cast<char*>(buf), size_t(next - buf)};
-      return next + 2;
+      return next;
     }
     start = next + 1;
   }
@@ -29,40 +28,48 @@ uint8_t* ParseLine(uint8_t* buf, const uint8_t* end, absl::string_view* res) {
 
 }  // namespace
 
-auto RespParser::WriteCommit(size_t write_sz, absl::string_view* line) -> ParseStatus {
-  next_line_ = write_start_;
+void RespParser::WriteCommit(size_t write_sz) {
+  // next_line_ = write_start_;
   write_start_ += write_sz;
 
-  next_line_ = ParseLine(next_line_, write_start_, line);
-  return next_line_ ? LINE_FINISHED : MORE_DATA;
+  // next_line_ = ParseLine(next_line_, write_start_, line);
+  // return next_line_ ? LINE_FINISHED : MORE_DATA;
 }
 
 auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
-  if (!next_line_)
-    return MORE_DATA;
+  if (!next_read_) {
+    next_read_ = buf_.data();
+    next_parse_ = next_read_;
+  }
 
-  next_line_ = ParseLine(next_line_, write_start_, line);
-  if (next_line_)
+  if (write_start_ - next_parse_ < 2)
+    return ParseStatus::MORE_DATA;
+
+  uint8_t* tmp = ParseLine(next_parse_, write_start_);
+  if (tmp) {
+    *line = absl::string_view(reinterpret_cast<char*>(next_read_), tmp - next_read_);
+    next_read_ = tmp + 2;
+    next_parse_ = next_read_;
     return LINE_FINISHED;
+  }
 
-  Realign();
+  next_parse_ = write_start_ - 1;
   return MORE_DATA;
 }
 
 void RespParser::Realign() {
-  ssize_t left_sz = write_start_ - next_line_;
+  ssize_t left_sz = write_start_ - next_read_;
   CHECK_GE(left_sz, 0);
 
   if (left_sz == 0) {
     write_start_ = buf_.data();
-    next_line_ = nullptr;
+    next_read_ = nullptr;
   } else if (left_sz < 64) {
-    memmove(buf_.data(), next_line_, left_sz);
-    next_line_ = buf_.data();
+    memmove(buf_.data(), next_read_, left_sz);
+    next_read_ = buf_.data();
     write_start_ = buf_.data() + left_sz;
+    next_parse_ = next_read_;
   }
-
 }
-
 
 }  // namespace redis

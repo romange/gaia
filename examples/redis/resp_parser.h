@@ -18,7 +18,7 @@ class RespParser {
   RespParser() : write_start_(buf_.begin()) {
     buf_[kBufSz] = '\r';
     buf_[kBufSz + 1] = '\n';
-    next_line_ = write_start_;
+    next_read_ = nullptr;
   }
 
   //! 0-copy interface
@@ -26,7 +26,7 @@ class RespParser {
     return Buffer(write_start_, buf_.data() + kBufSz - write_start_);
   }
 
-  ParseStatus WriteCommit(size_t write_sz, absl::string_view* line);
+  void WriteCommit(size_t write_sz);
 
   //! Consumes previously returned line.
   //! Returns true if another line was found in the write buffer and points line to it.
@@ -34,18 +34,18 @@ class RespParser {
   ParseStatus ParseNext(absl::string_view* line);
 
   Buffer ReadBuf() const {
-    return next_line_ ? Buffer(next_line_, write_start_ - next_line_) : Buffer{};
+    return next_read_ ? Buffer(next_read_, write_start_ - next_read_) : Buffer{};
   }
 
-  bool ReadEof() const { return next_line_ == nullptr; }
+  bool ReadEof() const { return next_read_ == nullptr; }
 
   void Reset() {
     write_start_ = buf_.data();
-    next_line_ = nullptr;
+    next_read_ = nullptr;
   }
 
   void Consume(size_t sz) {
-    next_line_ += sz;
+    next_read_ += sz;
     Realign();
   }
 
@@ -57,7 +57,7 @@ class RespParser {
   void Realign();
 
   std::array<uint8_t, kBufSz + 4> buf_;
-  uint8_t *write_start_, *next_line_ = nullptr;
+  uint8_t *write_start_, *next_read_ = nullptr, *next_parse_ = nullptr;
 };
 
 }  // namespace redis
