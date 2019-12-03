@@ -37,6 +37,8 @@ class RespParser {
     return next_line_ ? Buffer(next_line_, write_start_ - next_line_) : Buffer{};
   }
 
+  bool ReadEof() const { return next_line_ == nullptr; }
+
   void Reset() {
     write_start_ = buf_.data();
     next_line_ = nullptr;
@@ -51,6 +53,7 @@ class RespParser {
   uint8_t* WriteEnd() {
     return buf_.data() + kBufSz;
   }
+
   void Realign();
 
   std::array<uint8_t, kBufSz + 4> buf_;

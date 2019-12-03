@@ -51,12 +51,12 @@ system::error_code RespConnectionHandler::HandleRequest() {
   num_args_ = 1;
   IoState io_state = IoState::READ_EOL;
   // CHECK(states_.empty());
-  req_state_ = CmdState::INIT;
+  cmd_state_ = CmdState::INIT;
 
   // states_.push_back(CmdState::INIT);
   VLOG(1) << "RespConnectionHandler::HandleRequest";
 
-  while (args_.size() < num_args_) {
+  while (true) {
     switch (io_state) {
       case IoState::READ_EOL: {
         auto dest_buf = parser.GetDestBuf();
@@ -75,11 +75,12 @@ system::error_code RespConnectionHandler::HandleRequest() {
         break;
       }
       case IoState::READ_N:
+        CHECK(parser.ReadEof());
         asio::read(*socket_, bulk_str_, ec);
         if (ec)
           return ec;
-        io_state = IoState::HANDLE_STRING;
-        ABSL_FALLTHROUGH_INTENDED;
+        io_state = IoState::READ_EOL;
+        break;
       case IoState::HANDLE_STRING: {
         ErrorState es = HandleNextString(cmd, &parser);
         system::error_code* ec = absl::get_if<system::error_code>(&es);
@@ -89,11 +90,19 @@ system::error_code RespConnectionHandler::HandleRequest() {
         if (next_state != IoState::READ_EOL || parser.ParseNext(&cmd) == RespParser::MORE_DATA) {
           io_state = next_state;
         }
+        break;
       }
     }
+
+    if (args_.size() == num_args_) {
+      ec = HandleCommand();
+      if (ec)
+        return ec;
+      args_.clear();
+      num_args_ = 1;
+      cmd_state_ = CmdState::INIT;
+    }
   }
-  ec = HandleCommand();
-  args_.clear();
 
   VLOG(1) << "Finished";
 
@@ -106,9 +115,9 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
   system::error_code ec;
   namespace errc = system::errc;
 
-  switch (req_state_) {
+  switch (cmd_state_) {
     case CmdState::INIT:
-      req_state_ = CmdState::ARG_START;
+      cmd_state_ = CmdState::ARG_START;
       if (blob[0] == '*') {
         blob.remove_prefix(1);
         if (!absl::SimpleAtoi(blob, &num_args_))
@@ -121,6 +130,7 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         blob.remove_prefix(1);
         if (!absl::SimpleAtoi(blob, &bulk_size_))
           return errc::make_error_code(errc::invalid_argument);
+        cmd_state_ = CmdState::EMPTY_EXPECTED;
 
         RespParser::Buffer buf = parser->ReadBuf();
         line_buffer_.resize(bulk_size_);
@@ -129,7 +139,6 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         if (bulk_size_ <= buf.size()) {
           memcpy(ptr, buf.data(), bulk_size_);
           parser->Consume(bulk_size_);
-          args_.push_back(std::move(line_buffer_));
 
           return IoState::READ_EOL;
         }
@@ -137,12 +146,24 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         parser->Reset();
         bulk_str_ = asio::mutable_buffer{ptr + buf.size(), bulk_size_ - buf.size()};
         VLOG(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
+
         return IoState::READ_N;
+      } else {
+        args_.push_back(string{blob});
+        VLOG(1) << "Pushed " << args_.back();
+        cmd_state_ = CmdState::ARG_START;
+        return IoState::READ_EOL;
       }
-      ABSL_FALLTHROUGH_INTENDED;
-    case CmdState::ARG_END:
-      args_.push_back(string{blob});
+      break;
+    case CmdState::EMPTY_EXPECTED:
+      if (!blob.empty())
+        return errc::make_error_code(errc::illegal_byte_sequence);
+      args_.push_back(std::move(line_buffer_));
+      VLOG(1) << "Pushed " << args_.back();
+      cmd_state_ = CmdState::ARG_START;
+
       return IoState::READ_EOL;
+      break;
     default:
       LOG(FATAL) << "BUG";
   }
@@ -154,7 +175,7 @@ system::error_code RespConnectionHandler::HandleCommand() {
   CHECK_EQ(num_args_, args_.size());
   CHECK_GT(num_args_, 0);
 
-  LOG(INFO) << "Command: " << absl::StrJoin(args_, " ");
+  LOG(INFO) << "Command: " << num_args_ << " " << absl::StrJoin(args_, " ");
 
   absl::AsciiStrToUpper(&args_.front());
   const auto& upper = args_.front();
@@ -199,11 +220,22 @@ system::error_code RespListener::PrintCommands(const Args& args, util::FiberSync
 }
 
 system::error_code RespListener::Ping(const Args& args, util::FiberSyncSocket* s) {
-  VLOG(1) << "Ping";
-  const char kReply[] = "+PONG\r\n";
+  VLOG(1) << "Ping Handler";
 
   system::error_code ec;
-  asio::write(*s, asio::buffer(kReply, sizeof(kReply) - 1), ec);
+
+  const char* str = nullptr;
+  string tmp;
+  if (args.size() > 2) {
+    str = "-ERR too many arguments\r\n";
+  } else if (args.size() == 1) {
+    str = "+PONG\r\n";
+  } else {
+    absl::StrAppend(&tmp, "+", args.back(), "\r\n");
+    str = tmp.c_str();
+  }
+
+  asio::write(*s, asio::buffer(str, strlen(str)), ec);
 
   return ec;
 }
