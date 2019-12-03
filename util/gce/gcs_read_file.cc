@@ -68,8 +68,7 @@ class GcsReadFile : public ReadonlyFile, private detail::ApiSenderBufferBody {
   const string read_obj_url_;
   HttpsClientPool::ClientHandle https_handle_;
 
-  size_t size_;
-  size_t offs_ = 0;
+  size_t size_ = 0,offs_ = 0;
 };
 
 GcsReadFile::~GcsReadFile() {}
@@ -88,7 +87,14 @@ Status GcsReadFile::Open() {
   const auto& msg = parser()->get();
   auto content_len_it = msg.find(h2::field::content_length);
   if (content_len_it != msg.end()) {
-    CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &size_));
+    size_t content_sz = 0;
+    CHECK(absl::SimpleAtoi(detail::absl_sv(content_len_it->value()), &content_sz));
+
+    if (size_) {
+      CHECK_EQ(size_, content_sz + offs_) << "File size has changed underneath during reopen";
+    } else {
+      size_ = content_sz;
+    }
   }
   https_handle_ = std::move(handle_res.obj);
   return Status::OK;
