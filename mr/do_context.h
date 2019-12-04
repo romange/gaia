@@ -102,7 +102,7 @@ class RawContext {
   const FrequencyMap<T>* FindMaterializedFreqMapStatistic(
       const std::string& map_id) const {
     const detail::FreqMapWrapper *ptr = FindMaterializedFreqMapStatisticImpl(map_id);
-    return ptr->Cast<T>();
+    return &ptr->Cast<T>();
   }
 
   const ShardId& current_shard() const { return current_shard_;}
