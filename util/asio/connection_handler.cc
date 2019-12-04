@@ -67,8 +67,8 @@ void ConnectionHandler::RunInIOThread() {
       ec = HandleRequest();
       if (ec) {
         if (!IsExpectedFinish(ec)) {
-          LOG(WARNING) << "Error : " << ec.message() << ", " << ec.category().name() << "/"
-                       << ec.value();
+          LOG(WARNING) << "[" << socket_->native_handle() << "] Error : " << ec.message() << ", "
+                       << ec.category().name() << "/" << ec.value();
         }
         break;
       }

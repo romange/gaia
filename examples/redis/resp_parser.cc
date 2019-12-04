@@ -28,12 +28,11 @@ uint8_t* ParseLine(uint8_t* buf, const uint8_t* end) {
 
 }  // namespace
 
-void RespParser::WriteCommit(size_t write_sz) {
-  // next_line_ = write_start_;
-  write_start_ += write_sz;
-
-  // next_line_ = ParseLine(next_line_, write_start_, line);
-  // return next_line_ ? LINE_FINISHED : MORE_DATA;
+RespParser::RespParser() : write_start_(buf_.begin()) {
+  buf_[kBufSz] = '\r';
+  buf_[kBufSz + 1] = '\n';
+  next_read_ = write_start_;
+  next_parse_ = write_start_;
 }
 
 auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
@@ -50,6 +49,8 @@ auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
     *line = absl::string_view(reinterpret_cast<char*>(next_read_), tmp - next_read_);
     next_read_ = tmp + 2;
     next_parse_ = next_read_;
+    // We can not realign here because we will ruin the *line.
+
     return LINE_FINISHED;
   }
 

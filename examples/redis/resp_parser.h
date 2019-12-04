@@ -15,18 +15,14 @@ class RespParser {
   using Buffer = absl::Span<uint8_t>;
   enum ParseStatus { LINE_FINISHED = 1, MORE_DATA = 2 };
 
-  RespParser() : write_start_(buf_.begin()) {
-    buf_[kBufSz] = '\r';
-    buf_[kBufSz + 1] = '\n';
-    next_read_ = nullptr;
-  }
+  RespParser();
 
   //! 0-copy interface
   Buffer GetDestBuf() const {
     return Buffer(write_start_, buf_.data() + kBufSz - write_start_);
   }
 
-  void WriteCommit(size_t write_sz);
+  void WriteCommit(size_t write_sz) { write_start_ += write_sz; }
 
   //! Consumes previously returned line.
   //! Returns true if another line was found in the write buffer and points line to it.
@@ -37,7 +33,7 @@ class RespParser {
     return next_read_ ? Buffer(next_read_, write_start_ - next_read_) : Buffer{};
   }
 
-  bool ReadEof() const { return next_read_ == nullptr; }
+  bool IsReadEof() const { return next_read_ == nullptr; }
 
   void Reset() {
     write_start_ = buf_.data();
@@ -46,6 +42,10 @@ class RespParser {
 
   void Consume(size_t sz) {
     next_read_ += sz;
+    Realign();
+  }
+
+  void ConsumeLine() {
     Realign();
   }
 

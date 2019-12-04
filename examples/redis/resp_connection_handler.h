@@ -22,6 +22,7 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
 
  protected:
   boost::system::error_code HandleRequest() final;
+  void OnOpenSocket() final;
 
  private:
   enum class IoState : uint8_t { READ_EOL = 1, READ_N = 2, HANDLE_STRING = 3 };
@@ -42,6 +43,7 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
   ::boost::asio::mutable_buffer bulk_str_;
   const std::vector<Command>& commands_;
 
+  uint32_t conn_id_;
   std::vector<std::string> args_;
 };
 

@@ -15,6 +15,8 @@
 #include "examples/redis/redis_command.h"
 #include "examples/redis/resp_parser.h"
 
+#define VLOG_CONN(level) VLOG(level) << "[" << conn_id_ << "] "
+
 namespace redis {
 using namespace util;
 using namespace boost;
@@ -37,6 +39,10 @@ RespConnectionHandler::RespConnectionHandler(const std::vector<Command>& command
     : ConnectionHandler(context), commands_(commands) {
 }
 
+void RespConnectionHandler::OnOpenSocket() {
+  conn_id_ = socket_->native_handle();
+}
+
 /*
    *num tokens in the command,token1, token2 ....
    Example commands: echo -e '*1\r\n$4\r\PING\r\n', echo -e 'PING\r\n',
@@ -44,7 +50,6 @@ RespConnectionHandler::RespConnectionHandler(const std::vector<Command>& command
    { echo -e '*2\r\n$4\r\nPING\r\n$3\r\nfoo\r\n';  } | nc  localhost 6379
 */
 system::error_code RespConnectionHandler::HandleRequest() {
-  absl::string_view cmd;
   RespParser parser;
 
   system::error_code ec;
@@ -62,7 +67,7 @@ system::error_code RespConnectionHandler::HandleRequest() {
         if (ec)
           return ec;
         args_.clear();
-        if (parser.ReadEof())
+        if (parser.IsReadEof())
           break;
       }
       num_args_ = 1;
@@ -72,7 +77,7 @@ system::error_code RespConnectionHandler::HandleRequest() {
       break;
   }
 
-  VLOG(1) << "Finished";
+  VLOG(1) << "Finished " << ec;
 
   return ec;
 }
@@ -91,6 +96,7 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
 
         auto dest_buf = parser->GetDestBuf();
         if (dest_buf.size() < 2) {
+          LOG(ERROR) << "No write space and read buf is " << parser->ReadBuf().size();
           return system::errc::make_error_code(system::errc::no_buffer_space);
         }
 
@@ -103,7 +109,7 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
         break;
       }
       case IoState::READ_N:
-        CHECK(parser->ReadEof());
+        CHECK(parser->IsReadEof());
         asio::read(*socket_, bulk_str_, ec);
         if (ec)
           return ec;
@@ -115,6 +121,7 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
         system::error_code* ec2 = absl::get_if<system::error_code>(&es);
         if (ec2)
           return *ec2;
+        parser->ConsumeLine();
 
         *state = absl::get<IoState>(es);
         return ec;
@@ -125,8 +132,7 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
 
 auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser* parser)
     -> ErrorState {
-  VLOG(1) << "Blob: |" << blob << "|";
-  system::error_code ec;
+  VLOG_CONN(1) << "Blob: |" << blob << "|";
   namespace errc = system::errc;
 
   switch (cmd_state_) {
@@ -159,7 +165,7 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
         memcpy(ptr, buf.data(), buf.size());
         parser->Reset();
         bulk_str_ = asio::mutable_buffer{ptr + buf.size(), bulk_size_ - buf.size()};
-        VLOG(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
+        VLOG_CONN(1) << "Bulk string of size " << bulk_size_ << "/" << bulk_str_.size();
 
         return IoState::READ_N;
       }
@@ -170,7 +176,7 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
       if (!blob.empty())
         return errc::make_error_code(errc::illegal_byte_sequence);
       args_.push_back(std::move(line_buffer_));
-      VLOG(1) << "Pushed " << args_.back();
+      VLOG_CONN(1) << "Pushed " << args_.back();
       cmd_state_ = args_.size() < num_args_ ? CmdState::ARG_START : CmdState::INIT;
 
       return IoState::READ_EOL;
@@ -186,7 +192,7 @@ system::error_code RespConnectionHandler::HandleCommand() {
   CHECK_EQ(num_args_, args_.size());
   CHECK_GT(num_args_, 0);
 
-  LOG(INFO) << "Command: " << num_args_ << " " << absl::StrJoin(args_, " ");
+  DLOG(INFO) << "Command: " << num_args_ << " " << absl::StrJoin(args_, " ");
 
   absl::AsciiStrToUpper(&args_.front());
   const auto& upper = args_.front();
