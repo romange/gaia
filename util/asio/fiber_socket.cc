@@ -29,8 +29,8 @@ template <typename Duration> uint32_t ms_duration(const Duration& d) {
 using socket_t = FiberSocketImpl::next_layer_type;
 
 struct FiberSocketImpl::ClientData {
-  ::boost::fibers::fiber worker;
-  fibers_ext::condition_variable_any cv_st;
+  fibers::fiber worker;
+  fibers::condition_variable_any cv_st;
   fibers_ext::EventCount worker_ev;
 
   IoContext* io_cntx;
@@ -104,7 +104,7 @@ void FiberSocketImpl::SetStatus(const error_code& ec, const char* where) {
 }
 
 void FiberSocketImpl::WakeWorker() {
-  // This notify function is efficient and usually awakes worker fiber that 
+  // This notify function is efficient and usually awakes worker fiber that
   // is indeed suspended.
   clientsock_data_->worker_ev.notify();
 }

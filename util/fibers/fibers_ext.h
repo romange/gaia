@@ -8,7 +8,6 @@
 #include <experimental/optional>
 #include <ostream>
 
-#include "util/fibers/condition_variable.h"
 #include "util/fibers/event_count.h"
 
 namespace std {
@@ -179,7 +178,7 @@ class Semaphore {
   }
 
  private:
-  condition_variable_any cond_;
+  ::boost::fibers::condition_variable_any cond_;
   ::boost::fibers::mutex mutex_;
   uint32_t count_;
 };
@@ -190,7 +189,7 @@ struct NoOpLock {
   void unlock() {}
 };
 
-template <typename Pred> void Await(condition_variable_any& cv, Pred&& pred) {
+template <typename Pred> void Await(::boost::fibers::condition_variable_any& cv, Pred&& pred) {
   NoOpLock lock;
   cv.wait(lock, std::forward<Pred>(pred));
 }
@@ -202,7 +201,7 @@ template <typename Pred> void Await(condition_variable_any& cv, Pred&& pred) {
 // Cell class for emulating unbufferred_channel.
 template <typename T> class Cell {
   std::experimental::optional<T> val_;
-  condition_variable_any cv_;
+  ::boost::fibers::condition_variable_any cv_;
 
  public:
   bool IsEmpty() const { return !bool(val_); }

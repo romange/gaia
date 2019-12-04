@@ -80,7 +80,7 @@ void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
 
   struct SharedCList {
     ConnectionHandler::ListType clist;
-    fibers_ext::condition_variable_any clist_empty_cnd;
+    fibers::condition_variable_any clist_empty_cnd;
     fibers::mutex mu;
 
     void wait(std::unique_lock<fibers::mutex>& lk) {
