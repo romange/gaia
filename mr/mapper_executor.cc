@@ -30,6 +30,7 @@ struct MapperExecutor::PerIoStruct {
   std::vector<::boost::fibers::fiber> process_fd;
   std::unique_ptr<RawContext> raw_context;
   size_t records_read = 0;
+  absl::flat_hash_map<string, uint64_t> inputs_count_map;
 
   bool stop_early = false;
 
@@ -183,7 +184,8 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
 
     CHECK_EQ(channel_op_status::success, st);
     const pb::Input* pb_input = file_input.input;
-    bool is_binary = detail::IsBinary(pb_input->format().type());
+    pb::WireFormat::Type input_type = pb_input->format().type();
+    bool is_binary = detail::IsBinary(input_type);
     Record::Operand op = is_binary ? Record::BINARY_FORMAT : Record::TEXT_FORMAT;
     record_q.Push(op, 0, file_input.file_name);
     record_q.Push(Record::METADATA, &pb_input->file_spec(file_input.spec_index));
@@ -196,8 +198,11 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
       ++aux_local->records_read;
     };
 
-    cnt +=
-        runner_->ProcessInputFile(file_input.file_name, pb_input->format().type(), std::move(cb));
+    size_t records_read =
+        runner_->ProcessInputFile(file_input.file_name, input_type, std::move(cb));
+
+    cnt += records_read;
+    aux_local->inputs_count_map[pb_input->name()] += records_read;
   }
   VLOG(1) << "IOReadFiber closing after processing " << cnt << " items";
 
@@ -292,6 +297,9 @@ VarzValue::Map MapperExecutor::GetStats() const {
   LOG(INFO) << "MapperExecutor::GetStats";
 
   auto start = base::GetMonotonicMicrosFast();
+  absl::flat_hash_map<string, uint64_t> input_read;
+  fibers::mutex mu;
+
   pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
     VLOG(1) << "MapperExecutor::GetStats CB";
     auto delta = base::GetMonotonicMicrosFast() - start;
@@ -300,16 +308,21 @@ VarzValue::Map MapperExecutor::GetStats() const {
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
       record_read.fetch_add(aux_local->records_read, memory_order_relaxed);
+
       if (aux_local->raw_context) {
         parse_errors.fetch_add(aux_local->raw_context->parse_errors(), memory_order_relaxed);
       }
+      std::lock_guard<fibers::mutex> lk(mu);
+      input_read.merge(aux_local->inputs_count_map);
     }
   });
 
   res.emplace_back("parse-errors", VarzValue::FromInt(parse_errors.load()));
   res.emplace_back("records-read", VarzValue::FromInt(record_read.load()));
   res.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
-
+  for (const auto& k_v : input_read) {
+    res.emplace_back(absl::StrCat("map-input-", k_v.first), VarzValue::FromInt(k_v.second));
+  }
   return res;
 }
 
