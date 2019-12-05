@@ -23,6 +23,7 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
  protected:
   boost::system::error_code HandleRequest() final;
   void OnOpenSocket() final;
+  bool FlushWrites() final;
 
  private:
   enum class IoState : uint8_t { READ_EOL = 1, READ_N = 2, HANDLE_STRING = 3 };
@@ -32,12 +33,14 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
   boost::system::error_code HandleIoState(RespParser* parser, IoState* state);
 
   ErrorState HandleNextString(absl::string_view blob, RespParser* parser);
-  boost::system::error_code HandleCommand();
+  void HandleCommand();
 
   uint32_t num_args_ = 1;
   uint32_t bulk_size_ = 0;
 
-  enum class CmdState : uint8_t { INIT = 1, ARG_START = 2, EMPTY_EXPECTED = 4};
+  boost::system::error_code req_ec_;
+
+  enum class CmdState : uint8_t { INIT = 1, ARG_START = 2, EMPTY_EXPECTED = 4 };
   CmdState cmd_state_ = CmdState::INIT;
   std::string line_buffer_;
   ::boost::asio::mutable_buffer bulk_str_;
@@ -45,6 +48,10 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
 
   uint32_t conn_id_;
   std::vector<std::string> args_;
+
+  std::vector<std::string> outgoing_buf_;
+  ::boost::fibers::mutex wr_mu_;
+  std::vector<::boost::asio::const_buffer> write_seq_;
 };
 
 class RespListener : public ::util::ListenerInterface {
@@ -59,9 +66,8 @@ class RespListener : public ::util::ListenerInterface {
   util::ConnectionHandler* NewConnection(util::IoContext& context) final;
 
  private:
-  ::boost::system::error_code PrintCommands(const Args& args, util::FiberSyncSocket* s);
-  ::boost::system::error_code Ping(const Args& args, util::FiberSyncSocket* s);
-
+  void PrintCommands(const Args& args, std::string* dest);
+  void Ping(const Args& args, std::string* dest);
 
   std::vector<Command> commands_;
 };

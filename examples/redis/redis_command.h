@@ -9,10 +9,6 @@
 
 #include "absl/strings/string_view.h"
 
-namespace util {
-class FiberSyncSocket;
-}  // namespace util
-
 namespace redis {
 
 /*
@@ -42,8 +38,7 @@ enum CommandFlags {
 class Command {
  public:
   using Args = std::vector<std::string>;
-  using CommandFunction =
-      std::function< ::boost::system::error_code(const Args&, util::FiberSyncSocket*)>;
+  using CommandFunction = std::function<void(const Args&, std::string*)>;
 
   Command(const std::string& name, int32_t arity, uint32_t flags)
       : name_(name), arity_(arity), flags_(flags) {
@@ -65,8 +60,8 @@ class Command {
     fun_ = f;
   }
 
-  ::boost::system::error_code Call(const Args& args, util::FiberSyncSocket* socket) const {
-    return fun_(args, socket);
+  void Call(const Args& args, std::string* dest) const {
+    fun_(args, dest);
   }
 
  private:

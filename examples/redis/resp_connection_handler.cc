@@ -37,6 +37,7 @@ template <typename... Flags> constexpr uint32_t bitmask(CommandFlags left, Flags
 RespConnectionHandler::RespConnectionHandler(const std::vector<Command>& commands,
                                              util::IoContext* context)
     : ConnectionHandler(context), commands_(commands) {
+  use_flusher_fiber_ = true;
 }
 
 void RespConnectionHandler::OnOpenSocket() {
@@ -52,7 +53,6 @@ void RespConnectionHandler::OnOpenSocket() {
 system::error_code RespConnectionHandler::HandleRequest() {
   RespParser parser;
 
-  system::error_code ec;
   IoState io_state = IoState::READ_EOL;
   cmd_state_ = CmdState::INIT;
 
@@ -63,23 +63,23 @@ system::error_code RespConnectionHandler::HandleRequest() {
     if (cmd_state_ == CmdState::INIT) {
       if (!args_.empty()) {
         CHECK_EQ(args_.size(), num_args_);
-        ec = HandleCommand();
-        if (ec)
-          return ec;
+        HandleCommand();
+        if (req_ec_)
+          return req_ec_;
         args_.clear();
         if (parser.IsReadEof())
           break;
       }
       num_args_ = 1;
     }
-    ec = HandleIoState(&parser, &io_state);
-    if (ec)
+    req_ec_ = HandleIoState(&parser, &io_state);
+    if (req_ec_)
       break;
   }
 
-  VLOG(1) << "Finished " << ec;
+  VLOG(1) << "Finished " << req_ec_;
 
-  return ec;
+  return req_ec_;
 }
 
 system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoState* state) {
@@ -188,7 +188,7 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
   return system::error_code{};
 }
 
-system::error_code RespConnectionHandler::HandleCommand() {
+void RespConnectionHandler::HandleCommand() {
   CHECK_EQ(num_args_, args_.size());
   CHECK_GT(num_args_, 0);
 
@@ -197,13 +197,32 @@ system::error_code RespConnectionHandler::HandleCommand() {
   absl::AsciiStrToUpper(&args_.front());
   const auto& upper = args_.front();
 
+  string tmp;
   for (size_t i = 0; i < commands_.size(); ++i) {
     if (upper == commands_[i].name()) {
-      return commands_[i].Call(args_, &socket_.value());
+      commands_[i].Call(args_, &tmp);
+      outgoing_buf_.push_back(std::move(tmp));
+      return;
     }
   }
 
-  return errc::make_error_code(errc::invalid_argument);
+  req_ec_ = errc::make_error_code(errc::invalid_argument);
+}
+
+bool RespConnectionHandler::FlushWrites() {
+  std::unique_lock<fibers::mutex> ul(wr_mu_, std::try_to_lock_t{});
+  if (!ul || outgoing_buf_.empty() || !socket_->is_open())
+    return false;
+
+  std::vector<std::string> local_buf(std::move(outgoing_buf_));
+  write_seq_.resize(local_buf.size());
+  for (size_t i = 0; i < local_buf.size(); ++i) {
+    write_seq_[i] = asio::buffer(local_buf[i]);
+  }
+
+  asio::write(*socket_, write_seq_, req_ec_);
+
+  return true;
 }
 
 RespListener::RespListener() {
@@ -215,14 +234,14 @@ RespListener::~RespListener() {
 void RespListener::Init() {
   commands_.emplace_back("COMMAND", 0, bitmask(FL_RANDOM, FL_LOADING, FL_STALE));
   commands_.back().SetFunction(
-      [this](const auto& args, util::FiberSyncSocket* s) { return PrintCommands(args, s); });
+      [this](const auto& args, string* s) { return PrintCommands(args, s); });
 
   commands_.emplace_back("PING", -1, bitmask(FL_FAST, FL_STALE));
   commands_.back().SetFunction(
-      [this](const auto& args, util::FiberSyncSocket* s) { return Ping(args, s); });
+      [this](const auto& args, string* s) { return Ping(args, s); });
 }
 
-system::error_code RespListener::PrintCommands(const Args& args, util::FiberSyncSocket* s) {
+void RespListener::PrintCommands(const Args& args, string* dest) {
   VLOG(1) << "PrintCommands";
 
   const char kReply[] =
@@ -231,30 +250,21 @@ system::error_code RespListener::PrintCommands(const Args& args, util::FiberSync
       ":0\r\n:0\r\n:0\r\n"
       "*6\r\n+ping\r\n:-1\r\n*2\r\n+stale\r\n+fast\r\n:0\r\n:0\r\n:0\r\n";
 
-  system::error_code ec;
-  asio::write(*s, asio::buffer(kReply, sizeof(kReply) - 1), ec);
-  return ec;
+  dest->assign(kReply, sizeof(kReply) - 1);
 }
 
-system::error_code RespListener::Ping(const Args& args, util::FiberSyncSocket* s) {
+void RespListener::Ping(const Args& args, string* dest) {
   VLOG(1) << "Ping Handler";
 
   system::error_code ec;
 
-  const char* str = nullptr;
-  string tmp;
   if (args.size() > 2) {
-    str = "-ERR too many arguments\r\n";
+    *dest = "-ERR too many arguments\r\n";
   } else if (args.size() == 1) {
-    str = "+PONG\r\n";
+    *dest = "+PONG\r\n";
   } else {
-    absl::StrAppend(&tmp, "+", args.back(), "\r\n");
-    str = tmp.c_str();
+    absl::StrAppend(dest, "+", args.back(), "\r\n");
   }
-
-  asio::write(*s, asio::buffer(str, strlen(str)), ec);
-
-  return ec;
 }
 
 ConnectionHandler* RespListener::NewConnection(util::IoContext& context) {
