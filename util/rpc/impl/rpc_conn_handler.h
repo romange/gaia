@@ -29,7 +29,7 @@ class RpcConnectionHandler : public ConnectionHandler {
   system::error_code HandleRequest() final override;
 
  private:
-  void FlushWrites() override;
+  bool FlushWrites() override;
 
   // protected by wr_mu_ to preserve transcational semantics.
   // Returns true if the flush ocurred.

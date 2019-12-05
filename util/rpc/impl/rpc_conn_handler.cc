@@ -35,10 +35,13 @@ RpcConnectionHandler::~RpcConnectionHandler() {
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 }
 
-void RpcConnectionHandler::FlushWrites() {
+bool RpcConnectionHandler::FlushWrites() {
+  bool res = false;
   if (socket_->is_open() && !outgoing_buf_.empty()) {
-    req_flushes_ += uint64_t(FlushWritesInternal());
+    res = FlushWritesInternal();
+    req_flushes_ += uint64_t(res);
   }
+  return res;
 }
 
 void RpcConnectionHandler::OnOpenSocket() {

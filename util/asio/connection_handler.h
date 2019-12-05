@@ -82,9 +82,9 @@ class ConnectionHandler {
   }
 
  protected:
-  //! Called to flush pending writes to the socket.
-  virtual void FlushWrites() {
-  }
+  //! Called to flush pending writes to the socket. Returns true if flush took place,
+  // false overthise.
+  virtual bool FlushWrites() { return false; }
 
   //! Called once after connection was initialized. Will run in io context thread of this handler.
   virtual void OnOpenSocket() {
