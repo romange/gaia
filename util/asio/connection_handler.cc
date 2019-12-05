@@ -20,10 +20,75 @@ DEFINE_VARZ(VarzCount, connections);
 
 namespace util {
 
-bool IsExpectedFinish(system::error_code ec) {
+namespace detail {
+
+using FlushList = detail::slist<ConnectionHandler, ConnectionHandler::flush_hook_t,
+                                detail::constant_time_size<false>, detail::cache_last<false>>;
+
+class Flusher : public IoContext::Cancellable {
+ public:
+  Flusher() {
+  }
+
+  void Run() final;
+  void Cancel() final;
+
+  void Bind(ConnectionHandler* me) {
+    flush_conn_list_.push_front(*me);
+  }
+
+  void Remove(ConnectionHandler* me) {
+
+    // To make sure me does not run. Since Flusher and onnectionHandler fibers are
+    // on the same thread, then either:
+    // 1. Flusher is not running FlushWrites()- then we can just remove ourselves.
+    //    and FlushList::iterator will be still valid where it points to.
+    // 2. We are inside me->FlushWrites(). In that case mu_ is locked we want to wait till
+    //    FlushWrites finishes before we remove outselves.
+    std::unique_lock<fibers::mutex> lock(mu_);
+    flush_conn_list_.erase(FlushList::s_iterator_to(*me));
+  }
+
+ private:
+  bool stop_ = false;
+  fibers::condition_variable cv_;
+  fibers::mutex mu_;
+  FlushList flush_conn_list_;
+};
+
+void Flusher::Run() {
+  VLOG(1) << "Flusher start ";
+  std::unique_lock<fibers::mutex> lock(mu_);
+  while (!stop_) {
+    cv_.wait_for(lock, 300us);
+
+    for (auto it = flush_conn_list_.begin(); it != flush_conn_list_.end(); ++it) {
+      it->FlushWrites();
+    }
+  }
+}
+
+void Flusher::Cancel() {
+  VLOG(1) << "Flusher::Cancel";
+  {
+    std::lock_guard<fibers::mutex> lock(mu_);
+    stop_ = true;
+  }
+  cv_.notify_all();
+}
+
+}  // namespace detail
+
+namespace {
+
+inline bool IsExpectedFinish(system::error_code ec) {
   return ec == error::eof || ec == error::operation_aborted || ec == error::connection_reset ||
          ec == error::not_connected;
 }
+
+static thread_local detail::Flusher* local_flusher = nullptr;
+
+}  // namespace
 
 ConnectionHandler::ConnectionHandler(IoContext* context) noexcept : io_context_(*context) {
   CHECK_NOTNULL(context);
@@ -59,6 +124,14 @@ void ConnectionHandler::RunInIOThread() {
   CHECK(socket_);
   OnOpenSocket();
 
+  if (use_flusher_fiber_) {
+    if (!local_flusher) {
+      local_flusher = new detail::Flusher;
+      io_context_.AttachCancellable(local_flusher);
+    }
+    local_flusher->Bind(this);
+  }
+
   VLOG(1) << "ConnectionHandler::RunInIOThread: " << socket_->native_handle();
   system::error_code ec;
 
@@ -79,6 +152,10 @@ void ConnectionHandler::RunInIOThread() {
     LOG(ERROR) << str;
   }
 
+  if (use_flusher_fiber_) {
+    local_flusher->Remove(this);
+  }
+
   Close();
 
   connections.IncBy(-1);
@@ -97,6 +174,7 @@ void ConnectionHandler::Close() {
     VLOG(1) << "Before shutdown " << socket_->native_handle();
     socket_->Shutdown(ec);
     VLOG(1) << "After shutdown: " << ec << " " << ec.message();
+
     // socket::close() closes the underlying socket and cancels the pending operations.
     // HOWEVER the problem is that those operations return with ec = ok()
     // so the flow  is not aware that the socket is closed.

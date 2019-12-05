@@ -20,8 +20,6 @@ using namespace boost;
 // However FlushFiber runs from a background fiber and makes sure that all outgoing writes
 // are flushed to socket.
 class RpcConnectionHandler : public ConnectionHandler {
-  connection_hook_t flush_hook_;
-
  public:
   // bridge is owned by RpcConnectionHandler instance.
   // RpcConnectionHandler is created in acceptor thread and not in the socket thread.
@@ -30,20 +28,12 @@ class RpcConnectionHandler : public ConnectionHandler {
 
   system::error_code HandleRequest() final override;
 
-  using rpc_hook_t = detail::member_hook<RpcConnectionHandler, detail::connection_hook,
-                                        &RpcConnectionHandler::flush_hook_> ;
-
-  // Called by Flusher fiber to flush the outgoing writes.
-  bool PollAndFlushWrites() {
-    if (!socket_->is_open() || outgoing_buf_.empty())
-      return false;
-    return FlushWrites();
-  }
-
  private:
+  void FlushWrites() override;
+
   // protected by wr_mu_ to preserve transcational semantics.
   // Returns true if the flush ocurred.
-  bool FlushWrites();
+  bool FlushWritesInternal();
 
   // The following methods are run in the socket thread (thread that calls HandleRequest.)
   void OnOpenSocket() final;

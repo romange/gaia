@@ -17,53 +17,7 @@ namespace rpc {
 
 using namespace std::chrono_literals;
 
-namespace {
-
-using RpcConnList = detail::slist<RpcConnectionHandler, RpcConnectionHandler::rpc_hook_t,
-                                  detail::constant_time_size<false>, detail::cache_last<false>>;
-
-class Flusher : public IoContext::Cancellable {
- public:
-  Flusher() {}
-
-  void Run() final;
-  void Cancel() final;
-
-  RpcConnList flush_conn_list;
-
- private:
-  bool stop_ = false;
-  fibers::condition_variable cv_;
-  fibers::mutex mu_;
-};
-
-void Flusher::Run() {
-  VLOG(1) << "Flusher start ";
-  std::unique_lock<fibers::mutex> lock(mu_);
-  uint64_t num_flushes = 0;
-
-  while (!stop_) {
-    cv_.wait_for(lock, 300us);
-
-    for (auto it = flush_conn_list.begin(); it != flush_conn_list.end(); ++it) {
-      num_flushes += uint64_t(it->PollAndFlushWrites());
-    }
-  }
-  VLOG(1) << "Flusher exited " << num_flushes;
-}
-
-void Flusher::Cancel() {
-  VLOG(1) << "Flusher::Cancel";
-  {
-    std::lock_guard<fibers::mutex> lock(mu_);
-    stop_ = true;
-  }
-  cv_.notify_all();
-}
-
-thread_local Flusher* flusher = nullptr;
-
-}  // namespace
+namespace {}  // namespace
 
 using asio::ip::tcp;
 using fibers_ext::yield;
@@ -71,8 +25,9 @@ using fibers_ext::yield;
 constexpr size_t kRpcPoolSize = 32;
 
 RpcConnectionHandler::RpcConnectionHandler(ConnectionBridge* bridge, IoContext* context)
-    : ConnectionHandler(context),
-      bridge_(bridge), rpc_items_(kRpcPoolSize) {}
+    : ConnectionHandler(context), bridge_(bridge), rpc_items_(kRpcPoolSize) {
+  use_flusher_fiber_ = true;
+}
 
 RpcConnectionHandler::~RpcConnectionHandler() {
   bridge_->Join();
@@ -80,14 +35,14 @@ RpcConnectionHandler::~RpcConnectionHandler() {
   outgoing_buf_.clear_and_dispose([this](RpcItem* i) { rpc_items_.Release(i); });
 }
 
+void RpcConnectionHandler::FlushWrites() {
+  if (socket_->is_open() && !outgoing_buf_.empty()) {
+    req_flushes_ += uint64_t(FlushWritesInternal());
+  }
+}
+
 void RpcConnectionHandler::OnOpenSocket() {
   VLOG(1) << "OnOpenSocket: " << socket_->native_handle();
-
-  if (!flusher) {
-    flusher = new Flusher;
-    io_context_.AttachCancellable(flusher);
-  }
-  flusher->flush_conn_list.push_front(*this);
 
   bridge_->InitInThread();
 }
@@ -95,16 +50,6 @@ void RpcConnectionHandler::OnOpenSocket() {
 void RpcConnectionHandler::OnCloseSocket() {
   VLOG(1) << "OnCloseSocket: Before flush fiber join " << socket_->native_handle();
   DCHECK(io_context_.InContextThread());
-
-  // To make sure  does not run. Since Flusher and RpcConnectionHandler fibers are
-  // on the same thread, then either:
-  // 1. Flusher is outside this->FlushWrites()- then we can just remove ourselves.
-  //    and RpcConnList::iterator will be still valid where it point to.
-  // 2. We are inside this->FlushWrites(). In that case we want to wait till it finishes to run.
-  std::lock_guard<fibers::mutex> ul(wr_mu_);
-  flusher->flush_conn_list.erase(RpcConnList::s_iterator_to(*this));
-
-  VLOG(1) << "After flush fiber join " << req_flushes_;
 }
 
 system::error_code RpcConnectionHandler::HandleRequest() {
@@ -123,7 +68,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   DCHECK_NE(-1, socket_->native_handle());
 
   if (rpc_items_.empty() && !outgoing_buf_.empty()) {
-    req_flushes_ += FlushWrites();
+    req_flushes_ += FlushWritesInternal();
   }
 
   // We use item for reading the envelope.
@@ -161,7 +106,7 @@ system::error_code RpcConnectionHandler::HandleRequest() {
   return ec_;
 }
 
-bool RpcConnectionHandler::FlushWrites() {
+bool RpcConnectionHandler::FlushWritesInternal() {
   // Serves as critical section. We can not allow interleaving writes into the socket.
   // If another fiber flushes - we just exit without blocking.
   std::unique_lock<fibers::mutex> ul(wr_mu_, std::try_to_lock_t{});

@@ -16,6 +16,11 @@ namespace util {
 using namespace boost;
 using asio::ip::tcp;
 
+// auto_unlink requires cache_last,constant_time_size = false.
+using ListType = detail::slist<ConnectionHandler, ConnectionHandler::member_hook_t,
+                               detail::constant_time_size<false>, detail::cache_last<false>>;
+
+
 AcceptServer::ListenerWrapper::ListenerWrapper(const endpoint& ep, IoContext* io_context,
                                                ListenerInterface* si)
     : io_context(*io_context), acceptor(io_context->raw_context(), ep), listener(si) {
@@ -79,7 +84,7 @@ void AcceptServer::AcceptInIOThread(ListenerWrapper* wrapper) {
   fiber_props.set_name("AcceptLoop");
 
   struct SharedCList {
-    ConnectionHandler::ListType clist;
+    ListType clist;
     fibers::condition_variable_any clist_empty_cnd;
     fibers::mutex mu;
 

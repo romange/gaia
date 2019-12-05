@@ -25,25 +25,29 @@ using namespace ::boost::intrusive;
 // of hook without holding the reference to the container itself.
 // Requires that the container won't have O(1) size function.
 typedef slist_member_hook<link_mode<auto_unlink>> connection_hook;
+class Flusher;
 
 }  // namespace detail
 
 // An instance of this class handles a single connection in fiber.
 class ConnectionHandler {
   friend class AcceptServer;
- public:
-  using ptr_t = ::boost::intrusive_ptr<ConnectionHandler>;
-  using io_context = ::boost::asio::io_context;
+  friend class detail::Flusher;
+
   using connection_hook_t = detail::connection_hook;
 
   connection_hook_t hook_;
+  connection_hook_t flush_hook_;
+
+ public:
+  using ptr_t = ::boost::intrusive_ptr<ConnectionHandler>;
+  using io_context = ::boost::asio::io_context;
 
   using member_hook_t =
       detail::member_hook<ConnectionHandler, detail::connection_hook, &ConnectionHandler::hook_>;
 
-  // auto_unlink requires cache_last,constant_time_size = false.
-  using ListType = detail::slist<ConnectionHandler, ConnectionHandler::member_hook_t,
-                                 detail::constant_time_size<false>, detail::cache_last<false>>;
+  using flush_hook_t = detail::member_hook<ConnectionHandler, detail::connection_hook,
+                                           &ConnectionHandler::flush_hook_>;
 
   explicit ConnectionHandler(IoContext* context) noexcept;
 
@@ -53,7 +57,9 @@ class ConnectionHandler {
 
   void Close();
 
-  IoContext& context() { return io_context_; }
+  IoContext& context() {
+    return io_context_;
+  }
 
   friend void intrusive_ptr_add_ref(ConnectionHandler* ctx) noexcept {
     ctx->use_count_.fetch_add(1, std::memory_order_relaxed);
@@ -76,8 +82,13 @@ class ConnectionHandler {
   }
 
  protected:
+  //! Called to flush pending writes to the socket.
+  virtual void FlushWrites() {
+  }
+
   //! Called once after connection was initialized. Will run in io context thread of this handler.
-  virtual void OnOpenSocket() {}
+  virtual void OnOpenSocket() {
+  }
 
   /**
    * @brief Called before ConnectionHandler destroyed but after the socket was signalled
@@ -87,7 +98,8 @@ class ConnectionHandler {
    * Derived ConnectionHandler should clean here resources that must closed
    * before the object is destroyed. Will run in io context thread of the socket.
    */
-  virtual void OnCloseSocket() {}
+  virtual void OnCloseSocket() {
+  }
 
   // Should not block the thread. Can fiber-block (fiber friendly).
   virtual boost::system::error_code HandleRequest() = 0;
@@ -95,6 +107,10 @@ class ConnectionHandler {
   absl::optional<FiberSyncSocket> socket_;
 
   IoContext& io_context_;
+
+  //! If set to true, the frameworks will setup a flusher fiber that will call FlushWrites() method
+  //! few times per msec.
+  bool use_flusher_fiber_ = false;
 
  private:
   void RunInIOThread();
@@ -108,7 +124,8 @@ class ConnectionHandler {
  */
 class ListenerInterface {
  public:
-  virtual ~ListenerInterface() {}
+  virtual ~ListenerInterface() {
+  }
 
   void RegisterPool(IoContextPool* pool);
 
@@ -116,13 +133,17 @@ class ListenerInterface {
   virtual ConnectionHandler* NewConnection(IoContext& context) = 0;
 
   // Called by AcceptServer when shutting down start and before all connections are closed.
-  virtual void PreShutdown() {}
+  virtual void PreShutdown() {
+  }
 
   // Called by AcceptServer when shutting down finalized and after all connections are closed.
-  virtual void PostShutdown() {}
+  virtual void PostShutdown() {
+  }
 
  protected:
-  IoContextPool* pool() { return pool_; }
+  IoContextPool* pool() {
+    return pool_;
+  }
 
  private:
   IoContextPool* pool_ = nullptr;
