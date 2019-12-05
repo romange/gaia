@@ -193,15 +193,28 @@ void RespConnectionHandler::HandleCommand() {
   CHECK_GT(num_args_, 0);
 
   DLOG(INFO) << "Command: " << num_args_ << " " << absl::StrJoin(args_, " ");
+  if (outgoing_buf_.size() > 100) {
+    FlushWrites();
+    if (req_ec_)
+      return;
+  }
 
   absl::AsciiStrToUpper(&args_.front());
   const auto& upper = args_.front();
 
   string tmp;
+  constexpr size_t kSmallBufSize = 1 << 13;
   for (size_t i = 0; i < commands_.size(); ++i) {
     if (upper == commands_[i].name()) {
       commands_[i].Call(args_, &tmp);
-      outgoing_buf_.push_back(std::move(tmp));
+
+      //  asio::write limits maximum number of buffers in one batch to 16 so we
+      // join multiple responses into the same buffer.
+      if (outgoing_buf_.empty() || (outgoing_buf_.back().size() > kSmallBufSize)) {
+        outgoing_buf_.push_back(std::move(tmp));
+      } else {
+        outgoing_buf_.back().append(std::move(tmp));
+      }
       return;
     }
   }
@@ -255,8 +268,6 @@ void RespListener::PrintCommands(const Args& args, string* dest) {
 
 void RespListener::Ping(const Args& args, string* dest) {
   VLOG(1) << "Ping Handler";
-
-  system::error_code ec;
 
   if (args.size() > 2) {
     *dest = "-ERR too many arguments\r\n";

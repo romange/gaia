@@ -68,7 +68,7 @@ class Flusher : public IoContext::Cancellable {
 
   //! We really use EventCount just to suspend/resume fibers unconditionally. Maybe it's cleaner
   //  just expose those methods directly.
-  fibers_ext::EventCount sleep_ec_;  
+  fibers_ext::EventCount sleep_ec_;
   FlushList flush_conn_list_;
 };
 
@@ -89,7 +89,7 @@ void Flusher::SpinFlush() {
 
   uint32_t no_flush = 0;
 
-  // We count iterations with no flushes at all. 
+  // We count iterations with no flushes at all.
   // If server does not need flushing for some time we return.
   while (no_flush < 100) {
     cv_.wait_for(lock, 300us);
