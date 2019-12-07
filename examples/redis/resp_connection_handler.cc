@@ -7,6 +7,7 @@
 #include <boost/asio/write.hpp>
 
 #include "absl/strings/ascii.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -24,13 +25,15 @@ using std::string;
 namespace errc = system::errc;
 
 namespace {
-constexpr uint32_t bitmask(CommandFlags fl) {
+constexpr uint32_t bitmask(CommandFlag fl) {
   return static_cast<uint32_t>(fl);
 }
 
-template <typename... Flags> constexpr uint32_t bitmask(CommandFlags left, Flags... fl) {
+template <typename... Flags> constexpr uint32_t bitmask(CommandFlag left, Flags... fl) {
   return static_cast<uint32_t>(left) | bitmask(fl...);
 }
+
+static_assert(bitmask(FL_DENYOOM, FL_WRITE) == 5, "");
 
 }  // namespace
 
@@ -56,7 +59,6 @@ system::error_code RespConnectionHandler::HandleRequest() {
   IoState io_state = IoState::READ_EOL;
   cmd_state_ = CmdState::INIT;
 
-  // states_.push_back(CmdState::INIT);
   VLOG(1) << "RespConnectionHandler::HandleRequest";
 
   while (true) {
@@ -67,8 +69,13 @@ system::error_code RespConnectionHandler::HandleRequest() {
         if (req_ec_)
           return req_ec_;
         args_.clear();
+        parser.ConsumeWs();
+
         if (parser.IsReadEof())
           break;
+
+        VLOG(1) << "Parser has " << parser.ReadBuf().size() << "/" << int(parser.ReadBuf()[0]);
+        static_assert(13 == '\r', "");
       }
       num_args_ = 1;
     }
@@ -104,6 +111,9 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
             socket_->read_some(asio::mutable_buffer{dest_buf.data(), dest_buf.size()}, ec);
         if (ec)
           return ec;
+        DVLOG(1) << "Wrote "
+                 << absl::CHexEscape(
+                        absl::string_view{reinterpret_cast<char*>(dest_buf.data()), read_sz});
         parser->WriteCommit(read_sz);
 
         break;
@@ -117,13 +127,12 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
         break;
 
       case IoState::HANDLE_STRING: {
-        ErrorState es = HandleNextString(cmd, parser);
-        system::error_code* ec2 = absl::get_if<system::error_code>(&es);
-        if (ec2)
-          return *ec2;
+        IoState es = HandleNextString(cmd, parser);
+        if (req_ec_)
+          return req_ec_;
         parser->ConsumeLine();
 
-        *state = absl::get<IoState>(es);
+        *state = es;
         return ec;
       }
     }
@@ -131,7 +140,7 @@ system::error_code RespConnectionHandler::HandleIoState(RespParser* parser, IoSt
 }
 
 auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser* parser)
-    -> ErrorState {
+    -> IoState {
   VLOG_CONN(1) << "Blob: |" << blob << "|";
   namespace errc = system::errc;
 
@@ -140,16 +149,19 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
       cmd_state_ = CmdState::ARG_START;
       if (blob[0] == '*') {
         blob.remove_prefix(1);
-        if (!absl::SimpleAtoi(blob, &num_args_))
-          return errc::make_error_code(errc::invalid_argument);
+        if (!absl::SimpleAtoi(blob, &num_args_)) {
+          req_ec_ = errc::make_error_code(errc::invalid_argument);
+        }
         return IoState::READ_EOL;
       }
       ABSL_FALLTHROUGH_INTENDED;
     case CmdState::ARG_START:
       if (blob[0] == '$') {
         blob.remove_prefix(1);
-        if (!absl::SimpleAtoi(blob, &bulk_size_))
-          return errc::make_error_code(errc::invalid_argument);
+        if (!absl::SimpleAtoi(blob, &bulk_size_)) {
+          req_ec_ = errc::make_error_code(errc::invalid_argument);
+          return IoState::READ_EOL;
+        }
         cmd_state_ = CmdState::EMPTY_EXPECTED;
 
         RespParser::Buffer buf = parser->ReadBuf();
@@ -173,19 +185,19 @@ auto RespConnectionHandler::HandleNextString(absl::string_view blob, RespParser*
       blob = absl::string_view{};
       ABSL_FALLTHROUGH_INTENDED;
     case CmdState::EMPTY_EXPECTED:
-      if (!blob.empty())
-        return errc::make_error_code(errc::illegal_byte_sequence);
+      if (!blob.empty()) {
+        req_ec_ = errc::make_error_code(errc::illegal_byte_sequence);
+        return IoState::READ_EOL;
+      }
       args_.push_back(std::move(line_buffer_));
       VLOG_CONN(1) << "Pushed " << args_.back();
       cmd_state_ = args_.size() < num_args_ ? CmdState::ARG_START : CmdState::INIT;
 
       return IoState::READ_EOL;
-      break;
     default:
       LOG(FATAL) << "BUG";
+      return IoState::READ_EOL;
   }
-
-  return system::error_code{};
 }
 
 void RespConnectionHandler::HandleCommand() {
@@ -207,12 +219,15 @@ void RespConnectionHandler::HandleCommand() {
   for (size_t i = 0; i < commands_.size(); ++i) {
     if (upper == commands_[i].name()) {
       commands_[i].Call(args_, &tmp);
+      CHECK(!tmp.empty());
 
       //  asio::write limits maximum number of buffers in one batch to 16 so we
       // join multiple responses into the same buffer.
       if (outgoing_buf_.empty() || (outgoing_buf_.back().size() > kSmallBufSize)) {
+        DVLOG(1) << "Pushing " << tmp.size();
         outgoing_buf_.push_back(std::move(tmp));
       } else {
+        DVLOG(1) << "Appending " << tmp.size();
         outgoing_buf_.back().append(std::move(tmp));
       }
       return;
@@ -227,10 +242,14 @@ bool RespConnectionHandler::FlushWrites() {
   if (!ul || outgoing_buf_.empty() || !socket_->is_open())
     return false;
 
+  VLOG(1) << "FlushWrites";
+
   std::vector<std::string> local_buf(std::move(outgoing_buf_));
   write_seq_.resize(local_buf.size());
   for (size_t i = 0; i < local_buf.size(); ++i) {
-    write_seq_[i] = asio::buffer(local_buf[i]);
+    // We do not send '\0' character.
+    DVLOG(1) << "Sending:" << absl::CHexEscape(local_buf[i]);
+    write_seq_[i] = asio::buffer(local_buf[i].data(), local_buf[i].size());
   }
 
   asio::write(*socket_, write_seq_, req_ec_);
@@ -250,13 +269,30 @@ void RespListener::Init() {
       [this](const auto& args, string* s) { return PrintCommands(args, s); });
 
   commands_.emplace_back("PING", -1, bitmask(FL_FAST, FL_STALE));
-  commands_.back().SetFunction(
-      [this](const auto& args, string* s) { return Ping(args, s); });
+  commands_.back().SetFunction([this](const auto& args, string* s) { return Ping(args, s); });
 }
 
 void RespListener::PrintCommands(const Args& args, string* dest) {
   VLOG(1) << "PrintCommands";
 
+  if (args.size() > 1) {
+    *dest = "-ERR too many arguments\r\n";
+    return;
+  }
+
+#if 1
+  absl::StrAppend(dest, "*", commands_.size(), "\r\n");
+  for (const auto& cmd: commands_) {
+    absl::StrAppend(dest, "*6\r\n+", cmd.name(), "\r\n:", cmd.arity(), "\r\n");
+    absl::StrAppend(dest, "*", Command::FlagsCount(cmd.flags()), "\r\n");
+    for (uint32_t fl = 1; fl < FL_MAX; fl <<=1 ) {
+      if (cmd.flags() & fl) {
+        absl::StrAppend(dest, "+", Command::FlagName(static_cast<CommandFlag>(fl)), "\r\n");
+      }
+    }
+    absl::StrAppend(dest,":0\r\n:0\r\n:0\r\n");
+  }
+#else
   const char kReply[] =
       "*2\r\n"
       "*6\r\n+command\r\n:0\r\n*3\r\n+random\r\n+loading\r\n+stale\r\n"
@@ -264,10 +300,11 @@ void RespListener::PrintCommands(const Args& args, string* dest) {
       "*6\r\n+ping\r\n:-1\r\n*2\r\n+stale\r\n+fast\r\n:0\r\n:0\r\n:0\r\n";
 
   dest->assign(kReply, sizeof(kReply) - 1);
+#endif
 }
 
 void RespListener::Ping(const Args& args, string* dest) {
-  VLOG(1) << "Ping Handler";
+  VLOG(1) << "Ping Handler " << args.size();
 
   if (args.size() > 2) {
     *dest = "-ERR too many arguments\r\n";

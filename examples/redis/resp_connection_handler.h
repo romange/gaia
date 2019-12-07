@@ -28,11 +28,9 @@ class RespConnectionHandler : public ::util::ConnectionHandler {
  private:
   enum class IoState : uint8_t { READ_EOL = 1, READ_N = 2, HANDLE_STRING = 3 };
 
-  using ErrorState = absl::variant<boost::system::error_code, IoState>;
-
   boost::system::error_code HandleIoState(RespParser* parser, IoState* state);
 
-  ErrorState HandleNextString(absl::string_view blob, RespParser* parser);
+  IoState HandleNextString(absl::string_view blob, RespParser* parser);
   void HandleCommand();
 
   uint32_t num_args_ = 1;

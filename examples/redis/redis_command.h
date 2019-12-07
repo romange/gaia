@@ -24,7 +24,7 @@ movablekeys - keys have no pre-det
 
 */
 
-enum CommandFlags {
+enum CommandFlag {
   FL_WRITE = 1,
   FL_READONLY = 2,
   FL_DENYOOM = 4,
@@ -35,8 +35,12 @@ enum CommandFlags {
   FL_MAX = 0x80,
 };
 
+
 class Command {
  public:
+  static const char* FlagName(CommandFlag fl);
+  static uint32_t FlagsCount(uint32_t flags);
+
   using Args = std::vector<std::string>;
   using CommandFunction = std::function<void(const Args&, std::string*)>;
 
@@ -44,9 +48,7 @@ class Command {
       : name_(name), arity_(arity), flags_(flags) {
   }
 
-  const std::string& name() const {
-    return name_;
-  }
+  const std::string& name() const { return name_; }
 
   int32_t arity() const {
     return arity_;

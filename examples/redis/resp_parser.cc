@@ -2,6 +2,8 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "examples/redis/resp_parser.h"
+
+#include "absl/strings/ascii.h"
 #include "base/logging.h"
 
 namespace redis {
@@ -36,11 +38,6 @@ RespParser::RespParser() : write_start_(buf_.begin()) {
 }
 
 auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
-  if (!next_read_) {
-    next_read_ = buf_.data();
-    next_parse_ = next_read_;
-  }
-
   if (write_start_ - next_parse_ < 2)
     return ParseStatus::MORE_DATA;
 
@@ -49,28 +46,44 @@ auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
     *line = absl::string_view(reinterpret_cast<char*>(next_read_), tmp - next_read_);
     next_read_ = tmp + 2;
     next_parse_ = next_read_;
+    DVLOG(1) << "NR: " << next_read_ - buf_.begin() << ", ws: " << write_start_ - buf_.begin();
     // We can not realign here because we will ruin the *line.
 
     return LINE_FINISHED;
   }
 
   next_parse_ = write_start_ - 1;
+  DVLOG(1) << "NR: " << next_read_ - buf_.begin() << ", ws: " << write_start_ - buf_.begin();
+
   return MORE_DATA;
 }
 
 void RespParser::Realign() {
+  if (write_start_ == buf_.data())
+    return;
+
   ssize_t left_sz = write_start_ - next_read_;
   CHECK_GE(left_sz, 0);
 
   if (left_sz == 0) {
     write_start_ = buf_.data();
-    next_read_ = nullptr;
+    next_read_ = write_start_;
+    next_parse_ = write_start_;
   } else if (left_sz < 64) {
     memmove(buf_.data(), next_read_, left_sz);
     next_read_ = buf_.data();
     write_start_ = buf_.data() + left_sz;
     next_parse_ = next_read_;
   }
+}
+
+void RespParser::ConsumeWs() {
+  for (; next_read_ < write_start_; ++next_read_) {
+    if (!absl::ascii_isspace(*next_read_))
+      break;
+  }
+  Realign();
+  next_parse_  = next_read_;
 }
 
 }  // namespace redis

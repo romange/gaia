@@ -30,14 +30,14 @@ class RespParser {
   ParseStatus ParseNext(absl::string_view* line);
 
   Buffer ReadBuf() const {
-    return next_read_ ? Buffer(next_read_, write_start_ - next_read_) : Buffer{};
+    return Buffer(next_read_, write_start_ - next_read_);
   }
 
-  bool IsReadEof() const { return next_read_ == nullptr; }
+  bool IsReadEof() const { return next_read_ == write_start_; }
 
   void Reset() {
     write_start_ = buf_.data();
-    next_read_ = nullptr;
+    next_parse_ = next_read_ = write_start_;
   }
 
   void Consume(size_t sz) {
@@ -49,6 +49,7 @@ class RespParser {
     Realign();
   }
 
+  void ConsumeWs();
  private:
   uint8_t* WriteEnd() {
     return buf_.data() + kBufSz;
