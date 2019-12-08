@@ -8,11 +8,13 @@
 #include "base/logging.h"
 #include "mr/do_context.h"
 
+#include "file/filesource.h"
 #include "file/file_util.h"
 #include "file/test_util.h"
 #include "file/filesource.h"
 #include "util/asio/io_context_pool.h"
 #include "util/plang/addressbook.pb.h"
+#include "util/zlib_source.h"
 
 namespace mr3 {
 using namespace util;
@@ -99,6 +101,17 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
                       [&](size_t sz, auto& s) { expanded.push_back(s); });
   EXPECT_THAT(expanded, UnorderedElementsAre(EndsWith("shard-0000-000.txt.gz"),
                                              EndsWith("shard-0000-001.txt.gz")));
+  std::array<unsigned char, 1024> buf;
+  for (const string& str : expanded) {
+    std::unique_ptr<file::ReadonlyFile> file(file::ReadonlyFile::Open(str).obj);
+    CHECK(file);
+    util::ZlibSource src(new file::Source(file.release()));
+    StatusObject<size_t> bytes_read;
+    do {
+      bytes_read = src.Read(strings::MutableByteRange(buf));
+      CHECK(bytes_read.ok()) << bytes_read.status;
+    } while (bytes_read.obj);
+  }
 }
 
 TEST_F(LocalRunnerTest, Lst) {
