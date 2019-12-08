@@ -84,6 +84,8 @@ class CompressHandle : public DestHandle {
   void Close(bool abort_write) override;
 
  private:
+  void InitCompressSink();
+
   void Open() override;
   void WriteThreadLocal(uint64_t start_usec, string data);
 
@@ -102,7 +104,7 @@ class LstHandle : public DestHandle {
   void Write(StringGenCb cb) final;
   void Close(bool abort_write) final;
 
- private:
+private:
   void Open() override;
 
   void OpenThreadLocal();
@@ -119,17 +121,7 @@ CompressHandle::CompressHandle(DestFileSet* owner, const ShardId& sid) : DestHan
   start_delta_ = rnd() % (kBufLimit - 1);
 
   if (owner->output().has_compress()) {
-    compress_out_buf_ = new StringSink;
-    auto level = owner->output().compress().level();
-    if (owner->output().compress().type() == pb::Output::GZIP) {
-      compress_sink_.reset(new ZlibSink(compress_out_buf_, level));
-    } else if (owner->output().compress().type() == pb::Output::ZSTD) {
-      std::unique_ptr<ZStdSink> zsink{new ZStdSink(compress_out_buf_)};
-      CHECK_STATUS(zsink->Init(level));
-      compress_sink_ = std::move(zsink);
-    } else {
-      LOG(FATAL) << "Unsupported format " << owner->output().compress().ShortDebugString();
-    }
+    InitCompressSink();
   }
 }
 
@@ -143,15 +135,20 @@ void CompressHandle::AppendThreadLocal(const std::string& str) {
 
   if (raw_limit_ == kuint64max)  // No output size limit
     return;
+}
 
-  raw_size_ += str.size();
-  if (raw_size_ >= raw_limit_) {
-    CHECK(write_file_->Close());
-    ++sub_shard_;
-    raw_size_ = 0;
-    full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
 
-    OpenWriteFileLocal();
+void CompressHandle::InitCompressSink() {
+  compress_out_buf_ = new StringSink;
+  auto level = owner_->output().compress().level();
+  if (owner_->output().compress().type() == pb::Output::GZIP) {
+    compress_sink_.reset(new ZlibSink(compress_out_buf_, level));
+  } else if (owner_->output().compress().type() == pb::Output::ZSTD) {
+    std::unique_ptr<ZStdSink> zsink{new ZStdSink(compress_out_buf_)};
+    CHECK_STATUS(zsink->Init(level));
+    compress_sink_ = std::move(zsink);
+  } else {
+    LOG(FATAL) << "Unsupported format " << owner_->output().compress().ShortDebugString();
   }
 }
 
@@ -181,6 +178,7 @@ void CompressHandle::Write(StringGenCb cb) {
 
     if (compress_sink_) {
       strings::ByteRange br = strings::ToByteRange(*tmp_str);
+      // LOG(ERROR) << "APPEND";
       CHECK_STATUS(compress_sink_->Append(br));
 
       if (start_delta_ + compress_out_buf_->contents().size() < kBufLimit)
@@ -191,6 +189,8 @@ void CompressHandle::Write(StringGenCb cb) {
       start_delta_ = 0;
     }
 
+    raw_size_ += tmp_str->size();
+
     auto start = base::GetMonotonicMicrosFast();
     auto cb = [start, this, str = std::move(*tmp_str)]() mutable {
       WriteThreadLocal(start, std::move(str));
@@ -198,6 +198,19 @@ void CompressHandle::Write(StringGenCb cb) {
 
     bool preempted = io_queue_->Add(std::move(cb));
     lk.unlock();  // unlock the transaction. Must be after io_queue_->Add call.
+
+    if (raw_size_ >= raw_limit_) {
+      LOG(ERROR) << "REOPEN";
+
+      Close(false);
+      ++sub_shard_;
+      raw_size_ = 0;
+      full_path_ = owner_->ShardFilePath(sid_, sub_shard_);
+      if (compress_sink_) {
+        InitCompressSink();
+      }
+      Open();
+    }
 
     auto delta = base::GetMonotonicMicrosFast() - start;
     if (preempted) {
@@ -309,6 +322,7 @@ void LstHandle::OpenThreadLocal() {
   namespace gpb = google::protobuf;
 
   util::Sink* fs = new file::Sink{write_file_, DO_NOT_TAKE_OWNERSHIP};
+  LOG(ERROR) << "Opening " << write_file_;
   lst_writer_.reset(new file::ListWriter{fs});
   if (!owner_->output().type_name().empty()) {
     lst_writer_->AddMeta(file::kProtoTypeKey, owner_->output().type_name());
@@ -477,7 +491,7 @@ void DestHandle::GcsWriteFiber(IoContext* io_context) {
 }
 
 void DestHandle::OpenWriteFileLocal() {
-  VLOG(1) << "Creating file " << full_path_;
+  LOG(ERROR) << "Creating file " << full_path_;
 
   if (is_gcs()) {
     write_file_ =

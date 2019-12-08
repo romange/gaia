@@ -138,7 +138,9 @@ Status ZlibSink::Append(const strings::ByteRange& slice) {
 
   while (zcontext_.avail_out == 0) {
     strings::ByteRange br(buf_.get(), buf_size_);
-    RETURN_IF_ERROR(sub_->Append(br));
+    auto status = sub_->Append(br);
+    if (!status.ok()) asm("int $3");
+    RETURN_IF_ERROR(status);
 
     zcontext_.next_out = buf_.get();
     zcontext_.avail_out = buf_size_;
