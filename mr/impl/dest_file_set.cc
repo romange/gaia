@@ -104,7 +104,7 @@ class LstHandle : public DestHandle {
   void Write(StringGenCb cb) final;
   void Close(bool abort_write) final;
 
-private:
+ private:
   void Open() override;
 
   void OpenThreadLocal();
