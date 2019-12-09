@@ -55,6 +55,18 @@ class LocalRunnerTest : public testing::Test {
   std::unique_ptr<LocalRunner> runner_;
 };
 
+static void EnsureComperssedIntegrity(const std::string& str) {
+  std::array<unsigned char, 1024> buf;
+  std::unique_ptr<file::ReadonlyFile> file(file::ReadonlyFile::Open(str).obj);
+  CHECK(file);
+  util::ZlibSource src(new file::Source(file.release()));
+  StatusObject<size_t> bytes_read;
+  do {
+    bytes_read = src.Read(strings::MutableByteRange(buf));
+    CHECK(bytes_read.ok()) << bytes_read.status;
+  } while (bytes_read.obj);
+}
+
 const ShardId kShard0{0}, kShard1{1};
 
 TEST_F(LocalRunnerTest, Basic) {
@@ -101,16 +113,8 @@ TEST_F(LocalRunnerTest, MaxShardSize) {
                       [&](size_t sz, auto& s) { expanded.push_back(s); });
   EXPECT_THAT(expanded, UnorderedElementsAre(EndsWith("shard-0000-000.txt.gz"),
                                              EndsWith("shard-0000-001.txt.gz")));
-  std::array<unsigned char, 1024> buf;
   for (const string& str : expanded) {
-    std::unique_ptr<file::ReadonlyFile> file(file::ReadonlyFile::Open(str).obj);
-    CHECK(file);
-    util::ZlibSource src(new file::Source(file.release()));
-    StatusObject<size_t> bytes_read;
-    do {
-      bytes_read = src.Read(strings::MutableByteRange(buf));
-      CHECK(bytes_read.ok()) << bytes_read.status;
-    } while (bytes_read.obj);
+    EnsureComperssedIntegrity(str);
   }
 }
 
