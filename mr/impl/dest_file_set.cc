@@ -164,6 +164,7 @@ void CompressHandle::Write(StringGenCb cb) {
     tmp_str = cb();
     if (!tmp_str)
       break;
+    raw_size_ += tmp_str->size();
 
     if (compress_sink_) {
       this_fiber::yield();
@@ -188,8 +189,6 @@ void CompressHandle::Write(StringGenCb cb) {
       tmp_str->swap(compress_out_buf_->contents());
       start_delta_ = 0;
     }
-
-    raw_size_ += tmp_str->size();
 
     auto start = base::GetMonotonicMicrosFast();
     auto cb = [start, this, str = std::move(*tmp_str)]() mutable {
