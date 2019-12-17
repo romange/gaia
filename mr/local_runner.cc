@@ -6,6 +6,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_replace.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/walltime.h"
@@ -66,7 +67,7 @@ struct LocalRunner::Impl {
   void Start(const pb::Operator* op);
 
   /// Called from the main thread orchestrating the pipeline run.
-  void End(ShardFileMap* out_files);
+  void End(const MetricMap& metric_map, ShardFileMap* out_files);
 
   /// The functions below are called from IO threads.
   void ExpandGCS(absl::string_view glob, ExpandCb cb);
@@ -342,7 +343,7 @@ void LocalRunner::Impl::Start(const pb::Operator* op) {
   }
 }
 
-void LocalRunner::Impl::End(ShardFileMap* out_files) {
+void LocalRunner::Impl::End(const MetricMap& metric_map, ShardFileMap* out_files) {
   CHECK(dest_mgr_);
 
   auto shards = dest_mgr_->GetShards();
@@ -350,6 +351,21 @@ void LocalRunner::Impl::End(ShardFileMap* out_files) {
     out_files->emplace(sid, dest_mgr_->ShardFilePath(sid, -1));
   }
   dest_mgr_->CloseAllHandles(stop_signal_.load(std::memory_order_acquire));
+
+  string metric_file =
+    file_util::JoinPath(file_util::JoinPath(data_dir, current_op_->output().name()),
+                        "counter_map.csv");
+  if (util::IsGcsPath(metric_file)) {
+    LOG(ERROR) << "Outputting metric map to gcs not supported yet";
+  } else {
+    ::file::WriteFile *f = file::Open(metric_file);
+    CHECK_NOTNULL(f);
+    for (const auto& k_v : metric_map) {
+      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
+      CHECK_STATUS(f->Write(absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n")));
+    }
+    f->Close(); // This runs `delete this`
+  }
 
   lock_guard<mutex> lk(dest_mgr_mu_);
   dest_mgr_.reset();
@@ -466,9 +482,9 @@ RawContext* LocalRunner::CreateContext() {
   return impl_->NewContext();
 }
 
-void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
+void LocalRunner::OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) {
   VLOG(1) << "LocalRunner::OperatorEnd";
-  impl_->End(out_files);
+  impl_->End(metric_map, out_files);
 }
 
 void LocalRunner::ExpandGlob(const std::string& glob, ExpandCb cb) {
