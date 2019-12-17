@@ -14,6 +14,8 @@ namespace mr3 {
 // To get the exact list, call ExpandGlob() on each value.
 using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
 
+using MetricMap = std::map<std::string, long>;
+
 class RawContext;
 
 class Runner {
@@ -30,7 +32,8 @@ class Runner {
   // Must be thread-safe. Called from multiple threads in operator_executors.
   virtual RawContext* CreateContext() = 0;
 
-  virtual void OperatorEnd(ShardFileMap* out_files) = 0;
+  virtual void OperatorEnd(const MetricMap& metric_map,
+                           ShardFileMap* out_files) = 0;
 
   using ExpandCb = std::function<void(size_t file_size, const std::string&)>;
 

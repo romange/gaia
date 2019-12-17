@@ -50,7 +50,7 @@ void TestRunner::ExpandGlob(const string& glob, ExpandCb cb) {
   }
 }
 
-void TestRunner::OperatorEnd(ShardFileMap* out_files) {
+void TestRunner::OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) {
   auto it = out_fs_.find(last_out_name_);
   CHECK(it != out_fs_.end());
   it->second->is_finished = true;
@@ -60,6 +60,7 @@ void TestRunner::OperatorEnd(ShardFileMap* out_files) {
     out_files->emplace(k_v.first, name);
     input_fs_[name] = k_v.second;
   }
+  counters_[last_out_name_].reset(new MetricMap(metric_map));
   op_ = nullptr;
 }
 
@@ -80,6 +81,13 @@ const ShardedOutput& TestRunner::Table(const std::string& tb_name) const {
   CHECK(it != out_fs_.end()) << "Missing table file " << tb_name;
 
   return it->second->s_out;
+}
+
+const MetricMap& TestRunner::Counters(const std::string& tb_name) const {
+  auto it = counters_.find(tb_name);
+  CHECK(it != counters_.end()) << "Missing table counters " << tb_name;
+
+  return *it->second;
 }
 
 size_t EmptyRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,

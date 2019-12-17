@@ -119,6 +119,7 @@ TEST_F(MrTest, Basic) {
   pipeline_->Run(&runner_);
 
   EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
+  EXPECT_EQ(4, runner_.Counters("new_table").at("fn-calls"));
 }
 
 TEST_F(MrTest, Json) {
