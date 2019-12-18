@@ -422,6 +422,29 @@ void LocalRunner::Impl::LazyGcsInit() {
 }
 
 void LocalRunner::Impl::ShutDown() {
+  for (const auto& name_and_map : all_metric_maps_) {
+    std::string to_write;
+    for (const auto& k_v : name_and_map.second) {
+      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
+      to_write += absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n");
+    }
+
+    string metric_file =
+      file_util::JoinPath(file_util::JoinPath(data_dir, name_and_map.first), "counter_map.csv");
+    io_pool_->GetNextContext().AwaitSafe([this, &metric_file, &to_write] {
+        ::file::WriteFile *f;
+        if (util::IsGcsPath(metric_file)) {
+          f = CHECKED_GET(OpenGcsWriteFile(metric_file, *gce_handle_,
+                                           &per_thread_->api_conn_pool.value()));
+        } else {
+          f = file::Open(metric_file);
+        }
+        CHECK_NOTNULL(f);
+        CHECK_STATUS(f->Write(to_write));
+        f->Close(); // This runs `delete this`
+    });
+  }
+
   fq_pool_.Shutdown();
 
   auto cb_per_thread = [](IoContext&) {
@@ -437,22 +460,6 @@ void LocalRunner::Impl::ShutDown() {
 
   auto cached_bytes = file_cache_hit_bytes_.load();
   LOG_IF(INFO, cached_bytes) << "File cached hit bytes " << cached_bytes;
-
-  for (const auto& name_and_map : all_metric_maps_) {
-    string metric_file =
-      file_util::JoinPath(file_util::JoinPath(data_dir, name_and_map.first), "counter_map.csv");
-    ::file::WriteFile *f;
-    if (util::IsGcsPath(metric_file))
-      f = CHECKED_GET(OpenGcsWriteFile(metric_file, *dest_mgr_->gce(), dest_mgr_->GetGceApiPool()));
-    else
-      f = file::Open(metric_file);
-    CHECK_NOTNULL(f);
-    for (const auto& k_v : name_and_map.second) {
-      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
-      CHECK_STATUS(f->Write(absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n")));
-    }
-    f->Close(); // This runs `delete this`
-  }
 }
 
 RawContext* LocalRunner::Impl::NewContext() {
