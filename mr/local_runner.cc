@@ -130,6 +130,7 @@ struct LocalRunner::Impl {
 
   mutable std::mutex dest_mgr_mu_;
   std::unique_ptr<DestFileSet> dest_mgr_;
+  std::map<std::string, MetricMap> all_metric_maps_;
 
   friend class Source;
 };
@@ -352,20 +353,7 @@ void LocalRunner::Impl::End(const MetricMap& metric_map, ShardFileMap* out_files
   }
   dest_mgr_->CloseAllHandles(stop_signal_.load(std::memory_order_acquire));
 
-  string metric_file =
-    file_util::JoinPath(file_util::JoinPath(data_dir, current_op_->output().name()),
-                        "counter_map.csv");
-  if (util::IsGcsPath(metric_file)) {
-    LOG(ERROR) << "Outputting metric map to gcs not supported yet";
-  } else {
-    ::file::WriteFile *f = file::Open(metric_file);
-    CHECK_NOTNULL(f);
-    for (const auto& k_v : metric_map) {
-      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
-      CHECK_STATUS(f->Write(absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n")));
-    }
-    f->Close(); // This runs `delete this`
-  }
+  all_metric_maps_[current_op_->output().name()] = metric_map;
 
   lock_guard<mutex> lk(dest_mgr_mu_);
   dest_mgr_.reset();
@@ -449,6 +437,22 @@ void LocalRunner::Impl::ShutDown() {
 
   auto cached_bytes = file_cache_hit_bytes_.load();
   LOG_IF(INFO, cached_bytes) << "File cached hit bytes " << cached_bytes;
+
+  for (const auto& name_and_map : all_metric_maps_) {
+    string metric_file =
+      file_util::JoinPath(file_util::JoinPath(data_dir, name_and_map.first), "counter_map.csv");
+    ::file::WriteFile *f;
+    if (util::IsGcsPath(metric_file))
+      f = CHECKED_GET(OpenGcsWriteFile(metric_file, *dest_mgr_->gce(), dest_mgr_->GetGceApiPool()));
+    else
+      f = file::Open(metric_file);
+    CHECK_NOTNULL(f);
+    for (const auto& k_v : name_and_map.second) {
+      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
+      CHECK_STATUS(f->Write(absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n")));
+    }
+    f->Close(); // This runs `delete this`
+  }
 }
 
 RawContext* LocalRunner::Impl::NewContext() {
