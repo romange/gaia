@@ -38,6 +38,11 @@ void OperatorExecutor::ExtractFreqMap(function<void(string, detail::FreqMapWrapp
   freq_maps_.clear();
 }
 
+void OperatorExecutor::ExtractCounterMap(function<void(std::map<std::string, long>&&)> cb) {
+  cb(std::move(metric_map_));
+  metric_map_.clear();
+}
+
 void OperatorExecutor::Init(const RawContext::FreqMapRegistry& prev_maps) {
   finalized_maps_ = &prev_maps;
   InitInternal();

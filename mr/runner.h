@@ -4,6 +4,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/string_view.h"
 #include "mr/mr3.pb.h"
 #include "mr/mr_types.h"
 
@@ -13,8 +14,6 @@ namespace mr3 {
 // i.e can be "shard-0000-*.txt.gz" but can be a single file as well.
 // To get the exact list, call ExpandGlob() on each value.
 using ShardFileMap = absl::flat_hash_map<ShardId, std::string>;
-
-using MetricMap = std::map<std::string, long>;
 
 class RawContext;
 
@@ -32,8 +31,7 @@ class Runner {
   // Must be thread-safe. Called from multiple threads in operator_executors.
   virtual RawContext* CreateContext() = 0;
 
-  virtual void OperatorEnd(const MetricMap& metric_map,
-                           ShardFileMap* out_files) = 0;
+  virtual void OperatorEnd(ShardFileMap* out_files) = 0;
 
   using ExpandCb = std::function<void(size_t file_size, const std::string&)>;
 
@@ -43,6 +41,8 @@ class Runner {
   // Returns number of records processed.
   virtual size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                                   RawSinkCb cb) = 0;
+
+  virtual void SaveFile(absl::string_view fn, absl::string_view data) = 0;
 };
 
 }  // namespace mr3

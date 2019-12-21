@@ -29,7 +29,7 @@ class LocalRunner : public Runner {
   // Must be thread-safe. Called from multiple threads in pipeline_executor.
   RawContext* CreateContext() final;
 
-  void OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) final;
+  void OperatorEnd(ShardFileMap* out_files) final;
 
   // For GCS, if glob ends with "**", expands it recursively.
   void ExpandGlob(const std::string& glob, ExpandCb cb) final;
@@ -37,6 +37,8 @@ class LocalRunner : public Runner {
   // Read file and fill queue. This function must be fiber-friendly.
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                           RawSinkCb cb) final;
+
+  void SaveFile(absl::string_view fn, absl::string_view data);
 
   void Stop();
 

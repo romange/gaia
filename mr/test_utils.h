@@ -70,22 +70,26 @@ class TestRunner : public Runner {
                           RawSinkCb cb) final;
 
   void OperatorStart(const pb::Operator* op) final { op_ = op; }
-  void OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) final;
+  void OperatorEnd(ShardFileMap* out_files) final;
 
   void AddInputRecords(const std::string& fl, const std::vector<std::string>& records) {
     std::copy(records.begin(), records.end(), std::back_inserter(input_fs_[fl]));
   }
 
+  void SaveFile(absl::string_view fn, absl::string_view data) {
+    out_files_[fn] = std::string(data);
+  }
+
   const ShardedOutput& Table(const std::string& tb_name) const;
-  const MetricMap& Counters(const std::string& tb_name) const;
+  const std::string& SavedFile(const std::string& fn) const;
 
   std::atomic_int parse_errors{0}, write_calls{0};
 
  private:
   const pb::Operator* op_ = nullptr;
   absl::flat_hash_map<std::string, std::vector<std::string>> input_fs_;
-  absl::flat_hash_map<std::string, std::unique_ptr<OutputShardSet>> out_fs_;
-  absl::flat_hash_map<std::string, std::unique_ptr<MetricMap>> counters_;
+  absl::flat_hash_map<std::string, std::unique_ptr<OutputShardSet>> out_tables_;
+  absl::flat_hash_map<std::string, std::string> out_files_;
   std::string last_out_name_;
 };
 
@@ -110,10 +114,12 @@ class EmptyRunner : public Runner {
   }
 
   void OperatorStart(const pb::Operator* op) final {}
-  void OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) final  {}
+  void OperatorEnd(ShardFileMap* out_files) final  {}
 
   size_t ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
                           RawSinkCb cb) final;
+
+  void SaveFile(absl::string_view, absl::string_view) final {}
 };
 
 }  // namespace mr3

@@ -120,6 +120,7 @@ class Pipeline {
   std::atomic_bool stopped_{false};
 
   RawContext::FreqMapRegistry freq_maps_;
+  std::map<std::string, MetricMap> metric_maps_;
 };
 
  template <typename GrouperType, typename OutT, typename... Args>

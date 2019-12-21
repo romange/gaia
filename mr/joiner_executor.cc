@@ -97,7 +97,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     LOG(INFO) << op_name << "-" << k_v.first << ": " << k_v.second;
   }
 
-  runner_->OperatorEnd(metric_map_, out_files);
+  runner_->OperatorEnd(out_files);
 }
 
 util::VarzValue::Map JoinerExecutor::GetStats() const {

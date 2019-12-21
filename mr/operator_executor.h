@@ -38,7 +38,8 @@ class OperatorExecutor : public std::enable_shared_from_this<OperatorExecutor> {
   virtual void Stop() = 0;
 
   void ExtractFreqMap(std::function<void(std::string, detail::FreqMapWrapper&&)> cb);
- protected:
+  void ExtractCounterMap(std::function<void(std::map<std::string, long>&&)> cb);
+protected:
   void RegisterContext(RawContext* context);
 
   /// Called from all IO threads once they finished running the operator.

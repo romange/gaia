@@ -2,10 +2,13 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 #include "mr/pipeline.h"
+
+#include "absl/strings/str_replace.h"
+#include "base/logging.h"
+#include "file/file_util.h"
+
 #include "mr/joiner_executor.h"
 #include "mr/mapper_executor.h"
-
-#include "base/logging.h"
 
 namespace mr3 {
 using namespace boost;
@@ -92,6 +95,17 @@ bool Pipeline::Run(Runner* runner) {
     ProcessTable(sptr.get());
   }
 
+  VLOG(1) << "Saving counter maps";
+  for (const auto& name_and_map : metric_maps_) {
+    std::string to_write;
+    for (const auto& k_v : name_and_map.second) {
+      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
+      to_write += absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n");
+    }
+
+    runner->SaveFile(file_util::JoinPath(name_and_map.first, "counter_map.csv"), to_write);
+  }
+
   VLOG(1) << "Before Runner::Shutdown";
   runner->Shutdown();
 
@@ -141,6 +155,12 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
   };
 
   executor_->ExtractFreqMap(cb);
+
+  auto cb2 = [this, &op](std::map<std::string, long>&& map) {
+    metric_maps_[op.output().name()] = std::move(map);
+  };
+
+  executor_->ExtractCounterMap(cb2);
 }
 
 pb::Input* Pipeline::mutable_input(const std::string& name) {
