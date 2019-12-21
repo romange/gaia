@@ -35,6 +35,8 @@ struct ShardId : public absl::variant<absl::monostate, uint32_t, std::string> {
   bool is_defined() const { return !absl::holds_alternative<absl::monostate>(*this); }
 };
 
+using MetricMap = std::map<std::string, long>;
+
 }  // namespace mr3
 
 std::ostream& operator<<(std::ostream& os, const mr3::ShardId& sid);

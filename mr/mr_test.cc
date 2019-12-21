@@ -8,6 +8,7 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "file/file_util.h"
 #include "mr/mr_pb.h"
 #include "mr/pipeline.h"
 #include "mr/test_utils.h"
@@ -119,7 +120,9 @@ TEST_F(MrTest, Basic) {
   pipeline_->Run(&runner_);
 
   EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
-  EXPECT_EQ(4, runner_.Counters("new_table").at("fn-calls"));
+  EXPECT_EQ("\"fn-calls\",4\n"
+            "\"fn-writes\",4\n",
+            runner_.SavedFile(file_util::JoinPath("new_table", "counter_map.csv")));
 }
 
 TEST_F(MrTest, Json) {

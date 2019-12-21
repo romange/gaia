@@ -127,7 +127,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
     LOG(INFO) << op_name << "-" << k_v.first << ": " << k_v.second;
   }
 
-  runner_->OperatorEnd(metric_map_, out_files);
+  runner_->OperatorEnd(out_files);
   file_name_q_.reset();
 }
 

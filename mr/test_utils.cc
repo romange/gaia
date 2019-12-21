@@ -34,7 +34,7 @@ void TestRunner::Shutdown() {}
 RawContext* TestRunner::CreateContext() {
   CHECK(!op_->output().name().empty());
   last_out_name_ = op_->output().name();
-  auto& res = out_fs_[last_out_name_];
+  auto& res = out_tables_[last_out_name_];
   if (!res)
     res.reset(new OutputShardSet);
 
@@ -50,9 +50,9 @@ void TestRunner::ExpandGlob(const string& glob, ExpandCb cb) {
   }
 }
 
-void TestRunner::OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_files) {
-  auto it = out_fs_.find(last_out_name_);
-  CHECK(it != out_fs_.end());
+void TestRunner::OperatorEnd(ShardFileMap* out_files) {
+  auto it = out_tables_.find(last_out_name_);
+  CHECK(it != out_tables_.end());
   it->second->is_finished = true;
 
   for (const auto& k_v : it->second->s_out) {
@@ -60,7 +60,6 @@ void TestRunner::OperatorEnd(const MetricMap& metric_map, ShardFileMap* out_file
     out_files->emplace(k_v.first, name);
     input_fs_[name] = k_v.second;
   }
-  counters_[last_out_name_].reset(new MetricMap(metric_map));
   op_ = nullptr;
 }
 
@@ -77,17 +76,17 @@ size_t TestRunner::ProcessInputFile(const std::string& filename, pb::WireFormat:
 }
 
 const ShardedOutput& TestRunner::Table(const std::string& tb_name) const {
-  auto it = out_fs_.find(tb_name);
-  CHECK(it != out_fs_.end()) << "Missing table file " << tb_name;
+  auto it = out_tables_.find(tb_name);
+  CHECK(it != out_tables_.end()) << "Missing table file " << tb_name;
 
   return it->second->s_out;
 }
 
-const MetricMap& TestRunner::Counters(const std::string& tb_name) const {
-  auto it = counters_.find(tb_name);
-  CHECK(it != counters_.end()) << "Missing table counters " << tb_name;
+const std::string& TestRunner::SavedFile(const std::string& fn) const {
+  auto it = out_files_.find(fn);
+  CHECK(it != out_files_.end()) << "Missing extra file " << fn;
 
-  return *it->second;
+  return it->second;
 }
 
 size_t EmptyRunner::ProcessInputFile(const std::string& filename, pb::WireFormat::Type type,
