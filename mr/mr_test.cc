@@ -120,8 +120,8 @@ TEST_F(MrTest, Basic) {
   pipeline_->Run(&runner_);
 
   EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
-  EXPECT_EQ("\"fn-calls\",4\n"
-            "\"fn-writes\",4\n",
+  EXPECT_EQ("fn-calls,4\n"
+            "fn-writes,4\n",
             runner_.SavedFile(file_util::JoinPath("new_table", "counter_map.csv")));
 }
 

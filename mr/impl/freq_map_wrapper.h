@@ -57,7 +57,7 @@ private:
   void CheckType(const std::type_info& t) const;
 
   absl::any any_;
-  std::unique_ptr<ExtraFunctions> extra_functions_;
+  std::shared_ptr<ExtraFunctions> extra_functions_;
 };
 
 } // detail

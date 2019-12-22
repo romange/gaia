@@ -445,12 +445,14 @@ RawContext* LocalRunner::Impl::NewContext() {
 
 void LocalRunner::Impl::SaveFile(absl::string_view fn, absl::string_view data) {
   io_pool_->GetNextContext().AwaitSafe([&] {
+      std::string full_fn = file_util::JoinPath(data_dir, fn);
       ::file::WriteFile *f;
-      if (util::IsGcsPath(data_dir)) {
-        f = CHECKED_GET(OpenGcsWriteFile(file_util::JoinPath(data_dir, fn), *gce_handle_,
+      if (util::IsGcsPath(full_fn)) {
+        f = CHECKED_GET(OpenGcsWriteFile(full_fn, *gce_handle_,
                                          &per_thread_->api_conn_pool.value()));
       } else {
-        f = file::Open(file_util::JoinPath(data_dir, fn));
+        // TODO(ORI): Use OpenFiberWriteFile instead.
+        f = file::Open(full_fn);
       }
       CHECK_NOTNULL(f);
       CHECK_STATUS(f->Write(data));
