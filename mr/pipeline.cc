@@ -99,8 +99,7 @@ bool Pipeline::Run(Runner* runner) {
   for (const auto& name_and_map : metric_maps_) {
     std::string to_write;
     for (const auto& k_v : name_and_map.second) {
-      std::string escaped_first = absl::StrReplaceAll(k_v.first, {{"\"", "\"\""}});
-      to_write += absl::StrCat("\"", escaped_first, "\",", k_v.second, "\n");
+      to_write += absl::StrCat(k_v.first, ",", k_v.second, "\n");
     }
 
     runner->SaveFile(file_util::JoinPath(name_and_map.first, "counter_map.csv"), to_write);
@@ -148,19 +147,13 @@ void Pipeline::ProcessTable(detail::TableBase* tbl) {
     }
   }
 
-  auto cb = [this](string k, detail::FreqMapWrapper&& any) {
-    auto res = freq_maps_.emplace(std::move(k), std::move(any));
-    CHECK(res.second) << "Frequency map " << k
+  for (const auto& k_v : executor_->GetFreqMaps()) {
+    auto res = freq_maps_.emplace(k_v.first, k_v.second);
+    CHECK(res.second) << "Frequency map " << k_v.first
                       << " was created more than once across the pipeline run.";
-  };
+  }
 
-  executor_->ExtractFreqMap(cb);
-
-  auto cb2 = [this, &op](std::map<std::string, long>&& map) {
-    metric_maps_[op.output().name()] = std::move(map);
-  };
-
-  executor_->ExtractCounterMap(cb2);
+  metric_maps_[op.output().name()] = executor_->GetCounterMap();
 }
 
 pb::Input* Pipeline::mutable_input(const std::string& name) {
