@@ -254,7 +254,7 @@ add_third_party(
 
 add_third_party(
   pcre
-  URL  https://netix.dl.sourceforge.net/project/pcre/pcre/8.43/pcre-8.43.tar.gz
+  URL https://ftp.pcre.org/pub/pcre/pcre-8.43.tar.gz
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-unicode-properties --enable-utf8
                     --prefix=${THIRD_PARTY_LIB_DIR}/pcre
 
