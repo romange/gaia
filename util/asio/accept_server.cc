@@ -23,7 +23,14 @@ using ListType = detail::slist<ConnectionHandler, ConnectionHandler::member_hook
 
 AcceptServer::ListenerWrapper::ListenerWrapper(const endpoint& ep, IoContext* io_context,
                                                ListenerInterface* si)
-    : io_context(*io_context), acceptor(io_context->raw_context(), ep), listener(si) {
+    : io_context(*io_context), acceptor(io_context->raw_context(), ep.protocol()), listener(si) {
+  acceptor.set_option(asio::socket_base::reuse_address(true));
+
+  system::error_code ec;
+  acceptor.bind(ep, ec);
+  CHECK(!ec) << ec << "/" << ec.message() << " for port " << ep;
+
+  acceptor.listen();
   port = acceptor.local_endpoint().port();
 }
 
