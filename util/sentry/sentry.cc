@@ -22,7 +22,8 @@ using namespace ::std;
 namespace {
 
 struct Dsn {
-  string key;
+  string public_key;
+  string secret_key;
   string hostname;
   string url;
 };
@@ -69,8 +70,12 @@ SentrySink::SentrySink(Dsn dsn, IoContext* io_context) : client_(io_context), ds
   } else {
     port_ = "80";
   }
+  std::string optional_secret_field = dsn_.secret_key.empty() ? "" :
+    absl::StrCat(", sentry_secret=", dsn_.secret_key);
   client_.AddHeader("X-Sentry-Auth",
-                    absl::StrCat("Sentry sentry_version=6, sentry_key=", dsn_.key));
+                    absl::StrCat("Sentry sentry_version=7",
+                                 ", sentry_key=", dsn_.public_key,
+                                 optional_secret_field));
   client_.AddHeader("Content-Type", "application/json");
   client_.AddHeader("Host", dsn_.hostname);
   client_.AddHeader("User-Agent", "gaia-cpp/0.1");
@@ -121,28 +126,52 @@ bool ParseDsn(const string& dsn, Dsn* res) {
   size_t kpos = dsn.find('@');
   if (kpos == string::npos)
     return false;
-  res->key = dsn.substr(0, kpos);
+  size_t protocol_sep_pos = dsn.find("://");
+  if (protocol_sep_pos == string::npos)
+    protocol_sep_pos = 0; // Nobody wrote http://, just assume it is http anyway.
+  else
+    protocol_sep_pos += 3;
+  std::string key = dsn.substr(protocol_sep_pos, kpos - protocol_sep_pos);
+  size_t colon_pos = key.find(':');
+  if (colon_pos == string::npos) {
+    res->public_key = key;
+    res->secret_key = "";
+  } else {
+    res->public_key = key.substr(0, colon_pos);
+    res->secret_key = key.substr(colon_pos + 1);
+  }
   ++kpos;
   size_t pos = dsn.find('/', kpos);
-  if (kpos == string::npos)
+  if (pos == string::npos)
     return false;
   res->hostname = dsn.substr(kpos, pos - kpos);
   res->url = dsn.substr(pos);
 
-  VLOG(1) << "Dsn is: " << res->key << "|" << res->hostname << "|" << res->url;
+  VLOG(1) << "Dsn is: " << res->public_key
+          << "|" << res->secret_key
+          << "|" << res->hostname
+          << "|" << res->url;
   return true;
 }
 
 }  // namespace
 
 void EnableSentry(IoContext* context) {
-  if (FLAGS_sentry_dsn.empty()) {
-    LOG(INFO) << "--sentry_dsn is not defined, sentry is disabled";
+  static std::atomic<bool> ran_once(false);
+  CHECK(!ran_once.exchange(true)) << "EnableSentry called twice";
+
+  std::string sentry_dsn = FLAGS_sentry_dsn;
+  if (sentry_dsn.empty()) {
+    LOG(INFO) << "--sentry_dsn is not defined, reading SENTRY_LOG_URI";
+    if (const char *env = getenv("SENTRY_LOG_URI"))
+      sentry_dsn = env;
+  }
+  if (sentry_dsn.empty()) {
+    LOG(INFO) << "SENTRY_LOG_URI is also not defined, sentry is disabled";
     return;
   }
-
   Dsn dsn;
-  CHECK(ParseDsn(FLAGS_sentry_dsn, &dsn)) << "Could not parse " << FLAGS_sentry_dsn;
+  CHECK(ParseDsn(sentry_dsn, &dsn)) << "Could not parse " << sentry_dsn;
 
   auto ptr = std::make_unique<SentrySink>(std::move(dsn), context);
   context->AttachCancellable(ptr.get());

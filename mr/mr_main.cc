@@ -11,6 +11,7 @@
 #include "mr/local_runner.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
+#include "util/sentry/sentry.h"
 
 namespace mr3 {
 
@@ -29,6 +30,7 @@ PipelineMain::PipelineMain(int* argc, char*** argv) : guard_(new MainInitGuard{a
 void PipelineMain::Init() {
   pool_.reset(new IoContextPool);
   pool_->Run();
+  util::EnableSentry(&pool_->GetNextContext());
   pipeline_.reset(new Pipeline(pool_.get()));
 
   acc_server_.reset(new AcceptServer(pool_.get()));
