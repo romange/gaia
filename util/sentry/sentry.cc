@@ -162,12 +162,15 @@ void EnableSentry(IoContext* context) {
 
   std::string sentry_dsn = FLAGS_sentry_dsn;
   if (sentry_dsn.empty()) {
-    LOG(INFO) << "--sentry_dsn is not defined, reading SENTRY_LOG_URI";
-    if (const char *env = getenv("SENTRY_LOG_URI"))
+    if (const char *env = getenv("SENTRY_LOG_URI")) {
       sentry_dsn = env;
+      LOG(INFO) << "SENTRY_LOG_URI found: " << sentry_dsn;
+    }
+  } else {
+    LOG(INFO) << "--sentry_dsn flag found: " << sentry_dsn;
   }
   if (sentry_dsn.empty()) {
-    LOG(INFO) << "SENTRY_LOG_URI is also not defined, sentry is disabled";
+    LOG(INFO) << "No --sentry_dsn or SENTRY_LOG_URI, sentry is disabled";
     return;
   }
   Dsn dsn;
