@@ -8,6 +8,8 @@
 #include "mr/impl/table_impl.h"
 #include "mr/runner.h"
 
+#include "util/stats/varz_value.h"
+
 namespace util {
 class IoContextPool;
 }  // namespace util
@@ -38,13 +40,32 @@ class OperatorExecutor : public std::enable_shared_from_this<OperatorExecutor> {
   virtual void Stop() = 0;
 
   const RawContext::FreqMapRegistry& GetFreqMaps() const { return freq_maps_; }
-  const std::map<std::string, long>& GetCounterMap() const { return metric_map_; }
+  const MetricMap& GetCounterMap() const { return metric_map_; }
 
 protected:
+  struct PerIoStruct {
+    unsigned index;
+    std::vector<::boost::fibers::fiber> process_fd;
+    std::unique_ptr<RawContext> raw_context;
+
+    long *records_read_ptr = nullptr; // To avoid always looking up "fn-calls", used only by mapper.
+    bool stop_early = false; // Used only by mapper.
+
+    PerIoStruct(unsigned i);
+
+    void Shutdown();
+  };
+
   void RegisterContext(RawContext* context);
 
   /// Called from all IO threads once they finished running the operator.
-  void FinalizeContext(long items_cnt, RawContext* context);
+  void FinalizeContext(RawContext* context);
+
+  /// Called for every IO thread in order to fetch the metric map parts from all of them,
+  /// updates into metric_map_.
+  void UpdateMetricMap(RawContext* context, MetricMap* metric_map);
+
+  util::VarzValue::Map GetStats();
 
   static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
     context->is_binary_ = is_binary;
@@ -66,15 +87,15 @@ protected:
   util::IoContextPool* pool_;
   Runner* runner_;
 
-  ::boost::fibers::mutex mu_;
-
   /// I keep it as std::map to print counters in lexicographic order.
   /// Performance is negligible since it's used only for final aggregation.
-  std::map<std::string, long> metric_map_;
+  MetricMap metric_map_;
   std::atomic<uint64_t> parse_errors_{0};
 
   RawContext::FreqMapRegistry freq_maps_;
   const RawContext::FreqMapRegistry* finalized_maps_;
+
+  static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 
 }  // namespace mr3

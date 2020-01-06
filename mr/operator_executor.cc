@@ -4,30 +4,46 @@
 #include "mr/operator_executor.h"
 
 #include "base/logging.h"
+#include "base/walltime.h"
+
+#include "util/asio/io_context_pool.h"
 
 namespace mr3 {
 using namespace boost;
 using namespace std;
 
+OperatorExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {
+}
+
+thread_local std::unique_ptr<OperatorExecutor::PerIoStruct> OperatorExecutor::per_io_;
+
+void OperatorExecutor::PerIoStruct::Shutdown() {
+  VLOG(1) << "PerIoStruct::ShutdownStart";
+  for (auto& f : process_fd)
+    f.join();
+  VLOG(1) << "PerIoStruct::ShutdownEnd";
+}
+
+
 void OperatorExecutor::RegisterContext(RawContext* context) {
   context->finalized_maps_ = finalized_maps_;
 }
 
-void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
+void OperatorExecutor::FinalizeContext(RawContext* raw_context) {
   raw_context->Flush();
-  parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
 
-  std::lock_guard<fibers::mutex> lk(mu_);
-  for (const auto& k_v : raw_context->metric_map_) {
-    metric_map_[string(k_v.first)] += k_v.second;
-  }
-  metric_map_["fn-calls"] += items_cnt;
-  metric_map_["fn-writes"] += raw_context->item_writes();
+  UpdateMetricMap(raw_context, &metric_map_);
 
   // Merge frequency maps. We aggregate counters for all the contexts.
   for (auto& k_v : raw_context->freq_maps_) {
     auto& any = freq_maps_[k_v.first];
     any.Add(k_v.second);
+  }
+}
+
+void OperatorExecutor::UpdateMetricMap(RawContext *raw_context, MetricMap *metric_map) {
+  for (const auto& k_v : raw_context->metric_map_) {
+    (*metric_map)[string(k_v.first)] += k_v.second;
   }
 }
 
@@ -52,5 +68,40 @@ void OperatorExecutor::SetMetaData(const pb::Input::FileSpec& fs, RawContext* co
       LOG(FATAL) << "Invalid file spec tag " << fs.ShortDebugString();
   }
 }
+
+util::VarzValue::Map OperatorExecutor::GetStats() {
+  util::VarzValue::Map res;
+
+  LOG(INFO) << "MapperExecutor::GetStats";
+
+  auto start = base::GetMonotonicMicrosFast();
+  absl::flat_hash_map<string, uint64_t> input_read;
+
+  // TODO: Implement finish-latency-usec, a variable that tells us how much time, on average,
+  //       we spent per shard.
+
+  MetricMap metric_map;
+
+  pool_->AwaitFiberOnAllSerially([&, me = shared_from_this()](util::IoContext& io) {
+    VLOG(1) << "MapperExecutor::GetStats CB";
+    auto delta = base::GetMonotonicMicrosFast() - start;
+    LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
+
+    PerIoStruct* aux_local = per_io_.get();
+    if (aux_local) {
+      if (aux_local->raw_context) {
+        UpdateMetricMap(aux_local->raw_context.get(), &metric_map);
+      }
+    }
+  });
+
+  res.emplace_back("stats-latency",
+                   util::VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
+  for (const auto& k_v : metric_map) {
+    res.emplace_back(k_v.first, util::VarzValue::FromInt(k_v.second));
+  }
+  return res;
+}
+
 
 }  // namespace mr3

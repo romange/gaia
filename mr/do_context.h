@@ -68,17 +68,14 @@ class RawContext {
   //! MR metrics - are used for monitoring, exposing statistics via http
   void IncBy(StringPiece name, long delta) { metric_map_[name] += delta; }
   void Inc(StringPiece name) { IncBy(name, 1); }
-  // const StringPieceDenseMap<long>& metric_map() const { return metric_map_; }
+  StringPieceDenseMap<long>& metric_map() { return metric_map_; }
 
   // Used only in tests.
   void TEST_Write(const ShardId& shard_id, std::string&& record) {
     Write(shard_id, std::move(record));
   }
 
-  void EmitParseError() { ++parse_errors_; }
-
-  size_t parse_errors() const { return parse_errors_;}
-  size_t item_writes() const { return item_writes_;}
+  void EmitParseError() { ++*parse_errors_ptr_; }
 
   const std::string& input_file_name() const { return file_name_;}
 
@@ -109,7 +106,7 @@ class RawContext {
 
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
-    ++item_writes_;
+    ++*item_writes_ptr_;
     WriteInternal(shard_id, std::move(record));
   }
 
@@ -119,7 +116,8 @@ class RawContext {
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
   StringPieceDenseMap<long> metric_map_;
-  size_t parse_errors_ = 0, item_writes_ = 0;
+  long *parse_errors_ptr_ = nullptr; // Only for efficency, to avoid always looking up in metric_map.
+  long *item_writes_ptr_ = nullptr; // Only for efficency, to avoid always looking up in metric_map.
   std::string file_name_;
   ShardId current_shard_;
 

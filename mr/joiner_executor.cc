@@ -28,19 +28,6 @@ ShardId GetShard(const pb::Input::FileSpec& fspec) {
 
 }  // namespace
 
-struct JoinerExecutor::PerIoStruct {
-  unsigned index;
-  ::boost::fibers::fiber process_fd;
-
-  void Shutdown();
-
-  PerIoStruct(unsigned i) : index(i) {}
-};
-
-thread_local std::unique_ptr<JoinerExecutor::PerIoStruct> JoinerExecutor::per_io_;
-
-void JoinerExecutor::PerIoStruct::Shutdown() { process_fd.join(); }
-
 JoinerExecutor::JoinerExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
 
@@ -62,8 +49,8 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-
-    per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb};
+    per_io_->raw_context.reset(runner_->CreateContext());
+    per_io_->process_fd.emplace_back(fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb});
   });
 
   std::map<ShardId, std::vector<IndexedInput>> shard_inputs;
@@ -86,8 +73,9 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   }
   input_q_.close();
 
-  pool_->AwaitFiberOnAll([&](IoContext&) {
+  pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
+    FinalizeContext(per_io_->raw_context.get());
     per_io_.reset();
   });
 
@@ -98,19 +86,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   }
 
   runner_->OperatorEnd(out_files);
-}
-
-util::VarzValue::Map JoinerExecutor::GetStats() const {
-  util::VarzValue::Map res;
-
-  uint64_t latency = 0;
-  uint64_t cnt = finish_shard_latency_cnt_.load(std::memory_order_acquire);
-  if (cnt) {  // not 100% correct but will do for this.
-    latency = finish_shard_latency_sum_.load(std::memory_order_relaxed) / cnt;
-  }
-  res.emplace_back("finish-latency-usec", util::VarzValue::FromInt(latency));
-
-  return res;
 }
 
 void JoinerExecutor::CheckInputs(const std::vector<const InputBase*>& inputs) {
@@ -144,12 +119,11 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
   // PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
-  uint64_t cnt = 0;
 
-  std::unique_ptr<RawContext> raw_context(runner_->CreateContext());
-  RegisterContext(raw_context.get());
+  RawContext *raw_context = per_io_->raw_context.get();
+  RegisterContext(raw_context);
 
-  std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context.get())};
+  std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context)};
 
   while (true) {
     channel_op_status st = input_q_.pop(shard_input);
@@ -157,7 +131,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       break;
 
     CHECK_EQ(channel_op_status::success, st);
-    SetCurrentShard(shard_input.first, raw_context.get());
+    SetCurrentShard(shard_input.first, raw_context);
     handler_wrapper->SetGroupingShard(shard_input.first);
 
     VLOG(1) << "Processing shard " << shard_input.first;
@@ -167,9 +141,10 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
       RawSinkCb emit_cb = handler_wrapper->Get(ii.index);
       bool is_binary = detail::IsBinary(ii.wf->type());
 
-      SetFileName(is_binary, ii.fspec->url_glob(), raw_context.get());
-      SetMetaData(*ii.fspec, raw_context.get());
-      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      SetFileName(is_binary, ii.fspec->url_glob(), raw_context);
+      SetMetaData(*ii.fspec, raw_context);
+      uint64_t cnt = runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      raw_context->IncBy("fn-calls", cnt);
     }
     auto start = base::GetMonotonicMicrosFast();
     handler_wrapper->OnShardFinish();
@@ -177,9 +152,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
                                         std::memory_order_relaxed);
     finish_shard_latency_cnt_.fetch_add(1, std::memory_order_acq_rel);
   }
-  VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
-
-  FinalizeContext(cnt, raw_context.get());
+  VLOG(1) << "ProcessInputQ finished processing";
 }
 
 }  // namespace mr3

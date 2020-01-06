@@ -8,7 +8,6 @@
 
 #include "mr/operator_executor.h"
 #include "util/fibers/simple_channel.h"
-#include "util/stats/varz_value.h"
 
 namespace mr3 {
 
@@ -38,8 +37,6 @@ class MapperExecutor : public OperatorExecutor {
 
   using RecordQueue = util::fibers_ext::SimpleChannel<Record>;
 
-  struct PerIoStruct;
-
  public:
   MapperExecutor(util::IoContextPool* pool, Runner* runner);
   ~MapperExecutor();
@@ -63,11 +60,8 @@ class MapperExecutor : public OperatorExecutor {
   void SetupPerIoThread(unsigned index, detail::TableBase* tb);
 
   static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
-  util::VarzValue::Map GetStats() const;
 
   std::unique_ptr<FileNameQueue> file_name_q_;
-
-  static thread_local std::unique_ptr<PerIoStruct> per_io_;
 };
 
 }  // namespace mr3
