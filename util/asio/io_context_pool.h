@@ -154,6 +154,22 @@ class IoContextPool {
     bc.Wait();
   }
 
+  /**
+   * @brief Runs `func` wrapped in fiber on all IO threads, _SERIALLY_. func must accept IoContext&.
+   *        func may fiber-block.
+   *
+   * Note that this function is highly inefficient, it is mostly useful when one wants to reduce
+   * several thread-local variables into a single common variable. Instead of creating a mutex for
+   * the variable, it is better to just run sequentially.
+   */
+  template <typename Func> void AwaitFiberOnAllSerially(Func&& func) {
+    boost::fibers::mutex mu; // Enforces only one thread.
+    AwaitFiberOnAll([&mu,func](auto&& args) { // We copy func on purpose, see ebove.
+        std::lock_guard<boost::fibers::mutex> lk(mu);
+        func(std::forward<decltype(args)>(args));
+    });
+  }
+
   IoContext* GetThisContext();
 
  private:

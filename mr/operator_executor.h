@@ -66,8 +66,6 @@ protected:
   util::IoContextPool* pool_;
   Runner* runner_;
 
-  ::boost::fibers::mutex mu_;
-
   /// I keep it as std::map to print counters in lexicographic order.
   /// Performance is negligible since it's used only for final aggregation.
   std::map<std::string, long> metric_map_;
