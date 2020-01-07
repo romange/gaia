@@ -98,8 +98,6 @@ struct ShardVisitor {
 
 RawContext::RawContext() {
   metric_map_.set_empty_key(StringPiece{});
-  item_writes_ptr_ = &metric_map_["fn-writes"];
-  parse_errors_ptr_ = &metric_map_["parse-errors"];
 }
 
 RawContext::~RawContext() {}

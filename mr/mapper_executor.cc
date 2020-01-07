@@ -29,7 +29,6 @@ struct MapperExecutor::PerIoStruct {
   unsigned index;
   std::vector<::boost::fibers::fiber> process_fd;
   std::unique_ptr<RawContext> raw_context;
-  long *records_read_ptr = nullptr; // To avoid always looking up "fn-calls", used only by mapper.
 
   bool stop_early = false;
 
@@ -87,7 +86,6 @@ void MapperExecutor::SetupPerIoThread(unsigned index, detail::TableBase* tb) {
 
   CHECK_GT(FLAGS_map_io_read_factor, 0);
   per_io_->process_fd.resize(FLAGS_map_io_read_factor);
-  per_io_->records_read_ptr = &ptr->raw_context->metric_map()["fn-calls"];
 
   for (auto& fbr : per_io_->process_fd) {
     fbr = fibers::fiber{&MapperExecutor::IOReadFiber, this, tb};
@@ -194,8 +192,8 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
                file_record_cnt = uint64_t{0}](string&& s) mutable {
       if (file_record_cnt++ < skip)
         return;
-      record_q.Push(Record::RECORD, *aux_local->records_read_ptr, std::move(s));
-      ++*aux_local->records_read_ptr;
+      record_q.Push(Record::RECORD, aux_local->raw_context->metric_map()["fn-calls"], std::move(s));
+      aux_local->raw_context->Inc("fn-calls");
     };
 
     size_t records_read =

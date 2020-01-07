@@ -75,7 +75,7 @@ class RawContext {
     Write(shard_id, std::move(record));
   }
 
-  void EmitParseError() { ++*parse_errors_ptr_; }
+  void EmitParseError() { ++metric_map_["parse-errors"]; }
 
   const std::string& input_file_name() const { return file_name_;}
 
@@ -106,7 +106,7 @@ class RawContext {
 
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
-    ++*item_writes_ptr_;
+    ++metric_map_["fn-writes"];
     WriteInternal(shard_id, std::move(record));
   }
 
@@ -116,8 +116,6 @@ class RawContext {
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
   StringPieceDenseMap<long> metric_map_;
-  long *parse_errors_ptr_ = nullptr; // Only for efficency, to avoid always looking up in metric_map.
-  long *item_writes_ptr_ = nullptr; // Only for efficency, to avoid always looking up in metric_map.
   std::string file_name_;
   ShardId current_shard_;
 
