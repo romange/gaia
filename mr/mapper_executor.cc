@@ -116,7 +116,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   file_name_q_->close();
 
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.
-  pool_->AwaitFiberOnAll([&](IoContext&) {
+  pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
     FinalizeContext(per_io_->records_read, per_io_->raw_context.get());
     per_io_.reset();
@@ -298,9 +298,8 @@ VarzValue::Map MapperExecutor::GetStats() const {
 
   auto start = base::GetMonotonicMicrosFast();
   absl::flat_hash_map<string, uint64_t> input_read;
-  fibers::mutex mu;
 
-  pool_->AwaitOnAll([&, me = shared_from_this()](IoContext& io) {
+  pool_->AwaitFiberOnAllSerially([&, me = shared_from_this()](IoContext& io) {
     VLOG(1) << "MapperExecutor::GetStats CB";
     auto delta = base::GetMonotonicMicrosFast() - start;
     LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
@@ -312,7 +311,6 @@ VarzValue::Map MapperExecutor::GetStats() const {
       if (aux_local->raw_context) {
         parse_errors.fetch_add(aux_local->raw_context->parse_errors(), memory_order_relaxed);
       }
-      std::lock_guard<fibers::mutex> lk(mu);
       input_read.merge(aux_local->inputs_count_map);
     }
   });

@@ -17,7 +17,6 @@ void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) 
   raw_context->Flush();
   parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
 
-  std::lock_guard<fibers::mutex> lk(mu_);
   for (const auto& k_v : raw_context->metric_map_) {
     metric_map_[string(k_v.first)] += k_v.second;
   }
