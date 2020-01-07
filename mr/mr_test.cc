@@ -121,7 +121,9 @@ TEST_F(MrTest, Basic) {
 
   EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
   EXPECT_EQ("fn-calls,4\n"
-            "fn-writes,4\n",
+            "fn-writes,4\n"
+            "map-input-read_bar,4\n"
+            "parse-errors,0\n",
             runner_.SavedFile(file_util::JoinPath("new_table", "counter_map.csv")));
 }
 

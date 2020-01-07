@@ -22,10 +22,10 @@ void TestContext::WriteInternal(const ShardId& shard_id, string&& record) {
   outp_ss_.s_out[shard_id].push_back(record);
 }
 
- void TestContext::Flush() {
-   runner_->parse_errors += parse_errors();
-   runner_->write_calls += item_writes();
- }
+void TestContext::Flush() {
+  runner_->parse_errors += metric_map()["parse-errors"];
+  runner_->write_calls += metric_map()["fn-writes"];
+}
 
 void TestRunner::Init() {}
 

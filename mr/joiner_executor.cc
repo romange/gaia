@@ -32,7 +32,6 @@ struct JoinerExecutor::PerIoStruct {
   unsigned index;
   ::boost::fibers::fiber process_fd;
   std::unique_ptr<RawContext> raw_context;
-  uint64 items_cnt;
 
   void Shutdown();
 
@@ -65,7 +64,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->raw_context.reset(runner_->CreateContext());
-    per_io_->items_cnt = 0;
     per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb};
   });
 
@@ -91,7 +89,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
-    FinalizeContext(per_io_->items_cnt, per_io_->raw_context.get());
+    FinalizeContext(per_io_->raw_context.get());
     per_io_.reset();
   });
 
@@ -114,6 +112,27 @@ util::VarzValue::Map JoinerExecutor::GetStats() const {
   }
   res.emplace_back("finish-latency-usec", util::VarzValue::FromInt(latency));
 
+  auto start = base::GetMonotonicMicrosFast();
+  fibers::mutex mu;
+  MetricMap metric_map;
+
+  pool_->AwaitFiberOnAll([&, me = shared_from_this()](IoContext& io) {
+    VLOG(1) << "JoinerExecutor::GetStats CB";
+    auto delta = base::GetMonotonicMicrosFast() - start;
+    LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
+
+    PerIoStruct* aux_local = per_io_.get();
+    if (aux_local) {
+      if (aux_local->raw_context) {
+        std::lock_guard<fibers::mutex> lk(mu);
+        UpdateMetricMap(aux_local->raw_context.get(), &metric_map);
+      }
+    }
+  });
+
+  for (const auto& k_v : metric_map) {
+    res.emplace_back(k_v.first, util::VarzValue::FromInt(k_v.second));
+  }
   return res;
 }
 
@@ -173,7 +192,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
       SetFileName(is_binary, ii.fspec->url_glob(), raw_context);
       SetMetaData(*ii.fspec, raw_context);
-      per_io_->items_cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      raw_context->IncBy("fn-calls", cnt);
     }
     auto start = base::GetMonotonicMicrosFast();
     handler_wrapper->OnShardFinish();
