@@ -125,7 +125,7 @@ util::VarzValue::Map JoinerExecutor::GetStats() const {
     if (aux_local) {
       if (aux_local->raw_context) {
         std::lock_guard<fibers::mutex> lk(mu);
-        UpdateMetricMap(aux_local->raw_context.get(), &metric_map);
+        aux_local->raw_context->UpdateMetricMap(&metric_map);
       }
     }
   });

@@ -46,10 +46,6 @@ protected:
   /// Called from all IO threads once they finished running the operator.
   void FinalizeContext(RawContext* context);
 
-  /// Called for every IO thread in order to fetch the metric map parts from all of them,
-  /// updates into metric_map_.
-  void UpdateMetricMap(RawContext* context, MetricMap* metric_map) const;
-
   static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
     context->is_binary_ = is_binary;
     context->file_name_ = file_name;

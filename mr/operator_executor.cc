@@ -16,18 +16,12 @@ void OperatorExecutor::RegisterContext(RawContext* context) {
 void OperatorExecutor::FinalizeContext(RawContext* raw_context) {
   raw_context->Flush();
 
-  UpdateMetricMap(raw_context, &metric_map_);
+  raw_context->UpdateMetricMap(&metric_map_);
 
   // Merge frequency maps. We aggregate counters for all the contexts.
   for (auto& k_v : raw_context->freq_maps_) {
     auto& any = freq_maps_[k_v.first];
     any.Add(k_v.second);
-  }
-}
-
-void OperatorExecutor::UpdateMetricMap(RawContext *raw_context, MetricMap *metric_map) const {
-  for (const auto& k_v : raw_context->metric_map_) {
-    (*metric_map)[string(k_v.first)] += k_v.second;
   }
 }
 

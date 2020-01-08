@@ -70,6 +70,13 @@ class RawContext {
   void Inc(StringPiece name) { IncBy(name, 1); }
   StringPieceDenseMap<long>& metric_map() { return metric_map_; }
 
+  /// Called for every IO thread in order to fetch the metric map parts from all of them,
+  /// updates into metric_map_.
+  void UpdateMetricMap(MetricMap* metric_map) {
+    for (const auto& k_v : metric_map_)
+      (*metric_map)[std::string(k_v.first)] += k_v.second;
+  }
+
   // Used only in tests.
   void TEST_Write(const ShardId& shard_id, std::string&& record) {
     Write(shard_id, std::move(record));

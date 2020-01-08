@@ -192,7 +192,7 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
                file_record_cnt = uint64_t{0}](string&& s) mutable {
       if (file_record_cnt++ < skip)
         return;
-      record_q.Push(Record::RECORD, aux_local->raw_context->metric_map()["fn-calls"], std::move(s));
+      record_q.Push(Record::RECORD, file_record_cnt - 1 - skip, std::move(s));
       aux_local->raw_context->Inc("fn-calls");
     };
 
@@ -304,7 +304,7 @@ VarzValue::Map MapperExecutor::GetStats() const {
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
       if (aux_local->raw_context) {
-        UpdateMetricMap(aux_local->raw_context.get(), &metric_map);
+        aux_local->raw_context->UpdateMetricMap(&metric_map);
       }
     }
   });
