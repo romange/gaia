@@ -192,8 +192,9 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
       SetFileName(is_binary, ii.fspec->url_glob(), raw_context);
       SetMetaData(*ii.fspec, raw_context);
-      cnt += runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
-      raw_context->IncBy("fn-calls", cnt);
+      size_t records_read = runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      cnt += records_read;
+      raw_context->IncBy("fn-calls", records_read);
     }
     auto start = base::GetMonotonicMicrosFast();
     handler_wrapper->OnShardFinish();
