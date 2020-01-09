@@ -31,7 +31,6 @@ void PipelineMain::Init() {
   pool_.reset(new IoContextPool);
   pool_->Run();
   util::EnableSentry(&pool_->GetNextContext());
-  pipeline_.reset(new Pipeline(pool_.get()));
 
   acc_server_.reset(new AcceptServer(pool_.get()));
   if (FLAGS_http_port >= 0) {
@@ -39,6 +38,17 @@ void PipelineMain::Init() {
     LOG(INFO) << "Started http server on port " << port;
   }
   acc_server_->Run();
+  acc_server_->TriggerOnBreakSignal([this] {
+    for (auto& p : pipelines_)
+      p->Stop();
+    for (auto& r : breakable_runners_)
+      r->Stop();
+  });
+}
+
+Pipeline* PipelineMain::pipeline() {
+  pipelines_.emplace_back(new Pipeline(pool_.get()));
+  return pipelines_.back().get();
 }
 
 PipelineMain::~PipelineMain() {
@@ -47,15 +57,13 @@ PipelineMain::~PipelineMain() {
 }
 
 LocalRunner* PipelineMain::StartLocalRunner(const std::string& root_dir, bool stop_on_break) {
-  CHECK(!runner_);
-  runner_.reset(new LocalRunner(pool_.get(), file_util::ExpandPath(root_dir)));
+  LocalRunner* local_runner = new LocalRunner(pool_.get(), file_util::ExpandPath(root_dir));
   if (stop_on_break) {
-    acc_server_->TriggerOnBreakSignal([this] {
-      pipeline_->Stop();
-      runner_->Stop();
-    });
+    breakable_runners_.emplace_back(local_runner);
+  } else {
+    runners_.emplace_back(local_runner);
   }
-  return runner_.get();
+  return local_runner;
 }
 
 }  // namespace mr3
