@@ -158,7 +158,10 @@ bool ParseDsn(const string& dsn, Dsn* res) {
 
 void EnableSentry(IoContext* context) {
   static std::atomic<bool> ran_once(false);
-  CHECK(!ran_once.exchange(true)) << "EnableSentry called twice";
+  if (ran_once.exchange(true)) {
+    LOG(WARNING) << "EnableSentry called twice";
+    return;
+  }
 
   std::string sentry_dsn = FLAGS_sentry_dsn;
   if (sentry_dsn.empty()) {
