@@ -29,8 +29,6 @@ struct MapperExecutor::PerIoStruct {
   unsigned index;
   std::vector<::boost::fibers::fiber> process_fd;
   std::unique_ptr<RawContext> raw_context;
-  size_t records_read = 0;
-  absl::flat_hash_map<string, uint64_t> inputs_count_map;
 
   bool stop_early = false;
 
@@ -118,7 +116,7 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.
   pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
-    FinalizeContext(per_io_->records_read, per_io_->raw_context.get());
+    FinalizeContext(per_io_->raw_context.get());
     per_io_.reset();
   });
 
@@ -194,15 +192,15 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
                file_record_cnt = uint64_t{0}](string&& s) mutable {
       if (file_record_cnt++ < skip)
         return;
-      record_q.Push(Record::RECORD, aux_local->records_read, std::move(s));
-      ++aux_local->records_read;
+      record_q.Push(Record::RECORD, file_record_cnt - 1 - skip, std::move(s));
+      aux_local->raw_context->Inc("fn-calls");
     };
 
     size_t records_read =
         runner_->ProcessInputFile(file_input.file_name, input_type, std::move(cb));
 
     cnt += records_read;
-    aux_local->inputs_count_map[pb_input->name()] += records_read;
+    aux_local->raw_context->IncBy("map-input-" + pb_input->name(), records_read);
   }
   VLOG(1) << "IOReadFiber closing after processing " << cnt << " items";
 
@@ -292,12 +290,11 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
 
 VarzValue::Map MapperExecutor::GetStats() const {
   VarzValue::Map res;
-  atomic<size_t> parse_errors{0}, record_read{0};
 
   LOG(INFO) << "MapperExecutor::GetStats";
 
   auto start = base::GetMonotonicMicrosFast();
-  absl::flat_hash_map<string, uint64_t> input_read;
+  MetricMap metric_map;
 
   pool_->AwaitFiberOnAllSerially([&, me = shared_from_this()](IoContext& io) {
     VLOG(1) << "MapperExecutor::GetStats CB";
@@ -306,20 +303,16 @@ VarzValue::Map MapperExecutor::GetStats() const {
 
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
-      record_read.fetch_add(aux_local->records_read, memory_order_relaxed);
-
       if (aux_local->raw_context) {
-        parse_errors.fetch_add(aux_local->raw_context->parse_errors(), memory_order_relaxed);
+        aux_local->raw_context->UpdateMetricMap(&metric_map);
       }
-      input_read.merge(aux_local->inputs_count_map);
     }
   });
 
-  res.emplace_back("parse-errors", VarzValue::FromInt(parse_errors.load()));
-  res.emplace_back("records-read", VarzValue::FromInt(record_read.load()));
-  res.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
-  for (const auto& k_v : input_read) {
-    res.emplace_back(absl::StrCat("map-input-", k_v.first), VarzValue::FromInt(k_v.second));
+  res.emplace_back("stats-latency",
+                   util::VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
+  for (const auto& k_v : metric_map) {
+    res.emplace_back(k_v.first, util::VarzValue::FromInt(k_v.second));
   }
   return res;
 }

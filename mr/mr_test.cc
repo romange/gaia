@@ -121,7 +121,9 @@ TEST_F(MrTest, Basic) {
 
   EXPECT_THAT(runner_.Table("new_table"), ElementsAre(MatchShard("shard1", elements)));
   EXPECT_EQ("fn-calls,4\n"
-            "fn-writes,4\n",
+            "fn-writes,4\n"
+            "map-input-read_bar,4\n"
+            "parse-errors,0\n",
             runner_.SavedFile(file_util::JoinPath("new_table", "counter_map.csv")));
 }
 
@@ -284,6 +286,10 @@ TEST_F(MrTest, Join) {
   EXPECT_THAT(runner_.Table("joinw"),
               UnorderedElementsAre(MatchShard(0, {"3:11"}), MatchShard(1, {"1:1", "4:1"}),
                                    MatchShard(2, {"2:11"})));
+  EXPECT_THAT("fn-calls,6\n"
+              "fn-writes,4\n"
+              "parse-errors,0\n",
+              runner_.SavedFile(file_util::JoinPath("joinw", "counter_map.csv")));
 }
 
 class GroupByInt {

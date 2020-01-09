@@ -96,7 +96,9 @@ struct ShardVisitor {
 
 }  // namespace
 
-RawContext::RawContext() { metric_map_.set_empty_key(StringPiece{}); }
+RawContext::RawContext() {
+  metric_map_.set_empty_key(StringPiece{});
+}
 
 RawContext::~RawContext() {}
 

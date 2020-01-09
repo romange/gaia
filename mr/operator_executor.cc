@@ -13,15 +13,10 @@ void OperatorExecutor::RegisterContext(RawContext* context) {
   context->finalized_maps_ = finalized_maps_;
 }
 
-void OperatorExecutor::FinalizeContext(long items_cnt, RawContext* raw_context) {
+void OperatorExecutor::FinalizeContext(RawContext* raw_context) {
   raw_context->Flush();
-  parse_errors_.fetch_add(raw_context->parse_errors(), std::memory_order_relaxed);
 
-  for (const auto& k_v : raw_context->metric_map_) {
-    metric_map_[string(k_v.first)] += k_v.second;
-  }
-  metric_map_["fn-calls"] += items_cnt;
-  metric_map_["fn-writes"] += raw_context->item_writes();
+  raw_context->UpdateMetricMap(&metric_map_);
 
   // Merge frequency maps. We aggregate counters for all the contexts.
   for (auto& k_v : raw_context->freq_maps_) {

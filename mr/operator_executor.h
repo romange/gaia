@@ -44,7 +44,7 @@ protected:
   void RegisterContext(RawContext* context);
 
   /// Called from all IO threads once they finished running the operator.
-  void FinalizeContext(long items_cnt, RawContext* context);
+  void FinalizeContext(RawContext* context);
 
   static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
     context->is_binary_ = is_binary;
