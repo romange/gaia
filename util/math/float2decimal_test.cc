@@ -118,6 +118,15 @@ void Float2DecimalTest::CheckDouble(double d0) const {
 }
 
 TEST_F(Float2DecimalTest, Basic) {
+
+  IEEEFloat<double> iofl(1.5);
+  EXPECT_EQ(2251799813685248L, iofl.SignificandBits());
+  EXPECT_EQ(1023, iofl.ExponentBits());
+
+  dtoa::BoundedFp res = dtoa::ComputeBoundedFp<double>(1.5);
+  EXPECT_EQ(13835058055282163712ULL, res.w.f);
+  EXPECT_EQ(-63, res.w.e);
+
   CheckFloat(1.2621774483536189e-29);
   CheckFloat(2048.00024);
   CheckFloat(0.000244140625);
