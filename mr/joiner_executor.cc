@@ -28,20 +28,6 @@ ShardId GetShard(const pb::Input::FileSpec& fspec) {
 
 }  // namespace
 
-struct JoinerExecutor::PerIoStruct {
-  unsigned index;
-  ::boost::fibers::fiber process_fd;
-  std::unique_ptr<RawContext> raw_context;
-
-  void Shutdown();
-
-  PerIoStruct(unsigned i) : index(i) {}
-};
-
-thread_local std::unique_ptr<JoinerExecutor::PerIoStruct> JoinerExecutor::per_io_;
-
-void JoinerExecutor::PerIoStruct::Shutdown() { process_fd.join(); }
-
 JoinerExecutor::JoinerExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {}
 
@@ -64,7 +50,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->raw_context.reset(runner_->CreateContext());
-    per_io_->process_fd = fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb};
+    per_io_->process_fd.emplace_back(fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb});
   });
 
   std::map<ShardId, std::vector<IndexedInput>> shard_inputs;
@@ -102,40 +88,6 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   runner_->OperatorEnd(out_files);
 }
 
-util::VarzValue::Map JoinerExecutor::GetStats() const {
-  util::VarzValue::Map res;
-
-  uint64_t latency = 0;
-  uint64_t cnt = finish_shard_latency_cnt_.load(std::memory_order_acquire);
-  if (cnt) {  // not 100% correct but will do for this.
-    latency = finish_shard_latency_sum_.load(std::memory_order_relaxed) / cnt;
-  }
-  res.emplace_back("finish-latency-usec", util::VarzValue::FromInt(latency));
-
-  auto start = base::GetMonotonicMicrosFast();
-  fibers::mutex mu;
-  MetricMap metric_map;
-
-  pool_->AwaitFiberOnAll([&, me = shared_from_this()](IoContext& io) {
-    VLOG(1) << "JoinerExecutor::GetStats CB";
-    auto delta = base::GetMonotonicMicrosFast() - start;
-    LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
-
-    PerIoStruct* aux_local = per_io_.get();
-    if (aux_local) {
-      if (aux_local->raw_context) {
-        std::lock_guard<fibers::mutex> lk(mu);
-        aux_local->raw_context->UpdateMetricMap(&metric_map);
-      }
-    }
-  });
-
-  for (const auto& k_v : metric_map) {
-    res.emplace_back(k_v.first, util::VarzValue::FromInt(k_v.second));
-  }
-  return res;
-}
-
 void JoinerExecutor::CheckInputs(const std::vector<const InputBase*>& inputs) {
   uint32_t modn = 0;
   for (const auto& input : inputs) {
@@ -167,7 +119,6 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
   // PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
-  uint64_t cnt = 0;
 
   RawContext *raw_context = per_io_->raw_context.get();
   RegisterContext(raw_context);
@@ -192,9 +143,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
 
       SetFileName(is_binary, ii.fspec->url_glob(), raw_context);
       SetMetaData(*ii.fspec, raw_context);
-      size_t records_read = runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
-      cnt += records_read;
-      raw_context->IncBy("fn-calls", records_read);
+      uint64_t cnt = runner_->ProcessInputFile(ii.fspec->url_glob(), ii.wf->type(), emit_cb);
+      raw_context->IncBy("fn-calls", cnt);
     }
     auto start = base::GetMonotonicMicrosFast();
     handler_wrapper->OnShardFinish();
@@ -202,7 +152,7 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
                                         std::memory_order_relaxed);
     finish_shard_latency_cnt_.fetch_add(1, std::memory_order_acq_rel);
   }
-  VLOG(1) << "ProcessInputQ finished after processing " << cnt << " items";
+  VLOG(1) << "ProcessInputQ finished processing";
 }
 
 }  // namespace mr3

@@ -25,30 +25,6 @@ using namespace util;
 
 using fibers::channel_op_status;
 
-struct MapperExecutor::PerIoStruct {
-  unsigned index;
-  std::vector<::boost::fibers::fiber> process_fd;
-  std::unique_ptr<RawContext> raw_context;
-
-  bool stop_early = false;
-
-  PerIoStruct(unsigned i);
-
-  void Shutdown();
-};
-
-MapperExecutor::PerIoStruct::PerIoStruct(unsigned i) : index(i) {
-}
-
-thread_local std::unique_ptr<MapperExecutor::PerIoStruct> MapperExecutor::per_io_;
-
-void MapperExecutor::PerIoStruct::Shutdown() {
-  VLOG(1) << "PerIoStruct::ShutdownStart";
-  for (auto& f : process_fd)
-    f.join();
-  VLOG(1) << "PerIoStruct::ShutdownEnd";
-}
-
 MapperExecutor::MapperExecutor(util::IoContextPool* pool, Runner* runner)
     : OperatorExecutor(pool, runner) {
 }
@@ -286,35 +262,6 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
     }
   }
   VLOG(1) << "MapFiber finished " << record_num;
-}
-
-VarzValue::Map MapperExecutor::GetStats() const {
-  VarzValue::Map res;
-
-  LOG(INFO) << "MapperExecutor::GetStats";
-
-  auto start = base::GetMonotonicMicrosFast();
-  MetricMap metric_map;
-
-  pool_->AwaitFiberOnAllSerially([&, me = shared_from_this()](IoContext& io) {
-    VLOG(1) << "MapperExecutor::GetStats CB";
-    auto delta = base::GetMonotonicMicrosFast() - start;
-    LOG_IF(INFO, delta > 10000) << "Started late " << delta / 1000 << "ms";
-
-    PerIoStruct* aux_local = per_io_.get();
-    if (aux_local) {
-      if (aux_local->raw_context) {
-        aux_local->raw_context->UpdateMetricMap(&metric_map);
-      }
-    }
-  });
-
-  res.emplace_back("stats-latency",
-                   util::VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
-  for (const auto& k_v : metric_map) {
-    res.emplace_back(k_v.first, util::VarzValue::FromInt(k_v.second));
-  }
-  return res;
 }
 
 }  // namespace mr3
