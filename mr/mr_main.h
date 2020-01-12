@@ -29,6 +29,7 @@ public:
 
   util::IoContextPool* pool() { return pool_.get(); }
   Pipeline* pipeline() { return pipeline_.get(); }
+  void ResetPipeline();
   util::AcceptServer* accept_server() { return acc_server_.get(); }
 
   LocalRunner* StartLocalRunner(const std::string& root_dir, bool stop_on_break = true);
