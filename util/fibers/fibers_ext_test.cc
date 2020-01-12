@@ -137,7 +137,7 @@ TEST_F(FibersTest, FiberQueue) {
   fiber.join();
 
   EXPECT_EQ(kIters, invocations);
-  EXPECT_LT(delay / kIters, 200);
+  EXPECT_LT(delay / kIters, 2000);  //
 }
 
 }  // namespace fibers_ext
