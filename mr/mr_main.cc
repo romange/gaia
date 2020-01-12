@@ -27,11 +27,16 @@ PipelineMain::PipelineMain(int* argc, char*** argv) : guard_(new MainInitGuard{a
   Init();
 }
 
+void PipelineMain::ResetPipeline() {
+  pipeline_.reset(new Pipeline(pool_.get()));
+  runner_.reset();
+}
+
 void PipelineMain::Init() {
   pool_.reset(new IoContextPool);
   pool_->Run();
   util::EnableSentry(&pool_->GetNextContext());
-  pipeline_.reset(new Pipeline(pool_.get()));
+  ResetPipeline();
 
   acc_server_.reset(new AcceptServer(pool_.get()));
   if (FLAGS_http_port >= 0) {
