@@ -64,22 +64,12 @@ if(IS_ABSOLUTE "${PYTHON_EXECUTABLE}")
   endif()
 endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/CMakeFindFrameworks.cmake)
-# Search for the python framework on Apple.
-CMAKE_FIND_FRAMEWORKS(Python)
-
-# Save CMAKE_FIND_FRAMEWORK
-if(DEFINED CMAKE_FIND_FRAMEWORK)
-  set(_PythonLibs_CMAKE_FIND_FRAMEWORK ${CMAKE_FIND_FRAMEWORK})
-else()
-  unset(_PythonLibs_CMAKE_FIND_FRAMEWORK)
-endif()
-# To avoid picking up the system Python.h pre-maturely.
-set(CMAKE_FIND_FRAMEWORK LAST)
 
 set(_PYTHON1_VERSIONS 1.6 1.5)
 set(_PYTHON2_VERSIONS 2.7 2.6 2.5 2.4 2.3 2.2 2.1 2.0)
 set(_PYTHON3_VERSIONS 3.8 3.7 3.6 3.5 3.4 3.3 3.2 3.1 3.0)
+
+message(STATUS "PVERSION ${PythonLibs_FIND_VERSION}")
 
 if(PythonLibs_FIND_VERSION)
     if(PythonLibs_FIND_VERSION_COUNT GREATER 1)
@@ -291,22 +281,15 @@ set(PYTHON_DEBUG_LIBRARIES "${PYTHON_DEBUG_LIBRARY}")
 # what SELECT_LIBRARY_CONFIGURATIONS() expects.
 set(PYTHON_LIBRARY_DEBUG "${PYTHON_DEBUG_LIBRARY}")
 set(PYTHON_LIBRARY_RELEASE "${PYTHON_LIBRARY}")
-include(${CMAKE_CURRENT_LIST_DIR}/SelectLibraryConfigurations.cmake)
+include(SelectLibraryConfigurations)
 SELECT_LIBRARY_CONFIGURATIONS(PYTHON)
 # SELECT_LIBRARY_CONFIGURATIONS() sets ${PREFIX}_FOUND if it has a library.
 # Unset this, this prefix doesn't match the module prefix, they are different
 # for historical reasons.
 unset(PYTHON_FOUND)
 
-# Restore CMAKE_FIND_FRAMEWORK
-if(DEFINED _PythonLibs_CMAKE_FIND_FRAMEWORK)
-  set(CMAKE_FIND_FRAMEWORK ${_PythonLibs_CMAKE_FIND_FRAMEWORK})
-  unset(_PythonLibs_CMAKE_FIND_FRAMEWORK)
-else()
-  unset(CMAKE_FIND_FRAMEWORK)
-endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/FindPackageHandleStandardArgs.cmake)
+include(FindPackageHandleStandardArgs)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(PythonLibs
                                   REQUIRED_VARS PYTHON_LIBRARIES PYTHON_INCLUDE_DIRS
                                   VERSION_VAR PYTHONLIBS_VERSION_STRING)

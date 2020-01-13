@@ -30,9 +30,14 @@ cxx_link(osmium_road_length base TRDP::libosmium)
 
 # find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-set(PYTHON_LIBRARY /usr/lib/python3.8/)
+# set(PYTHON_LIBRARY /usr/lib/python3.8/)
 find_package(PythonLibs 3.8 REQUIRED)
 include_directories(${PYTHON_INCLUDE_DIRS})
+
+add_executable(py3_subinterpreter py3_subinterpreter.cc)
+
+Message(STATUS "PYTHON_LIBRARIES ${PYTHON_LIBRARIES} ${PYTHON_LIBRARY}")
+target_link_libraries(py3_subinterpreter ${PYTHON_LIBRARIES})
 
 add_subdirectory(wordcount)
 add_subdirectory(redis)
