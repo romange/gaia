@@ -28,5 +28,11 @@ cxx_link(mrgrep mr3_lib http_v2 TRDP::re2)
 add_executable(osmium_road_length osmium_road_length.cc)
 cxx_link(osmium_road_length base TRDP::libosmium)
 
+# find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
+set(PYTHON_LIBRARY /usr/lib/python3.8/)
+find_package(PythonLibs 3.8 REQUIRED)
+include_directories(${PYTHON_INCLUDE_DIRS})
+
 add_subdirectory(wordcount)
 add_subdirectory(redis)
