@@ -50,7 +50,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
     per_io_->raw_context.reset(runner_->CreateContext());
-    per_io_->process_fd.emplace_back(fibers::fiber{&JoinerExecutor::ProcessInputQ, this, tb});
+    per_io_->process_fd.emplace_back(&JoinerExecutor::ProcessInputQ, this, tb);
   });
 
   std::map<ShardId, std::vector<IndexedInput>> shard_inputs;
