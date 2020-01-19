@@ -233,7 +233,7 @@ void AcceptServer::Wait() {
     ref_bc_.Wait();
     VLOG(1) << "AcceptServer::Wait completed";
   } else {
-    CHECK(listeners_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
+    // CHECK(listeners_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
   }
 }
 
