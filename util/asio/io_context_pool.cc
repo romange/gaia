@@ -21,11 +21,17 @@ namespace util {
 
 thread_local size_t IoContextPool::context_indx_ = 0;
 
-IoContextPool::IoContextPool(size_t pool_size) {
+IoContextPool::IoContextPool(size_t pool_size, std::vector<int> cpus) {
   if (pool_size == 0) {
     pool_size =
         FLAGS_io_context_threads > 0 ? FLAGS_io_context_threads : thread::hardware_concurrency();
   }
+  if (cpus.empty()) {
+    for (size_t i = 0; i < pool_size; ++i)
+      cpus.push_back(i);
+  }
+  CHECK_EQ(pool_size, cpus.size());
+  cpu_idx_arr_ = std::move(cpus);
   context_arr_.resize(pool_size);
   thread_arr_.resize(pool_size);
 }
@@ -60,7 +66,7 @@ void IoContextPool::Run() {
         base::StartThread(buf, [this, i, bc]() mutable { this->WrapLoop(i, &bc); });
     cpu_set_t cps;
     CPU_ZERO(&cps);
-    CPU_SET(i % thread::hardware_concurrency(), &cps);
+    CPU_SET(cpu_idx_arr_[i] % thread::hardware_concurrency(), &cps);
 
     int rc = pthread_setaffinity_np(thread_arr_[i].tid, sizeof(cpu_set_t), &cps);
     LOG_IF(WARNING, rc) << "Error calling pthread_setaffinity_np: " << strerror(rc) << "\n";

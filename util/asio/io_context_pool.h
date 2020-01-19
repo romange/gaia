@@ -36,7 +36,7 @@ class IoContextPool {
 
   //! Constructs io_context pool with number of threads equal to 'pool_size'.
   //! pool_size = 0 chooses automatically pool size equal to number of cores in the system.
-  explicit IoContextPool(std::size_t pool_size = 0);
+  explicit IoContextPool(std::size_t pool_size = 0, std::vector<int> cpus = {});
 
   ~IoContextPool();
 
@@ -130,9 +130,23 @@ class IoContextPool {
    *
    * 'func' callback runs inside a wrapping fiber.
    */
-  template <typename Func> void AsyncFiberOnAll(Func&& func) {
+  template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0> void AsyncFiberOnAll(Func&& func) {
+    AsyncOnAll([func = std::forward<Func>(func)](unsigned i, IoContext& context) {
+        ::boost::fibers::fiber(func, i, std::ref(context)).detach();
+    });
+  }
+
+  /**
+   * @brief Runs `func` in a fiber asynchronously. func must accept IoContext&.
+   *        func may fiber-block.
+   *
+   * @param func
+   *
+   * 'func' callback runs inside a wrapping fiber.
+   */
+  template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AsyncFiberOnAll(Func&& func) {
     AsyncOnAll([func = std::forward<Func>(func)](IoContext& context) {
-      ::boost::fibers::fiber(func, std::ref(context)).detach();
+        ::boost::fibers::fiber(func, std::ref(context)).detach();
     });
   }
 
@@ -144,7 +158,26 @@ class IoContextPool {
    *
    * Waits for all the callbacks to finish.
    */
-  template <typename Func> void AwaitFiberOnAll(Func&& func) {
+  template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0>
+  void AwaitFiberOnAll(Func&& func) {
+    fibers_ext::BlockingCounter bc(size());
+    auto cb = [func = std::forward<Func>(func), bc](unsigned i, IoContext& context) mutable {
+      func(i, context);
+      bc.Dec();
+    };
+    AsyncFiberOnAll(std::move(cb));
+    bc.Wait();
+  }
+
+  /**
+   * @brief Runs `func` wrapped in fiber on all IO threads in parallel. func must accept IoContext&.
+   *        func may fiber-block.
+   *
+   * @param func
+   *
+   * Waits for all the callbacks to finish.
+   */
+  template <typename Func, AcceptArgsCheck<Func, IoContext&> = 0> void AwaitFiberOnAll(Func&& func) {
     fibers_ext::BlockingCounter bc(size());
     auto cb = [func = std::forward<Func>(func), bc](IoContext& context) mutable {
       func(context);
@@ -178,6 +211,7 @@ class IoContextPool {
 
   typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
 
+  std::vector<int> cpu_idx_arr_;
   std::vector<IoContext> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
