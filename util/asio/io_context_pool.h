@@ -36,7 +36,7 @@ class IoContextPool {
 
   //! Constructs io_context pool with number of threads equal to 'pool_size'.
   //! pool_size = 0 chooses automatically pool size equal to number of cores in the system.
-  explicit IoContextPool(std::size_t pool_size = 0, std::vector<int> cpus = {});
+  explicit IoContextPool(std::size_t pool_size = 0, std::vector<size_t> cpus = {});
 
   ~IoContextPool();
 
@@ -132,7 +132,7 @@ class IoContextPool {
    */
   template <typename Func, AcceptArgsCheck<Func, unsigned, IoContext&> = 0> void AsyncFiberOnAll(Func&& func) {
     AsyncOnAll([func = std::forward<Func>(func)](unsigned i, IoContext& context) {
-        ::boost::fibers::fiber(func, i, std::ref(context)).detach();
+      ::boost::fibers::fiber(func, i, std::ref(context)).detach();
     });
   }
 
@@ -211,7 +211,7 @@ class IoContextPool {
 
   typedef ::boost::asio::executor_work_guard<IoContext::io_context::executor_type> work_guard_t;
 
-  std::vector<int> cpu_idx_arr_;
+  std::vector<size_t> cpu_idx_arr_;
   std::vector<IoContext> context_arr_;
   struct TInfo {
     pthread_t tid = 0;
