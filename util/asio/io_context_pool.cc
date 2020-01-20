@@ -21,7 +21,7 @@ namespace util {
 
 thread_local size_t IoContextPool::context_indx_ = 0;
 
-IoContextPool::IoContextPool(size_t pool_size, std::vector<int> cpus) {
+IoContextPool::IoContextPool(size_t pool_size, std::vector<size_t> cpus) {
   if (pool_size == 0) {
     pool_size =
         FLAGS_io_context_threads > 0 ? FLAGS_io_context_threads : thread::hardware_concurrency();
