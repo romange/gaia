@@ -54,12 +54,12 @@ class MapperExecutor : public OperatorExecutor {
 
   // Input managing fiber that reads files from disk and pumps data into record_q.
   // One per IO thread.
-  void IOReadFiber(detail::TableBase* tb);
+  void IOReadFiber(detail::TableBase* tb, RawContext* ctx);
 
   // index - io thread index.
   void SetupPerIoThread(unsigned index, detail::TableBase* tb);
 
-  static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
+  static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb, RawContext* ctx);
 
   std::unique_ptr<FileNameQueue> file_name_q_;
 };

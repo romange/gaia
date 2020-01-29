@@ -83,9 +83,8 @@ util::VarzValue::Map OperatorExecutor::GetStats() {
 
     PerIoStruct* aux_local = per_io_.get();
     if (aux_local) {
-      if (aux_local->raw_context) {
-        aux_local->raw_context->UpdateMetricMap(&metric_map);
-      }
+      for (auto& raw_context : aux_local->raw_contexts)
+        raw_context->UpdateMetricMap(&metric_map);
     }
   });
 
@@ -96,6 +95,5 @@ util::VarzValue::Map OperatorExecutor::GetStats() {
   }
   return res;
 }
-
 
 }  // namespace mr3

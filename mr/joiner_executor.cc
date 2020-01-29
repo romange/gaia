@@ -49,7 +49,7 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   pool_->AwaitOnAll([&](unsigned index, IoContext&) {
     per_io_.reset(new PerIoStruct(index));
-    per_io_->raw_context.reset(runner_->CreateContext());
+    per_io_->raw_contexts.emplace_back(runner_->CreateContext());
     per_io_->process_fd.emplace_back(&JoinerExecutor::ProcessInputQ, this, tb);
   });
 
@@ -75,7 +75,9 @@ void JoinerExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
 
   pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
-    FinalizeContext(per_io_->raw_context.get());
+    for (auto& raw_context : per_io_->raw_contexts) {
+      FinalizeContext(raw_context.get());
+    }
     per_io_.reset();
   });
 
@@ -120,7 +122,9 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   // PerIoStruct* trd_local = per_io_.get();
   ShardInput shard_input;
 
-  RawContext *raw_context = per_io_->raw_context.get();
+  CHECK_EQ(1, per_io_->raw_contexts.size()) << "When we support more than 1 I/O fiber, "
+                                            << "we'll need to pass the correct context pointer";
+  RawContext *raw_context = per_io_->raw_contexts[0].get();
   RegisterContext(raw_context);
 
   std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context)};

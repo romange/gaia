@@ -55,8 +55,6 @@ void MapperExecutor::Stop() {
 
 void MapperExecutor::SetupPerIoThread(unsigned index, detail::TableBase* tb) {
   auto* ptr = new PerIoStruct(index);
-  ptr->raw_context.reset(runner_->CreateContext());
-  RegisterContext(ptr->raw_context.get());
 
   per_io_.reset(ptr);
 
@@ -64,7 +62,9 @@ void MapperExecutor::SetupPerIoThread(unsigned index, detail::TableBase* tb) {
   per_io_->process_fd.resize(FLAGS_map_io_read_factor);
 
   for (auto& fbr : per_io_->process_fd) {
-    fbr = fibers::fiber{&MapperExecutor::IOReadFiber, this, tb};
+    ptr->raw_contexts.emplace_back(runner_->CreateContext());
+    RegisterContext(ptr->raw_contexts.back().get());
+    fbr = fibers::fiber{&MapperExecutor::IOReadFiber, this, tb, ptr->raw_contexts.back().get()};
   }
 }
 
@@ -92,7 +92,9 @@ void MapperExecutor::Run(const std::vector<const InputBase*>& inputs, detail::Ta
   // Use AwaitFiberOnAll because Shutdown() blocks the callback.
   pool_->AwaitFiberOnAllSerially([&](IoContext&) {
     per_io_->Shutdown();
-    FinalizeContext(per_io_->raw_context.get());
+    for (auto& raw_context : per_io_->raw_contexts) {
+      FinalizeContext(raw_context.get());
+    }
     per_io_.reset();
   });
 
@@ -133,21 +135,20 @@ void MapperExecutor::PushInput(const InputBase* input) {
   }
 }
 
-void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
+void MapperExecutor::IOReadFiber(detail::TableBase* tb, RawContext* ctx) {
   this_fiber::properties<IoFiberProperties>().set_name("IOReadFiber");
 
   PerIoStruct* aux_local = per_io_.get();
   FileInput file_input;
   uint64_t cnt = 0;
 
-  std::unique_ptr<detail::HandlerWrapperBase> handler{
-      tb->CreateHandler(aux_local->raw_context.get())};
+  std::unique_ptr<detail::HandlerWrapperBase> handler{tb->CreateHandler(ctx)};
   CHECK_EQ(1, handler->Size());
 
   // contains items pushed from the IORead fiber but not yet processed by MapFiber.
   RecordQueue record_q(256);
 
-  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler.get());
+  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler.get(), ctx);
 
   VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
 
@@ -169,14 +170,14 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
       if (file_record_cnt++ < skip)
         return;
       record_q.Push(Record::RECORD, file_record_cnt - 1 - skip, std::move(s));
-      aux_local->raw_context->Inc("fn-calls");
+      ctx->Inc("fn-calls");
     };
 
     size_t records_read =
         runner_->ProcessInputFile(file_input.file_name, input_type, std::move(cb));
 
     cnt += records_read;
-    aux_local->raw_context->IncBy("map-input-" + pb_input->name(), records_read);
+    ctx->IncBy("map-input-" + pb_input->name(), records_read);
   }
   VLOG(1) << "IOReadFiber closing after processing " << cnt << " items";
 
@@ -190,13 +191,12 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
   VLOG(1) << "IOReadFiber after OnShardFinish";
 }
 
-void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper) {
+void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper,
+                              RawContext* raw_context) {
   auto& props = this_fiber::properties<IoFiberProperties>();
   props.set_name("MapFiber");
   props.SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL);
 
-  PerIoStruct* aux_local = per_io_.get();
-  RawContext* raw_context = aux_local->raw_context.get();
   CHECK(raw_context);
 
   Record record;

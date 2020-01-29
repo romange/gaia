@@ -46,8 +46,9 @@ protected:
   struct PerIoStruct {
     unsigned index;
     std::vector<::boost::fibers::fiber> process_fd;
-    std::unique_ptr<RawContext> raw_context;
-
+    std::vector<std::unique_ptr<RawContext>> raw_contexts; // --map_io_read_factor enables several
+                                                           // I/O fibers per thread. Thus, one
+                                                           // context doesn't suffice.
     long *records_read_ptr = nullptr; // To avoid always looking up "fn-calls", used only by mapper.
     bool stop_early = false; // Used only by mapper.
 
