@@ -3,6 +3,7 @@
 //
 #pragma once
 
+#include <boost/fiber/fss.hpp>
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
@@ -44,8 +45,8 @@ template <> struct RecordTraits<std::string> {
 
 /** RawContext and its wrapper DoContext<T> provide bidirectional interface from user classes
  *  to the framework.
- *  RawContextis created per IO Context thread. In other words, RawContext is thread-local but
- *  not necessarily fiber local.
+ *  RawContextis created per IO Context thread. In other words, RawContext is thread-local,
+ *  with the internal PerFiber struct being fiber-local.
  */
 class RawContext {
   template <typename T> friend class DoContext;
@@ -84,14 +85,6 @@ class RawContext {
 
   void EmitParseError() { ++metric_map_["parse-errors"]; }
 
-  const std::string& input_file_name() const { return file_name_;}
-
-  // Line number for text files.
-  size_t input_pos() const { return input_pos_; }
-
-  const InputMetaData& meta_data() const { return metadata_;}
-  bool is_binary() const { return is_binary_; }
-
   template <class T>
   FrequencyMap<T>&  GetFreqMapStatistic(const std::string& map_id) {
     auto res = freq_maps_.emplace(map_id, detail::FreqMapWrapper());
@@ -109,7 +102,20 @@ class RawContext {
     return &ptr->Cast<T>();
   }
 
-  const ShardId& current_shard() const { return current_shard_;}
+  // Sometimes we run 2 shards per thread, in which case it is important to have these per-fiber
+  struct PerFiber {
+    std::string file_name;
+    ShardId current_shard;
+    InputMetaData metadata;
+    size_t input_pos = 0;
+    bool is_binary = false;
+  };
+
+  const PerFiber *per_fiber() {
+    if (!per_fiber_.get())
+      per_fiber_.reset(new PerFiber);
+    return per_fiber_.get();
+  }
 
  private:
   void Write(const ShardId& shard_id, std::string&& record) {
@@ -122,25 +128,21 @@ class RawContext {
   // To allow testing we mark this function as public.
   virtual void WriteInternal(const ShardId& shard_id, std::string&& record) = 0;
 
+  ::boost::fibers::fiber_specific_ptr<PerFiber> per_fiber_;
+
   StringPieceDenseMap<long> metric_map_;
-  std::string file_name_;
-  ShardId current_shard_;
-
-  InputMetaData metadata_;
-  bool is_binary_ = false;
-
   FreqMapRegistry freq_maps_;
   const FreqMapRegistry* finalized_maps_ = nullptr;
-  size_t input_pos_ = 0;
 };
 
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
-// It's thread-local.
+// It's thread-local as well as caching a pointer to the fiber-local part of the RawContext.
 template <typename T> class DoContext {
   template <typename Handler, typename ToType> friend class detail::HandlerWrapper;
 
  public:
-  DoContext(const Output<T>& out, RawContext* context) : out_(out), context_(context) {}
+  DoContext(const Output<T>& out, RawContext* context)
+      : out_(out), context_(context), context_fiber_local_(context->per_fiber()) {}
 
   template<typename U> void Write(const ShardId& shard_id, U&& u) {
     context_->Write(shard_id, rt_.Serialize(out_.is_binary(), std::forward<U>(u)));
@@ -158,6 +160,12 @@ template <typename T> class DoContext {
 
   RawContext* raw() { return context_; }
 
+  // These functions are quicker than accessing fiber local through raw()
+  bool is_binary() const { return context_fiber_local_->is_binary; }
+  const std::string& input_file_name() const { return context_fiber_local_->file_name; }
+  const RawContext::InputMetaData& meta_data() const { return context_fiber_local_->metadata; }
+  size_t input_pos() const { return context_fiber_local_->input_pos; }
+
   //
   void SetOutputShard(ShardId sid) {
     detail::VerifyUnspecifiedSharding(out_.msg());
@@ -170,6 +178,7 @@ private:
 
   Output<T> out_;
   RawContext* context_;
+  const RawContext::PerFiber* context_fiber_local_;
   RecordTraits<T> rt_;
 };
 

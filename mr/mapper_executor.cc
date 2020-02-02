@@ -140,14 +140,10 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
   FileInput file_input;
   uint64_t cnt = 0;
 
-  std::unique_ptr<detail::HandlerWrapperBase> handler{
-      tb->CreateHandler(aux_local->raw_context.get())};
-  CHECK_EQ(1, handler->Size());
-
   // contains items pushed from the IORead fiber but not yet processed by MapFiber.
   RecordQueue record_q(256);
 
-  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, handler.get());
+  fibers::fiber map_fd(&MapperExecutor::MapFiber, &record_q, tb);
 
   VLOG(1) << "Starting MapFiber on " << tb->op().output().DebugString();
 
@@ -185,23 +181,27 @@ void MapperExecutor::IOReadFiber(detail::TableBase* tb) {
   record_q.StartClosing();
 
   map_fd.join();
-  handler->OnShardFinish();
 
   VLOG(1) << "IOReadFiber after OnShardFinish";
 }
 
-void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* handler_wrapper) {
+void MapperExecutor::MapFiber(RecordQueue* record_q, detail::TableBase* tb) {
   auto& props = this_fiber::properties<IoFiberProperties>();
   props.set_name("MapFiber");
   props.SetNiceLevel(IoFiberProperties::MAX_NICE_LEVEL);
 
   PerIoStruct* aux_local = per_io_.get();
   RawContext* raw_context = aux_local->raw_context.get();
+
+  std::unique_ptr<detail::HandlerWrapperBase> handler{
+      tb->CreateHandler(aux_local->raw_context.get())};
+  CHECK_EQ(1, handler->Size());
+
   CHECK(raw_context);
 
   Record record;
   uint64_t record_num = 0;
-  RawSinkCb cb = handler_wrapper->Get(0);
+  RawSinkCb cb = handler->Get(0);
   base::Histogram hist;
 
   while (true) {
@@ -261,6 +261,8 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase*
       hist.Add(delta);
     }
   }
+
+  handler->OnShardFinish();
   VLOG(1) << "MapFiber finished " << record_num;
 }
 

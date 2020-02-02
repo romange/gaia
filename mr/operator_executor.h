@@ -64,18 +64,18 @@ protected:
   util::VarzValue::Map GetStats();
 
   static void SetFileName(bool is_binary, const std::string& file_name, RawContext* context) {
-    context->is_binary_ = is_binary;
-    context->file_name_ = file_name;
+    context->per_fiber_->is_binary = is_binary;
+    context->per_fiber_->file_name = file_name;
   }
 
   static void SetMetaData(const pb::Input::FileSpec& fs, RawContext* context);
 
   static void SetPosition(size_t pos, RawContext* context) {
-    context->input_pos_ = pos;
+    context->per_fiber_->input_pos = pos;
   }
 
   static void SetCurrentShard(ShardId shard, RawContext* context) {
-    context->current_shard_ = std::move(shard);
+    context->per_fiber_->current_shard = std::move(shard);
   }
 
   virtual void InitInternal() = 0;
