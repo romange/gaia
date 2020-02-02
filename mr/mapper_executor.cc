@@ -14,10 +14,10 @@
 #include "util/fibers/fibers_ext.h"
 #include "util/stats/varz_stats.h"
 
-namespace mr3 {
-
 DEFINE_uint32(map_limit, 0, "");
 DEFINE_uint32(map_io_read_factor, 2, "");
+
+namespace mr3 {
 
 using namespace std;
 using namespace boost;

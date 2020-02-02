@@ -19,6 +19,9 @@
 
 using namespace std;
 
+DECLARE_uint32(io_context_threads);
+DECLARE_uint32(map_io_read_factor);
+
 namespace mr3 {
 
 using namespace util;
@@ -44,6 +47,9 @@ class StrValMapper {
   StrValMapper(MetaCheck* meta_check) : meta_check_(meta_check) {}
 
   void Do(string val, mr3::DoContext<StrVal>* cntx) {
+    if (++should_stop_ % 5) {
+      boost::this_fiber::yield(); // Used for MetadataPerFiber, to allow fibers to race each other.
+    }
     meta_check_->input_files.insert(cntx->input_file_name());
     if (absl::holds_alternative<int64_t>(cntx->meta_data())) {
       meta_check_->meta.insert(to_string(absl::get<int64_t>(cntx->meta_data())));
@@ -56,7 +62,10 @@ class StrValMapper {
 
     cntx->Write(std::move(a));
   }
+ private:
+  static std::atomic<int> should_stop_;
 };
+std::atomic<int> StrValMapper::should_stop_;
 
 struct IntVal {
   int val;
@@ -290,6 +299,33 @@ TEST_F(MrTest, Join) {
               "fn-writes,4\n"
               "parse-errors,0\n",
               runner_.SavedFile(file_util::JoinPath("joinw", "counter_map.csv")));
+}
+
+TEST_F(MrTest, MetadataPerFiber) {
+  google::FlagSaver fs;
+
+  FLAGS_io_context_threads = 1;
+  FLAGS_map_io_read_factor = 20;
+  std::vector<pb::Input::FileSpec> fspecs;
+  // NOTE(ORI): We need enough elements here so that queue between reader fiber and map fiber
+  //            will be filled. Otherwise reader fiber will consider the file finished and fetch the
+  //            next one, preventing the job from being distributed equally over all fibers.
+  std::vector<std::string> elements(600, "1");
+  for (size_t i = 0; i < FLAGS_map_io_read_factor; ++i) {
+    fspecs.emplace_back();
+    auto& fspec = fspecs.back();
+    fspec.set_url_glob("bar.txt");
+    fspec.set_i64val(i);
+  }
+
+  MetaCheck meta_check;
+
+  StringTable read = pipeline_->ReadText("read1", fspecs);
+  PTable<StrVal> map = read.Map<StrValMapper>("map1", &meta_check);
+  map.Write("write", pb::WireFormat::TXT).WithModNSharding(1, [](const auto&) { return 0; });
+  runner_.AddInputRecords("bar.txt", elements);
+  pipeline_->Run(&runner_);
+  ASSERT_EQ(FLAGS_map_io_read_factor, meta_check.meta.size());
 }
 
 class GroupByInt {
