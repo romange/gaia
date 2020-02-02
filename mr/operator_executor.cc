@@ -50,13 +50,13 @@ void OperatorExecutor::SetMetaData(const pb::Input::FileSpec& fs, RawContext* co
   using FS = pb::Input::FileSpec;
   switch (fs.metadata_case()) {
     case FS::METADATA_NOT_SET:
-      context->metadata_.emplace<absl::monostate>();
+      context->per_fiber_->metadata.emplace<absl::monostate>();
     break;
     case FS::kStrval:
-      context->metadata_ = fs.strval();
+      context->per_fiber_->metadata = fs.strval();
     break;
     case FS::kI64Val:
-      context->metadata_ = fs.i64val();
+      context->per_fiber_->metadata = fs.i64val();
     break;
     default:
       LOG(FATAL) << "Invalid file spec tag " << fs.ShortDebugString();

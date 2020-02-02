@@ -99,7 +99,7 @@ template <typename T> class DefaultParser {
 template <typename FromType, typename Parser, typename DoFn, typename ToType>
 void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRecord&& rr) {
   FromType tmp_rec;
-  bool is_binary = context->raw()->is_binary();
+  bool is_binary = context->is_binary();
   bool parse_ok = (*parser)(is_binary, std::move(rr), &tmp_rec);
 
   if (parse_ok) {
@@ -155,7 +155,7 @@ class IdentityHandlerWrapper : public HandlerWrapperBase {
       : do_ctx_(out, raw_context), parser_(std::move(parser)) {
     AddFn([this](RawRecord&& rr) {
       T val;
-      if (parser_(do_ctx_.raw()->is_binary(), std::move(rr), &val)) {
+      if (parser_(do_ctx_.is_binary(), std::move(rr), &val)) {
         do_ctx_.Write(std::move(val));
       } else {
         do_ctx_.raw()->EmitParseError();
@@ -180,6 +180,9 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
     is_identity_ = false;
   }
 
+  // NOTE(ORI): CreateHandler binds a handler to fiber-local data, make sure
+  //            to call it from the same fiber that will use the handler.
+  //            DO NOT SHARE THE HANDLER BETWEEN FIBERS.
   HandlerWrapperBase* CreateHandler(RawContext* context);
 
  protected:

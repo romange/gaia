@@ -59,7 +59,7 @@ class MapperExecutor : public OperatorExecutor {
   // index - io thread index.
   void SetupPerIoThread(unsigned index, detail::TableBase* tb);
 
-  static void MapFiber(RecordQueue* record_q, detail::HandlerWrapperBase* hwb);
+  static void MapFiber(RecordQueue* record_q, detail::TableBase* tb);
 
   std::unique_ptr<FileNameQueue> file_name_q_;
 };

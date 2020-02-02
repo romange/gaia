@@ -44,11 +44,11 @@ class StrValMapper {
   StrValMapper(MetaCheck* meta_check) : meta_check_(meta_check) {}
 
   void Do(string val, mr3::DoContext<StrVal>* cntx) {
-    meta_check_->input_files.insert(cntx->raw()->input_file_name());
-    if (absl::holds_alternative<int64_t>(cntx->raw()->meta_data())) {
-      meta_check_->meta.insert(to_string(absl::get<int64_t>(cntx->raw()->meta_data())));
+    meta_check_->input_files.insert(cntx->input_file_name());
+    if (absl::holds_alternative<int64_t>(cntx->meta_data())) {
+      meta_check_->meta.insert(to_string(absl::get<int64_t>(cntx->meta_data())));
     }
-    meta_check_->pos.push_back(cntx->raw()->input_pos());
+    meta_check_->pos.push_back(cntx->input_pos());
 
     StrVal a;
     val.append("a");
