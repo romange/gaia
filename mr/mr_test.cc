@@ -65,7 +65,7 @@ class StrValMapper {
  private:
   static std::atomic<int> should_stop_;
 };
-std::atomic<int> StrValMapper::should_stop_;
+std::atomic<int> StrValMapper::should_stop_(0);
 
 struct IntVal {
   int val;
