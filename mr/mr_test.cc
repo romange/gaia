@@ -307,9 +307,9 @@ TEST_F(MrTest, MetadataPerFiber) {
   FLAGS_io_context_threads = 1;
   FLAGS_map_io_read_factor = 20;
   std::vector<pb::Input::FileSpec> fspecs;
-  // NOTE(ORI): We need enough elements here so that queue between reader fiber and map fiber
-  //            will be filled. Otherwise reader fiber will consider the file finished and fetch the
-  //            next one, preventing the job from being distributed equally over all fibers.
+  // We need enough elements here so that queue between reader fiber and map fiber
+  // will be filled. Otherwise reader fiber will consider the file finished and fetch the
+  // next one, preventing the job from being distributed equally over all fibers.
   std::vector<std::string> elements(600, "1");
   for (size_t i = 0; i < FLAGS_map_io_read_factor; ++i) {
     fspecs.emplace_back();
