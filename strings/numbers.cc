@@ -423,7 +423,7 @@ void u64tostr(uint64 val, size_t out_len, char *out_buf, unsigned base) {
   ptrdiff_t i;
   for (i = kBufSize - 1; val > 0 && i >= 0; val /= base, --i)
     buf[i] = kDigits[val % base];
-  size_t to_copy = std::min(kBufSize - i, out_len - 1);
+  size_t to_copy = std::min(kBufSize - i - 1, out_len - 1);
   memcpy(out_buf, buf + i + 1, to_copy);
   out_buf[to_copy] = '\0';
 }
