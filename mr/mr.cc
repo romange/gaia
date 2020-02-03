@@ -102,6 +102,11 @@ RawContext::RawContext() {
 
 RawContext::~RawContext() {}
 
+void RawContext::InitPerFiber() {
+  CHECK(!per_fiber_.get());
+  per_fiber_.reset(new PerFiber);
+}
+
 const detail::FreqMapWrapper *
 RawContext::FindMaterializedFreqMapStatisticImpl(const std::string& map_id) const {
   auto it = CHECK_NOTNULL(finalized_maps_)->find(map_id);

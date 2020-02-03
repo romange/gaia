@@ -180,9 +180,8 @@ class TableBase : public std::enable_shared_from_this<TableBase> {
     is_identity_ = false;
   }
 
-  // NOTE(ORI): CreateHandler binds a handler to fiber-local data, make sure
-  //            to call it from the same fiber that will use the handler.
-  //            DO NOT SHARE THE HANDLER BETWEEN FIBERS.
+  // CreateHandler binds a handler to fiber-local data, make sure to call it from the same fiber
+  // that will use the handler. DO NOT SHARE THE HANDLER BETWEEN FIBERS.
   HandlerWrapperBase* CreateHandler(RawContext* context);
 
  protected:
