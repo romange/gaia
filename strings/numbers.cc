@@ -394,6 +394,39 @@ bool safe_strto64_base(StringPiece str,
   return safe_int_internal<int64>(str.begin(), str.end(), base, v);
 }
 
+bool safe_strtou32_base(StringPiece str,
+                        uint32* v, int base) {
+  return safe_uint_internal<uint32>(str.begin(), str.end(), base, v);
+}
+
+bool safe_strtou64_base(StringPiece str,
+                       uint64* v, int base) {
+  return safe_uint_internal<uint64>(str.begin(), str.end(), base, v);
+}
+
+void u64tostr(uint64 val, size_t out_len, char *out_buf, unsigned base) {
+  const char kDigits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                          'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+                          'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+                          'U', 'V', 'W', 'X', 'Y', 'Z'};
+  constexpr size_t kBufSize = 64; // At most, 64 binary digits.
+  char buf[kBufSize];
+  CHECK_GT(out_len, 1);
+  CHECK_LT(base, 37);
+  CHECK_LT(1, base);
+  CHECK(out_buf);
+  if (val == 0) {
+    out_buf[0] = '0';
+    out_buf[1] = '\0';
+    return;
+  }
+  ptrdiff_t i;
+  for (i = kBufSize - 1; val > 0 && i >= 0; val /= base, --i)
+    buf[i] = kDigits[val % base];
+  size_t to_copy = std::min(kBufSize - i, out_len - 1);
+  memcpy(out_buf, buf + i + 1, to_copy);
+  out_buf[to_copy] = '\0';
+}
 
 bool safe_strtof(StringPiece str, float* value) {
   char* endptr;

@@ -42,6 +42,13 @@ inline bool safe_strtou64(StringPiece str, uint64* value) {
   return absl::SimpleAtoi<uint64>(str, value);
 }
 
+bool safe_strto32_base(StringPiece str, int32* v, int base);
+bool safe_strtou32_base(StringPiece str, uint32* v, int base);
+bool safe_strto64_base(StringPiece str, int64* v, int base);
+bool safe_strtou64_base(StringPiece str, uint64* v, int base);
+
+void u64tostr(uint64 val, size_t out_len, char *buf, unsigned base);
+
 // Convert strings to floating point values.
 // Leading and trailing spaces are allowed.
 // Values may be rounded on over- and underflow.
@@ -338,7 +345,3 @@ char* FloatToBuffer(float i, char* buffer);
 // overestimate to be safe.
 static const int kDoubleToBufferSize = 32;
 static const int kFloatToBufferSize = 24;
-
-
-
-
