@@ -111,9 +111,9 @@ class RawContext {
     bool is_binary = false;
   };
 
-  const PerFiber *per_fiber() {
-    if (!per_fiber_.get())
-      per_fiber_.reset(new PerFiber);
+  void InitPerFiber();
+
+  const PerFiber *per_fiber() const {
     return per_fiber_.get();
   }
 

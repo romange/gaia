@@ -123,6 +123,8 @@ void JoinerExecutor::ProcessInputQ(detail::TableBase* tb) {
   RawContext *raw_context = per_io_->raw_context.get();
   RegisterContext(raw_context);
 
+  raw_context->InitPerFiber();
+
   std::unique_ptr<detail::HandlerWrapperBase> handler_wrapper{tb->CreateHandler(raw_context)};
 
   while (true) {

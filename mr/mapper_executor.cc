@@ -193,6 +193,8 @@ void MapperExecutor::MapFiber(RecordQueue* record_q, detail::TableBase* tb) {
   PerIoStruct* aux_local = per_io_.get();
   RawContext* raw_context = aux_local->raw_context.get();
 
+  raw_context->InitPerFiber();
+
   std::unique_ptr<detail::HandlerWrapperBase> handler{
       tb->CreateHandler(aux_local->raw_context.get())};
   CHECK_EQ(1, handler->Size());
