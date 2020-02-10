@@ -9,6 +9,7 @@
 #include <boost/fiber/buffered_channel.hpp>
 #include <boost/fiber/future.hpp>
 
+#include "absl/strings/str_cat.h"
 #include "base/init.h"
 #include "base/logging.h"
 #include "file/file_util.h"
@@ -28,7 +29,6 @@ DEFINE_string(read_path, "", "");
 DEFINE_string(prefix, "", "");
 
 using FileQ = fibers::buffered_channel<string>;
-
 
 http::SslContextResult CreateSslContext() {
   system::error_code ec;
@@ -62,8 +62,26 @@ http::SslContextResult CreateSslContext() {
   return http::SslContextResult(std::move(cntx));
 }
 
+void sha256_string(absl::string_view str, char out[65]) {
+  unsigned char hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+  SHA256_Update(&sha256, str.data(), str.size());
+  SHA256_Final(hash, &sha256);
+
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  for (unsigned i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    out[i * 2] = kHex[(hash[i] >> 4) & 0xF];
+    out[i * 2 + 1] = kHex[hash[i] & 0xF];
+  }
+  out[64] = 0;
+}
+
 void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
   const char kDomain[] = "s3.amazonaws.com";
+  const char kRegion[] = "us-east-1";
+  const char kService[] = "s3";
+  const char kAlgo[] = "AWS4-HMAC-SHA256";
 
   http::HttpsClient https_client(kDomain, io_context, ssl_cntx);
   system::error_code ec = https_client.Connect(2000);
@@ -71,6 +89,38 @@ void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
 
   h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
   h2::response<h2::string_body> resp;
+
+  req.set(h2::field::host, kDomain);
+
+  const char* const access_key = getenv("AWS_ACCESS_KEY_ID");
+  CHECK(access_key);
+
+  // hash of the empty string.
+  const char kPayloadHash[] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+  string canonical_headers = absl::StrCat("host", ":", kDomain, "\n");
+  absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", kPayloadHash, "\n");
+  absl::StrAppend(&canonical_headers, "x-amz-date", ":", "20200209T232617Z", "\n");
+
+  string method = "GET";
+  string canonical_querystring = "";
+  string canonical_request = absl::StrCat(method, "\n", "/", "\n", canonical_querystring, "\n");
+  string signed_headers = "host;x-amz-content-sha256;x-amz-date";
+
+  absl::StrAppend(&canonical_request, canonical_headers, "\n", signed_headers, "\n", kPayloadHash);
+
+  string datestamp = "20200209";
+  string amz_date = "20200209T233000Z";
+  string credential_scope =
+      absl::StrCat(datestamp, "/", kRegion, "/", kService, "/", "aws4_request");
+
+  char hexdigest[65];
+  sha256_string(canonical_request, hexdigest);
+
+  string string_to_sign =
+      absl::StrCat(kAlgo, "\n", amz_date, "\n", credential_scope, "\n", hexdigest);
+  cout << "String to sign: " << string_to_sign << "---\n";
+
   ec = https_client.Send(req, &resp);
   CHECK(!ec) << ec << "/" << ec.message();
   cout << resp << endl;
