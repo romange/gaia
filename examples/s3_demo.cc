@@ -83,15 +83,15 @@ void sha256_string(absl::string_view str, char out[65]) {
   SHA256_Update(&sha256, str.data(), str.size());
   SHA256_Final(hash, &sha256);
 
-  Hexify(reinterpret_cast<const char *>(hash), SHA256_DIGEST_LENGTH, out);
+  Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
 }
 
 static void HMAC(absl::string_view key, absl::string_view msg, string* dest) {
   HMAC_CTX* hmac = HMAC_CTX_new();
 
   CHECK_EQ(1, HMAC_CTX_reset(hmac));
-  CHECK_EQ(1, HMAC_Init_ex(hmac, reinterpret_cast<const unsigned char*>(key.data()),
-                           key.size(), EVP_sha256(), NULL));
+  CHECK_EQ(1, HMAC_Init_ex(hmac, reinterpret_cast<const unsigned char*>(key.data()), key.size(),
+                           EVP_sha256(), NULL));
 
   CHECK_EQ(1, HMAC_Update(hmac, reinterpret_cast<const unsigned char*>(msg.data()), msg.size()));
 
@@ -114,27 +114,28 @@ string GetSignatureKey(absl::string_view key, absl::string_view datestamp, absl:
   return sign;
 }
 
-void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
-  const char kDomain[] = "s3.amazonaws.com";
-  const char kRegion[] = "us-east-1";
-  const char kService[] = "s3";
-  const char kAlgo[] = "AWS4-HMAC-SHA256";
+const char kAlgo[] = "AWS4-HMAC-SHA256";
 
-  http::HttpsClient https_client(kDomain, io_context, ssl_cntx);
-  system::error_code ec = https_client.Connect(2000);
-  CHECK(!ec) << ec << "/" << ec.message();
+class AwsSigner {
+ public:
+  AwsSigner(string access_key, string secret_key)
+      : access_key_(access_key), secret_key_(secret_key) {
+    region_ = "us-east-1";
+    service_ = "s3";
+  }
 
-  h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
-  h2::response<h2::string_body> resp;
+  void Sign(absl::string_view domain, h2::header<true, h2::fields>* req);
 
-  req.set(h2::field::host, kDomain);
+ private:
+  string access_key_, secret_key_;
+  string region_, service_;
+};
 
-  const char* const access_key = getenv("AWS_ACCESS_KEY_ID");
-  CHECK(access_key);
-  const char* const secret_key = getenv("AWS_SECRET_ACCESS_KEY");
-  CHECK(secret_key);
 
-  // hash of the empty string.
+void AwsSigner::Sign(absl::string_view domain, h2::header<true, h2::fields>* req) {
+  req->set(h2::field::host, domain);
+
+  // hash of the empty body.
   const char kPayloadHash[] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
   time_t now = time(nullptr);  // Must be recent (upto 900sec skew is allowed vs amazon servers).
@@ -148,21 +149,20 @@ void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
   CHECK_GT(strftime(amz_date, arraysize(amz_date), "%Y%m%dT%H%M00Z", &tm_s), 0);
   LOG(INFO) << "Time now: " << now;
 
-  string canonical_headers = absl::StrCat("host", ":", kDomain, "\n");
+  string canonical_headers = absl::StrCat("host", ":", domain, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", kPayloadHash, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-date", ":", amz_date, "\n");
 
-  string method = "GET";
-  string canonical_querystring = "";
-
-  string canonical_request = absl::StrCat(method, "\n", "/", "\n", canonical_querystring, "\n");
+  char method[] = "GET", url[] = "/";
+  char canonical_querystring[] = "";
+  string canonical_request = absl::StrCat(method, "\n", url, "\n", canonical_querystring, "\n");
 
   string signed_headers = "host;x-amz-content-sha256;x-amz-date";
   absl::StrAppend(&canonical_request, canonical_headers, "\n", signed_headers, "\n", kPayloadHash);
   VLOG(1) << "CanonicalRequest:\n" << canonical_request << "\n-------------------\n";
 
   string credential_scope =
-      absl::StrCat(datestamp, "/", kRegion, "/", kService, "/", "aws4_request");
+      absl::StrCat(datestamp, "/", region_, "/", service_, "/", "aws4_request");
 
   char hexdigest[65];
   sha256_string(canonical_request, hexdigest);
@@ -172,24 +172,43 @@ void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
 
   // signing_key is not dependent on the request, could be cached between requests for the same
   // service/region.
-  string signing_key = GetSignatureKey(secret_key, datestamp, kRegion, kService);
+  string signing_key = GetSignatureKey(secret_key_, datestamp, region_, service_);
   VLOG(1) << "signing_key: " << absl::Base64Escape(signing_key);
 
   string signature;
   HMAC(signing_key, string_to_sign, &signature);
   Hexify(signature.data(), signature.size(), hexdigest);
 
-  string authorization_header = absl::StrCat(kAlgo, " Credential=", access_key, "/",
-                                             credential_scope, ",SignedHeaders=", signed_headers,
-                                             ",Signature=", hexdigest);
+  string authorization_header =
+      absl::StrCat(kAlgo, " Credential=", access_key_, "/", credential_scope,
+                   ",SignedHeaders=", signed_headers, ",Signature=", hexdigest);
 
-  req.set("x-amz-date", amz_date);
-  req.set("x-amz-content-sha256", kPayloadHash);
-  req.set(h2::field::authorization, authorization_header);
+  req->set("x-amz-date", amz_date);
+  req->set("x-amz-content-sha256", kPayloadHash);
+  req->set(h2::field::authorization, authorization_header);
+}
+
+void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
+  const char kDomain[] = "s3.amazonaws.com";
+
+  http::HttpsClient https_client(kDomain, io_context, ssl_cntx);
+  system::error_code ec = https_client.Connect(2000);
+  CHECK(!ec) << ec << "/" << ec.message();
+
+  h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
+  h2::response<h2::string_body> resp;
+
+
+  const char* const access_key = getenv("AWS_ACCESS_KEY_ID");
+  CHECK(access_key);
+  const char* const secret_key = getenv("AWS_SECRET_ACCESS_KEY");
+  CHECK(secret_key);
+  AwsSigner signer{access_key, secret_key};
+  signer.Sign(kDomain, &req);
 
   ec = https_client.Send(req, &resp);
   CHECK(!ec) << ec << "/" << ec.message();
-  cout << resp << endl;
+  cout << resp.body() << endl;
 };
 
 int main(int argc, char** argv) {
