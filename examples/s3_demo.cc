@@ -12,12 +12,11 @@
 #include <boost/fiber/buffered_channel.hpp>
 #include <boost/fiber/future.hpp>
 
-#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "base/init.h"
 #include "base/logging.h"
 #include "file/file_util.h"
-
+#include "strings/escaping.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 #include "util/http/https_client.h"
@@ -28,11 +27,17 @@ using namespace boost;
 using namespace util;
 namespace h2 = beast::http;
 
-DEFINE_string(bucket, "", "");
-DEFINE_string(read_path, "", "");
 DEFINE_string(prefix, "", "");
 
-using FileQ = fibers::buffered_channel<string>;
+const char* access_key = nullptr;
+const char* secret_key = nullptr;
+
+// TODO: those are used in gcs_utils as well. CreateSslContext is used in gce.
+using bb_str_view = ::boost::beast::string_view;
+
+inline absl::string_view absl_sv(const bb_str_view s) {
+  return absl::string_view{s.data(), s.size()};
+}
 
 http::SslContextResult CreateSslContext() {
   system::error_code ec;
@@ -153,8 +158,14 @@ void AwsSigner::Sign(absl::string_view domain, h2::header<true, h2::fields>* req
   absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", kPayloadHash, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-date", ":", amz_date, "\n");
 
-  char method[] = "GET", url[] = "/";
-  char canonical_querystring[] = "";
+  constexpr char method[] = "GET";
+  size_t pos = req->target().find('?');
+  absl::string_view url = absl_sv(req->target().substr(0, pos));
+  absl::string_view canonical_querystring;
+  if (pos != string::npos) {
+    canonical_querystring = absl_sv(req->target().substr(pos + 1));
+  }
+
   string canonical_request = absl::StrCat(method, "\n", url, "\n", canonical_querystring, "\n");
 
   string signed_headers = "host;x-amz-content-sha256;x-amz-date";
@@ -188,10 +199,37 @@ void AwsSigner::Sign(absl::string_view domain, h2::header<true, h2::fields>* req
   req->set(h2::field::authorization, authorization_header);
 }
 
-void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
-  const char kDomain[] = "s3.amazonaws.com";
+const char kRootDomain[] = "s3.amazonaws.com";
 
-  http::HttpsClient https_client(kDomain, io_context, ssl_cntx);
+void List(asio::ssl::context* ssl_cntx, IoContext* io_context) {
+  size_t pos = FLAGS_prefix.find('/');
+  CHECK_NE(string::npos, pos);
+  string bucket = FLAGS_prefix.substr(0, pos);
+
+  string domain = absl::StrCat(bucket, ".", kRootDomain);
+  http::HttpsClient https_client(domain, io_context, ssl_cntx);
+  system::error_code ec = https_client.Connect(2000);
+  CHECK(!ec) << ec << "/" << ec.message();
+
+  string url = "/?delimeter=";
+  strings::AppendEncodedUrl("/", &url);
+  url.append("&prefix=");
+  strings::AppendEncodedUrl(FLAGS_prefix.substr(pos + 1), &url);
+
+  h2::request<h2::empty_body> req{h2::verb::get, url, 11};
+  h2::response<h2::string_body> resp;
+
+  AwsSigner signer{access_key, secret_key};
+  signer.Sign(domain, &req);
+
+  LOG(INFO) << "Request: " << req;
+  ec = https_client.Send(req, &resp);
+  CHECK(!ec) << ec << "/" << ec.message();
+  cout << resp << endl;
+}
+
+void ListBuckets(asio::ssl::context* ssl_cntx, IoContext* io_context) {
+  http::HttpsClient https_client(kRootDomain, io_context, ssl_cntx);
   system::error_code ec = https_client.Connect(2000);
   CHECK(!ec) << ec << "/" << ec.message();
 
@@ -199,12 +237,8 @@ void Run(asio::ssl::context* ssl_cntx, IoContext* io_context) {
   h2::response<h2::string_body> resp;
 
 
-  const char* const access_key = getenv("AWS_ACCESS_KEY_ID");
-  CHECK(access_key);
-  const char* const secret_key = getenv("AWS_SECRET_ACCESS_KEY");
-  CHECK(secret_key);
   AwsSigner signer{access_key, secret_key};
-  signer.Sign(kDomain, &req);
+  signer.Sign(kRootDomain, &req);
 
   ec = https_client.Send(req, &resp);
   CHECK(!ec) << ec << "/" << ec.message();
@@ -223,7 +257,15 @@ int main(int argc, char** argv) {
 
   IoContext& io_context = pool.GetNextContext();
 
-  io_context.AwaitSafe([&] { Run(ssl_cntx, &io_context); });
+  access_key = getenv("AWS_ACCESS_KEY_ID");
+  CHECK(access_key);
+  secret_key = getenv("AWS_SECRET_ACCESS_KEY");
+  CHECK(secret_key);
 
+  if (FLAGS_prefix.empty()) {
+    io_context.AwaitSafe([&] { ListBuckets(ssl_cntx, &io_context); });
+  } else {
+    io_context.AwaitSafe([&] { List(ssl_cntx, &io_context); });
+  }
   return 0;
 }
