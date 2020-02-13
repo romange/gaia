@@ -22,6 +22,13 @@ cxx_test(wheel_timer_test base LABELS CI)
 cxx_test(lambda_test base LABELS CI)
 cxx_test(mpmc_bounded_queue_test base LABELS CI)
 
+
+find_package(LibXml2)
+# Message(FATAL_ERROR  "${LIBXML2_INCLUDE_DIR} ${LIBXML2_LIBRARIES}")
+include_directories(${LIBXML2_INCLUDE_DIR})
+cxx_test(xml_test base absl_str_format ${LIBXML2_LIBRARIES})
+
+
 # Define default gtest_main for tests.
 add_library(gaia_gtest_main gtest_main.cc)
 target_link_libraries(gaia_gtest_main TRDP::glog TRDP::gflags TRDP::gtest base TRDP::benchmark)
