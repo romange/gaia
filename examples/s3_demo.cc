@@ -28,6 +28,7 @@ using namespace util;
 namespace h2 = beast::http;
 
 DEFINE_string(prefix, "", "");
+DEFINE_bool(get, false, "");
 
 const char* access_key = nullptr;
 const char* secret_key = nullptr;
@@ -211,10 +212,18 @@ void List(asio::ssl::context* ssl_cntx, IoContext* io_context) {
   system::error_code ec = https_client.Connect(2000);
   CHECK(!ec) << ec << "/" << ec.message();
 
-  string url = "/?delimeter=";
-  strings::AppendEncodedUrl("/", &url);
-  url.append("&prefix=");
-  strings::AppendEncodedUrl(FLAGS_prefix.substr(pos + 1), &url);
+
+  string url;
+  string key = FLAGS_prefix.substr(pos + 1);
+  if (FLAGS_get) {
+    absl::StrAppend(&url, "/", key);
+  } else {
+    url = "/?delimeter=";
+    strings::AppendEncodedUrl("/", &url);
+    url.append("&prefix=");
+    strings::AppendEncodedUrl(key, &url);
+  }
+
 
   h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
