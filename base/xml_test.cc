@@ -8,6 +8,7 @@
 
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
+#include <libxml/xpathInternals.h>
 
 namespace base {
 
@@ -18,42 +19,30 @@ class XmlTest {
   }
 };
 
-void print_xpath_nodes(xmlNodeSetPtr nodes, FILE* output) {
-  xmlNodePtr cur;
-  int i;
+inline const char* as_char(const xmlChar* var) {
+  return reinterpret_cast<const char*>(var);
+}
 
+void print_xpath_nodes(xmlNodeSetPtr nodes) {
   int size = (nodes) ? nodes->nodeNr : 0;
 
   LOG(INFO) << absl::StrFormat("Result (%d nodes):", size);
-  for (i = 0; i < size; ++i) {
-    if (nodes->nodeTab[i]->type == XML_NAMESPACE_DECL) {
-      xmlNsPtr ns;
+  for (int i = 0; i < size; ++i) {
+    xmlNodePtr cur = nodes->nodeTab[i];
+    CHECK_EQ(XML_ELEMENT_NODE, cur->type);
+    CHECK(cur->ns);
 
-      ns = (xmlNsPtr)nodes->nodeTab[i];
-      cur = (xmlNodePtr)ns->next;
-      if (cur->ns) {
-        LOG(INFO) << absl::StrFormat("= namespace \"%s\"=\"%s\" for node %s:%s", ns->prefix,
-                                     ns->href, cur->ns->href, cur->name);
-      } else {
-        LOG(INFO) << absl::StrFormat("= namespace \"%s\"=\"%s\" for node %s", ns->prefix, ns->href,
-                                     cur->name);
-      }
-    } else if (nodes->nodeTab[i]->type == XML_ELEMENT_NODE) {
-      cur = nodes->nodeTab[i];
-      if (cur->ns) {
-        const char* s1 = reinterpret_cast<const char*>(cur->ns->href),
-                   *s2 = reinterpret_cast<const char*>(cur->name);
+    const char *s1 = reinterpret_cast<const char*>(cur->ns->href),
+               *s2 = reinterpret_cast<const char*>(cur->name),
+               *s3 = reinterpret_cast<const char*>(cur->ns->prefix);
+    xmlChar* content = xmlNodeGetContent(cur);
 
-        LOG(INFO) << absl::StrFormat("= element node \"%s:%s\"", s1, s2);
-      } else {
-        LOG(INFO) << absl::StrFormat("= element node \"%s\"", cur->name);
-      }
-    } else {
-      cur = nodes->nodeTab[i];
-      LOG(INFO) << absl::StrFormat("= node \"%s\": type %d", cur->name, cur->type);
-    }
+    LOG(INFO) << absl::StrFormat("= element node \"%s:%s:%s:%s\"", s1, s3, s2, as_char(content));
+    xmlFree(content);
   }
 }
+
+
 TEST(XmlTest, Basic) {
   constexpr char kContent[] =
       R"(<?xml version="1.0" encoding="UTF-8"?>
@@ -71,12 +60,16 @@ TEST(XmlTest, Basic) {
   CHECK(doc);
 
   xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
-  xmlXPathObjectPtr xpathObj =
-      xmlXPathEvalExpression(reinterpret_cast<const unsigned char*>("//*"), xpathCtx);
+
+  auto res = xmlXPathRegisterNs(xpathCtx, BAD_CAST "NS",
+                                BAD_CAST "http://s3.amazonaws.com/doc/2006-03-01/");
+  CHECK_EQ(res, 0);
+
+  xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(BAD_CAST "/NS:ListBucketResult/*", xpathCtx);
   CHECK(xpathObj);
 
   /* Print results */
-  print_xpath_nodes(xpathObj->nodesetval, stderr);
+  print_xpath_nodes(xpathObj->nodesetval);
 
   xmlXPathFreeObject(xpathObj);
   xmlXPathFreeContext(xpathCtx);
