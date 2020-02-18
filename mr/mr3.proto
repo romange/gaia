@@ -87,9 +87,3 @@ message Operator {
   }
   optional Type type = 4;
 }
-
-message Pipeline {
-  map<string, Input> input = 1;
-
-  repeated Operator operator = 2;
-}
