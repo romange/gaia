@@ -64,6 +64,22 @@ base::void_t<decltype(&RecordTraits<OutType>::TypeName)> WriteTypeNameMaybe(pb::
 }
 template <typename OutType> void WriteTypeNameMaybe(pb::Output* outp, char) {}
 
+/// Initializes a handler, optionally sending a DoContext before the rest of its parameters.
+template <typename Handler, typename DoContextT, typename... Args>
+auto ConstructHandlerMaybeWithDoContext
+  (absl::optional<Handler>* handler, DoContextT* ctx, int,
+   Args&&... args) -> base::void_t<decltype(Handler(ctx, std::forward<Args>(args)...))> {
+  handler->emplace(ctx, std::forward<Args>(args)...);
+}
+
+template <typename Handler, typename DoContextT, typename... Args>
+auto ConstructHandlerMaybeWithDoContext
+  (absl::optional<Handler>* handler, DoContextT* ctx, char,
+   Args&&... args) {
+  handler->emplace(std::forward<Args>(args)...);
+}
+
+
 class HandlerWrapperBase {
  public:
   virtual ~HandlerWrapperBase() {}
@@ -110,23 +126,25 @@ void ParseAndDo(Parser* parser, DoContext<ToType>* context, DoFn&& do_fn, RawRec
 }
 
 template <typename Handler, typename ToType> class HandlerWrapper : public HandlerWrapperBase {
-  Handler h_;
   DoContext<ToType> do_ctx_;
+  absl::optional<Handler> h_; // optional so it can be initialized outside of init-list.
 
  public:
   template <typename... Args>
   HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
-      : h_(std::forward<Args>(args)...), do_ctx_(out, raw_context) {}
+      : do_ctx_(out, raw_context) {
+    ConstructHandlerMaybeWithDoContext<Handler>(&h_, &do_ctx_, 0, std::forward<Args>(args)...);
+  }
 
   void SetGroupingShard(const ShardId& sid) final {
     if (!do_ctx_.out_.msg().has_shard_spec()) {
       do_ctx_.out_.SetConstantShard(sid);
     }
-    NotifyShardStartMaybe(&h_, sid, 0);
+    NotifyShardStartMaybe(&*h_, sid, 0);
   }
 
   // We pass 0 into 3rd argument so compiler will prefer 'int' resolution if possible.
-  void OnShardFinish() final { FinishCallMaybe(&h_, &do_ctx_, 0); }
+  void OnShardFinish() final { FinishCallMaybe(&*h_, &do_ctx_, 0); }
 
   /// Add DoFn into processing pipeline. This DoFn may accept any free FnInputType instead of
   /// FromType as long as FromType can be moved into it. We create a wrapping handler
@@ -136,13 +154,13 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
     AddFn([this, ptr, parser = DefaultParser<FromType>{}](RawRecord&& rr) mutable {
       ParseAndDo<FromType>(&parser, &do_ctx_,
                            [this, ptr](FromType&& val, DoContext<ToType>* cntx) {
-                             return (h_.*ptr)(std::move(val), cntx);
+                             return ((*h_).*ptr)(std::move(val), cntx);
                            },
                            std::move(rr));
     });
   }
 
-  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) { AddFn(f(&h_, &do_ctx_)); }
+  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) { AddFn(f(&*h_, &do_ctx_)); }
 };
 
 template <typename T, typename Parser = DefaultParser<T>>
