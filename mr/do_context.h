@@ -135,6 +135,18 @@ class RawContext {
   const FreqMapRegistry* finalized_maps_ = nullptr;
 };
 
+class PipelineContext {
+public:
+  PipelineContext(RawContext* raw) : raw_(raw) {}
+
+  template <class T>
+  const FrequencyMap<T>* FindMaterializedFreqMapStatistic(const std::string& map_id) const {
+    return raw_->FindMaterializedFreqMapStatistic<T>(map_id);
+  }
+private:
+  RawContext* raw_;
+};
+
 // This class is created per MapFiber in SetupDoFn and it wraps RawContext.
 // It's thread-local as well as caching a pointer to the fiber-local part of the RawContext.
 template <typename T> class DoContext {

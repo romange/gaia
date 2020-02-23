@@ -65,18 +65,35 @@ base::void_t<decltype(&RecordTraits<OutType>::TypeName)> WriteTypeNameMaybe(pb::
 template <typename OutType> void WriteTypeNameMaybe(pb::Output* outp, char) {}
 
 /// Initializes a handler, optionally sending a DoContext before the rest of its parameters.
-template <typename Handler, typename DoContextT, typename... Args>
-auto ConstructHandlerMaybeWithDoContext
-  (absl::optional<Handler>* handler, DoContextT* ctx, int,
-   Args&&... args) -> base::void_t<decltype(Handler(ctx, std::forward<Args>(args)...))> {
-  handler->emplace(ctx, std::forward<Args>(args)...);
+template <typename Handler, typename... Args>
+auto ConstructHandlerMaybeWithPipelineContext
+  (absl::optional<Handler>* handler, RawContext* ctx, int, int,
+   Args&&... args) -> base::void_t<decltype(Handler((PipelineContext*)nullptr,
+                                                    std::forward<Args>(args)...))> {
+  PipelineContext ctx2(ctx);
+  handler->emplace(&ctx2, std::forward<Args>(args)...);
 }
 
-template <typename Handler, typename DoContextT, typename... Args>
-auto ConstructHandlerMaybeWithDoContext
-  (absl::optional<Handler>* handler, DoContextT* ctx, char,
-   Args&&... args) {
+template <typename Handler, typename... Args>
+auto ConstructHandlerMaybeWithPipelineContext
+  (absl::optional<Handler>* handler, RawContext* ctx, char, int,
+   Args&&... args) -> base::void_t<decltype(Handler(std::forward<Args>(args)...))> {
+
   handler->emplace(std::forward<Args>(args)...);
+}
+
+template <typename Handler, typename... Args>
+auto ConstructHandlerMaybeWithPipelineContext
+  (absl::optional<Handler>* handler, RawContext* ctx, char, char,
+   Args&&... args) {
+
+  // numeric_limits used here only to prevent evaluation when template not instantiated.
+  static_assert(std::numeric_limits<Handler>::is_integer || false,
+                "Map() or Join() called on object with mismatching constructor. "
+                "The constructor for a mapper or a joiner must be of the form "
+                "ctor(PipelineContext*, EXTRA1, EXTRA2, EXTRA3...) or "
+                "ctor(EXTRA1, EXTRA2, EXTRA3....), "
+                "where EXTRAs are user supplied parameters at the end of the Join()/Map() call");
 }
 
 
@@ -133,7 +150,8 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
   template <typename... Args>
   HandlerWrapper(const Output<ToType>& out, RawContext* raw_context, Args&&... args)
       : do_ctx_(out, raw_context) {
-    ConstructHandlerMaybeWithDoContext<Handler>(&h_, &do_ctx_, 0, std::forward<Args>(args)...);
+    ConstructHandlerMaybeWithPipelineContext<Handler>(&h_, raw_context, 0, 0,
+                                                      std::forward<Args>(args)...);
   }
 
   void SetGroupingShard(const ShardId& sid) final {
