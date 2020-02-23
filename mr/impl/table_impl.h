@@ -64,7 +64,10 @@ base::void_t<decltype(&RecordTraits<OutType>::TypeName)> WriteTypeNameMaybe(pb::
 }
 template <typename OutType> void WriteTypeNameMaybe(pb::Output* outp, char) {}
 
-/// Initializes a handler, optionally sending a DoContext before the rest of its parameters.
+/// Initializes a handler, optionally sending a PipelineContext before the rest of its parameters.
+/// Note that the PipelineContext object only lives during construction, and therefore
+/// a reference to it should not be stored for later use (It is, however, ok to store references
+/// returned by FindMaterializedFreqMapStatistic and its other methods).
 template <typename Handler, typename... Args>
 auto ConstructHandlerMaybeWithPipelineContext
   (absl::optional<Handler>* handler, RawContext* ctx, int, int,
@@ -158,11 +161,11 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
     if (!do_ctx_.out_.msg().has_shard_spec()) {
       do_ctx_.out_.SetConstantShard(sid);
     }
-    NotifyShardStartMaybe(&*h_, sid, 0);
+    NotifyShardStartMaybe(&h_.value(), sid, 0);
   }
 
   // We pass 0 into 3rd argument so compiler will prefer 'int' resolution if possible.
-  void OnShardFinish() final { FinishCallMaybe(&*h_, &do_ctx_, 0); }
+  void OnShardFinish() final { FinishCallMaybe(&h_.value(), &do_ctx_, 0); }
 
   /// Add DoFn into processing pipeline. This DoFn may accept any free FnInputType instead of
   /// FromType as long as FromType can be moved into it. We create a wrapping handler
@@ -178,7 +181,9 @@ template <typename Handler, typename ToType> class HandlerWrapper : public Handl
     });
   }
 
-  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) { AddFn(f(&*h_, &do_ctx_)); }
+  void AddFromFactory(const RawSinkMethodFactory<Handler, ToType>& f) {
+    AddFn(f(&h_.value(), &do_ctx_));
+  }
 };
 
 template <typename T, typename Parser = DefaultParser<T>>
