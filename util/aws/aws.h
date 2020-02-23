@@ -4,8 +4,10 @@
 
 #pragma once
 
+#include <boost/beast/http/message.hpp>
 #include <boost/fiber/mutex.hpp>
 
+#include "absl/strings/string_view.h"
 #include "util/status.h"
 
 namespace util {
@@ -18,12 +20,16 @@ class AWS {
 
   Status Init();
 
+  void Sign(absl::string_view domain,
+            ::boost::beast::http::header<true, ::boost::beast::http::fields>* req);
+
  private:
   std::string region_id_, service_, secret_, access_key_;
 
   mutable ::boost::fibers::mutex mu_;
   mutable std::string sign_key_;
 
+  std::string credential_scope_;
   char date_str_[32];
 };
 

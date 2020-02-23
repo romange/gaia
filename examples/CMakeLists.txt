@@ -14,7 +14,7 @@ add_executable(gcs_demo gcs_demo.cc)
 cxx_link(gcs_demo gce_lib)
 
 add_executable(s3_demo s3_demo.cc)
-cxx_link(s3_demo file https_client_lib)
+cxx_link(s3_demo file https_client_lib aws_lib)
 
 add_executable(gsod_group gsod_group.cc)
 cxx_link(gsod_group mr3_lib absl_hash absl_str_format http_v2)
