@@ -382,6 +382,68 @@ TEST_F(MrTest, JoinReduceNoSharding) {
                                    MatchShard(2, {"5"})));
 }
 
+static constexpr char kMultFreq[] = "mult_freq";
+class FreqMapMultiplyingMapper {
+ public:
+  FreqMapMultiplyingMapper(int mult) : mult_(mult) {}
+
+  void Do(string val, mr3::DoContext<std::string>* ctx) {
+    ctx->raw()->GetFreqMapStatistic<std::string>(kMultFreq)[val] += mult_;
+    ctx->Write(std::move(val));
+  }
+
+ private:
+  const int mult_;
+};
+
+class FreqMapIncreasingJoiner {
+ public:
+  FreqMapIncreasingJoiner(PipelineContext* ctx, int inc)
+      : prev_freq_(ctx->FindMaterializedFreqMapStatistic<std::string>(kMultFreq)), inc_(inc) {}
+
+  void Do(string val, mr3::DoContext<std::string>* ctx) {
+    ctx->Write(val + std::to_string(prev_freq_->at(val) + inc_));
+  }
+
+ private:
+  const FrequencyMap<std::string>* const prev_freq_;
+  const int inc_;
+};
+
+TEST_F(MrTest, FreqMapThroughCtor) {
+  const int kMult = 1089;
+  const int kInc = 2785;
+  StringTable str1 = pipeline_->ReadText("read_bar", "bar.txt");
+  StringTable str2 = str1.Map<FreqMapMultiplyingMapper>("map", kMult);
+  str2.Write("str2", pb::WireFormat::TXT).WithModNSharding(10, [](auto) { return 1; });
+  StringTable str3 = pipeline_->Join("join", {str2.BindWith(&FreqMapIncreasingJoiner::Do)}, kInc);
+  str3.Write("str3", pb::WireFormat::TXT);
+
+  vector<string> elements{"ori", "ori", "ori", "adi", "adi", "roman"};
+
+  runner_.AddInputRecords("bar.txt", elements);
+  pipeline_->Run(&runner_);
+
+  EXPECT_THAT(*pipeline_->GetFreqMap<std::string>(kMultFreq),
+              UnorderedElementsAre(std::make_pair("ori", 3 * kMult),
+                                   std::make_pair("adi", 2 * kMult),
+                                   std::make_pair("roman", 1 * kMult)));
+
+  vector<string> elements_with_counts{"ori" + std::to_string(3 * kMult + kInc),
+                                      "ori" + std::to_string(3 * kMult + kInc),
+                                      "ori" + std::to_string(3 * kMult + kInc),
+                                      "adi" + std::to_string(2 * kMult + kInc),
+                                      "adi" + std::to_string(2 * kMult + kInc),
+                                      "roman" + std::to_string(1 * kMult + kInc)};
+
+  EXPECT_THAT(runner_.Table("str3"), ElementsAre(MatchShard(1, elements_with_counts)));
+
+  // EXPECT_THAT(*pipeline_->GetFreqMap(FreqMapMultiplyingMapper::kFreq),
+  //             UnorderedElementsAre({"ori", 3 * kInc * kMult},
+  //                                  {"adi", 2 * kInc * kMult},
+  //                                  {"roman", 1 * kInc * kMult}));
+}
+
 class AddressMapper {
  public:
   void Do(string str, DoContext<tutorial::Address>* out) {
