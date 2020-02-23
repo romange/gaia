@@ -136,14 +136,15 @@ class RawContext {
 };
 
 class PipelineContext {
-public:
-  PipelineContext(RawContext* raw) : raw_(raw) {}
+ public:
+  explicit PipelineContext(RawContext* raw) : raw_(raw) {}
 
   template <class T>
   const FrequencyMap<T>* FindMaterializedFreqMapStatistic(const std::string& map_id) const {
     return raw_->FindMaterializedFreqMapStatistic<T>(map_id);
   }
-private:
+
+ private:
   RawContext* raw_;
 };
 

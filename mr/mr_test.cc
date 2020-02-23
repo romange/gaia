@@ -128,6 +128,7 @@ TEST_F(MrTest, Basic) {
 }
 
 TEST_F(MrTest, Json) {
+
   PTable<rapidjson::Document> json_table = pipeline_->ReadText("read_bar", "bar.txt").AsJson();
   auto json_shard_func = [](const rapidjson::Document& doc) {
     return doc.HasMember("foo") ? "shard0" : "shard1";
@@ -401,11 +402,6 @@ TEST_F(MrTest, FreqMapThroughCtor) {
                                       "roman" + std::to_string(1 * kMult + kInc)};
 
   EXPECT_THAT(runner_.Table("str3"), ElementsAre(MatchShard(1, elements_with_counts)));
-
-  // EXPECT_THAT(*pipeline_->GetFreqMap(FreqMapMultiplyingMapper::kFreq),
-  //             UnorderedElementsAre({"ori", 3 * kInc * kMult},
-  //                                  {"adi", 2 * kInc * kMult},
-  //                                  {"roman", 1 * kInc * kMult}));
 }
 
 class AddressMapper {
