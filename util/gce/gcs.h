@@ -49,23 +49,23 @@ class GCS {
 
   ListBucketResult ListBuckets();
 
-  // Called with (size, key_name) pairs.
+  //! Called with (size, key_name) pairs.
   using ListObjectCb = std::function<void(size_t, absl::string_view)>;
 
-  // fs_mode = true - will return files only without "/" delimiter after the prefix.
-  // fs_mode = false - will return all files recursively containing the prefix.
+  //! fs_mode = true - will return files only without "/" delimiter after the prefix.
+  //! fs_mode = false - will return all files recursively containing the prefix.
   ListObjectResult List(absl::string_view bucket, absl::string_view prefix, bool fs_mode,
                         ListObjectCb cb);
 
   ReadObjectResult Read(absl::string_view bucket, absl::string_view path, size_t ofs,
                         const strings::MutableByteRange& range);
 
-  // Input: full gcs uri path that starts with "gs://"
-  // returns bucket and object paths accordingly.
+  //! Input: full gcs uri path that starts with "gs://"
+  //! fills correspondent bucket and object paths. Returns true if succeeds and false otherwise.
   static bool SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
                                 absl::string_view* path);
 
-  // Inverse function. Returns full gcs URI that starts with "gs://"".
+  //! Inverse function to SplitToBucketPath. Returns full gcs URI that starts with "gs://"".
   static std::string ToGcsPath(absl::string_view bucket, absl::string_view obj_path);
 
  private:

@@ -108,7 +108,7 @@ Status AWS::Init() {
 // TODO: to support date refreshes - i.e. to update sign_key_, credential_scope_
 // if the current has changed.
 void AWS::Sign(absl::string_view domain,
-               ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) {
+               ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) const {
   req->set(h2::field::host, domain);
 
   // Below is the hexdigest of sha256 of the empty body.

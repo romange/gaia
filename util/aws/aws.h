@@ -21,7 +21,7 @@ class AWS {
   Status Init();
 
   void Sign(absl::string_view domain,
-            ::boost::beast::http::header<true, ::boost::beast::http::fields>* req);
+            ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) const;
 
  private:
   std::string region_id_, service_, secret_, access_key_;

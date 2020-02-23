@@ -78,7 +78,7 @@ class RawContext {
       (*metric_map)[std::string(k_v.first)] += k_v.second;
   }
 
-  // Used only in tests.
+  //! Used only in tests.
   void TEST_Write(const ShardId& shard_id, std::string&& record) {
     Write(shard_id, std::move(record));
   }
