@@ -286,18 +286,9 @@ string GCS::BuildGetObjUrl(absl::string_view bucket, absl::string_view obj_path)
 }
 
 Status GCS::PrepareConnection() {
-  auto status = ClearConnState();
-
-  if (!status.ok()) {
-    LOG(ERROR) << "Error in ClearConnState " << status;
-  }
-
   return Status::OK;
 }
 
-util::Status GCS::ClearConnState() {
-  return Status::OK;
-}
 
 
 Status GCS::RefreshToken(Request* req) {

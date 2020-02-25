@@ -81,7 +81,6 @@ class GCS {
 
   std::string BuildGetObjUrl(absl::string_view bucket, absl::string_view path);
   util::Status PrepareConnection();
-  util::Status ClearConnState();
 
   //! Higher level function. Handles auth token expiration use-case.
   template <typename RespBody> util::Status SendWithToken(Request* req, Response<RespBody>* resp);

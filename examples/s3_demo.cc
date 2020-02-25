@@ -20,6 +20,7 @@
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 #include "util/aws/aws.h"
+#include "util/aws/s3.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
@@ -70,7 +71,6 @@ http::SslContextResult CreateSslContext() {
   return http::SslContextResult(std::move(cntx));
 }
 
-
 const char kRootDomain[] = "s3.amazonaws.com";
 
 void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
@@ -83,7 +83,6 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   system::error_code ec = https_client.Connect(2000);
   CHECK(!ec) << ec << "/" << ec.message();
 
-
   string url;
   string key = FLAGS_prefix.substr(pos + 1);
   if (FLAGS_get) {
@@ -94,7 +93,6 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
     url.append("&prefix=");
     strings::AppendEncodedUrl(key, &url);
   }
-
 
   h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
@@ -108,18 +106,16 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
 }
 
 void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
-  http::HttpsClient https_client(kRootDomain, io_context, ssl_cntx);
-  system::error_code ec = https_client.Connect(2000);
-  CHECK(!ec) << ec << "/" << ec.message();
+  http::HttpsClientPool pool{kRootDomain, ssl_cntx, io_context};
+  pool.set_connect_timeout(2000);
+  S3 s3{*aws, &pool};
 
-  h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
-  h2::response<h2::string_body> resp;
+  S3::ListBucketResult list_res = s3.ListBuckets();
+  CHECK_STATUS(list_res.status);
 
-  aws->Sign(kRootDomain, &req);
-
-  ec = https_client.Send(req, &resp);
-  CHECK(!ec) << ec << "/" << ec.message();
-  cout << resp.body() << endl;
+  for (const auto& b : list_res.obj) {
+    cout << b << endl;
+  }
 };
 
 int main(int argc, char** argv) {
