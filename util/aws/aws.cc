@@ -8,6 +8,8 @@
 
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 
 #include "base/logging.h"
 
@@ -99,8 +101,7 @@ Status AWS::Init() {
   CHECK_GT(strftime(date_str_, arraysize(date_str_), "%Y%m%d", &tm_s), 0);
   sign_key_ = GetSignatureKey(secret_, date_str_, region_id_, service_);
 
-  credential_scope_ =
-      absl::StrCat(date_str_, "/", region_id_, "/", service_, "/", "aws4_request");
+  credential_scope_ = absl::StrCat(date_str_, "/", region_id_, "/", service_, "/", "aws4_request");
 
   return Status::OK;
 }
@@ -131,15 +132,21 @@ void AWS::Sign(absl::string_view domain,
 
   size_t pos = req->target().find('?');
   absl::string_view url = absl_sv(req->target().substr(0, pos));
-  absl::string_view canonical_querystring;
+  absl::string_view query_string;
+  string canonical_querystring;
+
   if (pos != string::npos) {
-    canonical_querystring = absl_sv(req->target().substr(pos + 1));
+    query_string = absl_sv(req->target().substr(pos + 1));
+
+    // We must sign query string with params in alphabetical order
+    vector<absl::string_view> params = absl::StrSplit(query_string, "&");
+    sort(params.begin(), params.end());
+    canonical_querystring = absl::StrJoin(params, "&");
   }
 
   constexpr char kMethod[] = "GET";
 
   string canonical_request = absl::StrCat(kMethod, "\n", url, "\n", canonical_querystring, "\n");
-
   string signed_headers = "host;x-amz-content-sha256;x-amz-date";
   absl::StrAppend(&canonical_request, canonical_headers, "\n", signed_headers, "\n", kPayloadHash);
   VLOG(1) << "CanonicalRequest:\n" << canonical_request << "\n-------------------\n";

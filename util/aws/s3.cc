@@ -11,6 +11,8 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "base/logging.h"
+#include "strings/escaping.h"
+
 #include "util/aws/aws.h"
 #include "util/aws/s3.h"
 #include "util/http/https_client.h"
@@ -31,25 +33,66 @@ inline const char* as_char(const xmlChar* var) {
 using http::HttpsClientPool;
 using namespace boost;
 namespace h2 = beast::http;
+using std::string;
 
 constexpr char kS3Domain[] = "s3.amazonaws.com";
 
-S3::S3(const AWS& aws, http::HttpsClientPool* pool) : aws_(aws), pool_(pool) {
+S3Bucket::S3Bucket(const AWS& aws, http::HttpsClientPool* pool) : aws_(aws), pool_(pool) {
 }
 
-auto S3::ListBuckets() -> ListBucketResult {
+auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> ListObjectResult {
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
 
-  h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
+  string url{"/?prefix="};
+  strings::AppendEncodedUrl(glob, &url);
+
+  if (fs_mode) {
+    url.append("&delimeter=");
+    strings::AppendEncodedUrl("/", &url);
+  }
+
+  h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
 
-  aws_.Sign(kS3Domain, &req);
+  aws_.Sign(pool_->domain(), &req);
 
   system::error_code ec = handle->Send(req, &resp);
 
   if (ec) {
     return ToStatus(ec);
   }
+
+  if (resp.result() != h2::status::ok) {
+    LOG(INFO) << "ListError: " << resp;
+
+    return Status(StatusCode::IO_ERROR, string(resp.reason()));
+  }
+
+  VLOG(1) << "ListResp: " << resp;
+  return Status::OK;
+}
+
+ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
+  HttpsClientPool::ClientHandle handle = pool->GetHandle();
+
+  h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
+  h2::response<h2::string_body> resp;
+
+  aws.Sign(kS3Domain, &req);
+
+  system::error_code ec = handle->Send(req, &resp);
+
+  if (ec) {
+    return ToStatus(ec);
+  }
+
+  if (resp.result() != h2::status::ok) {
+    LOG(INFO) << "Error: " << resp;
+
+    return Status(StatusCode::IO_ERROR, string(resp.reason()));
+  }
+
+  VLOG(1) << "ListS3Buckets: " << resp;
 
   std::vector<std::string> res;
 

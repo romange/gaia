@@ -55,6 +55,8 @@ class HttpsClientPool {
   //! Number of existing handles created by this pool.
   unsigned handles_count() const { return existing_handles_; }
 
+  const std::string domain() const { return domain_; }
+
  private:
   using SslContext = ::boost::asio::ssl::context;
 

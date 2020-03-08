@@ -77,6 +77,26 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   size_t pos = FLAGS_prefix.find('/');
   CHECK_NE(string::npos, pos);
   string bucket = FLAGS_prefix.substr(0, pos);
+  string key = FLAGS_prefix.substr(pos + 1);
+
+  string domain = absl::StrCat(bucket, ".", kRootDomain);
+
+  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  pool.set_connect_timeout(2000);
+
+  S3Bucket s3bucket(*aws, &pool);
+  auto cb = [](size_t sz, absl::string_view name) {
+    cout << name << ":" << sz << endl;
+  };
+
+  S3Bucket::ListObjectResult result = s3bucket.List(key, true, cb);
+  CHECK_STATUS(result);
+}
+
+void Get(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
+  size_t pos = FLAGS_prefix.find('/');
+  CHECK_NE(string::npos, pos);
+  string bucket = FLAGS_prefix.substr(0, pos);
 
   string domain = absl::StrCat(bucket, ".", kRootDomain);
   http::HttpsClient https_client(domain, io_context, ssl_cntx);
@@ -85,14 +105,7 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
 
   string url;
   string key = FLAGS_prefix.substr(pos + 1);
-  if (FLAGS_get) {
-    absl::StrAppend(&url, "/", key);
-  } else {
-    url = "/?delimeter=";
-    strings::AppendEncodedUrl("/", &url);
-    url.append("&prefix=");
-    strings::AppendEncodedUrl(key, &url);
-  }
+  absl::StrAppend(&url, "/", key);
 
   h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
@@ -108,9 +121,8 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
 void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   http::HttpsClientPool pool{kRootDomain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
-  S3 s3{*aws, &pool};
 
-  S3::ListBucketResult list_res = s3.ListBuckets();
+  ListS3BucketResult list_res = ListS3Buckets(*aws, &pool);
   CHECK_STATUS(list_res.status);
 
   for (const auto& b : list_res.obj) {
@@ -137,7 +149,11 @@ int main(int argc, char** argv) {
   if (FLAGS_prefix.empty()) {
     io_context.AwaitSafe([&] { ListBuckets(ssl_cntx, &aws, &io_context); });
   } else {
-    io_context.AwaitSafe([&] { List(ssl_cntx, &aws, &io_context); });
+    if (FLAGS_get) {
+      io_context.AwaitSafe([&] { Get(ssl_cntx, &aws, &io_context); });
+    } else {
+      io_context.AwaitSafe([&] { List(ssl_cntx, &aws, &io_context); });
+    }
   }
   return 0;
 }
