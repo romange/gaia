@@ -26,6 +26,7 @@ cache:
 
 before_cache:
   - ls $TRAVIS_BUILD_DIR/build-dbg/third_party
+  - doxygen -v
 
 before_install:
   # Fix for Ubuntu Xenial apt-daily.service triggering
@@ -45,7 +46,7 @@ before_install:
   - |
     if [ ! -e "$DOXY_BINPATH/doxygen" ] && [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
       mkdir -p ~/doxygen && cd ~/doxygen
-      wget http://doxygen.nl/files/doxygen-1.8.15.linux.bin.tar.gz
+      wget https://netix.dl.sourceforge.net/project/doxygen/rel-1.8.15/doxygen-1.8.15.linux.bin.tar.gz
       tar xzf doxygen-1.8.15.linux.bin.tar.gz
       cd -
     fi
