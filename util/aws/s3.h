@@ -2,6 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include "file/file.h"
 #include "util/status.h"
 
 #pragma once
@@ -48,5 +49,21 @@ using ListS3BucketResult = util::StatusObject<std::vector<std::string>>;
 
 //! pool should be connected to s3.amazonaws.com
 ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool);
+
+/**
+ * @brief Opens an s3 object for sequential reading.
+ *
+ * @param key_path an object path without bucket prefix. The bucket is already predefined in
+ *                 pool connection.
+ * @param aws      an AWS handler
+ * @param pool     a pool handling https connections to the bucket.
+ * @param opts     ReadonlyFile::Options argument.
+ * @return StatusObject<file::ReadonlyFile*>
+ */
+StatusObject<file::ReadonlyFile*> OpenS3ReadFile(
+    absl::string_view key_path, const AWS& aws, http::HttpsClientPool* pool,
+    const file::ReadonlyFile::Options& opts = file::ReadonlyFile::Options{});
+
+bool IsS3Path(absl::string_view path);
 
 }  // namespace util

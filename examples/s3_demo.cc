@@ -99,23 +99,32 @@ void Get(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   string bucket = FLAGS_prefix.substr(0, pos);
 
   string domain = absl::StrCat(bucket, ".", kRootDomain);
-  http::HttpsClient https_client(domain, io_context, ssl_cntx);
-  system::error_code ec = https_client.Connect(2000);
-  CHECK(!ec) << ec << "/" << ec.message();
-
-  string url;
   string key = FLAGS_prefix.substr(pos + 1);
-  absl::StrAppend(&url, "/", key);
 
-  h2::request<h2::empty_body> req{h2::verb::get, url, 11};
-  h2::response<h2::string_body> resp;
+  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  pool.set_connect_timeout(2000);
 
-  aws->Sign(domain, &req);
+  StatusObject<file::ReadonlyFile*> res = OpenS3ReadFile(key, *aws, &pool);
+  CHECK_STATUS(res.status);
 
-  LOG(INFO) << "Request: " << req;
-  ec = https_client.Send(req, &resp);
-  CHECK(!ec) << ec << "/" << ec.message();
-  cout << resp << endl;
+  constexpr size_t kBufSize = 1 << 16;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  std::unique_ptr<file::ReadonlyFile> file{res.obj};
+
+  size_t ofs = 0;
+  strings::MutableByteRange mbr(buf.get(), kBufSize);
+  while (true) {
+    auto res = file->Read(ofs, mbr);
+    CHECK_STATUS(res.status);
+    ofs += res.obj;
+    if (res.obj < mbr.size()) {
+      break;
+    }
+  }
+
+  CHECK_EQ(0, file->Read(ofs, mbr).obj);
+  file->Close();
+  LOG(INFO) << "Read " << ofs << " bytes from " << key;
 }
 
 void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {

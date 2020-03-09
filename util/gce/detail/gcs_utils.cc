@@ -53,7 +53,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
 
   uint64_t start = base::GetMonotonicMicrosFast();
 
-  // for now we may increase num_iterations indefinitely in some case.
+  // for now we may increase num_iterations indefinitely in some cases.
   // TODO: to refine this logic.
   for (unsigned iters = 0; iters < num_iterations; ++iters) {
     if (!handle) {
@@ -70,7 +70,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     ec = SendRequestIterative(req, handle.get());
 
     if (!ec) {  // Success and fast path
-      detail::gcs_latency->IncBy(name_, base::GetMonotonicMicrosFast() - start);
+      gcs_latency->IncBy(name_, base::GetMonotonicMicrosFast() - start);
       return handle;
     }
 
