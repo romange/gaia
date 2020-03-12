@@ -25,8 +25,6 @@ namespace mr3 {
 
 util::VarzMapAverage5m dest_files("dest-files-set");
 
-DEFINE_uint32(gcs_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to GCS");
-
 namespace detail {
 
 using namespace boost;

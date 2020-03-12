@@ -22,6 +22,8 @@ class S3Bucket {
  public:
   using ListObjectResult = util::Status;
 
+  static const char* kRootDomain;
+
   //! Called with (size, key_name) pairs.
   using ListObjectCb = std::function<void(size_t, absl::string_view)>;
 
@@ -38,6 +40,11 @@ class S3Bucket {
   *  if fs_mode is true returns all paths upto the delimeter '/'.
   */
   ListObjectResult List(absl::string_view glob, bool fs_mode, ListObjectCb cb);
+
+  static bool SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
+                                absl::string_view* path);
+
+  static std::string ToFullPath(absl::string_view bucket, absl::string_view key_path);
 
 private:
   const AWS& aws_;

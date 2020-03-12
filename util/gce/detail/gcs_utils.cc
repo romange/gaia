@@ -74,6 +74,10 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
       return handle;
     }
 
+    if (ec == system::errc::operation_not_permitted) {
+      return Status(StatusCode::IO_ERROR, "Disabled operation");
+    }
+
     if (ec == asio::error::no_permission) {
       auto token_res = gce_.RefreshAccessToken(&pool_->io_context());
       if (!token_res.ok())
@@ -135,6 +139,15 @@ auto ApiSenderBufferBody::SendRequestIterative(const Request& req, http::HttpsCl
     return error_code{};  // all is good.
   }
 
+  string err_str(2048U, '\0');
+  auto& body = parser_->get().body();
+  body.data = &err_str.front();
+  body.size = err_str.size() - 1;
+  ec = client->Read(&parser_.value());
+  if (ec) {
+    return ec;
+  }
+
   // Parse & drain whatever comes after problematic status.
   // We must do it as long as we plan to use this connection for more requests.
   ec = client->DrainResponse(&parser_.value());
@@ -153,7 +166,13 @@ auto ApiSenderBufferBody::SendRequestIterative(const Request& req, http::HttpsCl
     return asio::error::no_permission;
   }
 
-  LOG(ERROR) << "Unexpected status " << msg;
+  if (msg.result() == h2::status::forbidden) {
+    LOG(ERROR) <<  "Error accessing GCS: " << err_str.c_str();
+
+    return system::errc::make_error_code(system::errc::operation_not_permitted);
+  }
+
+  LOG(ERROR) << "Unexpected status " << msg << msg.result_int() << "\n" << err_str.c_str() << "\n";
 
   return h2::error::bad_status;
 }

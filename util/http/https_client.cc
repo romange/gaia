@@ -119,6 +119,9 @@ auto HttpsClient::InitSslClient() -> error_code {
 }
 
 auto HttpsClient::DrainResponse(h2::response_parser<h2::buffer_body>* parser) -> error_code {
+  if (parser->is_done())
+    return error_code{};
+
   constexpr size_t kBufSize = 1 << 16;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
   auto& body = parser->get().body();

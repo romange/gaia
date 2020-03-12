@@ -12,6 +12,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/strip.h"
+
 #include "base/logging.h"
 #include "strings/escaping.h"
 
@@ -31,9 +33,9 @@ using std::string;
 
 using bb_str_view = ::boost::beast::string_view;
 
-constexpr char kS3Domain[] = "s3.amazonaws.com";
-
 namespace {
+
+constexpr char kS3Url[] = "s3://";
 
 // TODO: the same like in gcs_utils.h
 inline Status ToStatus(const ::boost::system::error_code& ec) {
@@ -55,7 +57,6 @@ std::ostream& operator<<(std::ostream& os, const h2::response<h2::buffer_body>& 
   return os;
 }
 
-
 // TODO: the same as in GCS. Can be implemented in terms of static 64 bytes buffer.
 inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   string tmp = absl::StrCat("bytes=", from, "-");
@@ -64,7 +65,6 @@ inline void SetRange(size_t from, size_t to, h2::fields* flds) {
   }
   flds->set(h2::field::range, std::move(tmp));
 }
-
 
 inline const char* as_char(const xmlChar* var) {
   return reinterpret_cast<const char*>(var);
@@ -101,8 +101,9 @@ class S3ReadFile : public ReadonlyFile {
   Status Open();
 
  private:
-
-  Parser* parser() { return &parser_; }
+  Parser* parser() {
+    return &parser_;
+  }
 
   const AWS& aws_;
   HttpsClientPool* pool_;
@@ -114,8 +115,8 @@ class S3ReadFile : public ReadonlyFile {
   size_t size_ = 0, offs_ = 0;
 };
 
-
-S3ReadFile::~S3ReadFile() {}
+S3ReadFile::~S3ReadFile() {
+}
 
 Status S3ReadFile::Open() {
   string url = absl::StrCat("/", read_obj_url_);
@@ -181,7 +182,7 @@ StatusObject<size_t> S3ReadFile::Read(size_t offset, const strings::MutableByteR
   }
 
   size_t read_sofar = 0;
-  while(read_sofar < range.size()) {
+  while (read_sofar < range.size()) {
     // We keep body references inside the loop because Open() that might be called here,
     // will recreate the parser from the point the connections disconnected.
     auto& body = parser()->get().body();
@@ -250,6 +251,8 @@ Status S3ReadFile::Close() {
 }  // namespace
 
 
+const char* S3Bucket::kRootDomain = "s3.amazonaws.com";
+
 S3Bucket::S3Bucket(const AWS& aws, http::HttpsClientPool* pool) : aws_(aws), pool_(pool) {
 }
 
@@ -285,13 +288,28 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
   return Status::OK;
 }
 
+bool S3Bucket::SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
+                                 absl::string_view* path) {
+  if (!absl::ConsumePrefix(&input, kS3Url))
+    return false;
+
+  auto pos = input.find('/');
+  *bucket = input.substr(0, pos);
+  *path = (pos == absl::string_view::npos) ? absl::string_view{} : input.substr(pos + 1);
+  return true;
+}
+
+string S3Bucket::ToFullPath(absl::string_view bucket, absl::string_view key_path) {
+  return absl::StrCat(kS3Url, bucket, "/", key_path);
+}
+
 ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
   HttpsClientPool::ClientHandle handle = pool->GetHandle();
 
   h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
   h2::response<h2::string_body> resp;
 
-  aws.Sign(kS3Domain, &req);
+  aws.Sign(S3Bucket::kRootDomain, &req);
 
   system::error_code ec = handle->Send(req, &resp);
 
@@ -344,25 +362,23 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
   return res;
 }
 
-StatusObject<file::ReadonlyFile*> OpenS3ReadFile(
-    absl::string_view key_path, const AWS& aws, http::HttpsClientPool* pool,
-    const file::ReadonlyFile::Options& opts) {
-
+StatusObject<file::ReadonlyFile*> OpenS3ReadFile(absl::string_view key_path, const AWS& aws,
+                                                 http::HttpsClientPool* pool,
+                                                 const file::ReadonlyFile::Options& opts) {
   CHECK(opts.sequential && pool);
 
   absl::string_view bucket, obj_path;
 
   string read_obj_url{key_path};
-  // strings::AppendEncodedUrl(key_path, &read_obj_url);
-
   std::unique_ptr<S3ReadFile> fl(new S3ReadFile(aws, pool, std::move(read_obj_url)));
   RETURN_IF_ERROR(fl->Open());
 
   return fl.release();
 }
 
-constexpr char kS3Url[] = "s3://";
 
-bool IsS3Path(absl::string_view path) { return absl::StartsWith(path, kS3Url); }
+bool IsS3Path(absl::string_view path) {
+  return absl::StartsWith(path, kS3Url);
+}
 
 }  // namespace util

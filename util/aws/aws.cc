@@ -80,6 +80,26 @@ constexpr char kAlgo[] = "AWS4-HMAC-SHA256";
 
 }  // namespace
 
+::boost::asio::ssl::context AWS::CheckedSslContext() {
+  system::error_code ec;
+  asio::ssl::context cntx{asio::ssl::context::tlsv12_client};
+  cntx.set_options(boost::asio::ssl::context::default_workarounds |
+                   boost::asio::ssl::context::no_compression | boost::asio::ssl::context::no_sslv2 |
+                   boost::asio::ssl::context::no_sslv3 | boost::asio::ssl::context::no_tlsv1 |
+                   boost::asio::ssl::context::no_tlsv1_1);
+  cntx.set_verify_mode(asio::ssl::verify_peer, ec);
+  if (ec) {
+    LOG(FATAL) << "Could not set verify mode " << ec;
+  }
+  // cntx.add_certificate_authority(asio::buffer(cert_string.data(), cert_string.size()), ec);
+  cntx.load_verify_file("/etc/ssl/certs/ca-certificates.crt", ec);
+  if (ec) {
+    LOG(FATAL) << "Could not load certificates file" << ec;
+  }
+
+  return cntx;
+}
+
 Status AWS::Init() {
   const char* access_key = getenv("AWS_ACCESS_KEY_ID");
   const char* secret_key = getenv("AWS_SECRET_ACCESS_KEY");

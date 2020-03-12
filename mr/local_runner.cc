@@ -19,6 +19,8 @@
 #include "mr/impl/local_context.h"
 
 #include "util/asio/io_context_pool.h"
+#include "util/aws/aws.h"
+#include "util/aws/s3.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/gce/gcs.h"
 #include "util/http/https_client_pool.h"
@@ -32,7 +34,8 @@ DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
 DEFINE_bool(local_runner_raw_shortcut_read, false,
             "If true, reads the input without parsing it "
             "into records and calling mappers. Used for testing the IO read path.");
-DECLARE_uint32(gcs_connect_deadline_ms);
+DEFINE_uint32(cloud_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to "
+                                               "cloud storage");
 
 using namespace util;
 using namespace boost;
@@ -70,6 +73,7 @@ struct LocalRunner::Impl {
 
   /// The functions below are called from IO threads.
   void ExpandGCS(absl::string_view glob, ExpandCb cb);
+  void ExpandS3(absl::string_view glob, ExpandCb cb);
 
   StatusObject<file::ReadonlyFile*> OpenLocalFile(const std::string& filename,
                                                   file::FiberReadOptions::Stats* stats);
@@ -89,6 +93,7 @@ struct LocalRunner::Impl {
 
  private:
   void LazyGcsInit();  // Called from IO threads.
+  void LazyAwsInit();  // Called from IO threads.
 
   util::VarzValue::Map GetStats() const;
 
@@ -99,8 +104,9 @@ struct LocalRunner::Impl {
   std::atomic_ulong file_cache_hit_bytes_{0}, input_gcs_conn_{0};
   const pb::Operator* current_op_ = nullptr;
 
-  fibers::mutex gce_mu_;
+  fibers::mutex cloud_mu_;
   std::unique_ptr<GCE> gce_handle_;
+  std::unique_ptr<AWS> aws_handle_;
 
   struct PerThread {
     vector<unique_ptr<GCS>> gcs_handles;
@@ -206,7 +212,7 @@ void LocalRunner::Impl::PerThread::SetupGce(IoContext* io_context) {
 
   ssl_context = GCE::CheckedSslContext();
   api_conn_pool.emplace(GCE::kApiDomain, &ssl_context.value(), io_context);
-  api_conn_pool->set_connect_timeout(FLAGS_gcs_connect_deadline_ms);
+  api_conn_pool->set_connect_timeout(FLAGS_cloud_connect_deadline_ms);
   api_conn_pool->set_retry_count(3);
 }
 
@@ -229,7 +235,7 @@ auto LocalRunner::Impl::GetGcsHandle() -> unique_ptr<GCS, handle_keeper> {
   CHECK(io_context) << "Must run from IO context thread";
 
   GCS* gcs = new GCS(*gce_handle_, &pt->ssl_context.value(), io_context);
-  CHECK_STATUS(gcs->Connect(FLAGS_gcs_connect_deadline_ms));
+  CHECK_STATUS(gcs->Connect(FLAGS_cloud_connect_deadline_ms));
 
   return unique_ptr<GCS, handle_keeper>(gcs, pt);
 }
@@ -381,6 +387,40 @@ void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   CHECK_STATUS(status);
 }
 
+void LocalRunner::Impl::ExpandS3(absl::string_view glob, ExpandCb cb) {
+  absl::string_view bucket, path;
+
+  // TODO: to extract split to common utils. It's not GCS specific.
+  CHECK(S3Bucket::SplitToBucketPath(glob, &bucket, &path));
+
+  IoContext* io_context = io_pool_->GetThisContext();
+  CHECK(io_context) << "Must run from IO context thread";
+
+  // Lazy init of aws_handle.
+  LazyAwsInit();
+
+  auto cb2 = [cb = std::move(cb), bucket](size_t sz, absl::string_view s) {
+    cb(sz, S3Bucket::ToFullPath(bucket, s));
+  };
+  bool recursive = absl::EndsWith(glob, "**");
+  if (recursive) {
+    path.remove_suffix(2);
+  } else if (absl::EndsWith(glob, "*")) {
+    path.remove_suffix(1);
+  }
+
+  string domain = absl::StrCat(bucket, ".", S3Bucket::kRootDomain);
+  ::boost::asio::ssl::context ssl_cntx = AWS::CheckedSslContext();
+  http::HttpsClientPool pool{domain, &ssl_cntx, io_context};
+  pool.set_connect_timeout(FLAGS_cloud_connect_deadline_ms);
+
+  S3Bucket s3{*aws_handle_, &pool};
+  bool fs_mode = !recursive;
+
+  auto status = s3.List(path, fs_mode, cb2);
+  CHECK_STATUS(status);
+}
+
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::string& filename) {
   CHECK(IsGcsPath(filename));
   LazyGcsInit();
@@ -411,12 +451,24 @@ void LocalRunner::Impl::LazyGcsInit() {
   auto* io_context = io_pool_->GetThisContext();
   per_thread_->SetupGce(io_context);
 
-  std::lock_guard<fibers::mutex> lk(gce_mu_);
+  std::lock_guard<fibers::mutex> lk(cloud_mu_);
   if (gce_handle_)
     return;
+
   gce_handle_.reset(new GCE);
   CHECK_STATUS(gce_handle_->Init());
   CHECK_STATUS(gce_handle_->RefreshAccessToken(io_context).status);
+}
+
+void LocalRunner::Impl::LazyAwsInit() {
+  std::lock_guard<fibers::mutex> lk(cloud_mu_);
+  if (aws_handle_)
+    return;
+
+  // TODO: to suport multiple regions.
+  aws_handle_.reset(new AWS{"us-east-1", "s3"});
+
+  CHECK_STATUS(aws_handle_->Init());
 }
 
 void LocalRunner::Impl::ShutDown() {
@@ -445,21 +497,19 @@ RawContext* LocalRunner::Impl::NewContext() {
 
 void LocalRunner::Impl::SaveFile(absl::string_view fn, absl::string_view data) {
   io_pool_->GetNextContext().AwaitSafe([&] {
-      std::string full_fn = file_util::JoinPath(data_dir, fn);
-      ::file::WriteFile *f;
-      if (util::IsGcsPath(full_fn)) {
-        f = CHECKED_GET(OpenGcsWriteFile(full_fn, *gce_handle_,
-                                         &per_thread_->api_conn_pool.value()));
-      } else {
-        // TODO(ORI): Use OpenFiberWriteFile instead.
-        f = file::Open(full_fn);
-      }
-      CHECK_NOTNULL(f);
-      CHECK_STATUS(f->Write(data));
-      f->Close(); // This runs `delete this`
+    std::string full_fn = file_util::JoinPath(data_dir, fn);
+    ::file::WriteFile* f;
+    if (util::IsGcsPath(full_fn)) {
+      f = CHECKED_GET(OpenGcsWriteFile(full_fn, *gce_handle_, &per_thread_->api_conn_pool.value()));
+    } else {
+      // TODO(ORI): Use OpenFiberWriteFile instead.
+      f = file::Open(full_fn);
+    }
+    CHECK_NOTNULL(f);
+    CHECK_STATUS(f->Write(data));
+    f->Close();  // This runs `delete this`
   });
 }
-
 
 /* LocalRunner implementation
 ********************************************/
@@ -494,13 +544,14 @@ void LocalRunner::OperatorEnd(ShardFileMap* out_files) {
 void LocalRunner::ExpandGlob(const std::string& glob, ExpandCb cb) {
   if (util::IsGcsPath(glob)) {
     impl_->ExpandGCS(glob, cb);
-    return;
-  }
-
-  std::vector<file_util::StatShort> paths = file_util::StatFiles(glob);
-  for (const auto& v : paths) {
-    if (v.st_mode & S_IFREG) {
-      cb(v.size, v.name);
+  } else if (util::IsS3Path(glob)) {
+    impl_->ExpandS3(glob, cb);
+  } else {
+    std::vector<file_util::StatShort> paths = file_util::StatFiles(glob);
+    for (const auto& v : paths) {
+      if (v.st_mode & S_IFREG) {
+        cb(v.size, v.name);
+      }
     }
   }
 }

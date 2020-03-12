@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <boost/asio/ssl.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/fiber/mutex.hpp>
 
@@ -23,6 +24,7 @@ class AWS {
   void Sign(absl::string_view domain,
             ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) const;
 
+  static ::boost::asio::ssl::context CheckedSslContext();
  private:
   std::string region_id_, service_, secret_, access_key_;
 
