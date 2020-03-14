@@ -270,6 +270,14 @@ void RespListener::Init() {
 
   commands_.emplace_back("PING", -1, bitmask(FL_FAST, FL_STALE));
   commands_.back().SetFunction([this](const auto& args, string* s) { return Ping(args, s); });
+
+  commands_.emplace_back("SET", -3, bitmask(FL_WRITE, FL_DENYOOM));
+  commands_.back().SetFunction([this](const auto& args, string* s) { return Set(args, s); });
+  commands_.back().SetKeyArgParams(1, 1, 1);
+
+  commands_.emplace_back("GET", 2, bitmask(FL_READONLY, FL_FAST));
+  commands_.back().SetFunction([this](const auto& args, string* s) { return Get(args, s); });
+  commands_.back().SetKeyArgParams(1, 1, 1);
 }
 
 void RespListener::PrintCommands(const Args& args, string* dest) {
@@ -280,7 +288,6 @@ void RespListener::PrintCommands(const Args& args, string* dest) {
     return;
   }
 
-#if 1
   absl::StrAppend(dest, "*", commands_.size(), "\r\n");
   for (const auto& cmd: commands_) {
     absl::StrAppend(dest, "*6\r\n+", cmd.name(), "\r\n:", cmd.arity(), "\r\n");
@@ -290,17 +297,9 @@ void RespListener::PrintCommands(const Args& args, string* dest) {
         absl::StrAppend(dest, "+", Command::FlagName(static_cast<CommandFlag>(fl)), "\r\n");
       }
     }
-    absl::StrAppend(dest,":0\r\n:0\r\n:0\r\n");
+    absl::StrAppend(dest, ":", cmd.first_key_arg(), "\r\n:", cmd.last_key_arg(),
+                    "\r\n:", cmd.key_arg_step(), "\r\n");
   }
-#else
-  const char kReply[] =
-      "*2\r\n"
-      "*6\r\n+command\r\n:0\r\n*3\r\n+random\r\n+loading\r\n+stale\r\n"
-      ":0\r\n:0\r\n:0\r\n"
-      "*6\r\n+ping\r\n:-1\r\n*2\r\n+stale\r\n+fast\r\n:0\r\n:0\r\n:0\r\n";
-
-  dest->assign(kReply, sizeof(kReply) - 1);
-#endif
 }
 
 void RespListener::Ping(const Args& args, string* dest) {
@@ -313,6 +312,26 @@ void RespListener::Ping(const Args& args, string* dest) {
   } else {
     absl::StrAppend(dest, "+", args.back(), "\r\n");
   }
+}
+
+void RespListener::Set(const Args& args, string* dest) {
+  VLOG(1) << "Set Handler " << args.size();
+
+  VLOG(1) << args[0] << "|" << args[1] << "|" << args[2];
+
+  *dest = "+OK\r\n";
+}
+
+void RespListener::Get(const Args& args, std::string* dest) {
+  VLOG(1) << "Set Handler " << args.size();
+
+  if (args.size() < 2) {
+    *dest = "-ERR wrong number of arguments for 'set' command\r\n";
+    return;
+  }
+  VLOG(1) << args[0] << "|" << args[1] << "|" << args[2];
+
+  *dest = "+OK\r\n";
 }
 
 ConnectionHandler* RespListener::NewConnection(util::IoContext& context) {

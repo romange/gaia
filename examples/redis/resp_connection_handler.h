@@ -66,6 +66,8 @@ class RespListener : public ::util::ListenerInterface {
  private:
   void PrintCommands(const Args& args, std::string* dest);
   void Ping(const Args& args, std::string* dest);
+  void Set(const Args& args, std::string* dest);
+  void Get(const Args& args, std::string* dest);
 
   std::vector<Command> commands_;
 };
