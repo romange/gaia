@@ -58,21 +58,22 @@ auto RespParser::ParseNext(absl::string_view* line) -> ParseStatus {
   return MORE_DATA;
 }
 
+// Makes enough space for write opertion by possibly moving the unread block the left.
 void RespParser::Realign() {
   if (write_start_ == buf_.data())
     return;
 
-  ssize_t left_sz = write_start_ - next_read_;
-  CHECK_GE(left_sz, 0);
+  ssize_t kept_len = write_start_ - next_read_;
+  CHECK_GE(kept_len, 0);
 
-  if (left_sz == 0) {
+  if (kept_len == 0) {
     write_start_ = buf_.data();
     next_read_ = write_start_;
     next_parse_ = write_start_;
-  } else if (left_sz < 64) {
-    memmove(buf_.data(), next_read_, left_sz);
+  } else if (kept_len < 64) {
+    memmove(buf_.data(), next_read_, kept_len);
     next_read_ = buf_.data();
-    write_start_ = buf_.data() + left_sz;
+    write_start_ = buf_.data() + kept_len;
     next_parse_ = next_read_;
   }
 }

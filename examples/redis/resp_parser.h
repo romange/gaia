@@ -24,9 +24,11 @@ class RespParser {
 
   void WriteCommit(size_t write_sz) { write_start_ += write_sz; }
 
-  //! Consumes previously returned line.
-  //! Returns true if another line was found in the write buffer and points line to it.
-  //! Returns false if no EOL is present .
+  //! Tries to parse the next line in the buffer ending with \r\n.
+  //! If succeeds, sets the 'line' argument to point to the buffer representing the line and
+  //! returns LINE_FINISHED. Otherwise, returns MORE_DATA.
+  //! In case of LINE_FINISHED, the returned buffer is "consumed" but still valid until the next
+  // operation to RespParser.
   ParseStatus ParseNext(absl::string_view* line);
 
   Buffer ReadBuf() const {
@@ -40,6 +42,7 @@ class RespParser {
     next_parse_ = next_read_ = write_start_;
   }
 
+  // Consumes and discards 'sz' characters.
   void Consume(size_t sz) {
     next_read_ += sz;
     Realign();
@@ -49,15 +52,17 @@ class RespParser {
     Realign();
   }
 
+  void Realign();
+
   void ConsumeWs();
  private:
   uint8_t* WriteEnd() {
     return buf_.data() + kBufSz;
   }
 
-  void Realign();
-
   std::array<uint8_t, kBufSz + 4> buf_;
+
+  // The structure is: |buf_.data()____next_read_____next_parse____write_start____buf_.end()|
   uint8_t *write_start_, *next_read_ = nullptr, *next_parse_ = nullptr;
 };
 
