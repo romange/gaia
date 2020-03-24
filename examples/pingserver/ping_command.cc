@@ -2,11 +2,11 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include "base/logging.h"
 #include "examples/pingserver/ping_command.h"
+#include "base/logging.h"
 
 const char PingCommand::kReply[] = "+PONG\r\n";
-
+using namespace boost;
 
 bool PingCommand::Decode(size_t len) {
   resp_parser_.WriteCommit(len);
@@ -56,4 +56,20 @@ bool PingCommand::HandleLine(absl::string_view line) {
 
 boost::asio::const_buffer PingCommand::reply() const {
   return boost::asio::buffer(kReply, sizeof(kReply) - 1);
+}
+
+using asio::ip::tcp;
+
+void ConfigureSocket(boost::asio::ip::tcp::socket* sock) {
+  tcp::no_delay nd(true);
+  sock->set_option(nd);
+
+  tcp::socket::keep_alive opt2(true);
+  sock->set_option(opt2);
+  sock->get_option(opt2);
+
+  sock->get_option(opt2);
+  CHECK(opt2.value());
+  sock->get_option(nd);
+  CHECK(nd.value());
 }

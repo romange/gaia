@@ -23,11 +23,10 @@ cxx_test(lambda_test base LABELS CI)
 cxx_test(mpmc_bounded_queue_test base LABELS CI)
 
 
-find_package(LibXml2)
-# Message(FATAL_ERROR  "${LIBXML2_INCLUDE_DIR} ${LIBXML2_LIBRARIES}")
+
+find_package(LibXml2) # libxml2 package
 include_directories(${LIBXML2_INCLUDE_DIR})
 cxx_test(xml_test base absl_str_format ${LIBXML2_LIBRARIES})
-
 
 # Define default gtest_main for tests.
 add_library(gaia_gtest_main gtest_main.cc)

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/ip/tcp.hpp>
 
 #include "examples/pingserver/resp_parser.h"
 
@@ -17,6 +18,7 @@ class PingCommand {
  public:
   PingCommand() {
   }
+
   bool Decode(size_t len);
 
   boost::asio::mutable_buffer read_buffer() {
@@ -33,3 +35,5 @@ class PingCommand {
  private:
   bool HandleLine(absl::string_view line);
 };
+
+void ConfigureSocket(boost::asio::ip::tcp::socket* sock);

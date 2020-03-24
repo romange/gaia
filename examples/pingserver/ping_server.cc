@@ -24,17 +24,7 @@ inline bool IsExpectedFinish(system::error_code ec) {
 class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
  public:
   RedisConnection(tcp::socket socket) : socket_(std::move(socket)) {
-    tcp::no_delay nd(true);
-    socket_.set_option(nd);
-
-    tcp::socket::keep_alive opt2(true);
-    socket_.set_option(opt2);
-    socket_.get_option(opt2);
-
-    socket_.get_option(opt2);
-    CHECK(opt2.value());
-    socket_.get_option(nd);
-    CHECK(nd.value());
+    ConfigureSocket(&socket_);
   }
 
   void start() {
