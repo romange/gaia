@@ -33,8 +33,6 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
 
  private:
   void do_read_cmd() {
-    CHECK(cmd_.ShouldRead());
-
     auto self(shared_from_this());
 
     auto cb = [this, self](boost::system::error_code ec, std::size_t length) {

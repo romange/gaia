@@ -28,10 +28,6 @@ class PingCommand {
 
   boost::asio::const_buffer reply() const;
 
-  bool ShouldRead() const {
-    return resp_parser_.IsReadEof();
-  }
-
  private:
   bool HandleLine(absl::string_view line);
 };
