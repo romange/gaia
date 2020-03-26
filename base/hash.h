@@ -42,7 +42,7 @@ namespace detail {
 
 // Should use std::has_unique_object_representations but we do not have in C++14.
 template<typename Hasher, typename T>
-std::enable_if_t<std::is_arithmetic<T>::value || std::is_enum<T>::value>
+std::enable_if_t<std::is_integral<T>::value || std::is_enum<T>::value>
 HashAppend(Hasher& h, const T& t) noexcept {
   h.update(&t, sizeof(t));
 }
@@ -97,7 +97,7 @@ public:
   }
 };
 
-} //namespace detail
+}  // namespace detail
 
 template <typename ...T> uint32_t XXHash32(const T&... t) {
   detail::XXHashImp<32> hasher;
