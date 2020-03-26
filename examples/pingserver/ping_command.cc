@@ -77,8 +77,8 @@ void ConfigureSocket(boost::asio::ip::tcp::socket* sock) {
   CHECK_EQ(0, setsockopt(sock->native_handle(), IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val)));
 
   val = 100;
-  CHECK_EQ(0, setsockopt(8, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)));
+  CHECK_EQ(0, setsockopt(sock->native_handle(), IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)));
 
   val = 3;
-  CHECK_EQ(0, setsockopt(8, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)));
+  CHECK_EQ(0, setsockopt(sock->native_handle(), IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)));
 }

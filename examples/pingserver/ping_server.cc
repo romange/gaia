@@ -8,6 +8,9 @@
 
 #include "base/init.h"
 #include "examples/pingserver/ping_command.h"
+#include "util/asio/accept_server.h"
+#include "util/asio/io_context_pool.h"
+#include "util/http/http_conn_handler.h"
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
@@ -91,11 +94,27 @@ class PingServer {
   tcp::acceptor acceptor_;
 };
 
+using namespace util;
+
 int main(int argc, char* argv[]) {
   MainInitGuard guard(&argc, &argv);
+
+  IoContextPool pool{1};
+  pool.Run();
+  AcceptServer accept_server(&pool);
+  http::Listener<> http_listener;
+
+  if (FLAGS_http_port >= 0) {
+    uint16_t port = accept_server.AddListener(FLAGS_http_port, &http_listener);
+    LOG(INFO) << "Started http server on port " << port;
+  }
+  accept_server.Run();
+
   try {
     tcp::endpoint endpoint(tcp::v4(), FLAGS_port);
-    boost::asio::io_context io_context;
+    boost::asio::io_context io_context{1};
+
+    accept_server.TriggerOnBreakSignal([&] { io_context.stop(); });
 
     PingServer srv(io_context, endpoint);
 
@@ -103,6 +122,7 @@ int main(int argc, char* argv[]) {
   } catch (std::exception& e) {
     std::cerr << "Exception: " << e.what() << "\n";
   }
+  accept_server.Stop(true);
 
   return 0;
 }
