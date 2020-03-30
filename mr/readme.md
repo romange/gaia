@@ -98,6 +98,8 @@ class WordGroupBy {
 What happens when one runs a pipeline
 -------------------------------------
 
+When one calls the `Pipeline::Join` or `PTable<T>::Map` methods, a `PTable<T>` object is created, which is a wrapper around a `detail::TableImplT`. The `detail::TableImplT` is given a factory function which gets a `RawContext` (see below) and a generates `HandlerWrapperBase` objects. These objects represent the interface between executors (the classes which run join/map logic, see below) and the user-provided code. The three main interfaces provided by `HandlerWrapperBase` are: `SetGroupingShard` which calls the user provided `OnShardStart`, `Get(i)` which returns the i-th input handler for a join or the single input handler for a map, and `OnShardFinish` which calls the user-provided function of the same name.
+
 When one calls the `PTable<T>::Write` method, it adds the mapper/joiner into `Pipeline::tables_`. Mapper/joiners are translated into a protobuf based representation, discarding template magic. When one calls `Pipeline::Run`, it begins iterating on `tables_`, creating and running an executor object (`JoinerExecutor` or `MapperExecutor`) for each entry, and merging together several per-thread counters and frequency.
 
 The executor object is responsible for the actual execution of the joiner/mapper. Before talking about executors, it is important to discuss the idea of an `IoContextPool`. In essence, an `IoContextPool` is an object that creates a thread pool where each thread is pinned to a single CPU. On these threads there is also an event loop, allowing several fibers (cooperative sub-threads) to run. The event loop in each thread waits for lambdas to be sent to it to run. Executors use this object in order to parallelize the work-load in an efficient, context-switchless way.
@@ -110,8 +112,8 @@ Some forms of IO storage (for example, Google Storage) work better when you read
 
 Note that the idealized model of a thread per CPU doesn't actually work on Linux when reading files from local disk. Linux doesn't support async IO for any filesystem that is not XFS. Because of this, there is a separate pool of threads that only run IO calls and send their results to the caller. This problem doesn't exist when working with Google Storage, since Asio is capable of handling asynchronous network IO.
 
-TODO: Write about runner.
+Although both types of executors handle the logic of the mapping/joining process, they try to avoid doing the I/O operation directly. Instead, I/O operations are implemented by a `Runner` object which represents the interactions of the MR infrastructure with the disk/net.
 
-TODO: Write about context.
+When an executor begins it calls the runner's `OperatorStart` function, which prepares the machinery for reading/writing files. Afterwards each worker thread in the I/O pool calls the runner's `CreateContext` to get a `RawContext` object. In order to read its inputs, the executor calls the `Runner`'s `ProcessInputFile` function, this function accepts an input path and a callback, it calls the callback repeatedly on inputs coming from the path. Finally, when an executor finishes, it calls the runner's OperatorEnd function, which closes the handles of open files as well as outputs a list of which files were written to (it's impossible to calculate this before running, due to custom sharding).
 
-TODO: Write about HandlerWrapper.
+In the previous paragraph, `RawContext` objects were mentioned. `RawContext` in an essence, can be thought of as a part of `Runner` that is given to worker threads and allows them to write outputs from their MR execution into files (in fact, the `DoContext` that user-written functions accept is a simple wrapper around `RawContext`). Note, however, that `RawContext`, unlike `Runner`, is not purely an abstract interface, it also contains logic to handle freq counters instead of only supporting I/O operations.
