@@ -1,3 +1,7 @@
+// Copyright 2020, Beeri 15.  All rights reserved.
+// Author: Roman Gershman (romange@gmail.com)
+//
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/read.hpp>
