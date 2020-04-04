@@ -13,12 +13,11 @@
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
 
-using namespace boost;
 using namespace util;
 
 int SetupListenSock(int port) {
   struct sockaddr_in server_addr;
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   CHECK_GT(fd, 0);
 
   memset(&server_addr, 0, sizeof(server_addr));
@@ -68,6 +67,7 @@ class EpollManager {
  public:
   EpollManager();
   ~EpollManager();
+
   void Arm(uint32_t mask, int fd, std::function<void(EpollManager*, EpollWrapper*)> cb);
   void Disarm(int fd);
 
@@ -99,15 +99,15 @@ void EpollManager::Arm(uint32_t mask, int fd,
 
 void EpollManager::Disarm(int fd) {
   CHECK_EQ(0, epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, NULL));
+  shutdown(fd, SHUT_RDWR);  // To send FYN as gentlemen would do.
   close(fd);
 }
 
 void EpollManager::Run() {
-  bool stop = false;
-  while (!stop) {
+  while (true) {
     int new_events = epoll_wait(epoll_fd_, events_, MAX_EVENTS, -1);
     if (new_events < 0) {
-      if (errno == EINTR) {
+      if (errno == EINTR) {  // We got signal interrupt - just exit.
         break;
       } else {
         char* str = strerror(errno);
@@ -122,7 +122,7 @@ void EpollManager::Run() {
   }
 }
 
-class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
+class RedisConnection {
  public:
   RedisConnection() {
   }
@@ -134,54 +134,67 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
 };
 
 void RedisConnection::Handle(EpollManager* mgr, EpollWrapper* wrapper) {
-  auto self(shared_from_this());
   auto rb = cmd_.read_buffer();
   int socket = wrapper->fd();
 
-  LOG(INFO) << "Handling socket " << socket;
+  DVLOG(1) << "Handling socket " << socket;
+
   while (true) {
     int res = read(socket, rb.data(), rb.size());
-    if (res <= 0) {
-      if (res < 0) {
-        CHECK_EQ(-1, res);  // could it be 0 for sockets?
+    if (res > 0) {
+      if (cmd_.Decode(res)) {  // It has a bug in case of pipelined requests.
+        DVLOG(1) << "Sending PONG to " << socket;
 
+        int res = write(socket, cmd_.reply().data(), cmd_.reply().size());
+        CHECK_GT(res, 0);
+        #if 0
+        if (res <= 0) {
+          CHECK_EQ(-1, res);  // could it be 0 for sockets?
+          if (errno != EAGAIN) {
+            char* str = strerror(errno);
+            LOG(FATAL) << "Error " << errno << "/" << str;
+          }
+        }
+        #endif
+      }
+    } else {  // Error or EOF
+      if (res < 0) {  // 0 means EOF (socket closed).
+        CHECK_EQ(-1, res);
         if (errno == EAGAIN)
           return;
         char* str = strerror(errno);
-        LOG(INFO) << "Error " << errno << "/" << str;
+        LOG(WARNING) << "Error " << errno << "/" << str;
       }
+
+      // In any case we close the connection.
       mgr->Disarm(socket);
-      wrapper->Set(nullptr);
-      return;
-    }
-
-    if (cmd_.Decode(res)) {
-      LOG(INFO) << "Sending PONG to " << socket;
-
-      int res = write(socket, cmd_.reply().data(), cmd_.reply().size());
-      if (res <= 0) {
-        CHECK_EQ(-1, res);  // could it be 0 for sockets?
-        if (errno != EAGAIN) {
-          char* str = strerror(errno);
-          LOG(FATAL) << "Error " << errno << "/" << str;
-        }
-      }
+      wrapper->Set(nullptr);  // After this moment 'this' is deleted.
+      break;
     }
   }
 }
+
+static unsigned num_opened = 0;
 
 void HandleAccept(EpollManager* mgr, EpollWrapper* me) {
   struct sockaddr_in client_addr;
   socklen_t len = sizeof(client_addr);
 
+  // We do not need to loop here because we subscribed HandleAccept with level-trigerred
+  // event.
   int conn_fd = accept4(me->fd(), (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
   CHECK_GT(conn_fd, 0);
+  ++num_opened;
 
-  auto connection = std::make_shared<RedisConnection>();
-  auto cb = [connection](EpollManager* mgr, EpollWrapper* me) { connection->Handle(mgr, me); };
+  std::shared_ptr<RedisConnection> connection(new RedisConnection);
+  auto cb = [c = std::move(connection)](EpollManager* mgr, EpollWrapper* me) {
+    c->Handle(mgr, me);
+  };
+
+  // We subscribe connectiosn with edge-triggerred event.
   mgr->Arm(EPOLLIN | EPOLLET, conn_fd, std::move(cb));
 
-  LOG(INFO) << "Accepted " << conn_fd;
+  VLOG(1) << "Accepted " << conn_fd;
 }
 
 int main(int argc, char* argv[]) {
