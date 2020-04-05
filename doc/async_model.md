@@ -151,8 +151,48 @@ Other Gaia APIs (for example, reading line formatted files, CSV, LST) are built 
 Internals
 ---------
 
-TODO: Explain how it is impossible to really do async I/O in Linux in a non-XFS filesystem so instead Gaia uses a thread pool of I/O threads. Also need to wonder why we need a pool and can't have a single I/O thread since all it does anyway is just call system calls.
+At the time of writing, Linux, and therefore also Asio, do not support async I/O for any filesystem except for XFS. Because of this, async I/O is simulated via threads. This is done by having `FiberReadFile` and `FiberWriteFile` accept a pointer to a `FiberQueueThreadPool` object. A `FiberQueueTheradPool` contains a thread pool where each thread runs `FiberQueue::Run`. `FiberQueue::Run` waits on its own `base::mpmc_bounded_queue` (a lock free multi-producer multi-consumer queue implementation) of callbacks which it runs. Such callbacks will normally call a system call which does synchronous I/O and notifies when done via a synchronization object.
 
-TODO: Network IO
-TODO: Maybe an example of how Gaia-MR uses all of these.
-TODO: Some of the fiber sync primitives, like blocking counter and friends.
+Network IO
+==========
+
+Usage
+-----
+
+Network servers are created and deployed in the following fashion:
+
+1) Create an `AcceptServer` object, it should accept an `IoContextPool` parameter.
+2) Add listeners to the `AcceptServer` via `AcceptServer::AddListener()`.
+3) Start the server via `AcceptServer::Run()`, this is non-blocking.
+4) If you wish to block a thread until the `AcceptServer` is finished, call `AcceptServer::Wait()`.
+5) Whoever wishes to stop the server can call `AcceptServer::Stop()`.
+
+A usage example using `http::Listener` can be seen in hello_world.md.
+
+Internals
+---------
+
+Listeners must be derived from `ListenerInterface`. In order satisfy `ListenerInterface`, an object needs to implement the `NewConnection` interface, which creates a `ConnectionHandler` per every connecting user. An object deriving from `ConnectionHandler` implements the `HandleRequest()` function, which reads and writes from a `FiberSyncSocket`.
+
+A `FiberSyncSocket` provides an interface similar to that of a normal socket, the only difference being, that instead of blocking an entire threads, operations only yield the current fiber. This is implemented via Asio's customization which allows connecting Asio events to fiber context switches. Further information about this can be found in https://www.boost.org/doc/libs/1_63_0/libs/fiber/doc/html/fiber/callbacks/then_there_s____boost_asio__.html . The main idea is to create a special type which replaces acts as an Asio completion token with special logic that causes it to yield the fiber instead, and return control to it when the I/O operation is done.
+
+When `AcceptServer::Run()` is called, it takes one of the threads of the `IoContextPool` and starts a fiber running `AcceptServer::AcceptInIOThread()` inside it. `AcceptInIOThread()` constantly calls `AcceptConnection()` to get a `ConnectionHandler` object, and uses `ConnectionHandler::RunInIoThread()` to repeatedly run the `ConnectionHandler`'s `HandleRequest()` on one of the `IoContextPool`'s threads (note that this doesn't have to be the same thread as the acceptor thread, which ensures that the server uses all CPUs).
+
+`Stop()` is implemented by creating a fake signal. An `AcceptServer` has a signal handler which closes Asio's TCP acceptor, which will cause the `async_accept()` call in `AcceptServer::AcceptConnection` to return an error and break out of the accept loop.
+
+Fiber synchronization primitives
+================================
+
+In addition to the ones existing in boost, Gaia provides several synchronization primitives of its own.
+
+`EventCount` (based on folly's event_count) is a mutexless notification mechanism, allowing either to `wait()` on events or to `notify()`/`notifyAll()` about them.
+
+`Done` allows `Wait()`ing for an event to finish, it is possible that finishing to `Wait()` either rests the event or doesn't.
+
+`BlockingCounter` allows `Wait()`ing until `Dec()` was called N times (useful when waiting for N threads to start).
+
+`Semaphore` allows `Wait()`ing until N tokens are available in the stock. Tokens can be added via `Signal()`ing.
+
+`Cell` is an `unbuffered_channel` without a `Close()` method, removing ambiguity is to whether the input parameter to `Emplace()` is `std::move()`d or not.
+
+`SimpleChannel` is an alternate implementation of `buffered_channel` based on `folly::ProducerConsumerQueue`. `SimpleChannel` has an alternate close schema where it can start closing even if there are messages waiting on the queue. It is the producer's responsibility to ensure all messages were consumed before destroying the queue. TODO: Why do we need this? What advantage does it offer over `buffered_channel`? Is it more efficient?
