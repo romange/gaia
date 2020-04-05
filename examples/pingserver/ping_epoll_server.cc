@@ -9,11 +9,13 @@
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
 #include "util/http/http_conn_handler.h"
+#include "util/stats/varz_stats.h"
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
 
 using namespace util;
+VarzQps ping_qps("ping-qps");
 
 int SetupListenSock(int port) {
   struct sockaddr_in server_addr;
@@ -145,6 +147,7 @@ void RedisConnection::Handle(EpollManager* mgr, EpollWrapper* wrapper) {
       if (cmd_.Decode(res)) {  // It has a bug in case of pipelined requests.
         DVLOG(1) << "Sending PONG to " << socket;
 
+        ping_qps.Inc();
         int res = write(socket, cmd_.reply().data(), cmd_.reply().size());
         CHECK_GT(res, 0);
         #if 0

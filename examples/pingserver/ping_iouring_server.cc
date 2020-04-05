@@ -17,11 +17,14 @@
 #include <unistd.h>
 
 #include <stdlib.h>
+#include "util/stats/varz_stats.h"
 
 using namespace util;
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
+
+VarzQps ping_qps("ping-qps");
 
 static int SetupListenSock(int port) {
   struct sockaddr_in server_addr;
@@ -153,6 +156,12 @@ void URingManager::Run() {
 class RedisConnection {
  public:
   RedisConnection() {
+    for (unsigned i = 0; i < 2; ++i) {
+      memset(msg_hdr_ + i, 0, sizeof(msghdr));
+      msg_hdr_[i].msg_iovlen = 1;
+    }
+    msg_hdr_[0].msg_iov = &io_rvec_;
+    msg_hdr_[1].msg_iov = &io_wvec_;
   }
 
   void Handle(int32_t res, URingManager* mgr, URingEvent* event);
@@ -164,6 +173,7 @@ class RedisConnection {
 
   PingCommand cmd_;
   struct iovec io_rvec_, io_wvec_;
+  msghdr msg_hdr_[2];
 };
 
 void RedisConnection::InitiateRead(URingManager* mgr, URingEvent* event) {
@@ -172,7 +182,8 @@ void RedisConnection::InitiateRead(URingManager* mgr, URingEvent* event) {
   auto rb = cmd_.read_buffer();
   io_rvec_.iov_base = rb.data();
   io_rvec_.iov_len = rb.size();
-  io_uring_prep_readv(sqe, socket, &io_rvec_, 1, 0);
+
+  io_uring_prep_recvmsg(sqe, socket, &msg_hdr_[0], 0);
   io_uring_sqe_set_data(sqe, event);
   state_ = READ;
 }
@@ -181,9 +192,13 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
   int socket = event->fd();
   io_uring_sqe* sqe = mgr->GetSubmit();
   auto rb = cmd_.reply();
+
   io_wvec_.iov_base = const_cast<void*>(rb.data());
   io_wvec_.iov_len = rb.size();
-  io_uring_prep_writev(sqe, socket, &io_wvec_, 1, 0);
+
+  // On my tests io_uring_prep_sendmsg is much faster than io_uring_prep_writev and
+  // subsequently sendmsg is faster than write.
+  io_uring_prep_sendmsg(sqe, socket, &msg_hdr_[1], 0);
   io_uring_sqe_set_data(sqe, event);
   state_ = WRITE;
 }
@@ -201,6 +216,7 @@ void RedisConnection::Handle(int32_t res, URingManager* mgr, URingEvent* event) 
       if (res > 0) {
         if (cmd_.Decode(res)) {  // It has a bug in case of pipelined requests.
           DVLOG(1) << "Sending PONG to " << socket;
+          ping_qps.Inc();
           InitiateWrite(mgr, event);
         } else {
           InitiateRead(mgr, event);
