@@ -190,11 +190,10 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
 
 void RedisConnection::Handle(int32_t res, URingManager* mgr, URingEvent* event) {
   int socket = event->fd();
-  DVLOG(1) << "Handling socket " << socket;
+  DVLOG(1) << "RedisConnection::Handle [" << socket << "] " << state_ << "/" << res;
 
   switch (state_) {
     case WAIT_READ:
-      DVLOG(1) << "WAIT_READ: " << res;
       CHECK_GT(res, 0);
       InitiateRead(mgr, event);
       break;
@@ -232,6 +231,7 @@ void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
 
   // TBD: to understand what res means here. Maybe, number of bytes available?
   CHECK_GT(res, 0);
+  VLOG(1) << "Completion HandleAccept " << res;
 
   while (true) {
     // We could remove accept4 in favor of uring but since it's relateively uncommong operation
@@ -252,7 +252,7 @@ void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
 
     mgr->Arm(conn_fd, std::move(cb));
 
-    VLOG(1) << "Accepted " << conn_fd;
+    VLOG(2) << "Accepted " << conn_fd;
   }
   mgr->RearmEvent(me);  // TODO: to test if we need to do it.
 }
