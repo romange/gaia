@@ -32,7 +32,8 @@ static int SetupListenSock(int port) {
 
   constexpr uint32_t BACKLOG = 128;
 
-  CHECK_EQ(0, bind(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)));
+  CHECK_EQ(0, bind(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)))
+      << "Error: " << strerror(errno);
   CHECK_EQ(0, listen(fd, BACKLOG));
 
   return fd;
@@ -133,16 +134,15 @@ void URingManager::Run() {
 
     // check how many cqe's are on the cqe ring, and put these cqe's in an array
     unsigned cqe_count = io_uring_peek_batch_cqe(&ring_, cqes, arraysize(cqes));
+    DVLOG(1) << "io_uring_peek_batch_cqe returned " << cqe_count << " completions";
 
     for (unsigned i = 0; i < cqe_count; ++i) {
       struct io_uring_cqe* cqe = cqes[i];
       auto res = cqe->res;
       // auto flags = cqe->flags;  cqe->flags is currently unused.
-
       URingEvent* event = reinterpret_cast<URingEvent*>(io_uring_cqe_get_data(cqe));
-
       io_uring_cq_advance(&ring_, 1);  // Once we copied the data we can mark the cqe consumed.
-      if (event)  {  // for linked SQEs event is null.
+      if (event) {                     // for linked SQEs event is null.
         event->Run(res, this);
       }
     }
@@ -191,7 +191,6 @@ void RedisConnection::StartPolling(int fd, URingManager* mgr) {
     sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
     InitiateRead(mgr, event);
-    state_ = READ;
   } else {
     io_uring_sqe_set_data(sqe, event);
     state_ = WAIT_READ;
@@ -224,7 +223,9 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
   if (FLAGS_linked_ske) {
     sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
-    InitiateRead(mgr, event);
+
+    mgr->AddPollIn(event);
+    state_ = WAIT_READ;
   } else {
     io_uring_sqe_set_data(sqe, event);
     state_ = WRITE;
@@ -233,7 +234,7 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
 
 void RedisConnection::Handle(int32_t res, URingManager* mgr, URingEvent* event) {
   int socket = event->fd();
-  DVLOG(1) << "RedisConnection::Handle [" << socket << "] " << state_ << "/" << res;
+  DVLOG(1) << "RedisConnection::Handle [" << socket << "] state/res: " << state_ << "/" << res;
 
   switch (state_) {
     case WAIT_READ:
