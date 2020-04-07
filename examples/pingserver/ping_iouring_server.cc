@@ -24,6 +24,8 @@ static int SetupListenSock(int port) {
   struct sockaddr_in server_addr;
   int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   CHECK_GT(fd, 0);
+  const int val = 1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
@@ -275,7 +277,7 @@ void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
   socklen_t len = sizeof(client_addr);
 
   // TBD: to understand what res means here. Maybe, number of bytes available?
-  CHECK_GT(res, 0);
+  CHECK_GT(res, 0) << strerror(-res);
   VLOG(1) << "Completion HandleAccept " << res;
 
   while (true) {
