@@ -98,6 +98,10 @@ URingManager::URingManager() {
   struct io_uring_params params;
   memset(&params, 0, sizeof(params));
   CHECK_EQ(0, io_uring_queue_init_params(4096, &ring_, &params));
+
+  if ((params.features & IORING_FEAT_FAST_POLL) == 0) {
+    LOG(WARNING) << "IORING_FEAT_FAST_POLL is missing";
+  }
 }
 
 URingManager::~URingManager() {
