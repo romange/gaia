@@ -156,6 +156,16 @@ BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_PROCESS_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_THREAD_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME_ALARM);
 
+void BM_ThreadClockById(benchmark::State& state) {
+  clockid_t clid;
+  CHECK_EQ(0, pthread_getcpuclockid(pthread_self(), &clid));
+  timespec ts;
+  while (state.KeepRunning()) {
+    DoNotOptimize(clock_gettime(clid, &ts));
+  }
+}
+BENCHMARK(BM_ThreadClockById);
+
 static void BM_ChronoSteady(benchmark::State& state) {
   while (state.KeepRunning()) {
     DoNotOptimize(steady_clock::now());
