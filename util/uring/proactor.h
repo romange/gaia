@@ -7,13 +7,14 @@
 #include <liburing.h>
 #include <pthread.h>
 
+#include <boost/intrusive/slist.hpp>
 #include <functional>
 
 #include "base/mpmc_bounded_queue.h"
 #include "util/fibers/event_count.h"
+#include "util/uring/fdevent.h"
 
 namespace util {
-
 namespace uring {
 
 class Proactor {
@@ -33,6 +34,13 @@ class Proactor {
   void Stop() {
     Async([this] { has_finished_ = true; });
   }
+
+  // TODO: to handle ooverflow use-cases.
+  io_uring_sqe* GetSubmitEntry() {
+    return io_uring_get_sqe(&ring_);
+  }
+
+  FdEvent* GetFdEvent(int fd);
 
  private:
   void WakeIfNeeded();
@@ -58,6 +66,13 @@ class Proactor {
   FuncQ task_queue_;
   std::atomic_uint32_t tq_seq_{0}, tq_wakeups_{0};
   EventCount task_queue_avail_;
+
+  using ListType = boost::intrusive::slist<FdEvent, FdEvent::member_hook_t,
+                                           boost::intrusive::constant_time_size<false>,
+                                           boost::intrusive::cache_last<false>>;
+
+  ListType event_fd_list_;
+  friend class FdEvent;
 };
 
 template <typename Func> void Proactor::Async(Func&& f) {
@@ -74,6 +89,12 @@ template <typename Func> void Proactor::Async(Func&& f) {
   }
 }
 
-}  // namespace uring
+inline void FdEvent::AddPollin(Proactor* proactor) {
+  io_uring_sqe* sqe = proactor->GetSubmitEntry();
 
+  io_uring_prep_poll_add(sqe, handle(), POLLIN);
+  io_uring_sqe_set_data(sqe, this);
+}
+
+}  // namespace uring
 }  // namespace util

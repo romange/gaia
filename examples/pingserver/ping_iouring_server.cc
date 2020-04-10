@@ -2,17 +2,16 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-// #include <fcntl.h>
-#include <liburing.h>
-
 #include "base/init.h"
 #include "examples/pingserver/ping_command.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
+#include "util/uring/proactor.h"
 #include "util/http/http_conn_handler.h"
 #include "util/stats/varz_stats.h"
 
 using namespace util;
+using namespace uring;
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
@@ -41,119 +40,6 @@ static int SetupListenSock(int port) {
   return fd;
 }
 
-class URingManager;
-class URingEvent;
-
-// first argument is the result of completion operation: io_uring_cqe.res
-using CbType = std::function<void(int32_t, URingManager*, URingEvent*)>;
-
-class URingEvent {
-  int fd_ = -1;
-  CbType cb_;  // This lambda might hold auxillary data that is needed to run.
-
- public:
-  explicit URingEvent(int fd) : fd_(fd) {
-  }
-
-  void Set(CbType cb) {
-    cb_ = std::move(cb);
-  }
-
-  int fd() const {
-    return fd_;
-  }
-  void Run(int res, URingManager* mgr) {
-    cb_(res, mgr, this);
-  }
-};
-
-class URingManager {
-  struct io_uring ring_;
-  std::vector<std::unique_ptr<URingEvent>> storage_;
-
- public:
-  URingManager();
-  ~URingManager();
-
-  URingEvent* AssignCb(int fd, CbType cb);
-
-  io_uring_sqe* GetSubmit() {
-    io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-    CHECK(sqe) << "TBD: To handle ring overflow";
-
-    return sqe;
-  }
-
-  void AddPollIn(URingEvent* event) {
-    struct io_uring_sqe* sqe = GetSubmit();
-
-    io_uring_prep_poll_add(sqe, event->fd(), POLLIN);
-    io_uring_sqe_set_data(sqe, event);
-  }
-
-  void Run();
-};
-
-URingManager::URingManager() {
-  struct io_uring_params params;
-  memset(&params, 0, sizeof(params));
-  CHECK_EQ(0, io_uring_queue_init_params(4096, &ring_, &params));
-
-  if ((params.features & IORING_FEAT_FAST_POLL) == 0) {
-    LOG(WARNING) << "IORING_FEAT_FAST_POLL is missing";
-  }
-}
-
-URingManager::~URingManager() {
-  io_uring_queue_exit(&ring_);
-}
-
-URingEvent* URingManager::AssignCb(int fd, CbType cb) {
-  CHECK(cb);
-
-  URingEvent* event = new URingEvent(fd);
-  event->Set(std::move(cb));
-
-  storage_.emplace_back(event);
-  return event;
-}
-
-void URingManager::Run() {
-  io_uring_cqe* cqe = nullptr;
-  struct io_uring_cqe* cqes[32];
-  static_assert(32 == arraysize(cqes), "");
-  while (true) {
-    // tell kernel we have put a sqe on the submission ring.
-    // Might return negative -errno.
-    CHECK_GE(io_uring_submit(&ring_), 0);  // Could be combined into io_uring_submit_and_wait.
-
-    // wait for new cqe to become available
-    int res = io_uring_wait_cqe(&ring_, &cqe);  // res must be <= 0.
-    if (res < 0) {
-      if (-res == EINTR)
-        break;
-
-      char* str = strerror(-res);
-      LOG(FATAL) << "Error " << -res << "/" << str;
-    }
-    CHECK_EQ(0, res);
-
-    // check how many cqe's are on the cqe ring, and put these cqe's in an array
-    unsigned cqe_count = io_uring_peek_batch_cqe(&ring_, cqes, arraysize(cqes));
-    DVLOG(1) << "io_uring_peek_batch_cqe returned " << cqe_count << " completions";
-
-    for (unsigned i = 0; i < cqe_count; ++i) {
-      struct io_uring_cqe* cqe = cqes[i];
-      auto res = cqe->res;
-      // auto flags = cqe->flags;  cqe->flags is currently unused.
-      URingEvent* event = reinterpret_cast<URingEvent*>(io_uring_cqe_get_data(cqe));
-      io_uring_cq_advance(&ring_, 1);  // Once we copied the data we can mark the cqe consumed.
-      if (event) {                     // for linked SQEs event is null.
-        event->Run(res, this);
-      }
-    }
-  }
-}
 
 class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
  public:
@@ -166,32 +52,32 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
     msg_hdr_[1].msg_iov = &io_wvec_;
   }
 
-  void Handle(int32_t res, URingManager* mgr, URingEvent* event);
+  void Handle(FdEvent::IoResult res, Proactor* mgr, FdEvent* event);
 
-  void StartPolling(int fd, URingManager* mgr);
+  void StartPolling(int fd, Proactor* mgr);
 
  private:
   enum State { WAIT_READ, READ, WRITE } state_ = WAIT_READ;
-  void InitiateRead(URingManager* mgr, URingEvent* event);
-  void InitiateWrite(URingManager* mgr, URingEvent* event);
+  void InitiateRead(Proactor* mgr, FdEvent* event);
+  void InitiateWrite(Proactor* mgr, FdEvent* event);
 
   PingCommand cmd_;
   struct iovec io_rvec_, io_wvec_;
   msghdr msg_hdr_[2];
 };
 
-void RedisConnection::StartPolling(int fd, URingManager* mgr) {
+void RedisConnection::StartPolling(int fd, Proactor* mgr) {
   auto ptr = shared_from_this();
 
-  auto cb = [ptr = std::move(ptr)](int32_t res, URingManager* mgr, URingEvent* me) {
+  auto cb = [ptr = std::move(ptr)](int32_t res, Proactor* mgr, FdEvent* me) {
     ptr->Handle(res, mgr, me);
   };
 
-  URingEvent* event = mgr->AssignCb(fd, std::move(cb));
+  FdEvent* event = mgr->GetFdEvent(fd);
+  event->Arm(std::move(cb));
 
-  struct io_uring_sqe* sqe = mgr->GetSubmit();
-
-  io_uring_prep_poll_add(sqe, event->fd(), POLLIN);
+  struct io_uring_sqe* sqe = mgr->GetSubmitEntry();
+  io_uring_prep_poll_add(sqe, event->handle(), POLLIN);
 
   if (FLAGS_linked_ske) {
     sqe->flags |= IOSQE_IO_LINK;
@@ -203,9 +89,9 @@ void RedisConnection::StartPolling(int fd, URingManager* mgr) {
   }
 }
 
-void RedisConnection::InitiateRead(URingManager* mgr, URingEvent* event) {
-  int socket = event->fd();
-  io_uring_sqe* sqe = mgr->GetSubmit();
+void RedisConnection::InitiateRead(Proactor* mgr, FdEvent* event) {
+  int socket = event->handle();
+  io_uring_sqe* sqe = mgr->GetSubmitEntry();
   auto rb = cmd_.read_buffer();
   io_rvec_.iov_base = rb.data();
   io_rvec_.iov_len = rb.size();
@@ -215,9 +101,9 @@ void RedisConnection::InitiateRead(URingManager* mgr, URingEvent* event) {
   state_ = READ;
 }
 
-void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
-  int socket = event->fd();
-  io_uring_sqe* sqe = mgr->GetSubmit();
+void RedisConnection::InitiateWrite(Proactor* mgr, FdEvent* event) {
+  int socket = event->handle();
+  io_uring_sqe* sqe = mgr->GetSubmitEntry();
   auto rb = cmd_.reply();
 
   io_wvec_.iov_base = const_cast<void*>(rb.data());
@@ -230,7 +116,7 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
     sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
 
-    mgr->AddPollIn(event);
+    event->AddPollin(mgr);
     state_ = WAIT_READ;
   } else {
     io_uring_sqe_set_data(sqe, event);
@@ -238,8 +124,8 @@ void RedisConnection::InitiateWrite(URingManager* mgr, URingEvent* event) {
   }
 }
 
-void RedisConnection::Handle(int32_t res, URingManager* mgr, URingEvent* event) {
-  int socket = event->fd();
+void RedisConnection::Handle(FdEvent::IoResult res, Proactor* mgr, FdEvent* event) {
+  int socket = event->handle();
   DVLOG(1) << "RedisConnection::Handle [" << socket << "] state/res: " << state_ << "/" << res;
 
   switch (state_) {
@@ -265,18 +151,18 @@ void RedisConnection::Handle(int32_t res, URingManager* mgr, URingEvent* event) 
         // In any case we close the connection.
         shutdown(socket, SHUT_RDWR);  // To send FYN as gentlemen would do.
         close(socket);
-        event->Set(nullptr);  // After this moment 'this' is deleted.
+        event->DisarmAndDiscard(mgr);  // After this moment 'this' is deleted.
       }
       break;
     case WRITE:
       CHECK_GT(res, 0);
       state_ = WAIT_READ;
-      mgr->AddPollIn(event);
+      event->AddPollin(mgr);
       break;
   }
 }
 
-void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
+void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
   struct sockaddr_in client_addr;
   socklen_t len = sizeof(client_addr);
 
@@ -287,7 +173,7 @@ void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
   while (true) {
     // We could remove accept4 in favor of uring but since it's relateively uncommong operation
     // we do not care.
-    int conn_fd = accept4(me->fd(), (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
+    int conn_fd = accept4(me->handle(), (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
     if (conn_fd == -1) {
       if (errno == EAGAIN)
         break;
@@ -301,7 +187,7 @@ void HandleAccept(int32_t res, URingManager* mgr, URingEvent* me) {
 
     VLOG(2) << "Accepted " << conn_fd;
   }
-  mgr->AddPollIn(me);  // TODO: to test if we need to do it.
+  me->AddPollin(mgr);  // resend it.
 }
 
 int main(int argc, char* argv[]) {
@@ -321,11 +207,16 @@ int main(int argc, char* argv[]) {
   }
 
   int sock_listen_fd = SetupListenSock(FLAGS_port);
-  URingManager mgr;
-  URingEvent* event = mgr.AssignCb(sock_listen_fd, &HandleAccept);
-  mgr.AddPollIn(event);
+  Proactor proactor;
 
-  mgr.Run();
+  accept_server.TriggerOnBreakSignal([&] { proactor.Stop();});
+
+  FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
+  event->Arm(&HandleAccept);
+  event->AddPollin(&proactor);
+
+  std::thread t1([&] { proactor.Run(); });
+  t1.join();
   accept_server.Stop(true);
 
   return 0;

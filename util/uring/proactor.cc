@@ -46,32 +46,6 @@ inline void wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
   LOG(FATAL) << "Error " << (res) << " evaluating sys_io_uring_enter: " << strerror(res);
 }
 
-class FdEvent;
-
-using CbType = std::function<void(int32_t, io_uring*, FdEvent*)>;
-
-class FdEvent {
-  int fd_ = -1;
-  CbType cb_;  // This lambda might hold auxillary data that is needed to run.
-
- public:
-  explicit FdEvent(int fd) : fd_(fd) {
-  }
-
-  void Set(CbType cb) {
-    cb_ = std::move(cb);
-  }
-
-  int fd() const {
-    return fd_;
-  }
-
-  void Run(int res, io_uring* ring) {
-    cb_(res, ring, this);
-  }
-};
-
-
 inline unsigned CQReadyCount(const io_uring& ring) {
   return io_uring_smp_load_acquire(ring.cq.ktail) - *ring.cq.khead;
 }
@@ -89,6 +63,10 @@ unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
     cqes[i] = ring.cq.cqes[head & mask];
 
   return count;
+}
+
+void DisposeFdEvent(FdEvent* ptr) {
+  delete ptr;
 }
 
 constexpr uint32_t WAIT_SECTION_STATE = 1UL << 31;
@@ -118,13 +96,21 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
   sqe->user_data = 1;
 
-  volatile
-  ctx::fiber dummy;  // For some weird reason I need this to pull boost::context into linkage.
+  volatile ctx::fiber
+      dummy;  // For some weird reason I need this to pull boost::context into linkage.
 }
 
 Proactor::~Proactor() {
   io_uring_queue_exit(&ring_);
   close(wake_fd_);
+  event_fd_list_.clear_and_dispose(&DisposeFdEvent);
+}
+
+FdEvent* Proactor::GetFdEvent(int fd) {
+  FdEvent* res = new FdEvent(fd);
+  event_fd_list_.push_front(*res);
+
+  return res;
 }
 
 void Proactor::Run() {
@@ -174,7 +160,7 @@ void Proactor::Run() {
           // ....
         } else if (cqe.user_data > 1024) {  // our heap range surely starts higher than 1k.
           FdEvent* event = reinterpret_cast<FdEvent*>(io_uring_cqe_get_data(&cqe));
-          event->Run(cqe.res, &ring_);
+          event->Run(cqe.res, this);
         }
       }
       continue;
@@ -209,6 +195,14 @@ void Proactor::WakeIfNeeded() {
 
     CHECK_EQ(8, write(wake_fd_, &val, sizeof(uint64_t)));
   }
+}
+
+void FdEvent::DisarmAndDiscard(Proactor* proactor) {
+  auto it = proactor->event_fd_list_.iterator_to(*this);
+  CHECK(it != proactor->event_fd_list_.end());
+
+  cb_ = nullptr;
+  proactor->event_fd_list_.erase_and_dispose(it, &DisposeFdEvent);
 }
 
 }  // namespace uring
