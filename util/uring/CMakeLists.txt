@@ -1,2 +1,4 @@
 add_library(uring_fiber_lib proactor.cc)
-cxx_link(uring_fiber_lib base -luring)
+cxx_link(uring_fiber_lib base Boost::fiber -luring)
+
+cxx_test(proactor_test uring_fiber_lib LABELS CI)

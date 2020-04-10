@@ -18,20 +18,23 @@ namespace uring {
 
 class Proactor {
  public:
-  Proactor();
+  explicit Proactor(unsigned ring_depth = 512);
   ~Proactor();
+
+  // Runs the poll-loop. Stalls the calling thread.
+  void Run();
+
+  template <typename Func> void Async(Func&& f);
 
   bool InProactorThread() const {
     return pthread_self() == thread_id_;
   }
 
-  void Run();  // Stalls the calling thread.
-
-  template <typename Func> void Async(Func&& f);
+  void Stop() {
+    Async([this] { has_finished_ = true; });
+  }
 
  private:
-  enum { WAIT_SECTION_MASK = 1UL << 31};
-
   void WakeIfNeeded();
 
   template <typename Func> bool EmplaceTaskQueue(Func&& f) {
@@ -39,9 +42,12 @@ class Proactor {
       return false;
 
     WakeIfNeeded();
+    return true;
   }
 
+  bool has_finished_ = false;
   io_uring ring_;
+
   pthread_t thread_id_;
   int wake_fd_;
 
@@ -50,7 +56,7 @@ class Proactor {
   using EventCount = fibers_ext::EventCount;
 
   FuncQ task_queue_;
-  std::atomic_uint32_t tq_seq_{0};
+  std::atomic_uint32_t tq_seq_{0}, tq_wakeups_{0};
   EventCount task_queue_avail_;
 };
 

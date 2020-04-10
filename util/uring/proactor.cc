@@ -6,7 +6,6 @@
 
 #include <liburing.h>
 #include <string.h>
-
 #include <sys/eventfd.h>
 #include <sys/poll.h>
 
@@ -22,6 +21,9 @@
       LOG(FATAL) << "Error " << (-__res_val) << " evaluating '" #x "': " << str; \
     }                                                                            \
   } while (false)
+
+using namespace boost;
+namespace ctx = boost::context;
 
 namespace util {
 namespace uring {
@@ -53,14 +55,45 @@ class FdEvent {
   }
 };
 
+inline void wait_for_cqe(io_uring* ring) {
+  io_uring_cqe* cqe;
+
+  // wait for new cqe to become available.
+
+  int res = io_uring_wait_cqe_nr(ring, &cqe, 1);  // res must be <= 0.
+  if (res >= 0 || res == -EINTR)
+    return;
+
+  LOG(FATAL) << "Error " << (-res) << " evaluating wait_for_cqe: " << strerror(-res);
+}
+
+inline unsigned CQReadyCount(const io_uring& ring) {
+  return io_uring_smp_load_acquire(ring.cq.ktail) - *ring.cq.khead;
+}
+
+unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
+  unsigned ready = CQReadyCount(ring);
+  if (!ready)
+    return 0;
+
+  count = count > ready ? ready : count;
+  unsigned head = *ring.cq.khead;
+  unsigned mask = *ring.cq.kring_mask;
+  unsigned last = head + count;
+  for (int i = 0; head != last; head++, i++)
+    cqes[i] = ring.cq.cqes[head & mask];
+
+  return count;
+}
+
+constexpr uint32_t WAIT_SECTION_MASK = 1UL << 31;
+
 }  // namespace
 
-Proactor::Proactor() : task_queue_(128) {
-  thread_id_ = pthread_self();
-
+Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   io_uring_params params;
   memset(&params, 0, sizeof(params));
-  URING_CHECK(io_uring_queue_init_params(4096, &ring_, &params));
+  URING_CHECK(io_uring_queue_init_params(ring_depth, &ring_, &params));
 
   if ((params.features & IORING_FEAT_FAST_POLL) == 0) {
     LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
@@ -74,11 +107,13 @@ Proactor::Proactor() : task_queue_(128) {
   wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   CHECK_GT(wake_fd_, 0);
 
-  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring_);
+  struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
   CHECK_NOTNULL(sqe);
 
-	io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
-	sqe->user_data = 1;
+  io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
+  sqe->user_data = 1;
+
+  ctx::fiber dummy;  // For some weird reason I need this to pull boost::context into linkage.
 }
 
 Proactor::~Proactor() {
@@ -87,11 +122,20 @@ Proactor::~Proactor() {
 }
 
 void Proactor::Run() {
-  io_uring_cqe* cqe = nullptr;
+  LOG(INFO) << "Proactor::Run";
+
+  thread_id_ = pthread_self();
+
+  sigset_t mask;
+  sigfillset(&mask);
+  CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
+
   constexpr size_t kBatchSize = 32;
-  struct io_uring_cqe* cqes[kBatchSize];
+  struct io_uring_cqe cqes[kBatchSize];
   unsigned cqe_count = 0;
   CbFunc task;
+
+  uint32_t tq_seq = tq_seq_.load(std::memory_order_acquire);
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
@@ -99,52 +143,54 @@ void Proactor::Run() {
     int num_submitted = io_uring_submit(&ring_);
     URING_CHECK(num_submitted);
 
-    uint32_t tq_seq = tq_seq_.load(std::memory_order_relaxed);
-
-    do {
-      DCHECK_EQ(0, tq_seq & WAIT_SECTION_MASK);
-
-      while (task_queue_.try_dequeue(task)) {
-        task_queue_avail_.notify();
-        task();
-      }
-    } while (tq_seq_.compare_exchange_weak(tq_seq, tq_seq | WAIT_SECTION_MASK));
-
-    // wait for new cqe to become available.
-    int res = io_uring_wait_cqe_nr(&ring_, &cqe, 1);  // res must be <= 0.
-    tq_seq_.store(0, std::memory_order_release);
-
-    if (res < 0) {
-      if (-res == EINTR)
-        break;
-      URING_CHECK(res);
+    while (task_queue_.try_dequeue(task)) {
+      task_queue_avail_.notify();
+      task();
     }
-    CHECK_EQ(0, res);
 
-    do {
-      // check how many cqes are in the cq-queue, and put these cqes in an array.
-      cqe_count = io_uring_peek_batch_cqe(&ring_, cqes, kBatchSize);
-      DVLOG(1) << "io_uring_peek_batch_cqe returned " << cqe_count << " completions";
+    cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
 
-      io_uring_cqe cqe;
+    if (cqe_count) {
+      // Once we copied the data we can mark the cqe consumed.
+      io_uring_cq_advance(&ring_, cqe_count);
       for (unsigned i = 0; i < cqe_count; ++i) {
-        cqe = *cqes[i];
-        io_uring_cq_advance(&ring_, 1);  // Once we copied the data we can mark the cqe consumed.
-
-        if (cqe.user_data <= 1) {
-
-        } else {
+        auto& cqe = cqes[i];
+        if (cqe.user_data == 1) {
+          struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+          CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));
+          io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
+          sqe->user_data = 1;
+        } else if (cqe.user_data > 1024) {  // our heap range starts higher than 1k.
           FdEvent* event = reinterpret_cast<FdEvent*>(io_uring_cqe_get_data(&cqe));
-          event->Run(res, &ring_);
+          event->Run(cqe.res, &ring_);
         }
       }
-    } while (cqe_count == kBatchSize);
+      continue;
+    }
+
+    // If tq_seq_ has changed since it was cached into tq_seq, then maybe
+    // we have more tasks to execute - lets run the loop again.
+    // Otherwise, mask tq_seq_ with WAIT_SECTION bit, hinting that we are going to stall now.
+    // Other threads will need to wake-up the loop (see ).
+    if (!tq_seq_.compare_exchange_weak(tq_seq, tq_seq | WAIT_SECTION_MASK,
+                                       std::memory_order_relaxed))
+      continue;
+
+    if (has_finished_)
+      break;
+
+    wait_for_cqe(&ring_);
+    tq_seq_.store(0, std::memory_order_release);
   }
+
+  VLOG(1) << "Made " << tq_wakeups_.load() << " wakeups";
 }
+
 
 void Proactor::WakeIfNeeded() {
   auto prev = tq_seq_.fetch_add(1, std::memory_order_acq_rel);
   if (prev & WAIT_SECTION_MASK) {
+    tq_wakeups_.fetch_add(1, std::memory_order_relaxed);
     uint64_t val = 1;
 
     CHECK_EQ(8, write(wake_fd_, &val, sizeof(uint64_t)));
@@ -152,5 +198,4 @@ void Proactor::WakeIfNeeded() {
 }
 
 }  // namespace uring
-
 }  // namespace util
