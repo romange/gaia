@@ -30,6 +30,22 @@ namespace uring {
 
 namespace {
 
+inline int sys_io_uring_enter(int fd, unsigned to_submit, unsigned min_complete, unsigned flags,
+                              sigset_t* sig) {
+  return syscall(__NR_io_uring_enter, fd, to_submit, min_complete, flags, sig, _NSIG / 8);
+}
+
+inline void wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
+  // res must be 0 or -1.
+  int res = sys_io_uring_enter(ring->ring_fd, 0, 1, IORING_ENTER_GETEVENTS, sig);
+  if (res == 0 || errno == EINTR)
+    return;
+  DCHECK_EQ(-1, res);
+  res = errno;
+
+  LOG(FATAL) << "Error " << (res) << " evaluating sys_io_uring_enter: " << strerror(res);
+}
+
 class FdEvent;
 
 using CbType = std::function<void(int32_t, io_uring*, FdEvent*)>;
@@ -55,17 +71,6 @@ class FdEvent {
   }
 };
 
-inline void wait_for_cqe(io_uring* ring) {
-  io_uring_cqe* cqe;
-
-  // wait for new cqe to become available.
-
-  int res = io_uring_wait_cqe_nr(ring, &cqe, 1);  // res must be <= 0.
-  if (res >= 0 || res == -EINTR)
-    return;
-
-  LOG(FATAL) << "Error " << (-res) << " evaluating wait_for_cqe: " << strerror(-res);
-}
 
 inline unsigned CQReadyCount(const io_uring& ring) {
   return io_uring_smp_load_acquire(ring.cq.ktail) - *ring.cq.khead;
@@ -86,7 +91,7 @@ unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
   return count;
 }
 
-constexpr uint32_t WAIT_SECTION_MASK = 1UL << 31;
+constexpr uint32_t WAIT_SECTION_STATE = 1UL << 31;
 
 }  // namespace
 
@@ -113,6 +118,7 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
   sqe->user_data = 1;
 
+  volatile
   ctx::fiber dummy;  // For some weird reason I need this to pull boost::context into linkage.
 }
 
@@ -153,14 +159,20 @@ void Proactor::Run() {
     if (cqe_count) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
+      DVLOG(2) << "Fetched " << cqe_count << " cqes";
+
       for (unsigned i = 0; i < cqe_count; ++i) {
         auto& cqe = cqes[i];
+
+        // I leave here 1024 codes with predefined meanings.
         if (cqe.user_data == 1) {
           struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
           CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));
           io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
           sqe->user_data = 1;
-        } else if (cqe.user_data > 1024) {  // our heap range starts higher than 1k.
+        } else if (cqe.user_data == 2) {
+          // ....
+        } else if (cqe.user_data > 1024) {  // our heap range surely starts higher than 1k.
           FdEvent* event = reinterpret_cast<FdEvent*>(io_uring_cqe_get_data(&cqe));
           event->Run(cqe.res, &ring_);
         }
@@ -168,12 +180,15 @@ void Proactor::Run() {
       continue;
     }
 
-    // If tq_seq_ has changed since it was cached into tq_seq, then maybe
-    // we have more tasks to execute - lets run the loop again.
-    // Otherwise, mask tq_seq_ with WAIT_SECTION bit, hinting that we are going to stall now.
-    // Other threads will need to wake-up the loop (see ).
-    if (!tq_seq_.compare_exchange_weak(tq_seq, tq_seq | WAIT_SECTION_MASK,
-                                       std::memory_order_relaxed))
+    /**
+     * If tq_seq_ has changed since it was cached into tq_seq, then WakeIfNeeded was called
+     * and we might have more tasks to execute - lets run the loop again.
+     * Otherwise, set tq_seq_ to WAIT_SECTION , hinting that we are going to stall now.
+     * Other threads will need to wake-up the loop (see WakeIfNeeded()) but they will
+     * call write() only once
+     *
+     */
+    if (!tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_relaxed))
       continue;
 
     if (has_finished_)
@@ -186,10 +201,9 @@ void Proactor::Run() {
   VLOG(1) << "Made " << tq_wakeups_.load() << " wakeups";
 }
 
-
 void Proactor::WakeIfNeeded() {
-  auto prev = tq_seq_.fetch_add(1, std::memory_order_acq_rel);
-  if (prev & WAIT_SECTION_MASK) {
+  auto prev = tq_seq_.fetch_add(1, std::memory_order_relaxed);
+  if (prev == WAIT_SECTION_STATE) {
     tq_wakeups_.fetch_add(1, std::memory_order_relaxed);
     uint64_t val = 1;
 

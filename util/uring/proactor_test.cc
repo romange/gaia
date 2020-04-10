@@ -55,5 +55,18 @@ TEST_F(ProactorTest, AsyncCall) {
   t.join();
 }
 
+
+void BM_AsyncCall(benchmark::State& state) {
+  Proactor proactor;
+  std::thread t([&] { proactor.Run(); });
+
+  while (state.KeepRunning()) {
+    proactor.Async([] {});
+  }
+  proactor.Stop();
+  t.join();
+}
+BENCHMARK(BM_AsyncCall);
+
 }  // namespace uring
 }  // namespace util
