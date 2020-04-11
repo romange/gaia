@@ -50,9 +50,11 @@ class ModuleInitializer {
 
 class MainInitGuard {
  public:
-   MainInitGuard(int* argc, char*** argv);
+   MainInitGuard(int* argc, char*** argv, uint32_t flags = 0);
 
    ~MainInitGuard();
 };
+
+constexpr uint32_t DISABLE_JIFFIES_THREAD = 1;
 
 #define MainInitGuard(x, y) static_assert(false, "Forgot variable name")

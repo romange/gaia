@@ -24,7 +24,12 @@ using namespace std::chrono;
 
 namespace base {
 
-class WalltimeTest : public testing::Test {};
+class WalltimeTest : public testing::Test {
+ protected:
+  static void SetUpTestCase() {
+    SetupJiffiesTimer();
+  }
+};
 
 TEST_F(WalltimeTest, BasicTimer) {
   LOG(INFO) << "Resolution in ms: " << Timer::ResolutionUsec() / 1000;
