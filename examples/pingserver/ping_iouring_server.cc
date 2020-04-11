@@ -6,9 +6,9 @@
 #include "examples/pingserver/ping_command.h"
 #include "util/asio/accept_server.h"
 #include "util/asio/io_context_pool.h"
-#include "util/uring/proactor.h"
 #include "util/http/http_conn_handler.h"
 #include "util/stats/varz_stats.h"
+#include "util/uring/proactor.h"
 
 using namespace util;
 using namespace uring;
@@ -209,13 +209,15 @@ int main(int argc, char* argv[]) {
   int sock_listen_fd = SetupListenSock(FLAGS_port);
   Proactor proactor;
 
-  accept_server.TriggerOnBreakSignal([&] { proactor.Stop();});
-
-  FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
-  event->Arm(&HandleAccept);
-  event->AddPollin(&proactor);
+  accept_server.TriggerOnBreakSignal([&] { proactor.Stop(); });
 
   std::thread t1([&] { proactor.Run(); });
+  proactor.Async([&] {
+    FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
+    event->Arm(&HandleAccept);
+    event->AddPollin(&proactor);
+  });
+
   t1.join();
   accept_server.Stop(true);
 

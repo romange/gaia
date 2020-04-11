@@ -17,13 +17,15 @@
 namespace util {
 namespace uring {
 
+class UringFiberAlgo;
+
 class Proactor {
+  Proactor(const Proactor&) = delete;
+  void operator=(const Proactor&) = delete;
+
  public:
   explicit Proactor(unsigned ring_depth = 512);
   ~Proactor();
-
-  // Runs the poll-loop. Stalls the calling thread.
-  void Run();
 
   template <typename Func> void Async(Func&& f);
 
@@ -35,7 +37,14 @@ class Proactor {
     Async([this] { has_finished_ = true; });
   }
 
-  // TODO: to handle ooverflow use-cases.
+  // Runs the poll-loop. Stalls the calling thread which will become the "Proactor" thread.
+  void Run();
+
+  /**
+   * The following methods can only run from Proactor::Run thread,i.e when
+   * InProactorThread is true. You can call them from other threads by enqueuing via Async.
+   */
+  // TODO: to handle overflow use-cases.
   io_uring_sqe* GetSubmitEntry() {
     return io_uring_get_sqe(&ring_);
   }
@@ -46,15 +55,31 @@ class Proactor {
   enum { WAIT_SECTION_STATE = 1UL << 31 };
 
   void WakeRing();
+
+  void WakeupIfNeeded() {
+    auto current = tq_seq_.fetch_add(1, std::memory_order_relaxed);
+    if (current == WAIT_SECTION_STATE) {
+      WakeRing();
+    }
+  }
+
   void DispatchCompletions(io_uring_cqe* cqes, unsigned count);
 
-  template <typename Func> bool EmplaceTaskQueue(Func&& f);
+  template <typename Func> bool EmplaceTaskQueue(Func&& f) {
+    if (task_queue_.try_enqueue(std::forward<Func>(f))) {
+      WakeupIfNeeded();
 
-  bool has_finished_ = false;
+      return true;
+    }
+    return false;
+  }
+
   io_uring ring_;
 
   pthread_t thread_id_;
+
   int wake_fd_;
+  bool has_finished_ = false;
 
   using CbFunc = std::function<void()>;
   using FuncQ = base::mpmc_bounded_queue<CbFunc>;
@@ -70,6 +95,7 @@ class Proactor {
 
   ListType event_fd_list_;
   friend class FdEvent;
+  friend class UringFiberAlgo;
 };
 
 template <typename Func> void Proactor::Async(Func&& f) {
@@ -84,17 +110,6 @@ template <typename Func> void Proactor::Async(Func&& f) {
     }
     task_queue_avail_.wait(key.epoch());
   }
-}
-
-template <typename Func> bool Proactor::EmplaceTaskQueue(Func&& f) {
-  if (!task_queue_.try_enqueue(std::forward<Func>(f)))
-    return false;
-
-  auto current = tq_seq_.fetch_add(1, std::memory_order_relaxed);
-  if (current == WAIT_SECTION_STATE) {
-    WakeRing();
-  }
-  return true;
 }
 
 inline void FdEvent::AddPollin(Proactor* proactor) {

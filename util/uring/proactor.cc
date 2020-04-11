@@ -4,6 +4,8 @@
 
 #include "util/uring/proactor.h"
 
+#include <boost/fiber/scheduler.hpp>
+
 #include <liburing.h>
 #include <string.h>
 #include <sys/eventfd.h>
@@ -123,8 +125,10 @@ void Proactor::Run() {
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
   uint32_t tq_seq = 0;
-  uint64_t num_stalls = 0;
+  uint32_t num_stalls = 0, empty_loops = 0;
   CbFunc task;
+  fibers::context* main_loop_ctx = fibers::context::active();
+  fibers::scheduler* sched = main_loop_ctx->get_scheduler();
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
@@ -132,11 +136,17 @@ void Proactor::Run() {
     int num_submitted = io_uring_submit(&ring_);
     URING_CHECK(num_submitted);
 
+    tq_seq = tq_seq_.load(std::memory_order_acquire);
+    unsigned num_task_runs = 0;
     while (task_queue_.try_dequeue(task)) {
+      ++num_task_runs;
       task();
     }
-    // Should we put it inside the loop? It might improve the latency.
-    task_queue_avail_.notify();
+
+    if (num_task_runs) {
+      // Should we put it inside the loop? It might improve the latency.
+      task_queue_avail_.notifyAll();
+    }
 
     uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
     if (cqe_count) {
@@ -147,6 +157,12 @@ void Proactor::Run() {
       DispatchCompletions(cqes, cqe_count);
       continue;
     }
+
+    if (sched->has_ready_fibers()) {
+
+    }
+
+    empty_loops += (num_task_runs == 0);
 
     /**
      * If tq_seq_ has changed since it was cached into tq_seq, then EmplaceTaskQueue succeeded
@@ -166,7 +182,8 @@ void Proactor::Run() {
    }
   }
 
-  VLOG(1) << "Had " << tq_wakeups_.load() << " wakeups and " << num_stalls << " stalls";
+  VLOG(1) << "wakeups/stalls/empty-loops: " << tq_wakeups_.load() << "/" << num_stalls << "/"
+          << empty_loops;
 }
 
 void Proactor::WakeRing() {
