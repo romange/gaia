@@ -12,10 +12,6 @@ using namespace boost;
 namespace util {
 namespace uring {
 
-static void print_action(int signal) {
-  LOG(INFO) << "Got signal " << signal << " " << strsignal(signal);
-}
-
 class ProactorTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -27,18 +23,6 @@ class ProactorTest : public testing::Test {
   }
 
   static void SetUpTestCase() {
-    sigset_t mask;
-    sigfillset(&mask);
-    sigdelset(&mask, SIGINT);
-    sigdelset(&mask, SIGTERM);
-    CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
-
-    struct sigaction new_action;
-    new_action.sa_handler = print_action;
-    sigemptyset(&new_action.sa_mask);
-    new_action.sa_flags = 0;
-
-    sigaction(SIGINT, &new_action, NULL);
   }
 
   std::unique_ptr<Proactor> proactor_;
@@ -47,7 +31,7 @@ class ProactorTest : public testing::Test {
 TEST_F(ProactorTest, AsyncCall) {
   std::thread t([&] { proactor_->Run(); });
   for (unsigned i = 0; i < 10000; ++i) {
-    proactor_->Async([]{});
+    proactor_->Async([] {});
   }
   usleep(5000);
 
@@ -55,6 +39,27 @@ TEST_F(ProactorTest, AsyncCall) {
   t.join();
 }
 
+TEST_F(ProactorTest, AsyncEvent) {
+  bool event_fired = false;
+
+  auto cb = [&](FdEvent::IoResult, Proactor*, FdEvent*) {
+    event_fired = true;
+    proactor_->Stop();
+  };
+
+  std::thread t([&] { proactor_->Run(); });
+  proactor_->Async([&] {
+    FdEvent* event = proactor_->GetFdEvent(-1);
+    event->Arm(cb);
+
+    io_uring_sqe* sqe = proactor_->GetSubmitEntry();
+    io_uring_prep_nop(sqe);
+    sqe->user_data = uint64_t(event);
+  });
+  t.join();
+
+  EXPECT_TRUE(event_fired);
+}
 
 void BM_AsyncCall(benchmark::State& state) {
   Proactor proactor;

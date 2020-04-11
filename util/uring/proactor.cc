@@ -153,8 +153,13 @@ void Proactor::Run() {
     }
 
     if (num_task_runs) {
-      // Should we put it inside the loop? It might improve the latency.
+      // Should we put 'notify' inside the loop? It might improve the latency.
       task_queue_avail_.notifyAll();
+
+      // TODO: for IORING_SETUP_SQPOLL it may be wrong to do this check.
+      if (io_uring_sq_ready(&ring_)) {
+        continue;
+      }
     }
 
     uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
@@ -174,7 +179,7 @@ void Proactor::Run() {
       continue;
     }
 
-    empty_loops += (num_task_runs == 0);
+    empty_loops += ((num_task_runs + num_submitted) == 0);
 
     /**
      * If tq_seq_ has changed since it was cached into tq_seq, then EmplaceTaskQueue succeeded
@@ -183,7 +188,7 @@ void Proactor::Run() {
      * Other threads will need to wake-up the ring (see WakeRing()) but only the they will
      * actually syscall only once.
      */
-    if (tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_relaxed)) {
+    if (tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_acquire)) {
       if (has_finished_)
         break;
 
