@@ -4,15 +4,17 @@
 
 #include "util/uring/proactor.h"
 
-#include <boost/fiber/scheduler.hpp>
-
 #include <liburing.h>
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/poll.h>
 
+#include <boost/fiber/operations.hpp>
+#include <boost/fiber/scheduler.hpp>
+
 #include "base/logging.h"
 #include "base/macros.h"
+#include "util/uring/uring_fiber_algo.h"
 
 #define URING_CHECK(x)                                                           \
   do {                                                                           \
@@ -122,13 +124,20 @@ void Proactor::Run() {
   sigfillset(&mask);
   CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
 
+  fibers::context* main_loop_ctx = fibers::context::active();
+
+  fibers::scheduler* sched = main_loop_ctx->get_scheduler();
+
+  UringFiberAlgo* scheduler = new UringFiberAlgo(this);
+  sched->set_algo(scheduler);
+  this_fiber::properties<UringFiberProps>().set_name("ioloop");
+
+
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
   uint32_t tq_seq = 0;
   uint32_t num_stalls = 0, empty_loops = 0;
   CbFunc task;
-  fibers::context* main_loop_ctx = fibers::context::active();
-  fibers::scheduler* sched = main_loop_ctx->get_scheduler();
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
@@ -159,7 +168,10 @@ void Proactor::Run() {
     }
 
     if (sched->has_ready_fibers()) {
-
+      // Suspend this fiber until others will run and get blocked.
+      // Eventually UringFiberAlgo will resume back this fiber in suspend_until function.
+      sched->suspend();
+      continue;
     }
 
     empty_loops += (num_task_runs == 0);
@@ -179,7 +191,7 @@ void Proactor::Run() {
       tq_seq = 0;
       ++num_stalls;
       tq_seq_.store(0, std::memory_order_release);
-   }
+    }
   }
 
   VLOG(1) << "wakeups/stalls/empty-loops: " << tq_wakeups_.load() << "/" << num_stalls << "/"

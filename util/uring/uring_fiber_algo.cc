@@ -11,7 +11,9 @@ namespace util {
 namespace uring {
 using namespace boost;
 
-UringFiberAlgo::UringFiberAlgo(Proactor* proactor) : proactor_(nullptr) {
+UringFiberAlgo::UringFiberAlgo(Proactor* proactor) : proactor_(proactor) {
+  main_cntx_ = fibers::context::active();
+  CHECK(main_cntx_->is_context(fibers::type::main_context));
 }
 
 UringFiberAlgo::~UringFiberAlgo() {
@@ -32,6 +34,8 @@ auto UringFiberAlgo::pick_next() noexcept -> FiberContext* {
   if (rqueue_.empty())
     return nullptr;
   FiberContext* ctx = &rqueue_.front();
+  rqueue_.pop_front();
+
   if (!ctx->is_context(boost::fibers::type::dispatcher_context)) {
     --ready_cnt_;
   }
@@ -62,11 +66,13 @@ bool UringFiberAlgo::has_ready_fibers() const noexcept {
 // suspend_until halts the thread in case there are no active fibers to run on it.
 // This is done by dispatcher fiber.
 void UringFiberAlgo::suspend_until(time_point const& abs_time) noexcept {
+  auto* cur_cntx = fibers::context::active();
+
+  DCHECK(cur_cntx->is_context(fibers::type::dispatcher_context));
   if (time_point::max() != abs_time) {
     LOG(FATAL) << "TBD";
   }
-  LOG(FATAL) << "TBD";
-  // cnd_.notify_one();
+  main_cntx_->get_scheduler()->schedule(main_cntx_);
 }
 
 // This function is called from remote threads, to wake this thread in case it's sleeping.
