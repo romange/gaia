@@ -69,8 +69,6 @@ void DisposeFdEvent(FdEvent* ptr) {
   delete ptr;
 }
 
-constexpr uint32_t WAIT_SECTION_STATE = 1UL << 31;
-
 }  // namespace
 
 Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
@@ -124,10 +122,9 @@ void Proactor::Run() {
 
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
-  unsigned cqe_count = 0;
+  uint32_t tq_seq = 0;
+  uint64_t num_stalls = 0;
   CbFunc task;
-
-  uint32_t tq_seq = tq_seq_.load(std::memory_order_acquire);
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
@@ -136,64 +133,65 @@ void Proactor::Run() {
     URING_CHECK(num_submitted);
 
     while (task_queue_.try_dequeue(task)) {
-      task_queue_avail_.notify();
       task();
     }
+    // Should we put it inside the loop? It might improve the latency.
+    task_queue_avail_.notify();
 
-    cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
-
+    uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
     if (cqe_count) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
       DVLOG(2) << "Fetched " << cqe_count << " cqes";
 
-      for (unsigned i = 0; i < cqe_count; ++i) {
-        auto& cqe = cqes[i];
-
-        // I leave here 1024 codes with predefined meanings.
-        if (cqe.user_data == 1) {
-          struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-          CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));
-          io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
-          sqe->user_data = 1;
-        } else if (cqe.user_data == 2) {
-          // ....
-        } else if (cqe.user_data > 1024) {  // our heap range surely starts higher than 1k.
-          FdEvent* event = reinterpret_cast<FdEvent*>(io_uring_cqe_get_data(&cqe));
-          event->Run(cqe.res, this);
-        }
-      }
+      DispatchCompletions(cqes, cqe_count);
       continue;
     }
 
     /**
-     * If tq_seq_ has changed since it was cached into tq_seq, then WakeIfNeeded was called
+     * If tq_seq_ has changed since it was cached into tq_seq, then EmplaceTaskQueue succeeded
      * and we might have more tasks to execute - lets run the loop again.
-     * Otherwise, set tq_seq_ to WAIT_SECTION , hinting that we are going to stall now.
-     * Other threads will need to wake-up the loop (see WakeIfNeeded()) but they will
-     * call write() only once
-     *
+     * Otherwise, set tq_seq_ to WAIT_SECTION, hinting that we are going to stall now.
+     * Other threads will need to wake-up the ring (see WakeRing()) but only the they will
+     * actually syscall only once.
      */
-    if (!tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_relaxed))
-      continue;
+    if (tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_relaxed)) {
+      if (has_finished_)
+        break;
 
-    if (has_finished_)
-      break;
-
-    wait_for_cqe(&ring_);
-    tq_seq_.store(0, std::memory_order_release);
+      wait_for_cqe(&ring_);
+      tq_seq = 0;
+      ++num_stalls;
+      tq_seq_.store(0, std::memory_order_release);
+   }
   }
 
-  VLOG(1) << "Made " << tq_wakeups_.load() << " wakeups";
+  VLOG(1) << "Had " << tq_wakeups_.load() << " wakeups and " << num_stalls << " stalls";
 }
 
-void Proactor::WakeIfNeeded() {
-  auto prev = tq_seq_.fetch_add(1, std::memory_order_relaxed);
-  if (prev == WAIT_SECTION_STATE) {
-    tq_wakeups_.fetch_add(1, std::memory_order_relaxed);
-    uint64_t val = 1;
+void Proactor::WakeRing() {
+  tq_wakeups_.fetch_add(1, std::memory_order_relaxed);
+  uint64_t val = 1;
 
-    CHECK_EQ(8, write(wake_fd_, &val, sizeof(uint64_t)));
+  CHECK_EQ(8, write(wake_fd_, &val, sizeof(uint64_t)));
+}
+
+void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) {
+    auto& cqe = cqes[i];
+
+    // I leave here 1024 codes with predefined meanings.
+    if (cqe.user_data == 1) {
+      struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+      CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));
+      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
+      sqe->user_data = 1;
+    } else if (cqe.user_data == 2) {
+      // ....
+    } else if (cqe.user_data > 1024) {  // our heap range surely starts higher than 1k.
+      FdEvent* event = reinterpret_cast<FdEvent*>(io_uring_cqe_get_data(&cqe));
+      event->Run(cqe.res, this);
+    }
   }
 }
 

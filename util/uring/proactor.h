@@ -43,15 +43,12 @@ class Proactor {
   FdEvent* GetFdEvent(int fd);
 
  private:
-  void WakeIfNeeded();
+  enum { WAIT_SECTION_STATE = 1UL << 31 };
 
-  template <typename Func> bool EmplaceTaskQueue(Func&& f) {
-    if (!task_queue_.try_enqueue(std::forward<Func>(f)))
-      return false;
+  void WakeRing();
+  void DispatchCompletions(io_uring_cqe* cqes, unsigned count);
 
-    WakeIfNeeded();
-    return true;
-  }
+  template <typename Func> bool EmplaceTaskQueue(Func&& f);
 
   bool has_finished_ = false;
   io_uring ring_;
@@ -87,6 +84,17 @@ template <typename Func> void Proactor::Async(Func&& f) {
     }
     task_queue_avail_.wait(key.epoch());
   }
+}
+
+template <typename Func> bool Proactor::EmplaceTaskQueue(Func&& f) {
+  if (!task_queue_.try_enqueue(std::forward<Func>(f)))
+    return false;
+
+  auto current = tq_seq_.fetch_add(1, std::memory_order_relaxed);
+  if (current == WAIT_SECTION_STATE) {
+    WakeRing();
+  }
+  return true;
 }
 
 inline void FdEvent::AddPollin(Proactor* proactor) {
