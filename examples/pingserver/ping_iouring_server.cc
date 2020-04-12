@@ -9,19 +9,21 @@
 #include "util/http/http_conn_handler.h"
 #include "util/stats/varz_stats.h"
 #include "util/uring/proactor.h"
+#include "util/uring/uring_fiber_algo.h"
 
+using namespace boost;
 using namespace util;
 using namespace uring;
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
-DEFINE_bool(linked_ske, false, "If true, then no-op events are linked to the next ones");
+DEFINE_bool(linked_sqe, false, "If true, then no-op events are linked to the next ones");
 
 VarzQps ping_qps("ping-qps");
 
 static int SetupListenSock(int port) {
   struct sockaddr_in server_addr;
-  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   CHECK_GT(fd, 0);
   const int val = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
@@ -39,7 +41,6 @@ static int SetupListenSock(int port) {
 
   return fd;
 }
-
 
 class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
  public:
@@ -79,7 +80,7 @@ void RedisConnection::StartPolling(int fd, Proactor* mgr) {
   struct io_uring_sqe* sqe = mgr->GetSubmitEntry();
   io_uring_prep_poll_add(sqe, event->handle(), POLLIN);
 
-  if (FLAGS_linked_ske) {
+  if (FLAGS_linked_sqe) {
     sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
     InitiateRead(mgr, event);
@@ -112,7 +113,7 @@ void RedisConnection::InitiateWrite(Proactor* mgr, FdEvent* event) {
   // On my tests io_uring_prep_sendmsg is much faster than io_uring_prep_writev and
   // subsequently sendmsg is faster than write.
   io_uring_prep_sendmsg(sqe, socket, &msg_hdr_[1], 0);
-  if (FLAGS_linked_ske) {
+  if (FLAGS_linked_sqe) {
     sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
 
@@ -166,8 +167,13 @@ void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
   struct sockaddr_in client_addr;
   socklen_t len = sizeof(client_addr);
 
-  // TBD: to understand what res means here. Maybe, number of bytes available?
+  // res is a mask of POLLXXX constants, see revents in poll(2) for more information.
   CHECK_GT(res, 0) << strerror(-res);
+  if (res == POLLERR) {
+    CHECK_EQ(0, close(me->handle()));
+    me->DisarmAndDiscard(mgr);
+    return;
+  }
   VLOG(1) << "Completion HandleAccept " << res;
 
   while (true) {
@@ -190,6 +196,57 @@ void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
   me->AddPollin(mgr);  // resend it.
 }
 
+void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
+  fibers::context* me = fibers::context::active();
+  UringFiberProps* props = reinterpret_cast<UringFiberProps*>(me->get_properties());
+  CHECK(props);
+  props->set_name("Acceptions");
+
+  struct sockaddr_in client_addr;
+  socklen_t len = sizeof(client_addr);
+  FdEvent* event = proactor->GetFdEvent(sock_listen_fd);
+  FdEvent::IoResult completion_result = 0;
+
+  auto cb = [me, &completion_result](FdEvent::IoResult res, Proactor* mgr, FdEvent* fdevent) {
+    completion_result = res;
+    fibers::context::active()->schedule(me);
+  };
+
+  event->Arm(std::move(cb));
+
+  while (true) {
+    event->AddPollin(proactor);
+    me->suspend();
+
+    if (completion_result == POLLERR) {
+      CHECK_EQ(0, close(sock_listen_fd));
+      event->DisarmAndDiscard(proactor);
+      break;
+    }
+    VLOG(1) << "Got accept completion " << completion_result;
+
+    // We could remove accept4 in favor of uring but since it's relateively uncommong operation
+    // we do not care.
+    int conn_fd;
+    while (true) {
+      conn_fd = accept4(sock_listen_fd, (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
+      if (conn_fd == -1)
+        break;
+      CHECK_GT(conn_fd, 0);
+
+      std::shared_ptr<RedisConnection> connection(new RedisConnection);
+      connection->StartPolling(conn_fd, proactor);
+
+      VLOG(2) << "Accepted " << conn_fd;
+    }
+
+    if (errno != EAGAIN) {
+      char* str = strerror(errno);
+      LOG(FATAL) << "Error calling accept4 " << errno << "/" << str;
+    }
+  }
+}
+
 int main(int argc, char* argv[]) {
   MainInitGuard guard(&argc, &argv);
 
@@ -209,15 +266,21 @@ int main(int argc, char* argv[]) {
   int sock_listen_fd = SetupListenSock(FLAGS_port);
   Proactor proactor;
 
-  accept_server.TriggerOnBreakSignal([&] { proactor.Stop(); });
+  accept_server.TriggerOnBreakSignal([&] {
+    shutdown(sock_listen_fd, SHUT_RDWR);
+    // close(sock_listen_fd);
+    proactor.Stop(); });
 
   std::thread t1([&] { proactor.Run(); });
-  proactor.Async([&] {
-    FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
-    event->Arm(&HandleAccept);
-    event->AddPollin(&proactor);
-  });
-
+  if (false) {
+    proactor.AsyncFiber([&] {
+      FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
+      event->Arm(&HandleAccept);
+      event->AddPollin(&proactor);
+    });
+  } else {
+    proactor.AsyncFiber(&ManageAcceptions, sock_listen_fd, &proactor);
+  }
   t1.join();
   accept_server.Stop(true);
 

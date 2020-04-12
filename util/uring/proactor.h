@@ -7,6 +7,7 @@
 #include <liburing.h>
 #include <pthread.h>
 
+#include <boost/fiber/fiber.hpp>
 #include <boost/intrusive/slist.hpp>
 #include <functional>
 
@@ -28,6 +29,15 @@ class Proactor {
   ~Proactor();
 
   template <typename Func> void Async(Func&& f);
+
+  template <typename Func, typename... Args> void AsyncFiber(Func&& f, Args&&... args) {
+    // Ideally we want to forward args into lambda but it's too complicated before C++20.
+    // So I just copy them into capture.
+    // We forward captured variables so we need lambda to be mutable.
+    Async([f = std::forward<Func>(f), args...]() mutable {
+      ::boost::fibers::fiber(std::forward<Func>(f), std::forward<Args>(args)...).detach();
+    });
+  }
 
   bool InProactorThread() const {
     return pthread_self() == thread_id_;
