@@ -10,7 +10,7 @@ Let's say we have a program that reads a large file and processes each chunk in 
 The problem with the naive implementation is that although I/O and CPU are different system resources, it uses only one each time instead of reading and processing at the same time. Asynchronous programming tries to solve this problem by allowing the read operation to run WITHOUT waiting for its result. This can be done either via asynchronous callbacks or by concurrency. A solution based on asynchronous callbacks would look as following:
 
     // The function "callback" is called when the chunk is read.
-    auto callback = [](Chunk&& chunk) {
+    std::function<void(Chunk&&)> callback = [callback](Chunk&& chunk) {
         if (chunks_remaining_to_read())
             read_chunk_async(callback);
         process_chunk(chunk);
