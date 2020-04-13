@@ -14,6 +14,7 @@
 using namespace boost;
 using namespace util;
 using namespace uring;
+using IoResult = Proactor::IoResult;
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
@@ -53,95 +54,92 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
     msg_hdr_[1].msg_iov = &io_wvec_;
   }
 
-  void Handle(FdEvent::IoResult res, Proactor* mgr, FdEvent* event);
+  void Handle(IoResult res, int32_t payload, Proactor* mgr);
 
   void StartPolling(int fd, Proactor* mgr);
 
  private:
-  enum State { WAIT_READ, READ, WRITE } state_ = WAIT_READ;
-  void InitiateRead(Proactor* mgr, FdEvent* event);
-  void InitiateWrite(Proactor* mgr, FdEvent* event);
+  SubmitEntry GetEntry(int32_t socket, Proactor* mgr) {
+    auto ptr = shared_from_this();
+    auto cb = [ptr](IoResult res, int32_t payload, Proactor* proactor) {
+      ptr->Handle(res, payload, proactor);
+    };
+    return mgr->GetSubmitEntry(std::move(cb), socket);
+  }
 
+  enum State { WAIT_READ, READ, WRITE } state_ = WAIT_READ;
+  void InitiateRead(Proactor* mgr);
+  void InitiateWrite(Proactor* mgr);
+
+  int fd_ = -1;
   PingCommand cmd_;
   struct iovec io_rvec_, io_wvec_;
   msghdr msg_hdr_[2];
 };
 
 void RedisConnection::StartPolling(int fd, Proactor* mgr) {
-  auto ptr = shared_from_this();
-
-  auto cb = [ptr = std::move(ptr)](int32_t res, Proactor* mgr, FdEvent* me) {
-    ptr->Handle(res, mgr, me);
-  };
-
-  FdEvent* event = mgr->GetFdEvent(fd);
-  event->Arm(std::move(cb));
-
-  struct io_uring_sqe* sqe = mgr->GetSubmitEntry();
-  io_uring_prep_poll_add(sqe, event->handle(), POLLIN);
+  SubmitEntry sqe = GetEntry(fd, mgr);
+  sqe.PrepPollAdd(fd, POLLIN);
+  fd_ = fd;
 
   if (FLAGS_linked_sqe) {
-    sqe->flags |= IOSQE_IO_LINK;
-    sqe->user_data = 0;
-    InitiateRead(mgr, event);
+    LOG(FATAL) << "TBD";
+    // sqe->flags |= IOSQE_IO_LINK;
+    // sqe->user_data = 0;
+    InitiateRead(mgr);
   } else {
-    io_uring_sqe_set_data(sqe, event);
     state_ = WAIT_READ;
   }
 }
 
-void RedisConnection::InitiateRead(Proactor* mgr, FdEvent* event) {
-  int socket = event->handle();
-  io_uring_sqe* sqe = mgr->GetSubmitEntry();
+void RedisConnection::InitiateRead(Proactor* mgr) {
+  SubmitEntry se = GetEntry(fd_, mgr);
   auto rb = cmd_.read_buffer();
   io_rvec_.iov_base = rb.data();
   io_rvec_.iov_len = rb.size();
 
-  io_uring_prep_recvmsg(sqe, socket, &msg_hdr_[0], 0);
-  io_uring_sqe_set_data(sqe, event);
+  se.PrepRecvMsg(fd_, &msg_hdr_[0], 0);
   state_ = READ;
 }
 
-void RedisConnection::InitiateWrite(Proactor* mgr, FdEvent* event) {
-  int socket = event->handle();
-  io_uring_sqe* sqe = mgr->GetSubmitEntry();
+void RedisConnection::InitiateWrite(Proactor* mgr) {
+  SubmitEntry se = GetEntry(fd_, mgr);
   auto rb = cmd_.reply();
-
   io_wvec_.iov_base = const_cast<void*>(rb.data());
   io_wvec_.iov_len = rb.size();
 
   // On my tests io_uring_prep_sendmsg is much faster than io_uring_prep_writev and
   // subsequently sendmsg is faster than write.
-  io_uring_prep_sendmsg(sqe, socket, &msg_hdr_[1], 0);
+  se.PrepSendMsg(fd_, &msg_hdr_[1], 0);
   if (FLAGS_linked_sqe) {
-    sqe->flags |= IOSQE_IO_LINK;
+    LOG(FATAL) << "TBD";
+    /*sqe->flags |= IOSQE_IO_LINK;
     sqe->user_data = 0;
 
     event->AddPollin(mgr);
-    state_ = WAIT_READ;
+    state_ = WAIT_READ;*/
   } else {
-    io_uring_sqe_set_data(sqe, event);
     state_ = WRITE;
   }
 }
 
-void RedisConnection::Handle(FdEvent::IoResult res, Proactor* mgr, FdEvent* event) {
-  int socket = event->handle();
+void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) {
+  int socket = payload;
   DVLOG(1) << "RedisConnection::Handle [" << socket << "] state/res: " << state_ << "/" << res;
 
   switch (state_) {
     case WAIT_READ:
-      CHECK_GT(res, 0);
-      InitiateRead(mgr, event);
+      CHECK_GT(res, 0) << strerror(-res);
+      InitiateRead(proactor);
       break;
     case READ:
       if (res > 0) {
         if (cmd_.Decode(res)) {  // The flow has a bug in case of pipelined requests.
           DVLOG(1) << "Sending PONG to " << socket;
           ping_qps.Inc();
-          InitiateWrite(mgr, event);
+          InitiateWrite(proactor);
         } else {
-          InitiateRead(mgr, event);
+          InitiateRead(proactor);
         }
       } else {          // res <= 0
         if (res < 0) {  // 0 means EOF (socket closed).
@@ -152,26 +150,26 @@ void RedisConnection::Handle(FdEvent::IoResult res, Proactor* mgr, FdEvent* even
         // In any case we close the connection.
         shutdown(socket, SHUT_RDWR);  // To send FYN as gentlemen would do.
         close(socket);
-        event->DisarmAndDiscard(mgr);  // After this moment 'this' is deleted.
       }
       break;
     case WRITE:
       CHECK_GT(res, 0);
+      SubmitEntry se = GetEntry(fd_, proactor);
+      se.PrepPollAdd(fd_, POLLIN);
       state_ = WAIT_READ;
-      event->AddPollin(mgr);
       break;
   }
 }
 
-void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
+void HandleAccept(IoResult res, int32_t payload, Proactor* mgr) {
   struct sockaddr_in client_addr;
   socklen_t len = sizeof(client_addr);
+  int32_t socket = payload;
 
   // res is a mask of POLLXXX constants, see revents in poll(2) for more information.
   CHECK_GT(res, 0) << strerror(-res);
   if (res == POLLERR) {
-    CHECK_EQ(0, close(me->handle()));
-    me->DisarmAndDiscard(mgr);
+    CHECK_EQ(0, close(socket));
     return;
   }
   VLOG(1) << "Completion HandleAccept " << res;
@@ -179,7 +177,7 @@ void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
   while (true) {
     // We could remove accept4 in favor of uring but since it's relateively uncommong operation
     // we do not care.
-    int conn_fd = accept4(me->handle(), (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
+    int conn_fd = accept4(socket, (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
     if (conn_fd == -1) {
       if (errno == EAGAIN)
         break;
@@ -193,8 +191,95 @@ void HandleAccept(FdEvent::IoResult res, Proactor* mgr, FdEvent* me) {
 
     VLOG(2) << "Accepted " << conn_fd;
   }
-  me->AddPollin(mgr);  // resend it.
+
+  SubmitEntry se = mgr->GetSubmitEntry(&HandleAccept, socket);
+  se.PrepPollAdd(socket, POLLIN);  // resend it.
 }
+
+// Consider returning -res for errors.
+int posix_err_wrap(int res, boost::system::error_code* ec) {
+  if (res < 0) {
+    *ec = boost::system::error_code(errno, boost::asio::error::get_system_category());
+  }
+  return res;
+}
+
+#if 0
+class ServerSocket {
+  ServerSocket(const ServerSocket&) = delete;
+  void operator=(const ServerSocket&) = delete;
+
+ public:
+  using native_handle_type = int;
+
+  ServerSocket() : fd_event_(nullptr) {
+  }
+
+  ServerSocket(FD int fd, Proactor* proactor);
+
+  ServerSocket(ServerSocket&& other) noexcept : fd_event_(other.fd_event_) {
+    other.fd_event_ = nullptr;
+  }
+
+  ~ServerSocket() {
+    ::boost::system::error_code ec;
+    Close(ec);  // Quietly close.
+
+    LOG_IF(WARNING, ec) << "Error closing socket " << ec;
+  }
+
+  ::boost::system::error_code Accept(Proactor* proactor, ServerSocket* peer);
+
+  ServerSocket& operator=(ServerSocket&& other) {
+    if (fd_ > 0) {
+      ::boost::system::error_code ec;
+      Close(ec);
+      LOG_IF(WARNING, ec) << "Error closing socket " << ec;
+      fd_ = -1;
+    }
+    std::swap(fd_, other.fd_);
+  }
+
+  void Close(::boost::system::error_code& ec) {
+    if (fd_ > 0) {
+      int res = posix_err_wrap(::close(fd_), &ec);
+      fd_ = -1;
+    }
+  }
+
+  native_handle_type native_handle() const {
+    return fd_;
+  }
+
+ private:
+  FdEvent* fd_event_;
+};
+
+
+auto BuildUringFiberCallback(FdEvent::IoResult* res) {
+  return [res, me = fibers::context::active()](FdEvent::IoResult io_res, Proactor*, FdEvent*) {
+    *res = io_res;
+    fibers::context::active()->schedule(me);  // Awake pending fiber.
+  };
+}
+
+void ServerSocket::Accept(ServerSocket& peer, ::boost::system::error_code& ec) {
+  ::boost::asio::ip::tcp::endpoint endpoint;
+  socklen_t addr_len = endpoint.capacity();
+
+  while (true) {
+    int res = accept4(fd_, endpoint.data(), &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    if (res > 0) {
+      peer = ServerSocket{res};
+      return;
+    }
+    if (res == -1 && errno == EAGAIN) {
+      FdEvent::IoResult io_res = 0;
+      auto cb = BuildUringFiberCallback(&io_res);
+
+    }
+  }
+#endif
 
 void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
   fibers::context* me = fibers::context::active();
@@ -204,23 +289,20 @@ void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
 
   struct sockaddr_in client_addr;
   socklen_t len = sizeof(client_addr);
-  FdEvent* event = proactor->GetFdEvent(sock_listen_fd);
-  FdEvent::IoResult completion_result = 0;
+  IoResult completion_result = 0;
 
-  auto cb = [me, &completion_result](FdEvent::IoResult res, Proactor* mgr, FdEvent* fdevent) {
+  auto cb = [me, &completion_result](IoResult res, int32_t, Proactor* mgr) {
     completion_result = res;
     fibers::context::active()->schedule(me);
   };
 
-  event->Arm(std::move(cb));
-
   while (true) {
-    event->AddPollin(proactor);
+    SubmitEntry se = proactor->GetSubmitEntry(cb, 0);
+    se.PrepPollAdd(sock_listen_fd, POLLIN);
     me->suspend();
 
     if (completion_result == POLLERR) {
       CHECK_EQ(0, close(sock_listen_fd));
-      event->DisarmAndDiscard(proactor);
       break;
     }
     VLOG(1) << "Got accept completion " << completion_result;
@@ -269,14 +351,14 @@ int main(int argc, char* argv[]) {
   accept_server.TriggerOnBreakSignal([&] {
     shutdown(sock_listen_fd, SHUT_RDWR);
     // close(sock_listen_fd);
-    proactor.Stop(); });
+    proactor.Stop();
+  });
 
   std::thread t1([&] { proactor.Run(); });
   if (false) {
     proactor.AsyncFiber([&] {
-      FdEvent* event = proactor.GetFdEvent(sock_listen_fd);
-      event->Arm(&HandleAccept);
-      event->AddPollin(&proactor);
+      SubmitEntry se = proactor.GetSubmitEntry(&HandleAccept, sock_listen_fd);
+      se.PrepPollAdd(sock_listen_fd, POLLIN);
     });
   } else {
     proactor.AsyncFiber(&ManageAcceptions, sock_listen_fd, &proactor);

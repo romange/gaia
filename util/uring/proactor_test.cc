@@ -11,11 +11,13 @@ using namespace boost;
 
 namespace util {
 namespace uring {
+constexpr uint32_t kRingDepth = 16;
 
 class ProactorTest : public testing::Test {
  protected:
+
   void SetUp() override {
-    proactor_ = std::make_unique<Proactor>();
+    proactor_ = std::make_unique<Proactor>(kRingDepth);
   }
 
   void TearDown() {
@@ -24,6 +26,8 @@ class ProactorTest : public testing::Test {
 
   static void SetUpTestCase() {
   }
+
+  using IoResult = Proactor::IoResult;
 
   std::unique_ptr<Proactor> proactor_;
 };
@@ -39,22 +43,36 @@ TEST_F(ProactorTest, AsyncCall) {
   t.join();
 }
 
+
+TEST_F(ProactorTest, SqeOverflowTBD) {
+  std::thread t([&] { proactor_->Run(); });
+
+  auto cb = [](IoResult, int64_t payload, Proactor*) {
+    ASSERT_EQ(12051977, payload);
+  };
+
+  proactor_->Async([&] {
+    for (unsigned i = 0; i < kRingDepth; ++i) {
+      proactor_->GetSubmitEntry(cb, 12051977);
+    }
+  });
+
+  proactor_->Stop();
+  t.join();
+}
+
 TEST_F(ProactorTest, AsyncEvent) {
   bool event_fired = false;
 
-  auto cb = [&](FdEvent::IoResult, Proactor*, FdEvent*) {
+  auto cb = [&event_fired](IoResult, int64_t payload, Proactor* p) {
     event_fired = true;
-    proactor_->Stop();
+    p->Stop();
   };
 
   std::thread t([&] { proactor_->Run(); });
   proactor_->Async([&] {
-    FdEvent* event = proactor_->GetFdEvent(-1);
-    event->Arm(cb);
-
-    io_uring_sqe* sqe = proactor_->GetSubmitEntry();
-    io_uring_prep_nop(sqe);
-    sqe->user_data = uint64_t(event);
+    SubmitEntry se = proactor_->GetSubmitEntry(std::move(cb), 1);
+    se.sqe()->opcode = IORING_OP_NOP;
   });
   t.join();
 

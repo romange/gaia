@@ -13,7 +13,7 @@
 
 #include "base/mpmc_bounded_queue.h"
 #include "util/fibers/event_count.h"
-#include "util/uring/fdevent.h"
+#include "util/uring/submit_entry.h"
 
 namespace util {
 namespace uring {
@@ -50,16 +50,18 @@ class Proactor {
   // Runs the poll-loop. Stalls the calling thread which will become the "Proactor" thread.
   void Run();
 
+  using IoResult = int;
+
+  // IoResult is the I/O result of the completion event.
+  // int64_t is the payload supplied during event submission. See GetSubmitEntry below.
+  using CbType = std::function<void(IoResult, int64_t, Proactor*)>;
+
   /**
    * The following methods can only run from Proactor::Run thread,i.e when
-   * InProactorThread is true. You can call them from other threads by enqueuing via Async.
+   * InProactorThread is true. You can call them from other threads by enqueing via Async.
    */
-  // TODO: to handle overflow use-cases.
-  io_uring_sqe* GetSubmitEntry() {
-    return io_uring_get_sqe(&ring_);
-  }
-
-  FdEvent* GetFdEvent(int fd);
+  // TODO: to handle SQE overflow use-cases.
+  SubmitEntry GetSubmitEntry(CbType cb, int64_t payload);
 
  private:
   enum { WAIT_SECTION_STATE = 1UL << 31 };
@@ -84,6 +86,8 @@ class Proactor {
     return false;
   }
 
+  void RegrowCentries();
+
   io_uring ring_;
 
   pthread_t thread_id_;
@@ -91,21 +95,27 @@ class Proactor {
   int wake_fd_;
   bool has_finished_ = false;
 
-  using CbFunc = std::function<void()>;
-  using FuncQ = base::mpmc_bounded_queue<CbFunc>;
+  using Tasklet = std::function<void()>;
+  using FuncQ = base::mpmc_bounded_queue<Tasklet>;
   using EventCount = fibers_ext::EventCount;
 
   FuncQ task_queue_;
   std::atomic_uint32_t tq_seq_{0}, tq_wakeups_{0};
   EventCount task_queue_avail_;
 
-  using ListType = boost::intrusive::slist<FdEvent, FdEvent::member_hook_t,
-                                           boost::intrusive::constant_time_size<false>,
-                                           boost::intrusive::cache_last<false>>;
-
-  ListType event_fd_list_;
-  friend class FdEvent;
   friend class UringFiberAlgo;
+
+  struct CompletionEntry {
+    CbType cb;
+
+    // serves for linked list management when unused. Also can store an additional payload
+    // field when in flight.
+    int64_t val = -1;
+  };
+  static_assert(sizeof(CompletionEntry) == 40, "");
+
+  std::vector<CompletionEntry> centries_;
+  int32_t next_free_ = -1;
 };
 
 template <typename Func> void Proactor::Async(Func&& f) {
@@ -122,12 +132,6 @@ template <typename Func> void Proactor::Async(Func&& f) {
   }
 }
 
-inline void FdEvent::AddPollin(Proactor* proactor) {
-  io_uring_sqe* sqe = proactor->GetSubmitEntry();
-
-  io_uring_prep_poll_add(sqe, handle(), POLLIN);
-  io_uring_sqe_set_data(sqe, this);
-}
 
 }  // namespace uring
 }  // namespace util
