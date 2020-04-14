@@ -4,6 +4,7 @@
 
 #include "examples/pingserver/ping_command.h"
 #include "base/logging.h"
+#include "absl/strings/escaping.h"
 
 const char PingCommand::kReply[] = "+PONG\r\n";
 using namespace boost;
@@ -38,7 +39,7 @@ bool PingCommand::HandleLine(absl::string_view line) {
         return true;
       }
 
-      CHECK_EQ(line, "*1");
+      CHECK_EQ("*1", line) << CEscape(line);
       state_ = STR_LEN;
       break;
     case STR_LEN:

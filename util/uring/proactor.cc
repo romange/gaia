@@ -67,9 +67,9 @@ unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
   unsigned head = *ring.cq.khead;
   unsigned mask = *ring.cq.kring_mask;
   unsigned last = head + count;
-  for (int i = 0; head != last; head++, i++)
+  for (int i = 0; head != last; head++, i++) {
     cqes[i] = ring.cq.cqes[head & mask];
-
+  }
   return count;
 }
 
@@ -86,6 +86,10 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
 
   if ((params.features & IORING_FEAT_FAST_POLL) == 0) {
     LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
+  }
+
+  if (0 == (params.features & IORING_FEAT_NODROP)) {
+    LOG_FIRST_N(INFO, 1) << "IORING_FEAT_NODROP feature is not present in the kernel";
   }
 
   if (params.features & IORING_FEAT_SINGLE_MMAP) {
@@ -126,9 +130,8 @@ void Proactor::Run() {
   sigfillset(&mask);
   CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
 
-  fibers::context* main_loop_ctx = fibers::context::active();
-
-  fibers::scheduler* sched = main_loop_ctx->get_scheduler();
+  main_loop_ctx_ = fibers::context::active();
+  fibers::scheduler* sched = main_loop_ctx_->get_scheduler();
 
   UringFiberAlgo* scheduler = new UringFiberAlgo(this);
   sched->set_algo(scheduler);
@@ -140,12 +143,19 @@ void Proactor::Run() {
   uint32_t tq_seq = 0;
   uint32_t num_stalls = 0, empty_loops = 0;
   Tasklet task;
+  int64_t inflight_requests = 0;
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
     // Might return negative -errno.
     int num_submitted = io_uring_submit(&ring_);
-    URING_CHECK(num_submitted);
+    if (num_submitted == -EBUSY) {
+      VLOG(1) << "EBUSY " << num_submitted;
+      num_submitted = 0;
+    } else {
+      URING_CHECK(num_submitted);
+    }
+    inflight_requests += num_submitted;
 
     tq_seq = tq_seq_.load(std::memory_order_acquire);
     unsigned num_task_runs = 0;
@@ -168,7 +178,9 @@ void Proactor::Run() {
     if (cqe_count) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
-      DVLOG(2) << "Fetched " << cqe_count << " cqes";
+      inflight_requests -= cqe_count;
+      DVLOG(2) << "Fetched " << cqe_count << " cqes, inflight: " << inflight_requests;
+      sqe_avail_.notifyAll();
 
       DispatchCompletions(cqes, cqe_count);
       continue;
@@ -231,7 +243,7 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
       size_t index = cqe.user_data - kUserDataCbIndex;
       DCHECK_LT(index, centries_.size());
       auto& e = centries_[index];
-      DCHECK(e.cb);
+      DCHECK(e.cb) << index;
 
       CbType func;
       auto payload = e.val;
@@ -247,27 +259,39 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
 
 SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
   io_uring_sqe* res = io_uring_get_sqe(&ring_);
+  if (res == NULL) {
+    fibers::context* current = fibers::context::active();
+    CHECK(current != main_loop_ctx_) << "SQE overflow in the main context";
+    
+    sqe_avail_.await([this] {return io_uring_sq_space_left(&ring_) > 0;});
+    res = io_uring_get_sqe(&ring_);  // now we should have the space.
+    CHECK(res);
+  }
 
-  // TODO: to handle overflows, i.e. when res is NULL.
-  CHECK(res) << "Current pending sqe: " << io_uring_sq_ready(&ring_);
   if (next_free_ < 0) {
     RegrowCentries();
+    DCHECK_GT(next_free_, 0);
   }
+
   res->user_data = next_free_ + kUserDataCbIndex;
   DCHECK_LT(next_free_, centries_.size());
 
   auto& e = centries_[next_free_];
   DCHECK(!e.cb);  // cb is undefined.
+  DVLOG(1) << "GetSubmitEntry: index: " << next_free_ << ", socket: " << payload;
 
-  next_free_ = centries_[next_free_].val;
+  next_free_ = e.val;
   e.cb = std::move(cb);
   e.val = payload;
+  e.opcode = -1;
 
   return SubmitEntry{res};
 }
 
 void Proactor::RegrowCentries() {
   size_t prev = centries_.size();
+  VLOG(1) << "RegrowCentries from " << prev << " to " << prev * 2;
+  
   centries_.resize(prev * 2);  // grow by 2.
   next_free_ = prev;
   for (; prev < centries_.size() - 1; ++prev)

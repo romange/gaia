@@ -18,6 +18,7 @@ using IoResult = Proactor::IoResult;
 
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
+DEFINE_uint32(queue_depth, 256, "");
 DEFINE_bool(linked_sqe, false, "If true, then no-op events are linked to the next ones");
 
 VarzQps ping_qps("ping-qps");
@@ -103,14 +104,21 @@ void RedisConnection::InitiateRead(Proactor* mgr) {
 }
 
 void RedisConnection::InitiateWrite(Proactor* mgr) {
-  SubmitEntry se = GetEntry(fd_, mgr);
+  //SubmitEntry se = GetEntry(fd_, mgr);
   auto rb = cmd_.reply();
   io_wvec_.iov_base = const_cast<void*>(rb.data());
   io_wvec_.iov_len = rb.size();
+  CHECK_EQ(rb.size(), sendmsg(fd_, msg_hdr_ + 1, 0));
 
+  SubmitEntry se = GetEntry(fd_, mgr);
+  se.PrepPollAdd(fd_, POLLIN);
+  state_ = WAIT_READ;
+  return;
+
+#if 0
   // On my tests io_uring_prep_sendmsg is much faster than io_uring_prep_writev and
   // subsequently sendmsg is faster than write.
-  se.PrepSendMsg(fd_, &msg_hdr_[1], 0);
+  se.PrepSendMsg(fd_, msg_hdr_ + 1, 0);
   if (FLAGS_linked_sqe) {
     LOG(FATAL) << "TBD";
     /*sqe->flags |= IOSQE_IO_LINK;
@@ -121,6 +129,7 @@ void RedisConnection::InitiateWrite(Proactor* mgr) {
   } else {
     state_ = WRITE;
   }
+#endif
 }
 
 void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) {
@@ -129,7 +138,7 @@ void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) 
 
   switch (state_) {
     case WAIT_READ:
-      CHECK_GT(res, 0) << strerror(-res);
+      CHECK_GT(res, 0) << strerror(-res) << socket;
       InitiateRead(proactor);
       break;
     case READ:
@@ -148,6 +157,7 @@ void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) 
         }
 
         // In any case we close the connection.
+        VLOG(1) << "Closing client socket " << socket;
         shutdown(socket, SHUT_RDWR);  // To send FYN as gentlemen would do.
         close(socket);
       }
@@ -346,7 +356,7 @@ int main(int argc, char* argv[]) {
   }
 
   int sock_listen_fd = SetupListenSock(FLAGS_port);
-  Proactor proactor;
+  Proactor proactor{FLAGS_queue_depth};
 
   accept_server.TriggerOnBreakSignal([&] {
     shutdown(sock_listen_fd, SHUT_RDWR);

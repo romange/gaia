@@ -4,10 +4,13 @@
 
 #include "util/uring/proactor.h"
 
+#include <fcntl.h>
+
 #include "base/gtest.h"
 #include "base/logging.h"
 
 using namespace boost;
+using namespace std;
 
 namespace util {
 namespace uring {
@@ -44,21 +47,27 @@ TEST_F(ProactorTest, AsyncCall) {
 }
 
 
-TEST_F(ProactorTest, SqeOverflowTBD) {
+TEST_F(ProactorTest, SqeOverflow) {
   std::thread t([&] { proactor_->Run(); });
 
+  size_t unique_id = 0;
+  char buf[128];
+
+  int fd = open(google::GetArgv0(), O_RDONLY | O_CLOEXEC);
+  CHECK_GT(fd, 0);
   auto cb = [](IoResult, int64_t payload, Proactor*) {
-    ASSERT_EQ(12051977, payload);
   };
 
-  proactor_->Async([&] {
-    for (unsigned i = 0; i < kRingDepth; ++i) {
-      proactor_->GetSubmitEntry(cb, 12051977);
+  proactor_->AsyncFiber([&] {
+    for (unsigned i = 0; i < kRingDepth*100; ++i) {
+      SubmitEntry se = proactor_->GetSubmitEntry(cb, unique_id++);
+      se.PrepRead(fd, buf, sizeof(buf), 0);
     }
   });
 
   proactor_->Stop();
   t.join();
+  close(fd);
 }
 
 TEST_F(ProactorTest, AsyncEvent) {

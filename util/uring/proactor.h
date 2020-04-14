@@ -101,7 +101,8 @@ class Proactor {
 
   FuncQ task_queue_;
   std::atomic_uint32_t tq_seq_{0}, tq_wakeups_{0};
-  EventCount task_queue_avail_;
+  EventCount task_queue_avail_, sqe_avail_;
+  ::boost::fibers::context* main_loop_ctx_ = nullptr;
 
   friend class UringFiberAlgo;
 
@@ -110,7 +111,8 @@ class Proactor {
 
     // serves for linked list management when unused. Also can store an additional payload
     // field when in flight.
-    int64_t val = -1;
+    int32_t val = -1;
+    int32_t opcode = -1;   // For debugging. TODO: to remove later.
   };
   static_assert(sizeof(CompletionEntry) == 40, "");
 

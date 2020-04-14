@@ -31,6 +31,13 @@ class SubmitEntry {
     sqe_->msg_flags = flags;
   }
 
+  void PrepRead(int fd, void* buf, unsigned size, size_t offset) {
+    PrepFd(IORING_OP_READ, fd);
+    sqe_->addr = (unsigned long)buf;
+    sqe_->len = size;
+    sqe_->off = offset;
+  }
+
   void PrepSendMsg(int fd, const struct msghdr* msg, unsigned flags) {
     PrepFd(IORING_OP_SENDMSG, fd);
     sqe_->addr = (unsigned long)msg;
@@ -41,6 +48,10 @@ class SubmitEntry {
   // TODO: To remove this accessor.
   io_uring_sqe* sqe() {
     return sqe_;
+  }
+
+  void PrepNOP() {
+    PrepFd(IORING_OP_NOP, -1);
   }
 
  private:
