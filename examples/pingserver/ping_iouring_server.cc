@@ -32,7 +32,7 @@ static int SetupListenSock(int port) {
 
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(FLAGS_port);
+  server_addr.sin_port = htons(port);
   server_addr.sin_addr.s_addr = INADDR_ANY;
 
   constexpr uint32_t BACKLOG = 128;
@@ -205,91 +205,6 @@ void HandleAccept(IoResult res, int32_t payload, Proactor* mgr) {
   SubmitEntry se = mgr->GetSubmitEntry(&HandleAccept, socket);
   se.PrepPollAdd(socket, POLLIN);  // resend it.
 }
-
-// Consider returning -res for errors.
-int posix_err_wrap(int res, boost::system::error_code* ec) {
-  if (res < 0) {
-    *ec = boost::system::error_code(errno, boost::asio::error::get_system_category());
-  }
-  return res;
-}
-
-#if 0
-class ServerSocket {
-  ServerSocket(const ServerSocket&) = delete;
-  void operator=(const ServerSocket&) = delete;
-
- public:
-  using native_handle_type = int;
-
-  ServerSocket() : fd_event_(nullptr) {
-  }
-
-  ServerSocket(FD int fd, Proactor* proactor);
-
-  ServerSocket(ServerSocket&& other) noexcept : fd_event_(other.fd_event_) {
-    other.fd_event_ = nullptr;
-  }
-
-  ~ServerSocket() {
-    ::boost::system::error_code ec;
-    Close(ec);  // Quietly close.
-
-    LOG_IF(WARNING, ec) << "Error closing socket " << ec;
-  }
-
-  ::boost::system::error_code Accept(Proactor* proactor, ServerSocket* peer);
-
-  ServerSocket& operator=(ServerSocket&& other) {
-    if (fd_ > 0) {
-      ::boost::system::error_code ec;
-      Close(ec);
-      LOG_IF(WARNING, ec) << "Error closing socket " << ec;
-      fd_ = -1;
-    }
-    std::swap(fd_, other.fd_);
-  }
-
-  void Close(::boost::system::error_code& ec) {
-    if (fd_ > 0) {
-      int res = posix_err_wrap(::close(fd_), &ec);
-      fd_ = -1;
-    }
-  }
-
-  native_handle_type native_handle() const {
-    return fd_;
-  }
-
- private:
-  FdEvent* fd_event_;
-};
-
-
-auto BuildUringFiberCallback(FdEvent::IoResult* res) {
-  return [res, me = fibers::context::active()](FdEvent::IoResult io_res, Proactor*, FdEvent*) {
-    *res = io_res;
-    fibers::context::active()->schedule(me);  // Awake pending fiber.
-  };
-}
-
-void ServerSocket::Accept(ServerSocket& peer, ::boost::system::error_code& ec) {
-  ::boost::asio::ip::tcp::endpoint endpoint;
-  socklen_t addr_len = endpoint.capacity();
-
-  while (true) {
-    int res = accept4(fd_, endpoint.data(), &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
-    if (res > 0) {
-      peer = ServerSocket{res};
-      return;
-    }
-    if (res == -1 && errno == EAGAIN) {
-      FdEvent::IoResult io_res = 0;
-      auto cb = BuildUringFiberCallback(&io_res);
-
-    }
-  }
-#endif
 
 void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
   fibers::context* me = fibers::context::active();
