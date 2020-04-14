@@ -22,20 +22,15 @@ namespace uring {
 
 constexpr uint32_t kRingDepth = 16;
 
-// Consider returning -res for errors.
-
-
-static void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
+static void ManageAcceptions(FiberSocket* fs, Proactor* proactor) {
   fibers::context* me = fibers::context::active();
   UringFiberProps* props = reinterpret_cast<UringFiberProps*>(me->get_properties());
   CHECK(props);
   props->set_name("Acceptions");
 
-  FiberSocket fs(sock_listen_fd);
-
   while (true) {
     FiberSocket peer;
-    std::error_code ec = fs.Accept(proactor, &peer);
+    std::error_code ec = fs->Accept(proactor, &peer);
 
     if (ec == errc::connection_aborted)
       break;
@@ -45,28 +40,6 @@ static void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
     VLOG(2) << "Accepted " << peer.native_handle();
   }
 }
-
-static int SetupListenSock(int port) {
-  struct sockaddr_in server_addr;
-  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  CHECK_GT(fd, 0);
-  const int val = 1;
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-
-  constexpr uint32_t BACKLOG = 128;
-
-  CHECK_EQ(0, bind(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)))
-      << "Error: " << strerror(errno);
-  CHECK_EQ(0, listen(fd, BACKLOG));
-
-  return fd;
-}
-
 
 class ProactorTest : public testing::Test {
  protected:
@@ -130,8 +103,12 @@ TEST_F(ProactorTest, AsyncEvent) {
 }
 
 TEST_F(ProactorTest, AcceptLoop) {
-  int listen_fd = SetupListenSock(1234);
-  proactor_->AsyncFiber(&ManageAcceptions, listen_fd, proactor_.get());
+  FiberSocket fs;
+  auto ec = fs.Listen(1234, 64);
+  CHECK(!ec) << ec;
+  int listen_fd = fs.native_handle();
+
+  proactor_->AsyncFiber(&ManageAcceptions, &fs, proactor_.get());
   usleep(1000);
   shutdown(listen_fd, SHUT_RDWR);
   close(listen_fd);

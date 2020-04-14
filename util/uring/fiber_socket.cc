@@ -15,9 +15,11 @@
 namespace util {
 namespace uring {
 
-inline int posix_err_wrap(int res, std::error_code* ec) {
+using namespace std;
+
+inline int posix_err_wrap(int res, error_code* ec) {
   if (res < 0) {
-    *ec = std::error_code(errno, std::system_category());
+    *ec = error_code(errno, system_category());
   }
   return res;
 }
@@ -25,7 +27,7 @@ inline int posix_err_wrap(int res, std::error_code* ec) {
 using namespace boost;
 
 FiberSocket::~FiberSocket() {
-  std::error_code ec;
+  error_code ec;
   Close(ec);  // Quietly close.
 
   LOG_IF(WARNING, ec) << "Error closing socket " << ec;
@@ -33,27 +35,51 @@ FiberSocket::~FiberSocket() {
 
 FiberSocket& FiberSocket::operator=(FiberSocket&& other) {
   if (fd_ > 0) {
-    std::error_code ec;
+    error_code ec;
     Close(ec);
     LOG_IF(WARNING, ec) << "Error closing socket " << ec;
     fd_ = -1;
   }
-  std::swap(fd_, other.fd_);
+  swap(fd_, other.fd_);
   return *this;
 }
 
-void FiberSocket::Close(std::error_code& ec) {
+void FiberSocket::Close(error_code& ec) {
   if (fd_ > 0) {
     posix_err_wrap(::close(fd_), &ec);
     fd_ = -1;
   }
 }
 
-std::error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
+error_code FiberSocket::Listen(unsigned port, unsigned backlog) {
+  CHECK_EQ(fd_, -1) << "Close socket before!";
+
+  sockaddr_in server_addr;
+  error_code ec;
+  fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  if (posix_err_wrap(fd_, &ec) < 0)
+    return ec;
+
+  const int val = 1;
+  setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(port);
+  server_addr.sin_addr.s_addr = INADDR_ANY;
+
+  if (posix_err_wrap(bind(fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)), &ec) < 0)
+    return ec;
+
+  posix_err_wrap(listen(fd_, backlog), &ec);
+  return ec;
+}
+
+error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
   sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
   fibers::context* me = fibers::context::active();
-  std::error_code ec;
+  error_code ec;
   using IoResult = Proactor::IoResult;
 
   while (true) {

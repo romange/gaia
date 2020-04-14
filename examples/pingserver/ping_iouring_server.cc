@@ -9,6 +9,7 @@
 #include "util/http/http_conn_handler.h"
 #include "util/stats/varz_stats.h"
 #include "util/uring/proactor.h"
+#include "util/uring/fiber_socket.h"
 #include "util/uring/uring_fiber_algo.h"
 
 using namespace boost;
@@ -22,27 +23,6 @@ DEFINE_uint32(queue_depth, 256, "");
 DEFINE_bool(linked_sqe, false, "If true, then no-op events are linked to the next ones");
 
 VarzQps ping_qps("ping-qps");
-
-static int SetupListenSock(int port) {
-  struct sockaddr_in server_addr;
-  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-  CHECK_GT(fd, 0);
-  const int val = 1;
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-
-  constexpr uint32_t BACKLOG = 128;
-
-  CHECK_EQ(0, bind(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)))
-      << "Error: " << strerror(errno);
-  CHECK_EQ(0, listen(fd, BACKLOG));
-
-  return fd;
-}
 
 class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
  public:
@@ -206,51 +186,24 @@ void HandleAccept(IoResult res, int32_t payload, Proactor* mgr) {
   se.PrepPollAdd(socket, POLLIN);  // resend it.
 }
 
-void ManageAcceptions(int sock_listen_fd, Proactor* proactor) {
+void ManageAcceptions(FiberSocket* fs, Proactor* proactor) {
   fibers::context* me = fibers::context::active();
   UringFiberProps* props = reinterpret_cast<UringFiberProps*>(me->get_properties());
   CHECK(props);
   props->set_name("Acceptions");
 
-  struct sockaddr_in client_addr;
-  socklen_t len = sizeof(client_addr);
-  IoResult completion_result = 0;
-
-  auto cb = [me, &completion_result](IoResult res, int32_t, Proactor* mgr) {
-    completion_result = res;
-    fibers::context::active()->schedule(me);
-  };
-
   while (true) {
-    SubmitEntry se = proactor->GetSubmitEntry(cb, 0);
-    se.PrepPollAdd(sock_listen_fd, POLLIN);
-    me->suspend();
-
-    if (completion_result == POLLERR) {
-      CHECK_EQ(0, close(sock_listen_fd));
+    FiberSocket peer;
+    std::error_code ec = fs->Accept(proactor, &peer);
+    if (ec == std::errc::connection_aborted)
       break;
+    if (ec) {
+      LOG(FATAL) << "Error calling accept " << ec << "/" << ec.message();
     }
-    VLOG(1) << "Got accept completion " << completion_result;
-
-    // We could remove accept4 in favor of uring but since it's relateively uncommong operation
-    // we do not care.
-    int conn_fd;
-    while (true) {
-      conn_fd = accept4(sock_listen_fd, (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
-      if (conn_fd == -1)
-        break;
-      CHECK_GT(conn_fd, 0);
-
-      std::shared_ptr<RedisConnection> connection(new RedisConnection);
-      connection->StartPolling(conn_fd, proactor);
-
-      VLOG(2) << "Accepted " << conn_fd;
-    }
-
-    if (errno != EAGAIN) {
-      char* str = strerror(errno);
-      LOG(FATAL) << "Error calling accept4 " << errno << "/" << str;
-    }
+    VLOG(2) << "Accepted " << peer.native_handle();
+    std::shared_ptr<RedisConnection> connection(new RedisConnection);
+    connection->StartPolling(peer.native_handle(), proactor);
+    peer.Detach();
   }
 }
 
@@ -270,23 +223,24 @@ int main(int argc, char* argv[]) {
     accept_server.Run();
   }
 
-  int sock_listen_fd = SetupListenSock(FLAGS_port);
   Proactor proactor{FLAGS_queue_depth};
+  FiberSocket server_sock;
+  auto ec = server_sock.Listen(FLAGS_port, 128);
+  CHECK(!ec) << ec;
 
   accept_server.TriggerOnBreakSignal([&] {
-    shutdown(sock_listen_fd, SHUT_RDWR);
-    // close(sock_listen_fd);
+    shutdown(server_sock.native_handle(), SHUT_RDWR);
     proactor.Stop();
   });
 
   std::thread t1([&] { proactor.Run(); });
   if (false) {
     proactor.AsyncFiber([&] {
-      SubmitEntry se = proactor.GetSubmitEntry(&HandleAccept, sock_listen_fd);
-      se.PrepPollAdd(sock_listen_fd, POLLIN);
+      SubmitEntry se = proactor.GetSubmitEntry(&HandleAccept, server_sock.native_handle());
+      se.PrepPollAdd(server_sock.native_handle(), POLLIN);
     });
   } else {
-    proactor.AsyncFiber(&ManageAcceptions, sock_listen_fd, &proactor);
+    proactor.AsyncFiber(&ManageAcceptions, &server_sock, &proactor);
   }
   t1.join();
   accept_server.Stop(true);

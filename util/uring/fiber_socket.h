@@ -5,6 +5,7 @@
 #pragma once
 
 #include <liburing/io_uring.h>
+
 #include <system_error>
 
 namespace util {
@@ -22,13 +23,16 @@ class FiberSocket {
   FiberSocket() : fd_(-1) {
   }
 
-  explicit FiberSocket(int fd) : fd_(fd) {}
+  explicit FiberSocket(int fd) : fd_(fd) {
+  }
 
   FiberSocket(FiberSocket&& other) noexcept : fd_(other.fd_) {
     other.fd_ = -1;
   }
 
   ~FiberSocket();
+
+  std::error_code Listen(unsigned port, unsigned backlog);
 
   std::error_code Accept(Proactor* proactor, FiberSocket* peer);
 
@@ -40,11 +44,14 @@ class FiberSocket {
     return fd_;
   }
 
+  //! Removes the ownership over file descriptor. Use with caution.
+  void Detach() {
+    fd_ = -1;
+  }
+
  private:
   int fd_;
 };
 
-
 }  // namespace uring
 }  // namespace util
-
