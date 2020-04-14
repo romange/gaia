@@ -59,10 +59,10 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
 };
 
 void RedisConnection::StartPolling(int fd, Proactor* mgr) {
+  fd_ = fd;
+#if 0
   SubmitEntry sqe = GetEntry(fd, mgr);
   sqe.PrepPollAdd(fd, POLLIN);
-  fd_ = fd;
-
   if (FLAGS_linked_sqe) {
     LOG(FATAL) << "TBD";
     // sqe->flags |= IOSQE_IO_LINK;
@@ -71,6 +71,11 @@ void RedisConnection::StartPolling(int fd, Proactor* mgr) {
   } else {
     state_ = WAIT_READ;
   }
+#else
+  InitiateRead(mgr);
+  return;
+#endif
+
 }
 
 void RedisConnection::InitiateRead(Proactor* mgr) {
@@ -84,18 +89,15 @@ void RedisConnection::InitiateRead(Proactor* mgr) {
 }
 
 void RedisConnection::InitiateWrite(Proactor* mgr) {
-  //SubmitEntry se = GetEntry(fd_, mgr);
   auto rb = cmd_.reply();
   io_wvec_.iov_base = const_cast<void*>(rb.data());
   io_wvec_.iov_len = rb.size();
-  CHECK_EQ(rb.size(), sendmsg(fd_, msg_hdr_ + 1, 0));
-
   SubmitEntry se = GetEntry(fd_, mgr);
+#if 0
+  CHECK_EQ(rb.size(), sendmsg(fd_, msg_hdr_ + 1, 0));
   se.PrepPollAdd(fd_, POLLIN);
   state_ = WAIT_READ;
-  return;
-
-#if 0
+#else
   // On my tests io_uring_prep_sendmsg is much faster than io_uring_prep_writev and
   // subsequently sendmsg is faster than write.
   se.PrepSendMsg(fd_, msg_hdr_ + 1, 0);
@@ -144,9 +146,10 @@ void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) 
       break;
     case WRITE:
       CHECK_GT(res, 0);
-      SubmitEntry se = GetEntry(fd_, proactor);
+      /*SubmitEntry se = GetEntry(fd_, proactor);
       se.PrepPollAdd(fd_, POLLIN);
-      state_ = WAIT_READ;
+      state_ = WAIT_READ;*/
+      InitiateRead(proactor);
       break;
   }
 }
