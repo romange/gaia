@@ -49,7 +49,7 @@ class ListenerInterface {
 
 class AcceptServer {
  public:
-  explicit AcceptServer(Proactor* pool);
+  explicit AcceptServer(Proactor* pool, bool break_on_int = true);
   ~AcceptServer();
 
   void Run();
@@ -76,21 +76,22 @@ class AcceptServer {
     Proactor* accept_proactor;
     ListenerInterface* lii;
     FiberSocket listener;
-
+    
     ListenerWrapper(Proactor* aproactor, ListenerInterface* l, FiberSocket fs)
         : accept_proactor(aproactor), lii(l), listener(std::move(fs)) {
     }
     ListenerWrapper(ListenerWrapper&&) noexcept = default;
   };
 
-  void RunAcceptLoop(ListenerWrapper* listener);
+  void RunAcceptLoop(ListenerWrapper* lw);
+  void BreakListeners();
 
   Proactor* pool_;
 
   // Called if a termination signal has been caught (SIGTERM/SIGINT).
   std::function<void()> on_break_hook_;
 
-  std::vector<ListenerWrapper> listeners_;
+  std::vector<ListenerWrapper> listen_wrapper_;
   fibers_ext::BlockingCounter ref_bc_;  // to synchronize listener threads during the shutdown.
 
   bool was_run_ = false;

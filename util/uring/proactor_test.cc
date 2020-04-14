@@ -10,6 +10,8 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+
+#include "util/uring/accept_server.h"
 #include "util/uring/fiber_socket.h"
 #include "util/uring/uring_fiber_algo.h"
 #include "util/fibers/fibers_ext.h"
@@ -106,6 +108,10 @@ TEST_F(ProactorTest, AsyncEvent) {
 }
 
 TEST_F(ProactorTest, AcceptLoop) {
+  AcceptServer as(proactor_.get());
+  as.Run();
+  as.Stop();
+
   FiberSocket fs;
   auto ec = fs.Listen(1234, 64);
   CHECK(!ec) << ec;
