@@ -6,6 +6,8 @@
 
 #include <liburing/io_uring.h>
 
+#include <boost/asio/ip/tcp.hpp>
+
 #include <system_error>
 
 namespace util {
@@ -19,6 +21,7 @@ class FiberSocket {
 
  public:
   using native_handle_type = int;
+  using endpoint_type = ::boost::asio::ip::tcp::endpoint;
 
   FiberSocket() : fd_(-1) {
   }
@@ -49,6 +52,8 @@ class FiberSocket {
     fd_ = -1;
   }
 
+   endpoint_type LocalEndpoint() const;
+   
  private:
   int fd_;
 };

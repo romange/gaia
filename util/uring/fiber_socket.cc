@@ -114,5 +114,19 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
   }
 }
 
+auto FiberSocket::LocalEndpoint() const -> endpoint_type {
+  endpoint_type endpoint;
+
+  if (fd_ < 0)
+    return endpoint;
+  socklen_t addr_len = endpoint.capacity();
+  error_code ec;
+  posix_err_wrap(::getsockname(fd_, endpoint.data(), &addr_len), &ec);
+  CHECK(ec) << "Error running getsockname " << ec;
+  endpoint.resize(addr_len);
+
+  return endpoint;
+}
+
 }  // namespace uring
 }  // namespace util

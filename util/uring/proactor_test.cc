@@ -77,14 +77,17 @@ TEST_F(ProactorTest, SqeOverflow) {
   int fd = open(google::GetArgv0(), O_RDONLY | O_CLOEXEC);
   CHECK_GT(fd, 0);
   auto cb = [](IoResult, int64_t payload, Proactor*) {};
+  fibers_ext::Done done;
 
-  proactor_->AsyncFiber([&] {
+  proactor_->AsyncFiber([&, done] () mutable {
     for (unsigned i = 0; i < kRingDepth * 100; ++i) {
       SubmitEntry se = proactor_->GetSubmitEntry(cb, unique_id++);
       se.PrepRead(fd, buf, sizeof(buf), 0);
     }
+    done.Notify();
   });
 
+  done.Wait();
   close(fd);
 }
 
