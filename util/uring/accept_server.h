@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "util/fibers/fibers_ext.h"
+#include "util/uring/connection.h"
 #include "util/uring/fiber_socket.h"
 
 namespace util {
@@ -76,7 +77,7 @@ class AcceptServer {
     Proactor* accept_proactor;
     ListenerInterface* lii;
     FiberSocket listener;
-    
+
     ListenerWrapper(Proactor* aproactor, ListenerInterface* l, FiberSocket fs)
         : accept_proactor(aproactor), lii(l), listener(std::move(fs)) {
     }

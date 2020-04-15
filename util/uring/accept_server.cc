@@ -79,12 +79,18 @@ void AcceptServer::BreakListeners() {
   }
 }
 
+// Runs in a dedicated fiber for each listener.
 void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   auto& fiber_props = this_fiber::properties<UringFiberProps>();
   fiber_props.set_name("AcceptLoop");
 
   auto ep = lw->listener.LocalEndpoint();
   LOG(INFO) << "AcceptServer - listening on port " << ep.port();
+
+  using ListType =
+      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<false>,
+                       intrusive::cache_last<false>>;
+  thread_local ListType conn_list;
 
   while (true) {
     FiberSocket peer;
@@ -96,9 +102,16 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
       break;
     }
     VLOG(2) << "Accepted " << peer.native_handle() << ": " << peer.LocalEndpoint();
-    Proactor* next = pool_;
+    Proactor* next = pool_;  // Could be on another thread.
 
-    Connection* conn = lw->lii->NewConnection(next);
+    // mutable because we move peer.
+    auto cb = [peer = std::move(peer), next, li = lw->lii]() mutable {
+      Connection* conn = li->NewConnection(next);
+      conn_list.push_front(*conn);
+      conn->SetSocket(std::move(peer));
+      next->AsyncFiber(&Connection::HandleRequests, conn, next);
+    };
+    next->Await(std::move(cb));
   }
   lw->lii->PreShutdown();
   // TODO: to close all connections. We can do it by declaring thread_local intrusive list of

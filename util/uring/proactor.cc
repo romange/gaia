@@ -77,6 +77,9 @@ constexpr uint64_t kUserDataCbIndex = 1024;
 
 }  // namespace
 
+
+thread_local Proactor::TLInfo Proactor::tl_info_;
+
 Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   CHECK_GE(ring_depth, 8);
 
@@ -126,6 +129,7 @@ void Proactor::Run() {
 
   thread_id_ = pthread_self();
 
+  // Should we do it here?
   sigset_t mask;
   sigfillset(&mask);
   CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
@@ -137,6 +141,7 @@ void Proactor::Run() {
   sched->set_algo(scheduler);
   this_fiber::properties<UringFiberProps>().set_name("ioloop");
 
+  tl_info_.is_proactor_thread = true;
 
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
@@ -262,7 +267,7 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
   if (res == NULL) {
     fibers::context* current = fibers::context::active();
     CHECK(current != main_loop_ctx_) << "SQE overflow in the main context";
-    
+
     sqe_avail_.await([this] {return io_uring_sq_space_left(&ring_) > 0;});
     res = io_uring_get_sqe(&ring_);  // now we should have the space.
     CHECK(res);
@@ -291,7 +296,7 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
 void Proactor::RegrowCentries() {
   size_t prev = centries_.size();
   VLOG(1) << "RegrowCentries from " << prev << " to " << prev * 2;
-  
+
   centries_.resize(prev * 2);  // grow by 2.
   next_free_ = prev;
   for (; prev < centries_.size() - 1; ++prev)
