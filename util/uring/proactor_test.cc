@@ -24,25 +24,6 @@ namespace uring {
 
 constexpr uint32_t kRingDepth = 16;
 
-static void ManageAcceptions(FiberSocket* fs, Proactor* proactor) {
-  fibers::context* me = fibers::context::active();
-  UringFiberProps* props = reinterpret_cast<UringFiberProps*>(me->get_properties());
-  CHECK(props);
-  props->set_name("Acceptions");
-
-  while (true) {
-    FiberSocket peer;
-    std::error_code ec = fs->Accept(proactor, &peer);
-
-    if (ec == errc::connection_aborted)
-      break;
-    if (ec) {
-      LOG(FATAL) << "Error calling accept " << ec << "/" << ec.message();
-    }
-    VLOG(2) << "Accepted " << peer.native_handle();
-  }
-}
-
 class ProactorTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -70,6 +51,14 @@ TEST_F(ProactorTest, AsyncCall) {
     proactor_->Async([] {});
   }
   usleep(5000);
+}
+
+TEST_F(ProactorTest, Await) {
+  thread_local int val = 5;
+
+  proactor_->Await([] { val = 15; });
+  int j = proactor_->Await([] { return val; });
+  EXPECT_EQ(15, j);
 }
 
 TEST_F(ProactorTest, SqeOverflow) {
@@ -105,22 +94,6 @@ TEST_F(ProactorTest, AsyncEvent) {
     se.sqe()->opcode = IORING_OP_NOP;
   });
   done.Wait();
-}
-
-TEST_F(ProactorTest, AcceptLoop) {
-  AcceptServer as(proactor_.get());
-  as.Run();
-  as.Stop();
-
-  FiberSocket fs;
-  auto ec = fs.Listen(1234, 64);
-  CHECK(!ec) << ec;
-  int listen_fd = fs.native_handle();
-
-  proactor_->AsyncFiber(&ManageAcceptions, &fs, proactor_.get());
-  usleep(1000);
-  shutdown(listen_fd, SHUT_RDWR);
-  close(listen_fd);
 }
 
 void BM_AsyncCall(benchmark::State& state) {

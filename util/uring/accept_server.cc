@@ -38,12 +38,15 @@ void AcceptServer::Run() {
 // If wait is false - does not wait for the server to stop.
 // Then you need to run Wait() to wait for proper shutdown.
 void AcceptServer::Stop(bool wait) {
+  VLOG(1) << "AcceptServer::Stop";
+
   BreakListeners();
   if (wait)
     Wait();
 }
 
 void AcceptServer::Wait() {
+  VLOG(1) << "AcceptServer::Wait";
   if (was_run_) {
     ref_bc_.Wait();
     VLOG(1) << "AcceptServer::Wait completed";
@@ -61,7 +64,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
   FiberSocket fs;
   auto ec = fs.Listen(port, backlog_);
-  CHECK(ec) << "Could not open port " << port << " " << ec << "/" << ec.message();
+  CHECK(!ec) << "Could not open port " << port << " " << ec << "/" << ec.message();
 
   auto ep = fs.LocalEndpoint();
   lii->RegisterPool(pool_);
@@ -75,7 +78,9 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
 void AcceptServer::BreakListeners() {
   for (auto& lw : listen_wrapper_) {
-    lw.accept_proactor->Async([sock = &lw.listener] {});
+    lw.accept_proactor->Async([sock = &lw.listener] {
+      sock->Shutdown(SHUT_RDWR);
+    });
   }
 }
 
@@ -97,6 +102,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     std::error_code ec = lw->listener.Accept(lw->accept_proactor, &peer);
     if (ec == errc::connection_aborted)
       break;
+
     if (ec) {
       LOG(ERROR) << "Error calling accept " << ec << "/" << ec.message();
       break;

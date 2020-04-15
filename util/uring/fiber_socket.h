@@ -9,6 +9,7 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include <system_error>
+#include "absl/base/attributes.h"
 
 namespace util {
 namespace uring {
@@ -35,13 +36,15 @@ class FiberSocket {
 
   ~FiberSocket();
 
-  std::error_code Listen(unsigned port, unsigned backlog);
+  ABSL_MUST_USE_RESULT std::error_code Listen(unsigned port, unsigned backlog);
 
-  std::error_code Accept(Proactor* proactor, FiberSocket* peer);
+  ABSL_MUST_USE_RESULT std::error_code Accept(Proactor* proactor, FiberSocket* peer);
 
   FiberSocket& operator=(FiberSocket&& other);
 
-  void Close(std::error_code& ec);
+  ABSL_MUST_USE_RESULT std::error_code Shutdown(int how);
+
+  ABSL_MUST_USE_RESULT std::error_code Close();
 
   native_handle_type native_handle() const {
     return fd_;
@@ -52,8 +55,8 @@ class FiberSocket {
     fd_ = -1;
   }
 
-   endpoint_type LocalEndpoint() const;
-   
+  endpoint_type LocalEndpoint() const;
+
  private:
   int fd_;
 };

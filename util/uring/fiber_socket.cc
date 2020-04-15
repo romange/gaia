@@ -27,16 +27,14 @@ inline int posix_err_wrap(int res, error_code* ec) {
 using namespace boost;
 
 FiberSocket::~FiberSocket() {
-  error_code ec;
-  Close(ec);  // Quietly close.
+  error_code ec = Close();  // Quietly close.
 
   LOG_IF(WARNING, ec) << "Error closing socket " << ec;
 }
 
 FiberSocket& FiberSocket::operator=(FiberSocket&& other) {
   if (fd_ > 0) {
-    error_code ec;
-    Close(ec);
+    error_code ec = Close();
     LOG_IF(WARNING, ec) << "Error closing socket " << ec;
     fd_ = -1;
   }
@@ -44,11 +42,19 @@ FiberSocket& FiberSocket::operator=(FiberSocket&& other) {
   return *this;
 }
 
-void FiberSocket::Close(error_code& ec) {
+error_code FiberSocket::Shutdown(int how) {
+  error_code ec;
+  posix_err_wrap(::shutdown(fd_, how), &ec);
+  return ec;
+}
+
+error_code FiberSocket::Close() {
+  error_code ec;
   if (fd_ > 0) {
     posix_err_wrap(::close(fd_), &ec);
     fd_ = -1;
   }
+  return ec;
 }
 
 error_code FiberSocket::Listen(unsigned port, unsigned backlog) {
@@ -103,7 +109,7 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
       me->suspend();
 
       if (io_res == POLLERR) {
-        Close(ec);
+        Close();
         return std::make_error_code(std::errc::connection_aborted);
       }
       continue;
@@ -122,7 +128,8 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   socklen_t addr_len = endpoint.capacity();
   error_code ec;
   posix_err_wrap(::getsockname(fd_, endpoint.data(), &addr_len), &ec);
-  CHECK(ec) << "Error running getsockname " << ec;
+  CHECK(!ec) << ec << "/" << ec.message() << " while running getsockname";
+
   endpoint.resize(addr_len);
 
   return endpoint;
