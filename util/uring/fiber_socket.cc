@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <sys/poll.h>
 
+#include <boost/asio/error.hpp>
 #include <boost/fiber/context.hpp>
 
 #include "base/logging.h"
@@ -51,9 +52,9 @@ class FiberCall {
   }
 };
 
-inline int posix_err_wrap(int res, error_code* ec) {
+inline int posix_err_wrap(int res, system::error_code* ec) {
   if (res == -1) {
-    *ec = error_code(errno, system_category());
+    *ec = system::error_code(errno, system::system_category());
   } else if (res < 0) {
     LOG(WARNING) << "Bad posix error " << res;
   }
@@ -77,13 +78,13 @@ FiberSocket& FiberSocket::operator=(FiberSocket&& other) noexcept {
   return *this;
 }
 
-error_code FiberSocket::Shutdown(int how) {
+auto FiberSocket::Shutdown(int how) -> error_code {
   error_code ec;
   posix_err_wrap(::shutdown(fd_, how), &ec);
   return ec;
 }
 
-error_code FiberSocket::Close() {
+auto FiberSocket::Close()  -> error_code {
   error_code ec;
   if (fd_ > 0) {
     posix_err_wrap(::close(fd_), &ec);
@@ -92,7 +93,7 @@ error_code FiberSocket::Close() {
   return ec;
 }
 
-error_code FiberSocket::Listen(unsigned port, unsigned backlog) {
+auto FiberSocket::Listen(unsigned port, unsigned backlog)  -> error_code {
   CHECK_EQ(fd_, -1) << "Close socket before!";
 
   sockaddr_in server_addr;
@@ -116,7 +117,7 @@ error_code FiberSocket::Listen(unsigned port, unsigned backlog) {
   return ec;
 }
 
-error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
+auto FiberSocket::Accept(Proactor* proactor, FiberSocket* peer)  -> error_code {
   sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
 
@@ -138,7 +139,7 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
 
       if (io_res == POLLERR) {
         Close();
-        return std::make_error_code(std::errc::connection_aborted);
+        return system::errc::make_error_code(system::errc::connection_aborted);
       }
       continue;
     }
@@ -148,7 +149,7 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
   }
 }
 
-auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> std::error_code {
+auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> error_code {
   CHECK_EQ(fd_, -1);
   error_code ec;
 
@@ -165,7 +166,7 @@ auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> std::e
       LOG(WARNING) << "Could not close fd " << strerror(errno);
     }
     fd_ = -1;
-    ec = error_code(-io_res, system_category());
+    ec = error_code(-io_res, system::system_category());
   }
   return ec;
 }
@@ -183,6 +184,10 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   endpoint.resize(addr_len);
 
   return endpoint;
+}
+
+size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
+  return 0;
 }
 
 }  // namespace uring

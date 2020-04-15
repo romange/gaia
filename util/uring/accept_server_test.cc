@@ -3,6 +3,10 @@
 //
 #include "util/uring/accept_server.h"
 
+#include <boost/beast/http/dynamic_body.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <boost/beast/http/write.hpp>
+
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "util/uring/proactor.h"
@@ -13,6 +17,7 @@ namespace uring {
 
 using namespace boost;
 using namespace std;
+namespace h2 = beast::http;
 
 class TestConnection : public Connection {
   protected:
@@ -67,6 +72,11 @@ TEST_F(AcceptServerTest, Basic) {
   client_proactor.AsyncFiber([&] {
     FiberSocket fs;
 
+    h2::request<h2::string_body> req(h2::verb::get, "/", 11);
+    req.body().assign("foo");
+    req.prepare_payload();
+
+    // h2::write(fs, req);
     error_code ec = fs.Connect(&client_proactor, ep);
     ASSERT_FALSE(ec) << ec;
     ASSERT_TRUE(fs.IsOpen());

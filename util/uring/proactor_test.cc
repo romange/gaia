@@ -12,7 +12,6 @@
 #include "base/logging.h"
 
 #include "util/uring/accept_server.h"
-#include "util/uring/fiber_socket.h"
 #include "util/uring/uring_fiber_algo.h"
 #include "util/fibers/fibers_ext.h"
 
