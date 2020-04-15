@@ -152,7 +152,7 @@ auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> std::e
   CHECK_EQ(fd_, -1);
   error_code ec;
 
-  fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  fd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (posix_err_wrap(fd_, &ec) < 0)
     return ec;
 
@@ -160,11 +160,12 @@ auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> std::e
   fc->PrepConnect(fd_, ep.data(), ep.size());
 
   IoResult io_res = fc.Get();
-  if (posix_err_wrap(-io_res, &ec) < 0) {
+  if (io_res < 0) {  // In that case connect returns -errno.
     if (close(fd_) < 0) {
       LOG(WARNING) << "Could not close fd " << strerror(errno);
     }
     fd_ = -1;
+    ec = error_code(-io_res, system_category());
   }
   return ec;
 }

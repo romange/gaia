@@ -48,7 +48,7 @@ class SubmitEntry {
   void PrepConnect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     PrepFd(IORING_OP_CONNECT, fd);
     sqe_->addr = (unsigned long)addr;
-    sqe_->len = 1;
+    sqe_->len = 0;
     sqe_->off = addrlen;
   }
 
