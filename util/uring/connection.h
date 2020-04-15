@@ -18,14 +18,15 @@ class Connection {
       ::boost::intrusive::link_mode<::boost::intrusive::auto_unlink>>;
   connection_hook_t hook_;
 
-  void SetSocket(FiberSocket&& s) { socket_ = std::move(s); }
-public:
-  virtual ~Connection() {}
 
+  void SetSocket(FiberSocket&& s) { socket_ = std::move(s); }
   using member_hook_t =
       ::boost::intrusive::member_hook<Connection, connection_hook_t, &Connection::hook_>;
 
-protected:
+ public:
+  virtual ~Connection() {}
+
+ protected:
   // The main loop for connection.
   virtual void HandleRequests(Proactor* proactor) = 0;
 

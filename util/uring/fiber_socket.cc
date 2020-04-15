@@ -16,27 +16,62 @@ namespace util {
 namespace uring {
 
 using namespace std;
+using namespace boost;
+using IoResult = Proactor::IoResult;
+
+namespace {
+
+class FiberCall {
+  SubmitEntry se_;
+  fibers::context* me_;
+  IoResult io_res_;
+
+ public:
+  FiberCall(Proactor* proactor) : me_(fibers::context::active()), io_res_(0) {
+    auto waker = [this](IoResult res, int32_t, Proactor* mgr) {
+      io_res_ = res;
+      fibers::context::active()->schedule(me_);
+    };
+    se_ = proactor->GetSubmitEntry(std::move(waker), 0);
+  }
+
+  ~FiberCall() {
+    CHECK(!me_) << "Get was not called!";
+  }
+
+  SubmitEntry* operator->() {
+    return &se_;
+  }
+
+  IoResult Get() {
+    me_->suspend();
+    me_ = nullptr;
+
+    return io_res_;
+  }
+};
 
 inline int posix_err_wrap(int res, error_code* ec) {
-  if (res < 0) {
+  if (res == -1) {
     *ec = error_code(errno, system_category());
+  } else if (res < 0) {
+    LOG(WARNING) << "Bad posix error " << res;
   }
   return res;
 }
 
-using namespace boost;
+}  // namespace
 
 FiberSocket::~FiberSocket() {
   error_code ec = Close();  // Quietly close.
 
-  LOG_IF(WARNING, ec) << "Error closing socket " << ec;
+  LOG_IF(WARNING, ec) << "Error closing socket " << ec << "/" << ec.message();
 }
 
-FiberSocket& FiberSocket::operator=(FiberSocket&& other) {
-  if (fd_ > 0) {
+FiberSocket& FiberSocket::operator=(FiberSocket&& other) noexcept {
+  if (fd_ >= 0) {
     error_code ec = Close();
-    LOG_IF(WARNING, ec) << "Error closing socket " << ec;
-    fd_ = -1;
+    LOG_IF(WARNING, ec) << "Error closing socket " << ec << "/" << ec.message();
   }
   swap(fd_, other.fd_);
   return *this;
@@ -84,9 +119,8 @@ error_code FiberSocket::Listen(unsigned port, unsigned backlog) {
 error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
   sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
-  fibers::context* me = fibers::context::active();
+
   error_code ec;
-  using IoResult = Proactor::IoResult;
 
   while (true) {
     int res = accept4(fd_, (struct sockaddr*)&client_addr, &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
@@ -98,15 +132,9 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
     DCHECK_EQ(-1, res);
 
     if (errno == EAGAIN) {
-      IoResult io_res = 0;
-
-      auto cb = [me, &io_res](IoResult res, int32_t, Proactor* mgr) {
-        io_res = res;
-        fibers::context::active()->schedule(me);
-      };
-      SubmitEntry se = proactor->GetSubmitEntry(std::move(cb), 0);
-      se.PrepPollAdd(fd_, POLLIN);
-      me->suspend();
+      FiberCall fc(proactor);
+      fc->PrepPollAdd(fd_, POLLIN);
+      IoResult io_res = fc.Get();
 
       if (io_res == POLLERR) {
         Close();
@@ -118,6 +146,27 @@ error_code FiberSocket::Accept(Proactor* proactor, FiberSocket* peer) {
     posix_err_wrap(res, &ec);
     return ec;
   }
+}
+
+auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> std::error_code {
+  CHECK_EQ(fd_, -1);
+  error_code ec;
+
+  fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  if (posix_err_wrap(fd_, &ec) < 0)
+    return ec;
+
+  FiberCall fc(proactor);
+  fc->PrepConnect(fd_, ep.data(), ep.size());
+
+  IoResult io_res = fc.Get();
+  if (posix_err_wrap(-io_res, &ec) < 0) {
+    if (close(fd_) < 0) {
+      LOG(WARNING) << "Could not close fd " << strerror(errno);
+    }
+    fd_ = -1;
+  }
+  return ec;
 }
 
 auto FiberSocket::LocalEndpoint() const -> endpoint_type {

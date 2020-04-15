@@ -14,9 +14,21 @@ namespace uring {
 using namespace boost;
 using namespace std;
 
+class TestConnection : public Connection {
+  protected:
+    void HandleRequests(Proactor* proactor) final;
+};
+
+void TestConnection::HandleRequests(Proactor* proactor) {
+  CHECK(socket_.IsOpen());
+  while (false) {
+    // TBD.
+  }
+}
+
 class TestListener : public ListenerInterface {
 public:
-  virtual Connection* NewConnection(Proactor* context) { return nullptr; }
+  virtual Connection* NewConnection(Proactor* context) { return new TestConnection; }
 };
 
 class AcceptServerTest : public testing::Test {
@@ -45,7 +57,25 @@ TEST_F(AcceptServerTest, Basic) {
   AcceptServer as(proactor_.get());
   as.AddListener(1234, new TestListener);
   as.Run();
+
+  system::error_code ec;
+  auto address = asio::ip::make_address("127.0.0.1", ec);
+  asio::ip::tcp::endpoint ep{address, 1234};
+
+  Proactor client_proactor(256);
+  thread t2([&] {client_proactor.Run(); });
+  client_proactor.AsyncFiber([&] {
+    FiberSocket fs;
+
+    error_code ec = fs.Connect(&client_proactor, ep);
+    ASSERT_FALSE(ec) << ec;
+    ASSERT_TRUE(fs.IsOpen());
+  });
+
   usleep(2000);
+  client_proactor.Stop();
+  t2.join();
+
   as.Stop(true);
 }
 

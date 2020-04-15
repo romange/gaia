@@ -7,8 +7,8 @@
 #include <liburing/io_uring.h>
 
 #include <boost/asio/ip/tcp.hpp>
-
 #include <system_error>
+
 #include "absl/base/attributes.h"
 
 namespace util {
@@ -20,14 +20,14 @@ class FiberSocket {
   FiberSocket(const FiberSocket&) = delete;
   void operator=(const FiberSocket&) = delete;
 
+  explicit FiberSocket(int fd) : fd_(fd) {
+  }
+
  public:
   using native_handle_type = int;
   using endpoint_type = ::boost::asio::ip::tcp::endpoint;
 
   FiberSocket() : fd_(-1) {
-  }
-
-  explicit FiberSocket(int fd) : fd_(fd) {
   }
 
   FiberSocket(FiberSocket&& other) noexcept : fd_(other.fd_) {
@@ -36,11 +36,13 @@ class FiberSocket {
 
   ~FiberSocket();
 
+  FiberSocket& operator=(FiberSocket&& other) noexcept;
+
   ABSL_MUST_USE_RESULT std::error_code Listen(unsigned port, unsigned backlog);
 
   ABSL_MUST_USE_RESULT std::error_code Accept(Proactor* proactor, FiberSocket* peer);
 
-  FiberSocket& operator=(FiberSocket&& other);
+  ABSL_MUST_USE_RESULT std::error_code Connect(Proactor* proactor, const endpoint_type& ep);
 
   ABSL_MUST_USE_RESULT std::error_code Shutdown(int how);
 
@@ -56,6 +58,12 @@ class FiberSocket {
   }
 
   endpoint_type LocalEndpoint() const;
+
+  //! IsOpen does not promise that the socket is connected or live, just that the file descriptor
+  //! is valid.
+  bool IsOpen() const {
+    return fd_ >= 0;
+  }
 
  private:
   int fd_;

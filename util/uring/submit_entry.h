@@ -45,6 +45,13 @@ class SubmitEntry {
     sqe_->msg_flags = flags;
   }
 
+  void PrepConnect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    PrepFd(IORING_OP_CONNECT, fd);
+    sqe_->addr = (unsigned long)addr;
+    sqe_->len = 1;
+    sqe_->off = addrlen;
+  }
+
   // TODO: To remove this accessor.
   io_uring_sqe* sqe() {
     return sqe_;

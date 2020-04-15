@@ -78,9 +78,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
 void AcceptServer::BreakListeners() {
   for (auto& lw : listen_wrapper_) {
-    lw.accept_proactor->Async([sock = &lw.listener] {
-      sock->Shutdown(SHUT_RDWR);
-    });
+    lw.accept_proactor->Async([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
   }
 }
 
@@ -95,6 +93,8 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   using ListType =
       intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<false>,
                        intrusive::cache_last<false>>;
+
+  // Holds all the connection references in the process. For each thread - its own list.
   thread_local ListType conn_list;
 
   while (true) {
@@ -115,8 +115,10 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
       Connection* conn = li->NewConnection(next);
       conn_list.push_front(*conn);
       conn->SetSocket(std::move(peer));
-      next->AsyncFiber(&Connection::HandleRequests, conn, next);
+      next->AsyncFiber(&RunSingleConnection, next, conn);
     };
+
+    // Run cb in its Proactor thread.
     next->Await(std::move(cb));
   }
   lw->lii->PreShutdown();
@@ -126,6 +128,15 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 
   LOG(INFO) << "Accept server stopped for port " << ep.port();
   ref_bc_.Dec();
+}
+
+void AcceptServer::RunSingleConnection(Proactor* p, Connection* conn) {
+  std::unique_ptr<Connection> guard(conn);
+  try {
+    conn->HandleRequests(p);
+  } catch (std::exception& e) {
+    LOG(ERROR) << "Uncaught exception " << e.what();
+  }
 }
 
 void ListenerInterface::RegisterPool(Proactor* pool) {

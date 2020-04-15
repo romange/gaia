@@ -85,7 +85,10 @@ class AcceptServer {
   };
 
   void RunAcceptLoop(ListenerWrapper* lw);
+  static void RunSingleConnection(Proactor* p, Connection* conn);
+
   void BreakListeners();
+
 
   Proactor* pool_;
 
