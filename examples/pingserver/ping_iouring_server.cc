@@ -8,8 +8,8 @@
 #include "util/asio/io_context_pool.h"
 #include "util/http/http_conn_handler.h"
 #include "util/stats/varz_stats.h"
-#include "util/uring/proactor.h"
 #include "util/uring/fiber_socket.h"
+#include "util/uring/proactor.h"
 #include "util/uring/uring_fiber_algo.h"
 
 using namespace boost;
@@ -23,6 +23,8 @@ DEFINE_uint32(queue_depth, 256, "");
 DEFINE_bool(linked_sqe, false, "If true, then no-op events are linked to the next ones");
 
 VarzQps ping_qps("ping-qps");
+
+static bool has_fast_poll = false;
 
 class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
  public:
@@ -60,22 +62,20 @@ class RedisConnection : public std::enable_shared_from_this<RedisConnection> {
 
 void RedisConnection::StartPolling(int fd, Proactor* mgr) {
   fd_ = fd;
-#if 0
-  SubmitEntry sqe = GetEntry(fd, mgr);
-  sqe.PrepPollAdd(fd, POLLIN);
-  if (FLAGS_linked_sqe) {
-    LOG(FATAL) << "TBD";
-    // sqe->flags |= IOSQE_IO_LINK;
-    // sqe->user_data = 0;
+  if (has_fast_poll) {
     InitiateRead(mgr);
   } else {
-    state_ = WAIT_READ;
+    SubmitEntry sqe = GetEntry(fd, mgr);
+    sqe.PrepPollAdd(fd, POLLIN);
+    if (FLAGS_linked_sqe) {
+      LOG(FATAL) << "TBD";
+      // sqe->flags |= IOSQE_IO_LINK;
+      // sqe->user_data = 0;
+      InitiateRead(mgr);
+    } else {
+      state_ = WAIT_READ;
+    }
   }
-#else
-  InitiateRead(mgr);
-  return;
-#endif
-
 }
 
 void RedisConnection::InitiateRead(Proactor* mgr) {
@@ -146,10 +146,13 @@ void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) 
       break;
     case WRITE:
       CHECK_GT(res, 0);
-      /*SubmitEntry se = GetEntry(fd_, proactor);
-      se.PrepPollAdd(fd_, POLLIN);
-      state_ = WAIT_READ;*/
-      InitiateRead(proactor);
+      if (has_fast_poll) {
+        InitiateRead(proactor);
+      } else {
+        SubmitEntry se = GetEntry(fd_, proactor);
+        se.PrepPollAdd(fd_, POLLIN);
+        state_ = WAIT_READ;
+      }
       break;
   }
 }
@@ -227,6 +230,9 @@ int main(int argc, char* argv[]) {
   }
 
   Proactor proactor{FLAGS_queue_depth};
+
+  has_fast_poll = proactor.HasFastPoll();
+
   FiberSocket server_sock;
   auto ec = server_sock.Listen(FLAGS_port, 128);
   CHECK(!ec) << ec;

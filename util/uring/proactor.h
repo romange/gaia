@@ -56,6 +56,9 @@ class Proactor {
     return tl_info_.is_proactor_thread;
   }
 
+  bool HasFastPoll() const { return fast_poll_f_; }
+
+
   /**
    *  Message passing functions.
    * */
@@ -105,6 +108,8 @@ class Proactor {
 
   int wake_fd_;
   bool has_finished_ = false;
+  uint8_t fast_poll_f_ : 1;
+  uint8_t reseved_f_   : 7;
 
   // We use fu2 function to allow moveable semantics.
   using Tasklet =

@@ -87,7 +87,8 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   memset(&params, 0, sizeof(params));
   URING_CHECK(io_uring_queue_init_params(ring_depth, &ring_, &params));
 
-  if ((params.features & IORING_FEAT_FAST_POLL) == 0) {
+  fast_poll_f_ = (params.features & IORING_FEAT_FAST_POLL) != 0;
+  if (!fast_poll_f_) {
     LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
   }
 
