@@ -98,7 +98,8 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
 
   if (params.features & IORING_FEAT_SINGLE_MMAP) {
     size_t sz = ring_.sq.ring_sz + params.sq_entries * sizeof(struct io_uring_sqe);
-    LOG_FIRST_N(INFO, 1) << "IORing with " << params.sq_entries << " allocated " << sz << " bytes";
+    LOG_FIRST_N(INFO, 1) << "IORing with " << params.sq_entries << " allocated " << sz
+                         << " bytes, cq_entries is " << *ring_.cq.kring_entries;
   }
   CHECK_EQ(ring_depth, params.sq_entries);  // Sanity.
 
@@ -115,7 +116,7 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
       dummy;  // For some weird reason I need this to pull boost::context into linkage.
   centries_.resize(params.sq_entries);
   next_free_ = 0;
-  for (size_t i = 0; i < centries_.size() -1; ++i) {
+  for (size_t i = 0; i < centries_.size() - 1; ++i) {
     centries_[i].val = i + 1;
   }
 }
@@ -148,23 +149,34 @@ void Proactor::Run() {
   struct io_uring_cqe cqes[kBatchSize];
   uint32_t tq_seq = 0;
   uint32_t num_stalls = 0, empty_loops = 0;
+  unsigned num_task_runs = 0;
   Tasklet task;
   int64_t inflight_requests = 0;
 
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
     // Might return negative -errno.
+    // The sqe buffer is [sqe_head, sqe_tail). io_uring_submit advances sqe_head to sqe_tail
+    // by copying the sqe buffer contents into kernel buffer.
+    // In case of an retryable error (EBUSY), we need to restore sqe_head to its previous value.
+    auto sq_head = ring_.sq.sqe_head;
     int num_submitted = io_uring_submit(&ring_);
-    if (num_submitted == -EBUSY) {
+    if (num_submitted >= 0) {
+      inflight_requests += num_submitted;
+    } else if (num_submitted == -EBUSY) {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
+      ring_.sq.sqe_head = sq_head;
     } else {
       URING_CHECK(num_submitted);
     }
-    inflight_requests += num_submitted;
+
+    num_task_runs = 0;
 
     tq_seq = tq_seq_.load(std::memory_order_acquire);
-    unsigned num_task_runs = 0;
+
+    // This should handle wait-free and "submit-free" short CPU tasks enqued
+    // using Async/Await calls.
     while (task_queue_.try_dequeue(task)) {
       ++num_task_runs;
       task();
@@ -175,6 +187,9 @@ void Proactor::Run() {
       task_queue_avail_.notifyAll();
 
       // TODO: for IORING_SETUP_SQPOLL it may be wrong to do this check.
+      // In the future tasks should not submit anything into SQE since it could overflow in
+      // the main context. We should check-error here!
+      // sq_head makes sure that we won't enter an infinite loop if we receive EBUSY.
       if (io_uring_sq_ready(&ring_)) {
         continue;
       }
@@ -189,7 +204,6 @@ void Proactor::Run() {
       sqe_avail_.notifyAll();
 
       DispatchCompletions(cqes, cqe_count);
-      continue;
     }
 
     if (sched->has_ready_fibers()) {
@@ -198,6 +212,9 @@ void Proactor::Run() {
       sched->suspend();
       continue;
     }
+
+    if (cqe_count)
+      continue;
 
     empty_loops += ((num_task_runs + num_submitted) == 0);
 
@@ -269,7 +286,7 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
     fibers::context* current = fibers::context::active();
     CHECK(current != main_loop_ctx_) << "SQE overflow in the main context";
 
-    sqe_avail_.await([this] {return io_uring_sq_space_left(&ring_) > 0;});
+    sqe_avail_.await([this] { return io_uring_sq_space_left(&ring_) > 0; });
     res = io_uring_get_sqe(&ring_);  // now we should have the space.
     CHECK(res);
   }

@@ -86,7 +86,7 @@ TEST_F(ProactorTest, SqeOverflow) {
 TEST_F(ProactorTest, AsyncEvent) {
   fibers_ext::Done done;
 
-  auto cb = [&done](IoResult, int64_t payload, Proactor* p) {
+  auto cb = [done](IoResult, int64_t payload, Proactor* p) mutable {
     done.Notify();
   };
 
