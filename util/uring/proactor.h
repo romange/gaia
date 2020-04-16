@@ -49,6 +49,8 @@ class Proactor {
   /**
    * The following methods can only run from Proactor::Run thread,i.e when
    * InProactorThread is true. You can call them from other threads by enqueing via Async.
+   * If cb is nullptr then no callback will be called upon completion of the request and payload
+   * argument is ignored.
    */
   SubmitEntry GetSubmitEntry(CbType cb, int64_t payload);
 

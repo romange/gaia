@@ -87,7 +87,7 @@ auto FiberSocket::Shutdown(int how) -> error_code {
   return ec;
 }
 
-auto FiberSocket::Close()  -> error_code {
+auto FiberSocket::Close() -> error_code {
   error_code ec;
   if (fd_ > 0) {
     posix_err_wrap(::close(fd_), &ec);
@@ -96,7 +96,7 @@ auto FiberSocket::Close()  -> error_code {
   return ec;
 }
 
-auto FiberSocket::Listen(unsigned port, unsigned backlog)  -> error_code {
+auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
   CHECK_EQ(fd_, -1) << "Close socket before!";
 
   sockaddr_in server_addr;
@@ -120,7 +120,7 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog)  -> error_code {
   return ec;
 }
 
-auto FiberSocket::Accept(FiberSocket* peer)  -> error_code {
+auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
   CHECK(p_);
 
   sockaddr_in client_addr;
@@ -203,11 +203,11 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
   msg.msg_iovlen = len;
 
   FiberCall fc(p_);
-  fc->PrepRecvMsg(fd_, &msg, 0);
+  fc->PrepSendMsg(fd_, &msg, 0);
   ssize_t res = fc.Get();
 
   if (res < 0) {
-    posix_err_wrap(-res, &ec);
+    ec = system::error_code(-res, system::system_category());
     res = 0;
   }
   return res;
@@ -222,18 +222,29 @@ size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code& ec) {
   msg.msg_iov = const_cast<iovec*>(ptr);
   msg.msg_iovlen = len;
 
-  FiberCall fc(p_);
-  fc->PrepRecvMsg(fd_, &msg, 0);
-  ssize_t res = fc.Get();
-
-  if (res == 0) {  // technically it's eof but we do not have this error here.
-    
-    // TODO: to organize the errors convention in the system...
-    ec = system::errc::make_error_code(system::errc::connection_aborted);
-  } else if (res < 0) {
-    posix_err_wrap(-res, &ec);
-    res = 0;
+  if (!p_->HasFastPoll()) {
+    SubmitEntry se = p_->GetSubmitEntry(nullptr, 0);
+    se.PrepPollAdd(fd_, POLLIN);
+    se.sqe()->flags = IOSQE_IO_LINK;
   }
+
+  ssize_t res;
+  while (true) {
+    FiberCall fc(p_);
+    fc->PrepRecvMsg(fd_, &msg, 0);
+    res = fc.Get();
+
+    if (res >= 0) {  // technically it's eof but we do not have this error here.
+      // TODO: to organize the errors convention in the system...
+      if (res == 0)
+        ec = system::errc::make_error_code(system::errc::connection_aborted);
+      break;
+    }
+    if (res != -EAGAIN && res != -EBUSY) {
+      LOG(FATAL) << "Unexpected error " << strerror(-res);
+    }
+  }
+
   return res;
 }
 

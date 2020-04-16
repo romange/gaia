@@ -73,6 +73,8 @@ unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
   return count;
 }
 
+constexpr uint64_t kIgnoreIndex = 0;
+constexpr uint64_t kWakeIndex = 1;
 constexpr uint64_t kUserDataCbIndex = 1024;
 
 }  // namespace
@@ -110,7 +112,7 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
   CHECK_NOTNULL(sqe);
 
   io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
-  sqe->user_data = 1;
+  sqe->user_data = kWakeIndex;
 
   volatile ctx::fiber
       dummy;  // For some weird reason I need this to pull boost::context into linkage.
@@ -160,13 +162,16 @@ void Proactor::Run() {
     // by copying the sqe buffer contents into kernel buffer.
     // In case of an retryable error (EBUSY), we need to restore sqe_head to its previous value.
     auto sq_head = ring_.sq.sqe_head;
+    bool sq_busy = false;
     int num_submitted = io_uring_submit(&ring_);
+
     if (num_submitted >= 0) {
       inflight_requests += num_submitted;
     } else if (num_submitted == -EBUSY) {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
       ring_.sq.sqe_head = sq_head;
+      sq_busy = true;
     } else {
       URING_CHECK(num_submitted);
     }
@@ -186,13 +191,7 @@ void Proactor::Run() {
       // Should we put 'notify' inside the loop? It might improve the latency.
       task_queue_avail_.notifyAll();
 
-      // TODO: for IORING_SETUP_SQPOLL it may be wrong to do this check.
-      // In the future tasks should not submit anything into SQE since it could overflow in
-      // the main context. We should check-error here!
-      // sq_head makes sure that we won't enter an infinite loop if we receive EBUSY.
-      if (io_uring_sq_ready(&ring_)) {
-        continue;
-      }
+      DCHECK(sq_busy || 0 == io_uring_sq_ready(&ring_));
     }
 
     uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
@@ -253,16 +252,7 @@ void Proactor::WakeRing() {
 void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
   for (unsigned i = 0; i < count; ++i) {
     auto& cqe = cqes[i];
-
-    // I leave here 1024 codes with predefined meanings.
-    if (cqe.user_data == 1) {
-      struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-      CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));
-      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
-      sqe->user_data = 1;
-    } else if (cqe.user_data == 2) {
-      // ....
-    } else if (cqe.user_data >= kUserDataCbIndex) {  // our heap range surely starts higher than 1k.
+    if (cqe.user_data >= kUserDataCbIndex) {  // our heap range surely starts higher than 1k.
       size_t index = cqe.user_data - kUserDataCbIndex;
       DCHECK_LT(index, centries_.size());
       auto& e = centries_[index];
@@ -276,6 +266,22 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
       next_free_ = index;
 
       func(cqe.res, payload, this);
+      continue;
+    }
+
+    if (cqe.user_data == kIgnoreIndex)
+      continue;
+
+    // I leave here 1024 codes with predefined meanings.
+    if (cqe.user_data == kWakeIndex) {
+      CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));   // Pull the data
+
+      // TODO: to move io_uring_get_sqe call from here to before we stall.
+      struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);    // And recharge
+      sqe->user_data = 1;
+    } else {
+      LOG(ERROR) << "Unrecognized user_data " << cqe.user_data;
     }
   }
 }
@@ -291,22 +297,26 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
     CHECK(res);
   }
 
-  if (next_free_ < 0) {
-    RegrowCentries();
-    DCHECK_GT(next_free_, 0);
+  if (cb) {
+    if (next_free_ < 0) {
+      RegrowCentries();
+      DCHECK_GT(next_free_, 0);
+    }
+
+    res->user_data = next_free_ + kUserDataCbIndex;
+    DCHECK_LT(next_free_, centries_.size());
+
+    auto& e = centries_[next_free_];
+    DCHECK(!e.cb);  // cb is undefined.
+    DVLOG(1) << "GetSubmitEntry: index: " << next_free_ << ", socket: " << payload;
+
+    next_free_ = e.val;
+    e.cb = std::move(cb);
+    e.val = payload;
+    e.opcode = -1;
+  } else {
+    res->user_data = kIgnoreIndex;
   }
-
-  res->user_data = next_free_ + kUserDataCbIndex;
-  DCHECK_LT(next_free_, centries_.size());
-
-  auto& e = centries_[next_free_];
-  DCHECK(!e.cb);  // cb is undefined.
-  DVLOG(1) << "GetSubmitEntry: index: " << next_free_ << ", socket: " << payload;
-
-  next_free_ = e.val;
-  e.cb = std::move(cb);
-  e.val = payload;
-  e.opcode = -1;
 
   return SubmitEntry{res};
 }
