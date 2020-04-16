@@ -84,7 +84,7 @@ class AcceptServer {
   };
 
   void RunAcceptLoop(ListenerWrapper* lw);
-  static void RunSingleConnection(Proactor* p, Connection* conn);
+  static void RunSingleConnection(Connection* conn, fibers_ext::EventCount* close);
 
   void BreakListeners();
 

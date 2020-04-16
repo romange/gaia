@@ -50,6 +50,15 @@ class FiberSocket {
 
   ABSL_MUST_USE_RESULT error_code Close();
 
+  // Read/Write functions should be called from IoContext thread.
+  // (fiber) SyncRead interface:
+  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
+  template <typename MBS> size_t read_some(const MBS& bufs, error_code& ec);
+
+ // To calm SyncReadStream compile-checker we provide exception-enabled interface without
+  // implementing it.
+  template <typename MBS> size_t read_some(const MBS& bufs);
+
   // SyncWrite interface:
   // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
   template <typename BS> size_t write_some(const BS& bufs, error_code& ec);
@@ -80,6 +89,7 @@ class FiberSocket {
 
  private:
   size_t Send(const iovec* ptr, size_t len, error_code& ec);
+  size_t Recv(iovec* ptr, size_t len, error_code& ec);
 
   int fd_;
 
@@ -87,6 +97,14 @@ class FiberSocket {
   // with predefined interfance and be compliant with SyncWriteStream/SyncReadStream concepts.
   Proactor* p_;
 };
+
+template <typename MBS> size_t FiberSocket::read_some(const MBS& bufs, error_code& ec) {
+  using badapter =
+      ::boost::asio::detail::buffer_sequence_adapter<boost::asio::mutable_buffer, const MBS&>;
+  badapter bsa(bufs);
+
+  return Recv(bsa.buffers(), bsa.count(), ec);
+}
 
 template <typename BS> size_t FiberSocket::write_some(const BS& bufs, error_code& ec) {
   using badapter =

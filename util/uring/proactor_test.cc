@@ -56,6 +56,8 @@ TEST_F(ProactorTest, Await) {
   thread_local int val = 5;
 
   proactor_->Await([] { val = 15; });
+  EXPECT_EQ(5, val);
+
   int j = proactor_->Await([] { return val; });
   EXPECT_EQ(15, j);
 }

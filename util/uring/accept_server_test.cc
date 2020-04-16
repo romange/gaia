@@ -21,14 +21,21 @@ namespace h2 = beast::http;
 
 class TestConnection : public Connection {
   protected:
-    void HandleRequests(Proactor* proactor) final;
+    void HandleRequests() final;
 };
 
-void TestConnection::HandleRequests(Proactor* proactor) {
+void TestConnection::HandleRequests() {
   CHECK(socket_.IsOpen());
-  while (false) {
-    // TBD.
+  char buf[128];
+  system::error_code ec;
+
+  while (true) {
+    ssize_t res = socket_.read_some(asio::buffer(buf), ec);
+    if (ec == std::errc::connection_aborted)
+      break;
+    CHECK(!ec) << ec << "/" << ec.message();
   }
+  VLOG(1) << "TestConnection exit";
 }
 
 class TestListener : public ListenerInterface {
@@ -69,6 +76,7 @@ TEST_F(AcceptServerTest, Basic) {
 
   Proactor client_proactor(256);
   thread t2([&] {client_proactor.Run(); });
+
   client_proactor.AsyncFiber([&] {
     FiberSocket fs;
     fs.set_proactor(&client_proactor);
@@ -80,7 +88,7 @@ TEST_F(AcceptServerTest, Basic) {
     h2::request<h2::string_body> req(h2::verb::get, "/", 11);
     req.body().assign("foo");
     req.prepare_payload();
-    h2::write(fs, req);
+    // h2::write(fs, req);
   });
 
   usleep(2000);

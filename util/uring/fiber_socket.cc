@@ -75,6 +75,9 @@ FiberSocket& FiberSocket::operator=(FiberSocket&& other) noexcept {
     LOG_IF(WARNING, ec) << "Error closing socket " << ec << "/" << ec.message();
   }
   swap(fd_, other.fd_);
+  p_ = other.p_;
+  other.p_ = nullptr;
+
   return *this;
 }
 
@@ -190,14 +193,48 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   return endpoint;
 }
 
-
 size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
+  CHECK(p_);
+  CHECK_GT(len, 0);
+
   msghdr msg;
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = const_cast<iovec*>(ptr);
   msg.msg_iovlen = len;
-  ssize_t res = posix_err_wrap(sendmsg(fd_, &msg, 0), &ec);
-  return res == -1 ? 0 : res;
+
+  FiberCall fc(p_);
+  fc->PrepRecvMsg(fd_, &msg, 0);
+  ssize_t res = fc.Get();
+
+  if (res < 0) {
+    posix_err_wrap(-res, &ec);
+    res = 0;
+  }
+  return res;
+}
+
+size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code& ec) {
+  CHECK_GT(len, 0);
+  CHECK(p_);
+
+  msghdr msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = const_cast<iovec*>(ptr);
+  msg.msg_iovlen = len;
+
+  FiberCall fc(p_);
+  fc->PrepRecvMsg(fd_, &msg, 0);
+  ssize_t res = fc.Get();
+
+  if (res == 0) {  // technically it's eof but we do not have this error here.
+    
+    // TODO: to organize the errors convention in the system...
+    ec = system::errc::make_error_code(system::errc::connection_aborted);
+  } else if (res < 0) {
+    posix_err_wrap(-res, &ec);
+    res = 0;
+  }
+  return res;
 }
 
 }  // namespace uring

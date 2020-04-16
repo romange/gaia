@@ -27,8 +27,9 @@ class Connection {
   virtual ~Connection() {}
 
  protected:
-  // The main loop for connection.
-  virtual void HandleRequests(Proactor* proactor) = 0;
+
+  // The main loop for a connection. Runs in the same proactor thread as of socket_.
+  virtual void HandleRequests() = 0;
 
   FiberSocket socket_;
   friend class AcceptServer;

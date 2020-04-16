@@ -96,6 +96,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 
   // Holds all the connection references in the process. For each thread - its own list.
   thread_local ListType conn_list;
+  fibers_ext::EventCount close_event;
 
   while (true) {
     FiberSocket peer;
@@ -110,33 +111,39 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     VLOG(2) << "Accepted " << peer.native_handle() << ": " << peer.LocalEndpoint();
     Proactor* next = pool_;  // Could be on another thread.
 
+    peer.set_proactor(next);
     // mutable because we move peer.
-    auto cb = [peer = std::move(peer), next, li = lw->lii]() mutable {
+    auto cb = [&close_event, peer = std::move(peer), next, li = lw->lii]() mutable {
       Connection* conn = li->NewConnection(next);
       conn_list.push_front(*conn);
       conn->SetSocket(std::move(peer));
-      next->AsyncFiber(&RunSingleConnection, next, conn);
+      next->AsyncFiber(&RunSingleConnection, conn, &close_event);
     };
 
     // Run cb in its Proactor thread.
     next->Await(std::move(cb));
   }
   lw->lii->PreShutdown();
-  // TODO: to close all connections. We can do it by declaring thread_local intrusive list of
-  // connections and go over it here via pool delegation.
+
+  for (auto& val : conn_list) {
+    val.socket_.Shutdown(SHUT_RDWR);
+  }
+  close_event.await([] {return conn_list.empty(); });
+
   lw->lii->PostShutdown();
 
   LOG(INFO) << "Accept server stopped for port " << ep.port();
   ref_bc_.Dec();
 }
 
-void AcceptServer::RunSingleConnection(Proactor* p, Connection* conn) {
+void AcceptServer::RunSingleConnection(Connection* conn, fibers_ext::EventCount* close) {
   std::unique_ptr<Connection> guard(conn);
   try {
-    conn->HandleRequests(p);
+    conn->HandleRequests();
   } catch (std::exception& e) {
     LOG(ERROR) << "Uncaught exception " << e.what();
   }
+  close->notify();
 }
 
 void ListenerInterface::RegisterPool(Proactor* pool) {
