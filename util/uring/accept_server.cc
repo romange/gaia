@@ -29,7 +29,7 @@ void AcceptServer::Run() {
     ref_bc_.Add(listen_wrapper_.size());
 
     for (auto& lw : listen_wrapper_) {
-      lw.accept_proactor->AsyncFiber(&AcceptServer::RunAcceptLoop, this, &lw);
+      lw.listener.proactor()->AsyncFiber(&AcceptServer::RunAcceptLoop, this, &lw);
     }
   }
   was_run_ = true;
@@ -70,15 +70,15 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   lii->RegisterPool(pool_);
 
   Proactor* next = pool_;
-
-  listen_wrapper_.emplace_back(next, lii, std::move(fs));
+  fs.set_proactor(next);
+  listen_wrapper_.emplace_back(lii, std::move(fs));
 
   return ep.port();
 }
 
 void AcceptServer::BreakListeners() {
   for (auto& lw : listen_wrapper_) {
-    lw.accept_proactor->Async([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
+    lw.listener.proactor()->Async([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
   }
 }
 
@@ -99,7 +99,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 
   while (true) {
     FiberSocket peer;
-    std::error_code ec = lw->listener.Accept(lw->accept_proactor, &peer);
+    std::error_code ec = lw->listener.Accept(&peer);
     if (ec == errc::connection_aborted)
       break;
 

@@ -74,12 +74,11 @@ class AcceptServer {
 
  private:
   struct ListenerWrapper {
-    Proactor* accept_proactor;
     ListenerInterface* lii;
     FiberSocket listener;
 
-    ListenerWrapper(Proactor* aproactor, ListenerInterface* l, FiberSocket fs)
-        : accept_proactor(aproactor), lii(l), listener(std::move(fs)) {
+    ListenerWrapper(ListenerInterface* l, FiberSocket fs)
+        : lii(l), listener(std::move(fs)) {
     }
     ListenerWrapper(ListenerWrapper&&) noexcept = default;
   };
@@ -88,7 +87,6 @@ class AcceptServer {
   static void RunSingleConnection(Proactor* p, Connection* conn);
 
   void BreakListeners();
-
 
   Proactor* pool_;
 

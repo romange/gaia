@@ -52,7 +52,7 @@ class FiberCall {
   }
 };
 
-inline int posix_err_wrap(int res, system::error_code* ec) {
+inline ssize_t posix_err_wrap(ssize_t res, system::error_code* ec) {
   if (res == -1) {
     *ec = system::error_code(errno, system::system_category());
   } else if (res < 0) {
@@ -117,7 +117,9 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog)  -> error_code {
   return ec;
 }
 
-auto FiberSocket::Accept(Proactor* proactor, FiberSocket* peer)  -> error_code {
+auto FiberSocket::Accept(FiberSocket* peer)  -> error_code {
+  CHECK(p_);
+
   sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
 
@@ -133,7 +135,7 @@ auto FiberSocket::Accept(Proactor* proactor, FiberSocket* peer)  -> error_code {
     DCHECK_EQ(-1, res);
 
     if (errno == EAGAIN) {
-      FiberCall fc(proactor);
+      FiberCall fc(p_);
       fc->PrepPollAdd(fd_, POLLIN);
       IoResult io_res = fc.Get();
 
@@ -149,15 +151,17 @@ auto FiberSocket::Accept(Proactor* proactor, FiberSocket* peer)  -> error_code {
   }
 }
 
-auto FiberSocket::Connect(Proactor* proactor, const endpoint_type& ep) -> error_code {
+auto FiberSocket::Connect(const endpoint_type& ep) -> error_code {
   CHECK_EQ(fd_, -1);
+  CHECK(p_);
+
   error_code ec;
 
   fd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (posix_err_wrap(fd_, &ec) < 0)
     return ec;
 
-  FiberCall fc(proactor);
+  FiberCall fc(p_);
   fc->PrepConnect(fd_, ep.data(), ep.size());
 
   IoResult io_res = fc.Get();
@@ -186,8 +190,14 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   return endpoint;
 }
 
+
 size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
-  return 0;
+  msghdr msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = const_cast<iovec*>(ptr);
+  msg.msg_iovlen = len;
+  ssize_t res = posix_err_wrap(sendmsg(fd_, &msg, 0), &ec);
+  return res == -1 ? 0 : res;
 }
 
 }  // namespace uring

@@ -71,15 +71,16 @@ TEST_F(AcceptServerTest, Basic) {
   thread t2([&] {client_proactor.Run(); });
   client_proactor.AsyncFiber([&] {
     FiberSocket fs;
+    fs.set_proactor(&client_proactor);
+    error_code ec = fs.Connect(ep);
+    ASSERT_FALSE(ec) << ec;
+    ASSERT_TRUE(fs.IsOpen());
+
 
     h2::request<h2::string_body> req(h2::verb::get, "/", 11);
     req.body().assign("foo");
     req.prepare_payload();
-
-    // h2::write(fs, req);
-    error_code ec = fs.Connect(&client_proactor, ep);
-    ASSERT_FALSE(ec) << ec;
-    ASSERT_TRUE(fs.IsOpen());
+    h2::write(fs, req);
   });
 
   usleep(2000);

@@ -157,41 +157,6 @@ void RedisConnection::Handle(IoResult res, int32_t payload, Proactor* proactor) 
   }
 }
 
-void HandleAccept(IoResult res, int32_t payload, Proactor* mgr) {
-  struct sockaddr_in client_addr;
-  socklen_t len = sizeof(client_addr);
-  int32_t socket = payload;
-
-  // res is a mask of POLLXXX constants, see revents in poll(2) for more information.
-  CHECK_GT(res, 0) << strerror(-res);
-  if (res == POLLERR) {
-    CHECK_EQ(0, close(socket));
-    return;
-  }
-  VLOG(1) << "Completion HandleAccept " << res;
-
-  while (true) {
-    // We could remove accept4 in favor of uring but since it's relateively uncommong operation
-    // we do not care.
-    int conn_fd = accept4(socket, (struct sockaddr*)&client_addr, &len, SOCK_NONBLOCK);
-    if (conn_fd == -1) {
-      if (errno == EAGAIN)
-        break;
-      char* str = strerror(errno);
-      LOG(FATAL) << "Error calling accept4 " << errno << "/" << str;
-    }
-    CHECK_GT(conn_fd, 0);
-
-    std::shared_ptr<RedisConnection> connection(new RedisConnection);
-    connection->StartPolling(conn_fd, mgr);
-
-    VLOG(2) << "Accepted " << conn_fd;
-  }
-
-  SubmitEntry se = mgr->GetSubmitEntry(&HandleAccept, socket);
-  se.PrepPollAdd(socket, POLLIN);  // resend it.
-}
-
 void ManageAcceptions(FiberSocket* fs, Proactor* proactor) {
   fibers::context* me = fibers::context::active();
   UringFiberProps* props = reinterpret_cast<UringFiberProps*>(me->get_properties());
@@ -200,7 +165,7 @@ void ManageAcceptions(FiberSocket* fs, Proactor* proactor) {
 
   while (true) {
     FiberSocket peer;
-    std::error_code ec = fs->Accept(proactor, &peer);
+    std::error_code ec = fs->Accept(&peer);
     if (ec == std::errc::connection_aborted)
       break;
     if (ec) {
@@ -243,14 +208,9 @@ int main(int argc, char* argv[]) {
   });
 
   std::thread t1([&] { proactor.Run(); });
-  if (false) {
-    proactor.AsyncFiber([&] {
-      SubmitEntry se = proactor.GetSubmitEntry(&HandleAccept, server_sock.native_handle());
-      se.PrepPollAdd(server_sock.native_handle(), POLLIN);
-    });
-  } else {
-    proactor.AsyncFiber(&ManageAcceptions, &server_sock, &proactor);
-  }
+  server_sock.set_proactor(&proactor);
+
+  proactor.AsyncFiber(&ManageAcceptions, &server_sock, &proactor);
   t1.join();
   accept_server.Stop(true);
 
