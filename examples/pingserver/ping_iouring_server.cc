@@ -42,16 +42,13 @@ class PingConnection : public uring::Connection {
   PingCommand cmd_;
 };
 
-bool is_conn_closed(const system::error_code& ec) {
-  return (ec == std::errc::connection_aborted) || (ec == std::errc::connection_reset);
-}
 
 void PingConnection::HandleRequests() {
   system::error_code ec;
 
   while (true) {
     size_t res = socket_.read_some(cmd_.read_buffer(), ec);
-    if (is_conn_closed(ec))
+    if (FiberSocket::IsConnClosed(ec))
       break;
 
     CHECK(!ec) << ec << "/" << ec.message();

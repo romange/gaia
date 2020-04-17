@@ -87,6 +87,9 @@ class FiberSocket {
   void set_proactor(Proactor* p) { p_ = p;}
   Proactor* proactor() { return p_; }
 
+  static bool IsConnClosed(const error_code& ec) {
+    return (ec == std::errc::connection_aborted) || (ec == std::errc::connection_reset);
+  }
  private:
   size_t Send(const iovec* ptr, size_t len, error_code& ec);
   size_t Recv(iovec* ptr, size_t len, error_code& ec);

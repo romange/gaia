@@ -18,10 +18,11 @@ namespace uring {
 using namespace boost;
 using namespace std;
 namespace h2 = beast::http;
+using fibers_ext::BlockingCounter;
 
 class TestConnection : public Connection {
-  protected:
-    void HandleRequests() final;
+ protected:
+  void HandleRequests() final;
 };
 
 void TestConnection::HandleRequests() {
@@ -34,13 +35,22 @@ void TestConnection::HandleRequests() {
     if (ec == std::errc::connection_aborted)
       break;
     CHECK(!ec) << ec << "/" << ec.message();
+
+    res = socket_.write_some(asio::buffer(buf), ec);
+
+    if (FiberSocket::IsConnClosed(ec))
+      break;
+
+    CHECK(!ec);
   }
   VLOG(1) << "TestConnection exit";
 }
 
 class TestListener : public ListenerInterface {
-public:
-  virtual Connection* NewConnection(Proactor* context) { return new TestConnection; }
+ public:
+  virtual Connection* NewConnection(Proactor* context) {
+    return new TestConnection;
+  }
 };
 
 class AcceptServerTest : public testing::Test {
@@ -65,33 +75,41 @@ class AcceptServerTest : public testing::Test {
   std::thread proactor_thread_;
 };
 
-TEST_F(AcceptServerTest, Basic) {
-  AcceptServer as(proactor_.get());
-  as.AddListener(1234, new TestListener);
-  as.Run();
+void RunClient(Proactor* proactor, BlockingCounter* bc) {
+  LOG(INFO) << ": Ping-client started";
+  FiberSocket fs;
+  fs.set_proactor(proactor);
 
   system::error_code ec;
   auto address = asio::ip::make_address("127.0.0.1", ec);
   asio::ip::tcp::endpoint ep{address, 1234};
 
+  ec = fs.Connect(ep);
+  ASSERT_FALSE(ec) << ec;
+  ASSERT_TRUE(fs.IsOpen());
+
+  h2::request<h2::string_body> req(h2::verb::get, "/", 11);
+  req.body().assign("foo");
+  req.prepare_payload();
+  h2::write(fs, req);
+
+  bc->Dec();
+
+  LOG(INFO) << ": echo-client stopped";
+}
+
+TEST_F(AcceptServerTest, Basic) {
+  AcceptServer as(proactor_.get());
+  as.AddListener(1234, new TestListener);
+  as.Run();
+
   Proactor client_proactor(256);
-  thread t2([&] {client_proactor.Run(); });
+  thread t2([&] { client_proactor.Run(); });
 
-  client_proactor.AsyncFiber([&] {
-    FiberSocket fs;
-    fs.set_proactor(&client_proactor);
-    error_code ec = fs.Connect(ep);
-    ASSERT_FALSE(ec) << ec;
-    ASSERT_TRUE(fs.IsOpen());
+  fibers_ext::BlockingCounter bc(1);
+  client_proactor.AsyncFiber(&RunClient, &client_proactor, &bc);
 
-
-    h2::request<h2::string_body> req(h2::verb::get, "/", 11);
-    req.body().assign("foo");
-    req.prepare_payload();
-    // h2::write(fs, req);
-  });
-
-  usleep(2000);
+  bc.Wait();
   client_proactor.Stop();
   t2.join();
 

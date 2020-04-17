@@ -235,11 +235,18 @@ size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code& ec) {
     res = fc.Get();
 
     if (res >= 0) {  // technically it's eof but we do not have this error here.
-      // TODO: to organize the errors convention in the system...
-      if (res == 0)
+      if (res == 0) {
+        CHECK(!ec) << ec;  // TBD: To remove.
         ec = system::errc::make_error_code(system::errc::connection_aborted);
+      }
       break;
     }
+
+    if (res == -ECONNRESET) {
+      ec = system::errc::make_error_code(system::errc::connection_aborted);
+      break;
+    }
+
     if (res != -EAGAIN && res != -EBUSY) {
       LOG(FATAL) << "Unexpected error " << strerror(-res);
     }
