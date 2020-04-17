@@ -124,8 +124,14 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
 }
 
 Proactor::~Proactor() {
+  CHECK(has_finished_);
   io_uring_queue_exit(&ring_);
   close(wake_fd_);
+}
+
+void Proactor::Stop() {
+  Async([this] { has_finished_ = true; });
+  VLOG(1) << "Proactor::StopFinish";
 }
 
 void Proactor::Run() {
@@ -162,7 +168,6 @@ void Proactor::Run() {
     // by copying the sqe buffer contents into kernel buffer.
     // In case of an retryable error (EBUSY), we need to restore sqe_head to its previous value.
     auto sq_head = ring_.sq.sqe_head;
-    bool sq_busy = false;
     int num_submitted = io_uring_submit(&ring_);
 
     if (num_submitted >= 0) {
@@ -171,7 +176,6 @@ void Proactor::Run() {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
       ring_.sq.sqe_head = sq_head;
-      sq_busy = true;
     } else {
       URING_CHECK(num_submitted);
     }
@@ -190,8 +194,6 @@ void Proactor::Run() {
     if (num_task_runs) {
       // Should we put 'notify' inside the loop? It might improve the latency.
       task_queue_avail_.notifyAll();
-
-      DCHECK(sq_busy || 0 == io_uring_sq_ready(&ring_));
     }
 
     uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
@@ -212,7 +214,7 @@ void Proactor::Run() {
       continue;
     }
 
-    if (cqe_count)
+    if (cqe_count || io_uring_sq_ready(&ring_))
       continue;
 
     empty_loops += ((num_task_runs + num_submitted) == 0);

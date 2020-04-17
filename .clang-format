@@ -12,6 +12,7 @@ AlwaysBreakTemplateDeclarations: false
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
 DerivePointerAlignment: false
 PointerAlignment: Left
+BasedOnStyle: Google
 ---
 Language: Proto
 BasedOnStyle: Google

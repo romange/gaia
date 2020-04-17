@@ -33,9 +33,8 @@ class Proactor {
     return pthread_self() == thread_id_;
   }
 
-  void Stop() {
-    Async([this] { has_finished_ = true; });
-  }
+  //! Signals proactor to stop. Does wait for it.
+  void Stop();
 
   // Runs the poll-loop. Stalls the calling thread which will become the "Proactor" thread.
   void Run();

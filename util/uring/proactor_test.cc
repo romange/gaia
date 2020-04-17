@@ -5,15 +5,14 @@
 #include "util/uring/proactor.h"
 
 #include <fcntl.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "base/gtest.h"
 #include "base/logging.h"
-
+#include "util/fibers/fibers_ext.h"
 #include "util/uring/accept_server.h"
 #include "util/uring/uring_fiber_algo.h"
-#include "util/fibers/fibers_ext.h"
 
 using namespace boost;
 using namespace std;
@@ -27,7 +26,7 @@ class ProactorTest : public testing::Test {
  protected:
   void SetUp() override {
     proactor_ = std::make_unique<Proactor>(kRingDepth);
-    proactor_thread_ = thread{[&] { proactor_->Run(); }};
+    proactor_thread_ = thread{[this] { proactor_->Run(); }};
   }
 
   void TearDown() {
@@ -68,18 +67,23 @@ TEST_F(ProactorTest, SqeOverflow) {
 
   int fd = open(google::GetArgv0(), O_RDONLY | O_CLOEXEC);
   CHECK_GT(fd, 0);
-  auto cb = [](IoResult, int64_t payload, Proactor*) {};
-  fibers_ext::Done done;
 
-  proactor_->AsyncFiber([&, done] () mutable {
-    for (unsigned i = 0; i < kRingDepth * 100; ++i) {
+  constexpr size_t kMaxPending = kRingDepth * 100;
+  fibers_ext::BlockingCounter bc(kMaxPending);
+  auto cb = [&bc](IoResult, int64_t payload, Proactor*) {
+    bc.Dec();
+  };
+
+  proactor_->AsyncFiber([&]() mutable {
+    for (unsigned i = 0; i < kMaxPending; ++i) {
       SubmitEntry se = proactor_->GetSubmitEntry(cb, unique_id++);
       se.PrepRead(fd, buf, sizeof(buf), 0);
+      VLOG(1) << i;
     }
-    done.Notify();
   });
 
-  done.Wait();
+  bc.Wait();  // We wait on all callbacks before closing FD that is being handled by IO loop.
+
   close(fd);
 }
 
