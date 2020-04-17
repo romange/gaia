@@ -265,7 +265,7 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
       DVLOG(2) << "Completing user_data " << cqe.user_data;
       DCHECK_LT(index, centries_.size());
       auto& e = centries_[index];
-      DCHECK(e.cb) << cqe.user_data;
+      CHECK(e.cb) << cqe.user_data;
 
       CbType func;
       auto payload = e.val;
@@ -317,7 +317,7 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
     DCHECK_LT(next_free_, centries_.size());
 
     auto& e = centries_[next_free_];
-    DCHECK(!e.cb);  // cb is undefined.
+    CHECK(!e.cb);  // cb is undefined.
     DVLOG(2) << "GetSubmitEntry: user_data: " << res->user_data << ", payload: " << payload;
 
     ///next_free_ = e.val;
