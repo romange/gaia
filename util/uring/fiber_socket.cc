@@ -113,7 +113,9 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
   server_addr.sin_port = htons(port);
   server_addr.sin_addr.s_addr = INADDR_ANY;
 
-  if (posix_err_wrap(bind(fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)), &ec) < 0)
+  if (posix_err_wrap(
+          bind(fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)), &ec) <
+      0)
     return ec;
 
   posix_err_wrap(listen(fd_, backlog), &ec);
@@ -129,7 +131,8 @@ auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
   error_code ec;
 
   while (true) {
-    int res = accept4(fd_, (struct sockaddr*)&client_addr, &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int res = accept4(fd_, (struct sockaddr*)&client_addr, &addr_len,
+                      SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (res >= 0) {
       *peer = FiberSocket{res};
       return ec;
@@ -202,13 +205,22 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
   msg.msg_iov = const_cast<iovec*>(ptr);
   msg.msg_iovlen = len;
 
-  FiberCall fc(p_);
-  fc->PrepSendMsg(fd_, &msg, 0);
-  ssize_t res = fc.Get();
+  ssize_t res;
+  while (true) {
+    FiberCall fc(p_);
+    fc->PrepSendMsg(fd_, &msg, 0);
+    res = fc.Get();
+    if (res >= 0) {
+      break;
+    }
+    if (res == -ECONNRESET) {
+      ec = system::errc::make_error_code(system::errc::connection_aborted);
+      break;
+    }
 
-  if (res < 0) {
-    ec = system::error_code(-res, system::system_category());
-    res = 0;
+    if (res != -EAGAIN) {
+      LOG(FATAL) << "Unexpected error " << strerror(-res);
+    }
   }
   return res;
 }
