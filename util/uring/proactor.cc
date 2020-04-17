@@ -116,11 +116,11 @@ Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
 
   volatile ctx::fiber
       dummy;  // For some weird reason I need this to pull boost::context into linkage.
-  centries_.resize(params.sq_entries);
+  // centries_.resize(params.sq_entries);
   next_free_ = 0;
-  for (size_t i = 0; i < centries_.size() - 1; ++i) {
+  /*for (size_t i = 0; i < centries_.size() - 1; ++i) {
     centries_[i].val = i + 1;
-  }
+  }*/
 }
 
 Proactor::~Proactor() {
@@ -169,17 +169,21 @@ void Proactor::Run() {
     // In case of an retryable error (EBUSY), we need to restore sqe_head to its previous value.
     auto sq_head = ring_.sq.sqe_head;
     int num_submitted = io_uring_submit(&ring_);
+    DVLOG(2) << "Submitted " << num_submitted;
 
-    if (num_submitted >= 0) {
+    bool ebusy = false;
+    if (num_submitted == 0) {
+    } else if (num_submitted > 0) {
       inflight_requests += num_submitted;
+      sqe_avail_.notifyAll();
     } else if (num_submitted == -EBUSY) {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
-      ring_.sq.sqe_head = sq_head;
+      // ring_.sq.sqe_head = sq_head;
+      ebusy = true;
     } else {
       URING_CHECK(num_submitted);
     }
-
     num_task_runs = 0;
 
     tq_seq = tq_seq_.load(std::memory_order_acquire);
@@ -197,12 +201,12 @@ void Proactor::Run() {
     }
 
     uint32_t cqe_count = IoRingPeek(ring_, cqes, kBatchSize);
+    LOG_IF(INFO, ebusy) << "Fetched cqe count " << cqe_count;
     if (cqe_count) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
       inflight_requests -= cqe_count;
       DVLOG(2) << "Fetched " << cqe_count << " cqes, inflight: " << inflight_requests;
-      sqe_avail_.notifyAll();
 
       DispatchCompletions(cqes, cqe_count);
     }
@@ -214,9 +218,10 @@ void Proactor::Run() {
       continue;
     }
 
-    if (cqe_count || io_uring_sq_ready(&ring_))
+    if (cqe_count || io_uring_sq_ready(&ring_)) {
+      LOG_IF(INFO, ebusy) << "Continue with ebusy " << cqe_count << "/" << io_uring_sq_ready(&ring_);
       continue;
-
+    }
     empty_loops += ((num_task_runs + num_submitted) == 0);
 
     /**
@@ -230,6 +235,7 @@ void Proactor::Run() {
       if (has_finished_)
         break;
 
+      DVLOG(1) << "Num in flight " << inflight_requests;
       wait_for_cqe(&ring_);
       tq_seq = 0;
       ++num_stalls;
@@ -256,16 +262,17 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
     auto& cqe = cqes[i];
     if (cqe.user_data >= kUserDataCbIndex) {  // our heap range surely starts higher than 1k.
       size_t index = cqe.user_data - kUserDataCbIndex;
+      DVLOG(2) << "Completing user_data " << cqe.user_data;
       DCHECK_LT(index, centries_.size());
       auto& e = centries_[index];
-      DCHECK(e.cb) << index;
+      DCHECK(e.cb) << cqe.user_data;
 
       CbType func;
       auto payload = e.val;
       func.swap(e.cb);
 
       e.val = next_free_;
-      next_free_ = index;
+      // next_free_ = index;
 
       func(cqe.res, payload, this);
       continue;
@@ -297,6 +304,7 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
     sqe_avail_.await([this] { return io_uring_sq_space_left(&ring_) > 0; });
     res = io_uring_get_sqe(&ring_);  // now we should have the space.
     CHECK(res);
+    DVLOG(1) << "Preempted flush sqes";
   }
 
   if (cb) {
@@ -304,19 +312,22 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
       RegrowCentries();
       DCHECK_GT(next_free_, 0);
     }
-
+    centries_.emplace_back();
     res->user_data = next_free_ + kUserDataCbIndex;
     DCHECK_LT(next_free_, centries_.size());
 
     auto& e = centries_[next_free_];
     DCHECK(!e.cb);  // cb is undefined.
-    DVLOG(1) << "GetSubmitEntry: index: " << next_free_ << ", socket: " << payload;
+    DVLOG(2) << "GetSubmitEntry: user_data: " << res->user_data << ", payload: " << payload;
 
-    next_free_ = e.val;
+    ///next_free_ = e.val;
+    next_free_++;
+
     e.cb = std::move(cb);
     e.val = payload;
     e.opcode = -1;
   } else {
+    DVLOG(1) << "IgnoredSQE";
     res->user_data = kIgnoreIndex;
   }
 
