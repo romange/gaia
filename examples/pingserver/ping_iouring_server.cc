@@ -12,6 +12,8 @@
 #include "util/uring/fiber_socket.h"
 #include "util/uring/proactor.h"
 #include "util/uring/uring_fiber_algo.h"
+#include "util/asio_stream_adapter.h"
+
 
 using namespace boost;
 using namespace util;
@@ -46,8 +48,9 @@ class PingConnection : public uring::Connection {
 void PingConnection::HandleRequests() {
   system::error_code ec;
 
+  AsioStreamAdapter<FiberSocket> asa(socket_);
   while (true) {
-    size_t res = socket_.read_some(cmd_.read_buffer(), ec);
+    size_t res = asa.read_some(cmd_.read_buffer(), ec);
     if (FiberSocket::IsConnClosed(ec))
       break;
 
@@ -56,7 +59,7 @@ void PingConnection::HandleRequests() {
 
     if (cmd_.Decode(res)) {  // The flow has a bug in case of pipelined requests.
       ping_qps.Inc();
-      socket_.write_some(cmd_.reply(), ec);
+      asa.write_some(cmd_.reply(), ec);
       CHECK(!ec) << ec << "/" << ec.message();
     }
   }

@@ -113,5 +113,17 @@ void BM_AsyncCall(benchmark::State& state) {
 }
 BENCHMARK(BM_AsyncCall);
 
+void BM_AwaitCall(benchmark::State& state) {
+  Proactor proactor;
+  std::thread t([&] { proactor.Run(); });
+
+  while (state.KeepRunning()) {
+    proactor.Await([] {});
+  }
+  proactor.Stop();
+  t.join();
+}
+BENCHMARK(BM_AwaitCall);
+
 }  // namespace uring
 }  // namespace util

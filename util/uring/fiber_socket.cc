@@ -7,7 +7,6 @@
 #include <netinet/in.h>
 #include <sys/poll.h>
 
-#include <boost/asio/error.hpp>
 #include <boost/fiber/context.hpp>
 
 #include "base/logging.h"
@@ -52,9 +51,9 @@ class FiberCall {
   }
 };
 
-inline ssize_t posix_err_wrap(ssize_t res, system::error_code* ec) {
+inline ssize_t posix_err_wrap(ssize_t res, FiberSocket::error_code* ec) {
   if (res == -1) {
-    *ec = system::error_code(errno, system::system_category());
+    *ec = FiberSocket::error_code(errno, std::system_category());
   } else if (res < 0) {
     LOG(WARNING) << "Bad posix error " << res;
   }
@@ -196,7 +195,7 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   return endpoint;
 }
 
-size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
+size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code* ec) {
   CHECK(p_);
   CHECK_GT(len, 0);
 
@@ -214,7 +213,7 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
       break;
     }
     if (res == -ECONNRESET) {
-      ec = system::errc::make_error_code(system::errc::connection_aborted);
+      *ec = system::errc::make_error_code(system::errc::connection_aborted);
       break;
     }
 
@@ -225,7 +224,7 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code& ec) {
   return res;
 }
 
-size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code& ec) {
+size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code* ec) {
   CHECK_GT(len, 0);
   CHECK(p_);
 
@@ -249,13 +248,13 @@ size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code& ec) {
     if (res >= 0) {  // technically it's eof but we do not have this error here.
       if (res == 0) {
         CHECK(!ec) << ec;  // TBD: To remove.
-        ec = system::errc::make_error_code(system::errc::connection_aborted);
+        *ec = system::errc::make_error_code(system::errc::connection_aborted);
       }
       break;
     }
 
     if (res == -ECONNRESET) {
-      ec = system::errc::make_error_code(system::errc::connection_aborted);
+      *ec = system::errc::make_error_code(system::errc::connection_aborted);
       break;
     }
 

@@ -6,9 +6,8 @@
 
 #include <liburing/io_uring.h>
 
-#include <boost/asio/detail/buffer_sequence_adapter.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/core/buffers_range.hpp>
+#include <boost/asio/buffer.hpp>
 
 #include "absl/base/attributes.h"
 
@@ -26,7 +25,7 @@ class FiberSocket {
  public:
   using native_handle_type = int;
   using endpoint_type = ::boost::asio::ip::tcp::endpoint;
-  using error_code = ::boost::system::error_code;
+  using error_code = std::error_code;
 
   FiberSocket() : fd_(-1), p_(nullptr) {
   }
@@ -50,22 +49,19 @@ class FiberSocket {
 
   ABSL_MUST_USE_RESULT error_code Close();
 
-  // Read/Write functions should be called from IoContext thread.
-  // (fiber) SyncRead interface:
-  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncReadStream.html
-  template <typename MBS> size_t read_some(const MBS& bufs, error_code& ec);
+  // Really need here expected.
+  size_t Send(const iovec* ptr, size_t len, error_code* ec);
 
- // To calm SyncReadStream compile-checker we provide exception-enabled interface without
-  // implementing it.
-  template <typename MBS> size_t read_some(const MBS& bufs);
+  size_t Send(const boost::asio::const_buffer& b, error_code* ec) {
+    iovec v{const_cast<void*>(b.data()), b.size()};
+    return Send(&v, 1, ec);
+  }
 
-  // SyncWrite interface:
-  // https://www.boost.org/doc/libs/1_69_0/doc/html/boost_asio/reference/SyncWriteStream.html
-  template <typename BS> size_t write_some(const BS& bufs, error_code& ec);
-
-  // To calm SyncWriteStream compile-checker we provide exception-enabled interface without
-  // implementing it.
-  template <typename BS> size_t write_some(const BS& bufs);
+  size_t Recv(iovec* ptr, size_t len, error_code* ec);
+  size_t Recv(const boost::asio::mutable_buffer& mb, error_code* ec) {
+    iovec v{mb.data(), mb.size()};
+    return Recv(&v, 1, ec);
+  }
 
   native_handle_type native_handle() const {
     return fd_;
@@ -91,8 +87,6 @@ class FiberSocket {
     return (ec == std::errc::connection_aborted) || (ec == std::errc::connection_reset);
   }
  private:
-  size_t Send(const iovec* ptr, size_t len, error_code& ec);
-  size_t Recv(iovec* ptr, size_t len, error_code& ec);
 
   int fd_;
 
@@ -100,22 +94,6 @@ class FiberSocket {
   // with predefined interfance and be compliant with SyncWriteStream/SyncReadStream concepts.
   Proactor* p_;
 };
-
-template <typename MBS> size_t FiberSocket::read_some(const MBS& bufs, error_code& ec) {
-  using badapter =
-      ::boost::asio::detail::buffer_sequence_adapter<boost::asio::mutable_buffer, const MBS&>;
-  badapter bsa(bufs);
-
-  return Recv(bsa.buffers(), bsa.count(), ec);
-}
-
-template <typename BS> size_t FiberSocket::write_some(const BS& bufs, error_code& ec) {
-  using badapter =
-      ::boost::asio::detail::buffer_sequence_adapter<boost::asio::const_buffer, const BS&>;
-  badapter bsa(bufs);
-
-  return Send(bsa.buffers(), bsa.count(), ec);
-}
 
 }  // namespace uring
 }  // namespace util

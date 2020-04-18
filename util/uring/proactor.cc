@@ -76,6 +76,7 @@ unsigned IoRingPeek(const io_uring& ring, io_uring_cqe* cqes, unsigned count) {
 constexpr uint64_t kIgnoreIndex = 0;
 constexpr uint64_t kWakeIndex = 1;
 constexpr uint64_t kUserDataCbIndex = 1024;
+constexpr uint32_t kSpinLimit = 200;
 
 }  // namespace
 
@@ -135,7 +136,7 @@ void Proactor::Stop() {
 }
 
 void Proactor::Run() {
-  LOG(INFO) << "Proactor::Run";
+  VLOG(1) << "Proactor::Run";
 
   thread_id_ = pthread_self();
 
@@ -156,8 +157,8 @@ void Proactor::Run() {
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
   uint32_t tq_seq = 0;
-  uint32_t num_stalls = 0, empty_loops = 0;
-  unsigned num_task_runs = 0;
+  uint32_t num_stalls = 0;
+  uint32_t spin_loops = 0, num_task_runs = 0;
   Tasklet task;
   int64_t inflight_requests = 0;
 
@@ -217,7 +218,13 @@ void Proactor::Run() {
     if (cqe_count || io_uring_sq_ready(&ring_))
       continue;
 
-    empty_loops += ((num_task_runs + num_submitted) == 0);
+    // Lets spin a bit to make a system a bit more responsive.
+    if (++spin_loops < kSpinLimit) {
+      pthread_yield();
+      continue;
+    }
+
+    spin_loops = 0;  // Reset the spinning.
 
     /**
      * If tq_seq_ has changed since it was cached into tq_seq, then EmplaceTaskQueue succeeded
@@ -237,8 +244,7 @@ void Proactor::Run() {
     }
   }
 
-  VLOG(1) << "wakeups/stalls/empty-loops: " << tq_wakeups_.load() << "/" << num_stalls << "/"
-          << empty_loops;
+  VLOG(1) << "wakeups/stalls: " << tq_wakeups_.load() << "/" << num_stalls;
 
   VLOG(1) << "centries size: " << centries_.size();
   centries_.clear();

@@ -9,6 +9,8 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+
+#include "util/asio_stream_adapter.h"
 #include "util/uring/proactor.h"
 #include "util/uring/uring_fiber_algo.h"
 
@@ -30,13 +32,15 @@ void TestConnection::HandleRequests() {
   char buf[128];
   system::error_code ec;
 
+  AsioStreamAdapter<FiberSocket> asa(socket_);
+
   while (true) {
-    ssize_t res = socket_.read_some(asio::buffer(buf), ec);
+    asa.read_some(asio::buffer(buf), ec);
     if (ec == std::errc::connection_aborted)
       break;
     CHECK(!ec) << ec << "/" << ec.message();
 
-    res = socket_.write_some(asio::buffer(buf), ec);
+    asa.write_some(asio::buffer(buf), ec);
 
     if (FiberSocket::IsConnClosed(ec))
       break;
@@ -79,9 +83,10 @@ void RunClient(Proactor* proactor, BlockingCounter* bc) {
   LOG(INFO) << ": Ping-client started";
   FiberSocket fs;
   fs.set_proactor(proactor);
+  AsioStreamAdapter<FiberSocket> asa(fs);
 
-  system::error_code ec;
-  auto address = asio::ip::make_address("127.0.0.1", ec);
+  FiberSocket::error_code ec;
+  auto address = asio::ip::make_address("127.0.0.1");
   asio::ip::tcp::endpoint ep{address, 1234};
 
   ec = fs.Connect(ep);
@@ -91,7 +96,7 @@ void RunClient(Proactor* proactor, BlockingCounter* bc) {
   h2::request<h2::string_body> req(h2::verb::get, "/", 11);
   req.body().assign("foo");
   req.prepare_payload();
-  h2::write(fs, req);
+  h2::write(asa, req);
 
   bc->Dec();
 
