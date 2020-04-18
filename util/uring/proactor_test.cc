@@ -13,6 +13,7 @@
 #include "util/fibers/fibers_ext.h"
 #include "util/uring/accept_server.h"
 #include "util/uring/uring_fiber_algo.h"
+#include "util/uring/proactor_pool.h"
 
 using namespace boost;
 using namespace std;
@@ -25,8 +26,8 @@ constexpr uint32_t kRingDepth = 16;
 class ProactorTest : public testing::Test {
  protected:
   void SetUp() override {
-    proactor_ = std::make_unique<Proactor>(kRingDepth);
-    proactor_thread_ = thread{[this] { proactor_->Run(); }};
+    proactor_ = std::make_unique<Proactor>();
+    proactor_thread_ = thread{[this] { proactor_->Run(kRingDepth); }};
   }
 
   void TearDown() {
@@ -99,6 +100,10 @@ TEST_F(ProactorTest, AsyncEvent) {
     se.sqe()->opcode = IORING_OP_NOP;
   });
   done.Wait();
+}
+
+TEST_F(ProactorTest, Pool) {
+  ProactorPool pool{1};
 }
 
 void BM_AsyncCall(benchmark::State& state) {

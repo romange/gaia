@@ -26,18 +26,14 @@ class Proactor {
   void operator=(const Proactor&) = delete;
 
  public:
-  explicit Proactor(unsigned ring_depth = 512);
+  Proactor();
   ~Proactor();
 
-  bool InMyThread() const {
-    return pthread_self() == thread_id_;
-  }
-
-  //! Signals proactor to stop. Does wait for it.
-  void Stop();
-
   // Runs the poll-loop. Stalls the calling thread which will become the "Proactor" thread.
-  void Run();
+  void Run(unsigned ring_depth = 512);
+
+  //! Signals proactor to stop. Does not wait for it.
+  void Stop();
 
   using IoResult = int;
 
@@ -52,6 +48,12 @@ class Proactor {
    * argument is ignored.
    */
   SubmitEntry GetSubmitEntry(CbType cb, int64_t payload);
+
+  bool InMyThread() const {
+    return pthread_self() == thread_id_;
+  }
+
+  auto thread_id() const { return thread_id_;}
 
   static bool IsProactorThread() {
     return tl_info_.is_proactor_thread;
@@ -81,6 +83,9 @@ class Proactor {
 
  private:
   enum { WAIT_SECTION_STATE = 1UL << 31 };
+
+  void Init(size_t ring_size);
+
   void WakeRing();
 
   void WakeupIfNeeded() {
@@ -105,10 +110,10 @@ class Proactor {
 
   io_uring ring_;
 
-  pthread_t thread_id_;
+  pthread_t thread_id_ = -1U;
 
   int wake_fd_;
-  bool has_finished_ = false;
+  bool is_stopped_ = true;
   uint8_t fast_poll_f_ : 1;
   uint8_t reseved_f_   : 7;
 

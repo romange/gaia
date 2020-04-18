@@ -26,9 +26,9 @@
     }                                                                            \
   } while (false)
 
-# ifndef __NR_io_uring_enter
-#  define __NR_io_uring_enter		426
-# endif
+#ifndef __NR_io_uring_enter
+#define __NR_io_uring_enter 426
+#endif
 
 using namespace boost;
 namespace ctx = boost::context;
@@ -80,65 +80,32 @@ constexpr uint32_t kSpinLimit = 200;
 
 }  // namespace
 
-
 thread_local Proactor::TLInfo Proactor::tl_info_;
 
-Proactor::Proactor(unsigned ring_depth) : task_queue_(128) {
-  CHECK_GE(ring_depth, 8);
-
-  io_uring_params params;
-  memset(&params, 0, sizeof(params));
-  URING_CHECK(io_uring_queue_init_params(ring_depth, &ring_, &params));
-
-  fast_poll_f_ = (params.features & IORING_FEAT_FAST_POLL) != 0;
-  if (!fast_poll_f_) {
-    LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
-  }
-
-  if (0 == (params.features & IORING_FEAT_NODROP)) {
-    LOG_FIRST_N(INFO, 1) << "IORING_FEAT_NODROP feature is not present in the kernel";
-  }
-
-  if (params.features & IORING_FEAT_SINGLE_MMAP) {
-    size_t sz = ring_.sq.ring_sz + params.sq_entries * sizeof(struct io_uring_sqe);
-    LOG_FIRST_N(INFO, 1) << "IORing with " << params.sq_entries << " allocated " << sz
-                         << " bytes, cq_entries is " << *ring_.cq.kring_entries;
-  }
-  CHECK_EQ(ring_depth, params.sq_entries);  // Sanity.
-
+Proactor::Proactor() : task_queue_(128) {
   wake_fd_ = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   CHECK_GT(wake_fd_, 0);
 
-  struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-  CHECK_NOTNULL(sqe);
-
-  io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
-  sqe->user_data = kWakeIndex;
-
-  volatile ctx::fiber
-      dummy;  // For some weird reason I need this to pull boost::context into linkage.
-  centries_.resize(params.sq_entries);
-  next_free_ = 0;
-  for (size_t i = 0; i < centries_.size() - 1; ++i) {
-    centries_[i].val = i + 1;
-  }
+  volatile ctx::fiber dummy;  // For some weird reason I need this to pull
+                              // boost::context into linkage.
 }
 
 Proactor::~Proactor() {
-  CHECK(has_finished_);
-  io_uring_queue_exit(&ring_);
+  CHECK(is_stopped_);
+  if (thread_id_ != -1U) {
+    io_uring_queue_exit(&ring_);
+  }
   close(wake_fd_);
 }
 
 void Proactor::Stop() {
-  Async([this] { has_finished_ = true; });
+  Async([this] { is_stopped_ = true; });
   VLOG(1) << "Proactor::StopFinish";
 }
 
-void Proactor::Run() {
+void Proactor::Run(unsigned ring_depth) {
   VLOG(1) << "Proactor::Run";
-
-  thread_id_ = pthread_self();
+  Init(ring_depth);
 
   // Should we do it here?
   sigset_t mask;
@@ -152,7 +119,7 @@ void Proactor::Run() {
   sched->set_algo(scheduler);
   this_fiber::properties<UringFiberProps>().set_name("ioloop");
 
-  tl_info_.is_proactor_thread = true;
+  is_stopped_ = false;
 
   constexpr size_t kBatchSize = 32;
   struct io_uring_cqe cqes[kBatchSize];
@@ -165,9 +132,10 @@ void Proactor::Run() {
   while (true) {
     // tell kernel we have put a sqe on the submission ring.
     // Might return negative -errno.
-    // The sqe buffer is [sqe_head, sqe_tail). io_uring_submit advances sqe_head to sqe_tail
-    // by copying the sqe buffer contents into kernel buffer.
-    // In case of an retryable error (EBUSY), we need to restore sqe_head to its previous value.
+    // The sqe buffer is [sqe_head, sqe_tail). io_uring_submit advances sqe_head
+    // to sqe_tail by copying the sqe buffer contents into kernel buffer. In
+    // case of an retryable error (EBUSY), we need to restore sqe_head to its
+    // previous value.
     auto sq_head = ring_.sq.sqe_head;
     int num_submitted = io_uring_submit(&ring_);
 
@@ -210,7 +178,8 @@ void Proactor::Run() {
 
     if (sched->has_ready_fibers()) {
       // Suspend this fiber until others will run and get blocked.
-      // Eventually UringFiberAlgo will resume back this fiber in suspend_until function.
+      // Eventually UringFiberAlgo will resume back this fiber in suspend_until
+      // function.
       sched->suspend();
       continue;
     }
@@ -227,14 +196,14 @@ void Proactor::Run() {
     spin_loops = 0;  // Reset the spinning.
 
     /**
-     * If tq_seq_ has changed since it was cached into tq_seq, then EmplaceTaskQueue succeeded
-     * and we might have more tasks to execute - lets run the loop again.
-     * Otherwise, set tq_seq_ to WAIT_SECTION, hinting that we are going to stall now.
-     * Other threads will need to wake-up the ring (see WakeRing()) but only the they will
-     * actually syscall only once.
+     * If tq_seq_ has changed since it was cached into tq_seq, then
+     * EmplaceTaskQueue succeeded and we might have more tasks to execute - lets
+     * run the loop again. Otherwise, set tq_seq_ to WAIT_SECTION, hinting that
+     * we are going to stall now. Other threads will need to wake-up the ring
+     * (see WakeRing()) but only the they will actually syscall only once.
      */
     if (tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_acquire)) {
-      if (has_finished_)
+      if (is_stopped_)
         break;
 
       wait_for_cqe(&ring_);
@@ -248,6 +217,46 @@ void Proactor::Run() {
 
   VLOG(1) << "centries size: " << centries_.size();
   centries_.clear();
+}
+
+void Proactor::Init(size_t ring_size) {
+  CHECK_EQ(0, ring_size & (ring_size - 1));
+  CHECK_GE(ring_size, 8);
+
+  io_uring_params params;
+  memset(&params, 0, sizeof(params));
+  URING_CHECK(io_uring_queue_init_params(ring_size, &ring_, &params));
+
+  fast_poll_f_ = (params.features & IORING_FEAT_FAST_POLL) != 0;
+  if (!fast_poll_f_) {
+    LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
+  }
+
+  if (0 == (params.features & IORING_FEAT_NODROP)) {
+    LOG_FIRST_N(INFO, 1) << "IORING_FEAT_NODROP feature is not present in the kernel";
+  }
+
+  if (params.features & IORING_FEAT_SINGLE_MMAP) {
+    size_t sz = ring_.sq.ring_sz + params.sq_entries * sizeof(struct io_uring_sqe);
+    LOG_FIRST_N(INFO, 1) << "IORing with " << params.sq_entries << " allocated " << sz
+                         << " bytes, cq_entries is " << *ring_.cq.kring_entries;
+  }
+  CHECK_EQ(ring_size, params.sq_entries);  // Sanity.
+
+  struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
+  CHECK_NOTNULL(sqe);
+
+  io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);
+  sqe->user_data = kWakeIndex;
+
+  centries_.resize(params.sq_entries);
+  next_free_ = 0;
+  for (size_t i = 0; i < centries_.size() - 1; ++i) {
+    centries_[i].val = i + 1;
+  }
+
+  thread_id_ = pthread_self();
+  tl_info_.is_proactor_thread = true;
 }
 
 void Proactor::WakeRing() {
@@ -282,11 +291,11 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
 
     // I leave here 1024 codes with predefined meanings.
     if (cqe.user_data == kWakeIndex) {
-      CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));   // Pull the data
+      CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));  // Pull the data
 
       // TODO: to move io_uring_get_sqe call from here to before we stall.
       struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);    // And recharge
+      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);  // And recharge
       sqe->user_data = 1;
     } else {
       LOG(ERROR) << "Unrecognized user_data " << cqe.user_data;
