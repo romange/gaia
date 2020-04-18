@@ -247,7 +247,7 @@ size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code* ec) {
 
     if (res >= 0) {  // technically it's eof but we do not have this error here.
       if (res == 0) {
-        CHECK(!ec) << ec;  // TBD: To remove.
+        CHECK(!*ec) << *ec;  // TBD: To remove.
         *ec = system::errc::make_error_code(system::errc::connection_aborted);
       }
       break;
