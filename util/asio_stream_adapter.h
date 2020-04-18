@@ -9,6 +9,13 @@
 
 namespace util {
 
+class SyncStreamInterface {
+public:
+  virtual ~SyncStreamInterface() {}
+  virtual size_t Send(const iovec* ptr, size_t len, std::error_code* ec) = 0;
+  virtual size_t Recv(iovec* ptr, size_t len, std::error_code* ec) = 0;
+};
+
 template <typename Socket> class AsioStreamAdapter {
   Socket& s_;
 

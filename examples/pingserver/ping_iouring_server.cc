@@ -4,14 +4,13 @@
 
 #include "base/init.h"
 #include "examples/pingserver/ping_command.h"
-#include "util/asio/accept_server.h"
-#include "util/asio/io_context_pool.h"
-#include "util/http/http_conn_handler.h"
+
 #include "util/stats/varz_stats.h"
 #include "util/uring/accept_server.h"
 #include "util/uring/fiber_socket.h"
 #include "util/uring/proactor.h"
 #include "util/uring/uring_fiber_algo.h"
+#include "util/uring/http_handler.h"
 #include "util/asio_stream_adapter.h"
 
 
@@ -78,31 +77,31 @@ int main(int argc, char* argv[]) {
 
   CHECK_GT(FLAGS_port, 0);
 
-  IoContextPool pool{1};
-  pool.Run();
-  AcceptServer accept_server(&pool);
-  http::Listener<> http_listener;
-
-  if (FLAGS_http_port >= 0) {
-    uint16_t port = accept_server.AddListener(FLAGS_http_port, &http_listener);
-    LOG(INFO) << "Started http server on port " << port;
-    accept_server.Run();
-  }
-
   Proactor proactor{FLAGS_queue_depth};
   std::thread t1([&] { proactor.Run(); });
 
   uring::AcceptServer uring_acceptor(&proactor, false);
   uring_acceptor.AddListener(FLAGS_port, new PingListener);
+  uring::HttpListener<> http;
+
+  if (FLAGS_http_port >= 0) {
+    uint16_t port = uring_acceptor.AddListener(FLAGS_http_port, &http);
+    LOG(INFO) << "Started http server on port " << port;
+  }
+
   uring_acceptor.Run();
 
-  accept_server.TriggerOnBreakSignal([&] {
+  /*accept_server.TriggerOnBreakSignal([&] {
     uring_acceptor.Stop(true);
     proactor.Stop();
-  });
+  });*/
 
   t1.join();
-  accept_server.Stop(true);
+  uring_acceptor.Stop(true);
+  proactor.Stop();
+
+
+  // accept_server.Stop(true);
 
   return 0;
 }

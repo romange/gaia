@@ -23,6 +23,8 @@ class Connection {
   using member_hook_t =
       ::boost::intrusive::member_hook<Connection, connection_hook_t, &Connection::hook_>;
 
+  auto native_handle() const { return socket_.native_handle(); }
+
  public:
   virtual ~Connection() {}
 
