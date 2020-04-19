@@ -8,7 +8,7 @@
 #include "util/stats/varz_stats.h"
 #include "util/uring/accept_server.h"
 #include "util/uring/fiber_socket.h"
-#include "util/uring/proactor.h"
+#include "util/uring/proactor_pool.h"
 #include "util/uring/uring_fiber_algo.h"
 #include "util/uring/http_handler.h"
 #include "util/asio_stream_adapter.h"
@@ -18,6 +18,7 @@ using namespace boost;
 using namespace util;
 using uring::FiberSocket;
 using uring::Proactor;
+using uring::ProactorPool;
 using uring::SubmitEntry;
 
 using IoResult = Proactor::IoResult;
@@ -77,10 +78,10 @@ int main(int argc, char* argv[]) {
 
   CHECK_GT(FLAGS_port, 0);
 
-  Proactor proactor{FLAGS_queue_depth};
-  std::thread t1([&] { proactor.Run(); });
+  ProactorPool pp{1};
+  pp.Run();
 
-  uring::AcceptServer uring_acceptor(&proactor, false);
+  uring::AcceptServer uring_acceptor(&pp);
   uring_acceptor.AddListener(FLAGS_port, new PingListener);
   uring::HttpListener<> http;
 
@@ -90,18 +91,14 @@ int main(int argc, char* argv[]) {
   }
 
   uring_acceptor.Run();
+  uring_acceptor.Wait();
 
   /*accept_server.TriggerOnBreakSignal([&] {
     uring_acceptor.Stop(true);
     proactor.Stop();
   });*/
-
-  t1.join();
-  uring_acceptor.Stop(true);
-  proactor.Stop();
-
-
-  // accept_server.Stop(true);
+  // uring_acceptor.Stop(true);
+  pp.Stop();
 
   return 0;
 }

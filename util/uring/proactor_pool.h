@@ -31,7 +31,8 @@ class ProactorPool {
 
   ~ProactorPool();
 
-  //! Starts running all Proactor objects in the pool. Does not block.
+  //! Starts running all Proactor objects in the pool.
+  //! Blocks until all the proactors up and spinning.
   void Run(uint32_t ring_depth = 256);
 
   /*! @brief Stops all io_context objects in the pool.

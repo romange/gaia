@@ -11,8 +11,8 @@
 #include "base/logging.h"
 
 #include "util/asio_stream_adapter.h"
-#include "util/uring/proactor.h"
-#include "util/uring/uring_fiber_algo.h"
+#include "util/uring/proactor_pool.h"
+// #include "util/uring/uring_fiber_algo.h"
 
 namespace util {
 namespace uring {
@@ -60,14 +60,12 @@ class TestListener : public ListenerInterface {
 class AcceptServerTest : public testing::Test {
  protected:
   void SetUp() override {
-    proactor_ = std::make_unique<Proactor>(16);
-    proactor_thread_ = thread{[&] { proactor_->Run(); }};
+    pp_.reset(new ProactorPool(1));
+    pp_->Run(16);
   }
 
   void TearDown() {
-    proactor_->Stop();
-    proactor_thread_.join();
-    proactor_.reset();
+    pp_->Stop();
   }
 
   static void SetUpTestCase() {
@@ -75,8 +73,7 @@ class AcceptServerTest : public testing::Test {
 
   using IoResult = Proactor::IoResult;
 
-  std::unique_ptr<Proactor> proactor_;
-  std::thread proactor_thread_;
+  std::unique_ptr<ProactorPool> pp_;
 };
 
 void RunClient(Proactor* proactor, BlockingCounter* bc) {
@@ -104,12 +101,12 @@ void RunClient(Proactor* proactor, BlockingCounter* bc) {
 }
 
 TEST_F(AcceptServerTest, Basic) {
-  AcceptServer as(proactor_.get());
+  AcceptServer as(pp_.get());
   as.AddListener(1234, new TestListener);
   as.Run();
 
-  Proactor client_proactor(256);
-  thread t2([&] { client_proactor.Run(); });
+  Proactor client_proactor;
+  thread t2([&] { client_proactor.Run(256); });
 
   fibers_ext::BlockingCounter bc(1);
   client_proactor.AsyncFiber(&RunClient, &client_proactor, &bc);

@@ -48,11 +48,11 @@ void ProactorPool::Run(uint32_t ring_depth) {
     LOG_IF(WARNING, rc) << "Error calling pthread_setaffinity_np: "
                         << strerror(rc) << "\n";
   }
+  state_ = RUN;
 
   AwaitOnAll([](Proactor*) {});
 
   LOG(INFO) << "Running " << pool_size_ << " io threads";
-  state_ = RUN;
 }
 
 void ProactorPool::Stop() {
@@ -70,6 +70,21 @@ void ProactorPool::Stop() {
     VLOG(2) << "Thread " << i << " has joined";
   }
   state_ = STOPPED;
+}
+
+Proactor* ProactorPool::GetNextProactor() {
+  uint32_t index = next_io_context_.load(std::memory_order_relaxed);
+  // Use a round-robin scheme to choose the next io_context to use.
+  DCHECK_LT(index, pool_size_);
+
+  Proactor& proactor = at(index++);
+
+  // Not-perfect round-robind since this function is non-transactional but it "works".
+  if (index >= pool_size_)
+    index = 0;
+
+  next_io_context_.store(index, std::memory_order_relaxed);
+  return &proactor;
 }
 
 }  // namespace uring

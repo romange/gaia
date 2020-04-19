@@ -73,6 +73,8 @@ FiberSocket& FiberSocket::operator=(FiberSocket&& other) noexcept {
     error_code ec = Close();
     LOG_IF(WARNING, ec) << "Error closing socket " << ec << "/" << ec.message();
   }
+  DCHECK_EQ(-1, fd_);
+
   swap(fd_, other.fd_);
   p_ = other.p_;
   other.p_ = nullptr;
@@ -98,7 +100,6 @@ auto FiberSocket::Close() -> error_code {
 auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
   CHECK_EQ(fd_, -1) << "Close socket before!";
 
-  sockaddr_in server_addr;
   error_code ec;
   fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (posix_err_wrap(fd_, &ec) < 0)
@@ -107,6 +108,7 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
   const int val = 1;
   setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 
+  sockaddr_in server_addr;
   memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sin_family = AF_INET;
   server_addr.sin_port = htons(port);

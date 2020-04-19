@@ -8,7 +8,7 @@
 
 #include "base/logging.h"
 #include "util/uring/fiber_socket.h"
-#include "util/uring/proactor.h"
+#include "util/uring/proactor_pool.h"
 #include "util/uring/uring_fiber_algo.h"
 
 namespace util {
@@ -17,8 +17,8 @@ namespace uring {
 using namespace boost;
 using namespace std;
 
-AcceptServer::AcceptServer(Proactor* pool, bool break_on_int) : pool_(pool), ref_bc_(0) {
-  // TBD: to register signals in order to stop the loop gracefully.
+AcceptServer::AcceptServer(ProactorPool* pool, bool break_on_int)
+    : pool_(pool), ref_bc_(0), break_(break_on_int) {
 }
 
 AcceptServer::~AcceptServer() {
@@ -69,8 +69,9 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   auto ep = fs.LocalEndpoint();
   lii->RegisterPool(pool_);
 
-  Proactor* next = pool_;
+  Proactor* next = pool_->GetNextProactor();
   fs.set_proactor(next);
+
   listen_wrapper_.emplace_back(lii, std::move(fs));
 
   return ep.port();
@@ -96,7 +97,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 
   // Holds all the connection references in the process. For each thread - its own list.
   thread_local ListType conn_list;
-  fibers_ext::EventCount close_event;
+  fibers_ext::BlockingCounter conn_count{0};
 
   while (true) {
     FiberSocket peer;
@@ -109,26 +110,33 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
       break;
     }
     VLOG(2) << "Accepted " << peer.native_handle() << ": " << peer.LocalEndpoint();
-    Proactor* next = pool_;  // Could be on another thread.
+    Proactor* next = pool_->GetNextProactor();  // Could be for another thread.
 
     peer.set_proactor(next);
+
     // mutable because we move peer.
-    auto cb = [&close_event, peer = std::move(peer), next, li = lw->lii]() mutable {
+    auto cb = [&conn_count, peer = std::move(peer), next, li = lw->lii]() mutable {
       Connection* conn = li->NewConnection(next);
       conn_list.push_front(*conn);
       conn->SetSocket(std::move(peer));
-      next->AsyncFiber(&RunSingleConnection, conn, &close_event);
+      conn_count.Add(1);
+      next->AsyncFiber(&RunSingleConnection, conn, &conn_count);
     };
 
     // Run cb in its Proactor thread.
     next->Await(std::move(cb));
   }
+
   lw->lii->PreShutdown();
 
-  for (auto& val : conn_list) {
-    val.socket_.Shutdown(SHUT_RDWR);
-  }
-  close_event.await([] {return conn_list.empty(); });
+  pool_->AsyncOnAll([&](Proactor*) {
+    for (auto& val : conn_list) {
+      val.socket_.Shutdown(SHUT_RDWR);
+    }
+  });
+
+  VLOG(1) << "Waiting for connections to close";
+  conn_count.Wait();
 
   lw->lii->PostShutdown();
 
@@ -136,17 +144,17 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   ref_bc_.Dec();
 }
 
-void AcceptServer::RunSingleConnection(Connection* conn, fibers_ext::EventCount* close) {
+void AcceptServer::RunSingleConnection(Connection* conn, fibers_ext::BlockingCounter* bc) {
   std::unique_ptr<Connection> guard(conn);
   try {
     conn->HandleRequests();
   } catch (std::exception& e) {
     LOG(ERROR) << "Uncaught exception " << e.what();
   }
-  close->notify();
+  bc->Dec();
 }
 
-void ListenerInterface::RegisterPool(Proactor* pool) {
+void ListenerInterface::RegisterPool(ProactorPool* pool) {
   // In tests we might relaunch AcceptServer with the same listener, so we allow
   // reassigning the same pool.
   CHECK(pool_ == nullptr || pool_ == pool);

@@ -15,6 +15,7 @@ namespace util {
 namespace uring {
 
 class Proactor;
+class ProactorPool;
 class Connection;
 
 /**
@@ -26,7 +27,7 @@ class ListenerInterface {
   virtual ~ListenerInterface() {
   }
 
-  void RegisterPool(Proactor* pool);
+  void RegisterPool(ProactorPool* pool);
 
   // Creates a dedicated handler for a new connection.
   virtual Connection* NewConnection(Proactor* context) = 0;
@@ -40,17 +41,17 @@ class ListenerInterface {
   }
 
  protected:
-  Proactor* pool() {
+  ProactorPool* pool() {
     return pool_;
   }
 
  private:
-  Proactor* pool_ = nullptr;
+  ProactorPool* pool_ = nullptr;
 };
 
 class AcceptServer {
  public:
-  explicit AcceptServer(Proactor* pool, bool break_on_int = true);
+  explicit AcceptServer(ProactorPool* pool, bool break_on_int = true);
   ~AcceptServer();
 
   void Run();
@@ -84,11 +85,12 @@ class AcceptServer {
   };
 
   void RunAcceptLoop(ListenerWrapper* lw);
-  static void RunSingleConnection(Connection* conn, fibers_ext::EventCount* close);
+
+  static void RunSingleConnection(Connection* conn, fibers_ext::BlockingCounter* bc);
 
   void BreakListeners();
 
-  Proactor* pool_;
+  ProactorPool* pool_;
 
   // Called if a termination signal has been caught (SIGTERM/SIGINT).
   std::function<void()> on_break_hook_;
@@ -97,6 +99,8 @@ class AcceptServer {
   fibers_ext::BlockingCounter ref_bc_;  // to synchronize listener threads during the shutdown.
 
   bool was_run_ = false;
+  bool break_ = false;
+
   uint16_t backlog_ = 128;
 };
 
