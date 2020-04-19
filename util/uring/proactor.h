@@ -81,6 +81,12 @@ class Proactor {
 
   template <typename Func> auto Await(Func&& f) -> decltype(f());
 
+  void RegisterSignal(std::initializer_list<uint16_t> l, std::function<void(int)> cb);
+
+  void ClearSignal(std::initializer_list<uint16_t> l) {
+    RegisterSignal(l, nullptr);
+  }
+
  private:
   enum { WAIT_SECTION_STATE = 1UL << 31 };
 

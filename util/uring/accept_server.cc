@@ -17,8 +17,44 @@ namespace uring {
 using namespace boost;
 using namespace std;
 
+using ListType =
+      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<false>,
+                       intrusive::cache_last<false>>;
+
+struct AcceptServer::SafeConnList {
+  ListType list;
+  fibers::mutex mu;
+  fibers::condition_variable cond;
+
+  void Link(Connection& c) {
+    std::lock_guard<fibers::mutex> lk(mu);
+    list.push_front(c);
+  }
+
+  void Unlink(Connection& c) {
+    std::lock_guard<fibers::mutex> lk(mu);
+    auto it = list.iterator_to(c);
+    list.erase(it);
+
+    if (list.empty())
+      cond.notify_one();
+  }
+
+  void AwaitEmpty() {
+    std::unique_lock<fibers::mutex> lk(mu);
+    cond.wait(lk, [this] { return list.empty(); });
+  }
+};
+
 AcceptServer::AcceptServer(ProactorPool* pool, bool break_on_int)
     : pool_(pool), ref_bc_(0), break_(break_on_int) {
+  if (break_on_int) {
+    Proactor* proactor = pool_->GetNextProactor();
+    proactor->RegisterSignal({SIGINT, SIGTERM}, [this](int signal) {
+      LOG(INFO) << "Exiting on signal " << signal;
+      BreakListeners();
+    });
+  }
 }
 
 AcceptServer::~AcceptServer() {
@@ -81,6 +117,7 @@ void AcceptServer::BreakListeners() {
   for (auto& lw : listen_wrapper_) {
     lw.listener.proactor()->Async([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
   }
+  VLOG(1) << "AcceptServer::BreakListeners finished";
 }
 
 // Runs in a dedicated fiber for each listener.
@@ -91,13 +128,8 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   auto ep = lw->listener.LocalEndpoint();
   LOG(INFO) << "AcceptServer - listening on port " << ep.port();
 
-  using ListType =
-      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<false>,
-                       intrusive::cache_last<false>>;
 
-  // Holds all the connection references in the process. For each thread - its own list.
-  thread_local ListType conn_list;
-  fibers_ext::BlockingCounter conn_count{0};
+  SafeConnList safe_list;
 
   while (true) {
     FiberSocket peer;
@@ -113,30 +145,29 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     Proactor* next = pool_->GetNextProactor();  // Could be for another thread.
 
     peer.set_proactor(next);
+    Connection* conn = lw->lii->NewConnection(next);
+    conn->SetSocket(std::move(peer));
+    safe_list.Link(*conn);
 
     // mutable because we move peer.
-    auto cb = [&conn_count, peer = std::move(peer), next, li = lw->lii]() mutable {
-      Connection* conn = li->NewConnection(next);
-      conn_list.push_front(*conn);
-      conn->SetSocket(std::move(peer));
-      conn_count.Add(1);
-      next->AsyncFiber(&RunSingleConnection, conn, &conn_count);
+    auto cb = [conn, next, &safe_list]() mutable {
+      next->AsyncFiber(&RunSingleConnection, conn, &safe_list);
     };
 
     // Run cb in its Proactor thread.
-    next->Await(std::move(cb));
+    next->AsyncFiber(std::move(cb));
   }
 
   lw->lii->PreShutdown();
 
-  pool_->AsyncOnAll([&](Proactor*) {
-    for (auto& val : conn_list) {
-      val.socket_.Shutdown(SHUT_RDWR);
-    }
-  });
+  safe_list.mu.lock();
+  for (auto& val : safe_list.list) {
+    val.socket_.Shutdown(SHUT_RDWR);
+  }
+  safe_list.mu.unlock();
 
   VLOG(1) << "Waiting for connections to close";
-  conn_count.Wait();
+  safe_list.AwaitEmpty();
 
   lw->lii->PostShutdown();
 
@@ -144,14 +175,14 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   ref_bc_.Dec();
 }
 
-void AcceptServer::RunSingleConnection(Connection* conn, fibers_ext::BlockingCounter* bc) {
+void AcceptServer::RunSingleConnection(Connection* conn, SafeConnList* conns) {
   std::unique_ptr<Connection> guard(conn);
   try {
     conn->HandleRequests();
   } catch (std::exception& e) {
     LOG(ERROR) << "Uncaught exception " << e.what();
   }
-  bc->Dec();
+  conns->Unlink(*conn);
 }
 
 void ListenerInterface::RegisterPool(ProactorPool* pool) {

@@ -84,9 +84,12 @@ class AcceptServer {
     ListenerWrapper(ListenerWrapper&&) noexcept = default;
   };
 
+  struct SafeConnList;
+
+
   void RunAcceptLoop(ListenerWrapper* lw);
 
-  static void RunSingleConnection(Connection* conn, fibers_ext::BlockingCounter* bc);
+  static void RunSingleConnection(Connection* conn, SafeConnList* list);
 
   void BreakListeners();
 

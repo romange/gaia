@@ -54,6 +54,35 @@ inline void wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
   LOG(FATAL) << "Error " << (res) << " evaluating sys_io_uring_enter: " << strerror(res);
 }
 
+struct signal_state {
+  struct Item {
+    Proactor* proactor = nullptr;
+    std::function<void(int)> cb;
+  };
+
+  Item signal_map[_NSIG];
+};
+
+signal_state* get_signal_state() {
+  static signal_state state;
+
+  return &state;
+}
+
+void SigAction(int signal, siginfo_t*, void*) {
+  signal_state* state = get_signal_state();
+  DCHECK_LT(signal, _NSIG);
+
+  auto& item = state->signal_map[signal];
+  auto cb = [signal, &item] { item.cb(signal); };
+
+  if (item.proactor && item.cb) {
+    item.proactor->Async(std::move(cb));
+  } else {
+    LOG(ERROR) << "Tangling signal handler " << signal;
+  }
+}
+
 inline unsigned CQReadyCount(const io_uring& ring) {
   return io_uring_smp_load_acquire(ring.cq.ktail) - *ring.cq.khead;
 }
@@ -96,6 +125,14 @@ Proactor::~Proactor() {
     io_uring_queue_exit(&ring_);
   }
   close(wake_fd_);
+
+  signal_state* ss = get_signal_state();
+  for (size_t i = 0; i < arraysize(ss->signal_map); ++i) {
+    if (ss->signal_map[i].proactor == this) {
+      ss->signal_map[i].proactor = nullptr;
+      ss->signal_map[i].cb = nullptr;
+    }
+  }
 }
 
 void Proactor::Stop() {
@@ -336,6 +373,36 @@ SubmitEntry Proactor::GetSubmitEntry(CbType cb, int64_t payload) {
   }
 
   return SubmitEntry{res};
+}
+
+void Proactor::RegisterSignal(std::initializer_list<uint16_t> l, std::function<void(int)> cb) {
+  auto* state = get_signal_state();
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+
+  if (cb) {
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = &SigAction;
+
+    for (uint16_t val : l) {
+      CHECK(!state->signal_map[val].cb) << "Signal " << val << " was already registered";
+      state->signal_map[val].cb = cb;
+      state->signal_map[val].proactor = this;
+
+      CHECK_EQ(0, sigaction(val, &sa, NULL));
+    }
+  } else {
+    sa.sa_handler = SIG_DFL;
+
+    for (uint16_t val : l) {
+      CHECK(state->signal_map[val].cb) << "Signal " << val << " was already registered";
+      state->signal_map[val].cb = nullptr;
+      state->signal_map[val].proactor = nullptr;
+
+      CHECK_EQ(0, sigaction(val, &sa, NULL));
+    }
+  }
 }
 
 void Proactor::RegrowCentries() {

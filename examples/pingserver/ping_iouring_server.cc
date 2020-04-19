@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
 
   CHECK_GT(FLAGS_port, 0);
 
-  ProactorPool pp{1};
+  ProactorPool pp;
   pp.Run();
 
   uring::AcceptServer uring_acceptor(&pp);

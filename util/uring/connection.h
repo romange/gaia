@@ -15,17 +15,18 @@ class AcceptServer;
 
 class Connection {
   using connection_hook_t = ::boost::intrusive::slist_member_hook<
-      ::boost::intrusive::link_mode<::boost::intrusive::auto_unlink>>;
+      ::boost::intrusive::link_mode<::boost::intrusive::normal_link>>;
   connection_hook_t hook_;
 
 
   void SetSocket(FiberSocket&& s) { socket_ = std::move(s); }
-  using member_hook_t =
-      ::boost::intrusive::member_hook<Connection, connection_hook_t, &Connection::hook_>;
 
   auto native_handle() const { return socket_.native_handle(); }
 
  public:
+  using member_hook_t =
+      ::boost::intrusive::member_hook<Connection, connection_hook_t, &Connection::hook_>;
+
   virtual ~Connection() {}
 
  protected:
