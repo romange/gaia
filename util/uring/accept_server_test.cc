@@ -9,10 +9,8 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
-
 #include "util/asio_stream_adapter.h"
 #include "util/uring/proactor_pool.h"
-// #include "util/uring/uring_fiber_algo.h"
 
 namespace util {
 namespace uring {
@@ -59,12 +57,10 @@ class TestListener : public ListenerInterface {
 
 class AcceptServerTest : public testing::Test {
  protected:
-  void SetUp() override {
-    pp_.reset(new ProactorPool(1));
-    pp_->Run(16);
-  }
+  void SetUp() override;
 
   void TearDown() {
+    as_->Stop(true);
     pp_->Stop();
   }
 
@@ -74,21 +70,35 @@ class AcceptServerTest : public testing::Test {
   using IoResult = Proactor::IoResult;
 
   std::unique_ptr<ProactorPool> pp_;
+  std::unique_ptr<AcceptServer> as_;
+  FiberSocket client_sock_;
 };
 
-void RunClient(Proactor* proactor, BlockingCounter* bc) {
-  LOG(INFO) << ": Ping-client started";
-  FiberSocket fs;
-  fs.set_proactor(proactor);
-  AsioStreamAdapter<FiberSocket> asa(fs);
+void AcceptServerTest::SetUp() {
+  const uint16_t kPort = 1234;
 
-  FiberSocket::error_code ec;
+  pp_.reset(new ProactorPool(2));
+  pp_->Run(16);
+
+  as_.reset(new AcceptServer{pp_.get()});
+  as_->AddListener(kPort, new TestListener);
+  as_->Run();
+
+  client_sock_.set_proactor(pp_->GetNextProactor());
   auto address = asio::ip::make_address("127.0.0.1");
-  asio::ip::tcp::endpoint ep{address, 1234};
+  asio::ip::tcp::endpoint ep{address, kPort};
 
-  ec = fs.Connect(ep);
-  ASSERT_FALSE(ec) << ec;
-  ASSERT_TRUE(fs.IsOpen());
+  client_sock_.proactor()->AwaitBlocking([&] {
+    FiberSocket::error_code ec = client_sock_.Connect(ep);
+    CHECK(!ec) << ec;
+  });
+}
+
+void RunClient(FiberSocket* fs, BlockingCounter* bc) {
+  LOG(INFO) << ": Ping-client started";
+  AsioStreamAdapter<FiberSocket> asa(*fs);
+
+  ASSERT_TRUE(fs->IsOpen());
 
   h2::request<h2::string_body> req(h2::verb::get, "/", 11);
   req.body().assign("foo");
@@ -101,21 +111,10 @@ void RunClient(Proactor* proactor, BlockingCounter* bc) {
 }
 
 TEST_F(AcceptServerTest, Basic) {
-  AcceptServer as(pp_.get());
-  as.AddListener(1234, new TestListener);
-  as.Run();
-
-  Proactor client_proactor;
-  thread t2([&] { client_proactor.Run(256); });
-
   fibers_ext::BlockingCounter bc(1);
-  client_proactor.AsyncFiber(&RunClient, &client_proactor, &bc);
+  client_sock_.proactor()->AsyncFiber(&RunClient, &client_sock_, &bc);
 
   bc.Wait();
-  client_proactor.Stop();
-  t2.join();
-
-  as.Stop(true);
 }
 
 }  // namespace uring

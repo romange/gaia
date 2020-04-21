@@ -10,7 +10,11 @@
 #include <boost/fiber/context.hpp>
 
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "util/uring/proactor.h"
+
+#define VSOCK(verbosity) VLOG(verbosity) << "sock[" << native_handle() << "] "
+#define DVSOCK(verbosity) DVLOG(verbosity) << "sock[" << native_handle() << "] "
 
 namespace util {
 namespace uring {
@@ -83,15 +87,26 @@ FiberSocket& FiberSocket::operator=(FiberSocket&& other) noexcept {
 }
 
 auto FiberSocket::Shutdown(int how) -> error_code {
+  CHECK_GE(fd_, 0);
+
+  // If we shutdown and then try to Send/Recv - the call will stall since no data
+  // is sent/received. Therefore we remember the state to allow consistent API experience.
   error_code ec;
-  posix_err_wrap(::shutdown(fd_, how), &ec);
+  if (fd_ & IS_SHUTDOWN)
+    return ec;
+
+  posix_err_wrap(::shutdown(fd_ & FD_MASK, how), &ec);
+  fd_ |= IS_SHUTDOWN;  // Enter shutdown state unrelated to the success of the call.
+
   return ec;
 }
 
 auto FiberSocket::Close() -> error_code {
   error_code ec;
   if (fd_ > 0) {
-    posix_err_wrap(::close(fd_), &ec);
+    DVSOCK(1) << "Closing socket";
+
+    posix_err_wrap(::close(fd_ & FD_MASK), &ec);
     fd_ = -1;
   }
   return ec;
@@ -114,9 +129,7 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
   server_addr.sin_port = htons(port);
   server_addr.sin_addr.s_addr = INADDR_ANY;
 
-  if (posix_err_wrap(
-          bind(fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)), &ec) <
-      0)
+  if (posix_err_wrap(bind(fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)), &ec) < 0)
     return ec;
 
   posix_err_wrap(listen(fd_, backlog), &ec);
@@ -130,10 +143,10 @@ auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
   socklen_t addr_len = sizeof(client_addr);
 
   error_code ec;
-
+  int fd = fd_ & FD_MASK;
+  
   while (true) {
-    int res = accept4(fd_, (struct sockaddr*)&client_addr, &addr_len,
-                      SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int res = accept4(fd, (struct sockaddr*)&client_addr, &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (res >= 0) {
       *peer = FiberSocket{res};
       return ec;
@@ -143,11 +156,10 @@ auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
 
     if (errno == EAGAIN) {
       FiberCall fc(p_);
-      fc->PrepPollAdd(fd_, POLLIN);
+      fc->PrepPollAdd(fd, POLLIN);
       IoResult io_res = fc.Get();
 
       if (io_res == POLLERR) {
-        Close();
         return system::errc::make_error_code(system::errc::connection_aborted);
       }
       continue;
@@ -160,7 +172,7 @@ auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
 
 auto FiberSocket::Connect(const endpoint_type& ep) -> error_code {
   CHECK_EQ(fd_, -1);
-  CHECK(p_);
+  CHECK(p_ && p_->InMyThread());
 
   error_code ec;
 
@@ -189,7 +201,7 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
     return endpoint;
   socklen_t addr_len = endpoint.capacity();
   error_code ec;
-  posix_err_wrap(::getsockname(fd_, endpoint.data(), &addr_len), &ec);
+  posix_err_wrap(::getsockname(fd_ & FD_MASK, endpoint.data(), &addr_len), &ec);
   CHECK(!ec) << ec << "/" << ec.message() << " while running getsockname";
 
   endpoint.resize(addr_len);
@@ -197,9 +209,27 @@ auto FiberSocket::LocalEndpoint() const -> endpoint_type {
   return endpoint;
 }
 
+auto FiberSocket::RemoteEndpoint() const -> endpoint_type {
+  endpoint_type endpoint;
+  CHECK_GT(fd_, 0);
+
+  socklen_t addr_len = endpoint.capacity();
+  error_code ec;
+  if (getpeername(fd_ & FD_MASK, endpoint.data(), &addr_len) == 0)
+    endpoint.resize(addr_len);
+
+  return endpoint;
+}
+
 size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code* ec) {
   CHECK(p_);
   CHECK_GT(len, 0);
+  CHECK_GE(fd_, 0);
+
+  if (fd_ & IS_SHUTDOWN) {
+    *ec = std::make_error_code(std::errc::connection_aborted);
+    return 0;
+  }
 
   msghdr msg;
   memset(&msg, 0, sizeof(msg));
@@ -207,65 +237,86 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code* ec) {
   msg.msg_iovlen = len;
 
   ssize_t res;
+  int fd = fd_ & FD_MASK;
+
   while (true) {
     FiberCall fc(p_);
-    fc->PrepSendMsg(fd_, &msg, 0);
-    res = fc.Get();
+    fc->PrepSendMsg(fd, &msg, 0);
+    res = fc.Get();  // Interrupt point
     if (res >= 0) {
-      break;
+      return res;  // Fastpath
     }
-    if (res == -ECONNRESET) {
-      *ec = system::errc::make_error_code(system::errc::connection_aborted);
+    DVSOCK(1) << "Got " << res;
+    res = -res;
+    if (res == EAGAIN || res == EBUSY)
+      continue;
+
+    if (base::_in(res, {ECONNABORTED, EPIPE, ECONNRESET})) {
+      if (res == EPIPE)  // We do not care about EPIPE that can happen when we shutdown our socket.
+        res = ECONNABORTED;
       break;
     }
 
-    if (res != -EAGAIN) {
-      LOG(FATAL) << "Unexpected error " << strerror(-res);
-    }
+    LOG(FATAL) << "Unexpected error " << res << "/" << strerror(res);
   }
-  return res;
+
+  *ec = std::error_code(res, std::generic_category());
+  VSOCK(1) << "Error " << *ec << " on " << RemoteEndpoint();
+
+  return 0;
 }
 
 size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code* ec) {
   CHECK_GT(len, 0);
   CHECK(p_);
+  CHECK_GE(fd_, 0);
+
+  if (fd_ & IS_SHUTDOWN) {
+    *ec = std::make_error_code(std::errc::connection_aborted);
+
+    return 0;
+  }
 
   msghdr msg;
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = const_cast<iovec*>(ptr);
   msg.msg_iovlen = len;
+  int fd = fd_ & FD_MASK;
 
   if (!p_->HasFastPoll()) {
     SubmitEntry se = p_->GetSubmitEntry(nullptr, 0);
-    se.PrepPollAdd(fd_, POLLIN);
+    se.PrepPollAdd(fd, POLLIN);
     se.sqe()->flags = IOSQE_IO_LINK;
   }
 
   ssize_t res;
   while (true) {
     FiberCall fc(p_);
-    fc->PrepRecvMsg(fd_, &msg, 0);
+    fc->PrepRecvMsg(fd, &msg, 0);
     res = fc.Get();
 
-    if (res >= 0) {  // technically it's eof but we do not have this error here.
-      if (res == 0) {
-        CHECK(!*ec) << *ec;  // TBD: To remove.
-        *ec = system::errc::make_error_code(system::errc::connection_aborted);
-      }
+    if (res > 0) {
+      return res;
+    }
+    DVSOCK(1) << "Got " << res;
+
+    res = -res;
+    if (res == EAGAIN || res == EBUSY)
+      continue;
+
+    if (res == 0)
+      res = ECONNABORTED;
+
+    if (base::_in(res, {ECONNABORTED, EPIPE, ECONNRESET})) {
       break;
     }
 
-    if (res == -ECONNRESET) {
-      *ec = system::errc::make_error_code(system::errc::connection_aborted);
-      break;
-    }
-
-    if (res != -EAGAIN && res != -EBUSY) {
-      LOG(FATAL) << "Unexpected error " << strerror(-res);
-    }
+    LOG(FATAL) << "Unexpected error " << res << "/" << strerror(res);
   }
+  *ec = std::error_code(res, std::generic_category());
+  VSOCK(1) << "Error " << *ec << " on " << RemoteEndpoint();
 
-  return res;
+  return 0;
 }
 
 }  // namespace uring

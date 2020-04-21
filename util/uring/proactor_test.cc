@@ -47,7 +47,7 @@ class ProactorTest : public testing::Test {
 
 TEST_F(ProactorTest, AsyncCall) {
   for (unsigned i = 0; i < 10000; ++i) {
-    proactor_->Async([] {});
+    proactor_->AsyncBrief([] {});
   }
   usleep(5000);
 }
@@ -55,10 +55,10 @@ TEST_F(ProactorTest, AsyncCall) {
 TEST_F(ProactorTest, Await) {
   thread_local int val = 5;
 
-  proactor_->Await([] { val = 15; });
+  proactor_->AwaitBrief([] { val = 15; });
   EXPECT_EQ(5, val);
 
-  int j = proactor_->Await([] { return val; });
+  int j = proactor_->AwaitBrief([] { return val; });
   EXPECT_EQ(15, j);
 }
 
@@ -95,7 +95,7 @@ TEST_F(ProactorTest, AsyncEvent) {
     done.Notify();
   };
 
-  proactor_->Async([&] {
+  proactor_->AsyncBrief([&] {
     SubmitEntry se = proactor_->GetSubmitEntry(std::move(cb), 1);
     se.sqe()->opcode = IORING_OP_NOP;
   });
@@ -111,7 +111,7 @@ void BM_AsyncCall(benchmark::State& state) {
   std::thread t([&] { proactor.Run(); });
 
   while (state.KeepRunning()) {
-    proactor.Async([] {});
+    proactor.AsyncBrief([] {});
   }
   proactor.Stop();
   t.join();
@@ -123,7 +123,7 @@ void BM_AwaitCall(benchmark::State& state) {
   std::thread t([&] { proactor.Run(); });
 
   while (state.KeepRunning()) {
-    proactor.Await([] {});
+    proactor.AwaitBrief([] {});
   }
   proactor.Stop();
   t.join();

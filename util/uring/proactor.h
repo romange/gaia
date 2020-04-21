@@ -53,33 +53,57 @@ class Proactor {
     return pthread_self() == thread_id_;
   }
 
-  auto thread_id() const { return thread_id_;}
+  auto thread_id() const {
+    return thread_id_;
+  }
 
   static bool IsProactorThread() {
     return tl_info_.is_proactor_thread;
   }
 
-  bool HasFastPoll() const { return fast_poll_f_; }
-
+  bool HasFastPoll() const {
+    return fast_poll_f_;
+  }
 
   /**
    *  Message passing functions.
    * */
 
   //! Fire and forget - does not wait for the function to be called.
+  //! `f` should not block, lock on mutexes or Await.
   //! Might block the calling fiber if the queue is full.
-  template <typename Func> void Async(Func&& f);
+  template <typename Func> void AsyncBrief(Func&& brief);
 
+  //! Similarly to AsyncBrief but waits 'f' to return.
+  template <typename Func> auto AwaitBrief(Func&& brief) -> decltype(brief());
+
+  //! Similarly to AsyncBrief but 'f' but wraps 'f' in fiber.
+  //! f is allowed to fiber-block or await.
   template <typename Func, typename... Args> void AsyncFiber(Func&& f, Args&&... args) {
     // Ideally we want to forward args into lambda but it's too complicated before C++20.
     // So I just copy them into capture.
     // We forward captured variables so we need lambda to be mutable.
-    Async([f = std::forward<Func>(f), args...]() mutable {
+    AsyncBrief([f = std::forward<Func>(f), args...]() mutable {
       ::boost::fibers::fiber(std::forward<Func>(f), std::forward<Args>(args)...).detach();
     });
   }
 
-  template <typename Func> auto Await(Func&& f) -> decltype(f());
+  // Please note that this function uses Await, therefore can not be used inside
+  // Proactor main fiber (i.e. Async callbacks).
+  template <typename... Args> boost::fibers::fiber LaunchFiber(Args&&... args) {
+    ::boost::fibers::fiber fb;
+
+    // It's safe to use & capture since we await before returning.
+    AwaitBrief([&] { fb = boost::fibers::fiber(std::forward<Args>(args)...); });
+    return fb;
+  }
+
+  // Runs possibly awating function 'f' safely in Proactor thread and waits for it to finish,
+  // If we are in his thread already, runs 'f' directly, otherwise
+  // runs it wrapped in a fiber. Should be used instead of 'AwaitBrief' when 'f' itself
+  // awaits on something.
+  // To summarize: 'f' may not block its thread, but allowed to block its fiber.
+  template <typename Func> auto AwaitBlocking(Func&& f) -> decltype(f());
 
   void RegisterSignal(std::initializer_list<uint16_t> l, std::function<void(int)> cb);
 
@@ -121,7 +145,7 @@ class Proactor {
   int wake_fd_;
   bool is_stopped_ = true;
   uint8_t fast_poll_f_ : 1;
-  uint8_t reseved_f_   : 7;
+  uint8_t reseved_f_ : 7;
 
   // We use fu2 function to allow moveable semantics.
   using Tasklet =
@@ -159,7 +183,7 @@ class Proactor {
   static thread_local TLInfo tl_info_;
 };
 
-template <typename Func> void Proactor::Async(Func&& f) {
+template <typename Func> void Proactor::AsyncBrief(Func&& f) {
   if (EmplaceTaskQueue(std::forward<Func>(f)))
     return;
 
@@ -173,7 +197,7 @@ template <typename Func> void Proactor::Async(Func&& f) {
   }
 }
 
-template <typename Func> auto Proactor::Await(Func&& f) -> decltype(f()) {
+template <typename Func> auto Proactor::AwaitBrief(Func&& f) -> decltype(f()) {
   if (InMyThread()) {
     return f();
   }
@@ -186,12 +210,30 @@ template <typename Func> auto Proactor::Await(Func&& f) -> decltype(f()) {
   detail::ResultMover<ResultType> mover;
 
   // Store done-ptr by value to increase the refcount while lambda is running.
-  Async([&mover, f = std::forward<Func>(f), done]() mutable {
+  AsyncBrief([&mover, f = std::forward<Func>(f), done]() mutable {
     mover.Apply(f);
     done.Notify();
   });
 
   done.Wait();
+  return std::move(mover).get();
+}
+
+// Runs possibly awating function 'f' safely in ContextThread and waits for it to finish,
+// If we are in the context thread already, runs 'f' directly, otherwise
+// runs it wrapped in a fiber. Should be used instead of 'Await' when 'f' itself
+// awaits on something.
+// To summarize: 'f' should not block its thread, but allowed to block its fiber.
+template <typename Func> auto Proactor::AwaitBlocking(Func&& f) -> decltype(f()) {
+  if (InMyThread()) {
+    return f();
+  }
+
+  using ResultType = decltype(f());
+  detail::ResultMover<ResultType> mover;
+  auto fb = LaunchFiber([&] { mover.Apply(std::forward<Func>(f)); });
+  fb.join();
+
   return std::move(mover).get();
 }
 

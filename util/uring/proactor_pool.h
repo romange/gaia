@@ -70,7 +70,7 @@ class ProactorPool {
       Proactor& context = proactor_[i];
       // func must be copied, it can not be moved, because we dsitribute it into
       // multiple Proactors.
-      context.Async([&context, func]() mutable { func(&context); });
+      context.AsyncBrief([&context, func]() mutable { func(&context); });
     }
   }
 
@@ -87,7 +87,7 @@ class ProactorPool {
     for (unsigned i = 0; i < size(); ++i) {
       Proactor& context = proactor_[i];
       // Copy func on purpose, see above.
-      context.Async([&context, i, func]() mutable { func(i, &context); });
+      context.AsyncBrief([&context, i, func]() mutable { func(i, &context); });
     }
   }
 

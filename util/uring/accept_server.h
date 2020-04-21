@@ -29,8 +29,13 @@ class ListenerInterface {
 
   void RegisterPool(ProactorPool* pool);
 
-  // Creates a dedicated handler for a new connection.
+  //! Creates a dedicated handler for a new connection.
+  //! Called per new accepted connection
   virtual Connection* NewConnection(Proactor* context) = 0;
+
+  //! Hook to be notified when listener interface start listening and accepting sockets.
+  //! Called once.
+  virtual void PreAcceptLoop(Proactor* owner) {}
 
   // Called by AcceptServer when shutting down start and before all connections are closed.
   virtual void PreShutdown() {

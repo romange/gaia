@@ -58,13 +58,14 @@ class FiberSocket {
   }
 
   size_t Recv(iovec* ptr, size_t len, error_code* ec);
+
   size_t Recv(const boost::asio::mutable_buffer& mb, error_code* ec) {
     iovec v{mb.data(), mb.size()};
     return Recv(&v, 1, ec);
   }
 
   native_handle_type native_handle() const {
-    return fd_;
+    return fd_ & FD_MASK;
   }
 
   //! Removes the ownership over file descriptor. Use with caution.
@@ -73,11 +74,12 @@ class FiberSocket {
   }
 
   endpoint_type LocalEndpoint() const;
+  endpoint_type RemoteEndpoint() const;
 
-  //! IsOpen does not promise that the socket is connected or live, just that the file descriptor
-  //! is valid.
+  //! IsOpen does not promise that the socket is TCP connected or live,
+  // just that the file descriptor is valid and its state is open.
   bool IsOpen() const {
-    return fd_ >= 0;
+    return fd_ >= 0 && (fd_ & IS_SHUTDOWN) == 0;
   }
 
   void set_proactor(Proactor* p) { p_ = p;}
@@ -86,9 +88,13 @@ class FiberSocket {
   static bool IsConnClosed(const error_code& ec) {
     return (ec == std::errc::connection_aborted) || (ec == std::errc::connection_reset);
   }
- private:
 
-  int fd_;
+ private:
+  // Gives me 512M descriptors.
+  enum { FD_MASK = 0x1fffffff};
+  enum { IS_SHUTDOWN = 0x20000000};
+
+  int32_t fd_;
 
   // We must reference proactor in each socket so that we could support write_some/read_some
   // with predefined interfance and be compliant with SyncWriteStream/SyncReadStream concepts.

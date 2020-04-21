@@ -11,6 +11,8 @@
 #include "util/uring/proactor_pool.h"
 #include "util/uring/uring_fiber_algo.h"
 
+#define VSOCK(verbosity, sock) VLOG(verbosity) << "sock[" << (sock).native_handle() << "] "
+
 namespace util {
 namespace uring {
 
@@ -18,7 +20,7 @@ using namespace boost;
 using namespace std;
 
 using ListType =
-      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<false>,
+      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<true>,
                        intrusive::cache_last<false>>;
 
 struct AcceptServer::SafeConnList {
@@ -26,22 +28,27 @@ struct AcceptServer::SafeConnList {
   fibers::mutex mu;
   fibers::condition_variable cond;
 
-  void Link(Connection& c) {
+  void Link(Connection* c) {
     std::lock_guard<fibers::mutex> lk(mu);
-    list.push_front(c);
+    list.push_front(*c);
+    VLOG(2) << "List size " << list.size();
   }
 
-  void Unlink(Connection& c) {
+  void Unlink(Connection* c) {
     std::lock_guard<fibers::mutex> lk(mu);
-    auto it = list.iterator_to(c);
+    auto it = list.iterator_to(*c);
     list.erase(it);
+    DVLOG(2) << "List size " << list.size();
 
-    if (list.empty())
+    if (list.empty()) {
       cond.notify_one();
+    }
   }
 
   void AwaitEmpty() {
     std::unique_lock<fibers::mutex> lk(mu);
+    DVLOG(1) << "AwaitEmpty: List size: " << list.size();
+
     cond.wait(lk, [this] { return list.empty(); });
   }
 };
@@ -115,7 +122,7 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
 void AcceptServer::BreakListeners() {
   for (auto& lw : listen_wrapper_) {
-    lw.listener.proactor()->Async([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
+    lw.listener.proactor()->AsyncBrief([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
   }
   VLOG(1) << "AcceptServer::BreakListeners finished";
 }
@@ -126,10 +133,10 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   fiber_props.set_name("AcceptLoop");
 
   auto ep = lw->listener.LocalEndpoint();
-  LOG(INFO) << "AcceptServer - listening on port " << ep.port();
-
-
+  VSOCK(0, lw->listener) << "AcceptServer - listening on port " << ep.port();
   SafeConnList safe_list;
+
+  lw->lii->PreAcceptLoop(lw->listener.proactor());
 
   while (true) {
     FiberSocket peer;
@@ -147,7 +154,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     peer.set_proactor(next);
     Connection* conn = lw->lii->NewConnection(next);
     conn->SetSocket(std::move(peer));
-    safe_list.Link(*conn);
+    safe_list.Link(conn);
 
     // mutable because we move peer.
     auto cb = [conn, next, &safe_list]() mutable {
@@ -161,12 +168,16 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   lw->lii->PreShutdown();
 
   safe_list.mu.lock();
+  unsigned cnt = 0;
   for (auto& val : safe_list.list) {
     val.socket_.Shutdown(SHUT_RDWR);
+    DVSOCK(1, val.socket_) << "Shutdown";
+    ++cnt;
   }
+
   safe_list.mu.unlock();
 
-  VLOG(1) << "Waiting for connections to close";
+  VLOG(1) << "Waiting for " << cnt <<" connections to close";
   safe_list.AwaitEmpty();
 
   lw->lii->PostShutdown();
@@ -176,13 +187,17 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 }
 
 void AcceptServer::RunSingleConnection(Connection* conn, SafeConnList* conns) {
+  VSOCK(2, *conn) << "Running connection";
+
   std::unique_ptr<Connection> guard(conn);
   try {
     conn->HandleRequests();
+    VSOCK(2, *conn) << "After HandleRequests";
+
   } catch (std::exception& e) {
     LOG(ERROR) << "Uncaught exception " << e.what();
   }
-  conns->Unlink(*conn);
+  conns->Unlink(conn);
 }
 
 void ListenerInterface::RegisterPool(ProactorPool* pool) {

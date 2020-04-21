@@ -60,7 +60,9 @@ void PingConnection::HandleRequests() {
     if (cmd_.Decode(res)) {  // The flow has a bug in case of pipelined requests.
       ping_qps.Inc();
       asa.write_some(cmd_.reply(), ec);
-      CHECK(!ec) << ec << "/" << ec.message();
+      if (ec) {
+        break;
+      }
     }
   }
   socket_.Shutdown(SHUT_RDWR);
