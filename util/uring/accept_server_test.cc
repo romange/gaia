@@ -26,7 +26,6 @@ class TestConnection : public Connection {
 };
 
 void TestConnection::HandleRequests() {
-  CHECK(socket_.IsOpen());
   char buf[128];
   system::error_code ec;
 
@@ -36,6 +35,7 @@ void TestConnection::HandleRequests() {
     asa.read_some(asio::buffer(buf), ec);
     if (ec == std::errc::connection_aborted)
       break;
+
     CHECK(!ec) << ec << "/" << ec.message();
 
     asa.write_some(asio::buffer(buf), ec);
@@ -115,6 +115,11 @@ TEST_F(AcceptServerTest, Basic) {
   client_sock_.proactor()->AsyncFiber(&RunClient, &client_sock_, &bc);
 
   bc.Wait();
+}
+
+TEST_F(AcceptServerTest, Break) {
+  usleep(1000);
+  as_->Stop(true);
 }
 
 }  // namespace uring

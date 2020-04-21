@@ -12,6 +12,7 @@
 #include "util/uring/uring_fiber_algo.h"
 
 #define VSOCK(verbosity, sock) VLOG(verbosity) << "sock[" << (sock).native_handle() << "] "
+#define DVSOCK(verbosity, sock) DVLOG(verbosity) << "sock[" << (sock).native_handle() << "] "
 
 namespace util {
 namespace uring {

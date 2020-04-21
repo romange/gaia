@@ -144,7 +144,7 @@ auto FiberSocket::Accept(FiberSocket* peer) -> error_code {
 
   error_code ec;
   int fd = fd_ & FD_MASK;
-  
+
   while (true) {
     int res = accept4(fd, (struct sockaddr*)&client_addr, &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (res >= 0) {
