@@ -21,8 +21,8 @@ using namespace boost;
 using namespace std;
 
 using ListType =
-      intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<true>,
-                       intrusive::cache_last<false>>;
+    intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<true>,
+                     intrusive::cache_last<false>>;
 
 struct AcceptServer::SafeConnList {
   ListType list;
@@ -178,7 +178,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
 
   safe_list.mu.unlock();
 
-  VLOG(1) << "Waiting for " << cnt <<" connections to close";
+  VLOG(1) << "Waiting for " << cnt << " connections to close";
   safe_list.AwaitEmpty();
 
   lw->lii->PostShutdown();

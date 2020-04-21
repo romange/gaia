@@ -43,15 +43,16 @@ inline int sys_io_uring_enter(int fd, unsigned to_submit, unsigned min_complete,
   return syscall(__NR_io_uring_enter, fd, to_submit, min_complete, flags, sig, _NSIG / 8);
 }
 
-inline void wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
+inline int wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
   // res must be 0 or -1.
   int res = sys_io_uring_enter(ring->ring_fd, 0, 1, IORING_ENTER_GETEVENTS, sig);
   if (res == 0 || errno == EINTR)
-    return;
+    return res;
   DCHECK_EQ(-1, res);
   res = errno;
 
   LOG(FATAL) << "Error " << (res) << " evaluating sys_io_uring_enter: " << strerror(res);
+  return 0;
 }
 
 struct signal_state {
@@ -217,7 +218,10 @@ void Proactor::Run(unsigned ring_depth) {
       // Suspend this fiber until others will run and get blocked.
       // Eventually UringFiberAlgo will resume back this fiber in suspend_until
       // function.
+      DVLOG(2) << "Suspend ioloop";
       sched->suspend();
+
+      DVLOG(2) << "Resume ioloop";
       continue;
     }
 
@@ -243,7 +247,9 @@ void Proactor::Run(unsigned ring_depth) {
       if (is_stopped_)
         break;
 
-      wait_for_cqe(&ring_);
+      int res = wait_for_cqe(&ring_);
+      DVLOG(1) << "Woke up " << res << "/" << tq_seq_.load(std::memory_order_acquire);
+
       tq_seq = 0;
       ++num_stalls;
       tq_seq_.store(0, std::memory_order_release);
@@ -297,6 +303,8 @@ void Proactor::Init(size_t ring_size) {
 }
 
 void Proactor::WakeRing() {
+  DVLOG(1) << "Wake ring " << tq_seq_.load(std::memory_order_relaxed);
+
   tq_wakeups_.fetch_add(1, std::memory_order_relaxed);
   uint64_t val = 1;
 

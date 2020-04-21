@@ -103,8 +103,44 @@ TEST_F(ProactorTest, AsyncEvent) {
 }
 
 TEST_F(ProactorTest, Pool) {
-  ProactorPool pool{1};
+  std::atomic_int val{0};
+  ProactorPool pool{2};
+  pool.Run();
+
+  pool.AwaitFiberOnAll([&](Proactor*) { val +=1; });
+  EXPECT_EQ(2, val);
+  pool.Stop();
 }
+
+TEST_F(ProactorTest, DispatchTest) {
+  fibers::condition_variable cnd1, cnd2;
+  fibers::mutex mu;
+  int state = 0;
+
+  LOG(INFO) << "LaunchFiber";
+  auto fb = proactor_->LaunchFiber([&] {
+    this_fiber::properties<UringFiberProps>().set_name("jessie");
+
+    std::unique_lock<fibers::mutex> g(mu);
+    state = 1;
+    LOG(INFO) << "state 1";
+
+    cnd2.notify_one();
+    cnd1.wait(g, [&] { return state == 2;});
+    LOG(INFO) << "End";
+  });
+
+  {
+    std::unique_lock<fibers::mutex> g(mu);
+    cnd2.wait(g, [&] { return state == 1;});
+    state = 2;
+    LOG(INFO) << "state 2";
+    cnd1.notify_one();
+  }
+  LOG(INFO) << "BeforeJoin";
+  fb.join();
+}
+
 
 void BM_AsyncCall(benchmark::State& state) {
   Proactor proactor;
