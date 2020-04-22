@@ -145,11 +145,6 @@ void Proactor::Run(unsigned ring_depth) {
   VLOG(1) << "Proactor::Run";
   Init(ring_depth);
 
-  // Should we do it here?
-  sigset_t mask;
-  sigfillset(&mask);
-  CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
-
   main_loop_ctx_ = fibers::context::active();
   fibers::scheduler* sched = main_loop_ctx_->get_scheduler();
 
@@ -165,24 +160,14 @@ void Proactor::Run(unsigned ring_depth) {
   uint32_t num_stalls = 0;
   uint32_t spin_loops = 0, num_task_runs = 0;
   Tasklet task;
-  int64_t inflight_requests = 0;
 
   while (true) {
-    // tell kernel we have put a sqe on the submission ring.
-    // Might return negative -errno.
-    // The sqe buffer is [sqe_head, sqe_tail). io_uring_submit advances sqe_head
-    // to sqe_tail by copying the sqe buffer contents into kernel buffer. In
-    // case of an retryable error (EBUSY), we need to restore sqe_head to its
-    // previous value.
-    auto sq_head = ring_.sq.sqe_head;
     int num_submitted = io_uring_submit(&ring_);
 
     if (num_submitted >= 0) {
-      inflight_requests += num_submitted;
     } else if (num_submitted == -EBUSY) {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
-      ring_.sq.sqe_head = sq_head;
     } else {
       URING_CHECK(num_submitted);
     }
@@ -207,8 +192,7 @@ void Proactor::Run(unsigned ring_depth) {
     if (cqe_count) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
-      inflight_requests -= cqe_count;
-      DVLOG(2) << "Fetched " << cqe_count << " cqes, inflight: " << inflight_requests;
+      DVLOG(2) << "Fetched " << cqe_count << " cqes";
       sqe_avail_.notifyAll();
 
       DispatchCompletions(cqes, cqe_count);
@@ -230,7 +214,7 @@ void Proactor::Run(unsigned ring_depth) {
 
     // Lets spin a bit to make a system a bit more responsive.
     if (++spin_loops < kSpinLimit) {
-      pthread_yield();
+      // pthread_yield(); We should not spin using sched_yield it burns fuckload of cpu.
       continue;
     }
 
@@ -265,9 +249,15 @@ void Proactor::Run(unsigned ring_depth) {
 void Proactor::Init(size_t ring_size) {
   CHECK_EQ(0, ring_size & (ring_size - 1));
   CHECK_GE(ring_size, 8);
+  CHECK_EQ(0, thread_id_) << "Init was already called";
 
   io_uring_params params;
   memset(&params, 0, sizeof(params));
+
+  // it seems that SQPOLL requires registering each fd, including sockets fds.
+  // need to check if its worth pursuing. 
+  // For sure not in short-term.
+  // params.flags = IORING_SETUP_SQPOLL;
   URING_CHECK(io_uring_queue_init_params(ring_size, &ring_, &params));
 
   fast_poll_f_ = (params.features & IORING_FEAT_FAST_POLL) != 0;
@@ -314,6 +304,9 @@ void Proactor::WakeRing() {
 void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
   for (unsigned i = 0; i < count; ++i) {
     auto& cqe = cqes[i];
+
+    // I allocate range of 1024 reserved values for the internal Proactor use.
+
     if (cqe.user_data >= kUserDataCbIndex) {  // our heap range surely starts higher than 1k.
       size_t index = cqe.user_data - kUserDataCbIndex;
       DCHECK_LT(index, centries_.size());
@@ -334,8 +327,11 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
     if (cqe.user_data == kIgnoreIndex)
       continue;
 
-    // I leave here 1024 codes with predefined meanings.
     if (cqe.user_data == kWakeIndex) {
+      DCHECK_GE(cqe.res, 0);
+
+      DVLOG(1) << "Wakeup " << cqe.res << "/" << cqe.flags;
+
       CHECK_EQ(8, read(wake_fd_, &cqe.user_data, 8));  // Pull the data
 
       // TODO: to move io_uring_get_sqe call from here to before we stall.

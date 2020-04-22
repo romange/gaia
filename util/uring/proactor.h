@@ -140,7 +140,7 @@ class Proactor {
 
   io_uring ring_;
 
-  pthread_t thread_id_ = -1U;
+  pthread_t thread_id_ = 0U;
 
   int wake_fd_;
   bool is_stopped_ = true;
