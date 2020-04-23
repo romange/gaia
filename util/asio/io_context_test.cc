@@ -158,6 +158,10 @@ class CancelImpl final : public IoContext::Cancellable {
 
 class IoContextTest : public testing::Test {
  protected:
+  static void SetUpTestCase() {
+    base::SetupJiffiesTimer();  // we need JiffiesTimer because IoScheduler counts on it.
+  }
+
   void SetUp() override {
     pool_ = std::make_unique<IoContextPool>(1);
     pool_->Run();

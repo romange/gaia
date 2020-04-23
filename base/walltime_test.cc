@@ -4,6 +4,7 @@
 #include "base/walltime.h"
 
 #include <sys/timerfd.h>
+#include <syscall.h>
 #include <time.h>
 
 #include <atomic>
@@ -145,8 +146,7 @@ static void BM_GetTimeOfDay(benchmark::State& state) {
 }
 BENCHMARK(BM_GetTimeOfDay);
 
-template <clockid_t cid>
-void BM_ClockType(benchmark::State& state) {
+template <clockid_t cid> void BM_ClockType(benchmark::State& state) {
   timespec ts;
   while (state.KeepRunning()) {
     DoNotOptimize(clock_gettime(cid, &ts));
@@ -199,7 +199,7 @@ void BM_TimerOverrun(benchmark::State& state) {
   timer_t timerid;
 
   sev.sigev_notify = SIGEV_THREAD_ID;
-  sev._sigev_un._tid = gettid();
+  sev._sigev_un._tid = syscall(SYS_gettid);
   sev.sigev_signo = SIGRTMIN;
   CHECK_EQ(0, timer_create(CLOCK_MONOTONIC, &sev, &timerid));
 
