@@ -1,7 +1,10 @@
 add_library(http_beast_prebuilt prebuilt_beast.cc)
 
-add_library(http_v2 http_conn_handler.cc status_page.cc profilez_handler.cc)
-cxx_link(http_v2 asio_fiber_lib proc_stats strings stats_lib http_beast_prebuilt fast_malloc)
+add_library(http_common http_common.cc status_page.cc profilez_handler.cc)
+cxx_link(http_common absl_strings base http_beast_prebuilt proc_stats fast_malloc)
+
+add_library(http_v2  http_conn_handler.cc )
+cxx_link(http_v2 asio_fiber_lib strings stats_lib http_common)
 
 add_executable(http_main http_main.cc)
 cxx_link(http_main http_v2 html_lib)

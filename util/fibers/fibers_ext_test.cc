@@ -18,6 +18,10 @@ class FibersTest : public testing::Test {
   void SetUp() final {}
 
   void TearDown() final {}
+
+  static void SetUpTestCase() {
+    base::SetupJiffiesTimer();
+  }
 };
 
 TEST_F(FibersTest, SimpleChannel) {
@@ -127,6 +131,8 @@ TEST_F(FibersTest, FiberQueue) {
   size_t invocations = 0;
   for (unsigned i = 0; i < kIters; ++i) {
     auto start = base::GetMonotonicMicrosFast();
+    ASSERT_GT(start, 0);
+
     fq.Add([&, start] {
       ASSERT_TRUE(cntx.InContextThread());
       delay += base::GetMonotonicMicrosFast() - start;
@@ -138,6 +144,7 @@ TEST_F(FibersTest, FiberQueue) {
 
   EXPECT_EQ(kIters, invocations);
   EXPECT_LT(delay / kIters, 2000);  //
+  EXPECT_GT(delay, 0);  //
 }
 
 }  // namespace fibers_ext

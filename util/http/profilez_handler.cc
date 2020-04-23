@@ -14,7 +14,7 @@
 #include "strings/split.h"
 #include "strings/strcat.h"
 #include "util/fibers/fibers_ext.h"
-#include "util/http/http_conn_handler.h"
+#include "util/http/http_common.h"
 #include "util/spawn.h"
 
 namespace util {
@@ -118,7 +118,7 @@ static void HandleHeapProfile(bool enable, StringResponse* response) {
   }
 }
 
-void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
+StringResponse ProfilezHandler(const QueryArgs& args) {
   bool enable = false;
   bool heap = false;
   for (const auto& k_v : args) {
@@ -131,15 +131,13 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   }
 
   fibers_ext::Done done;
-  std::thread([=]() mutable {
-    StringResponse response;
-
+  StringResponse response;
+  std::thread([=, &response]() mutable {
     if (!heap) {
       HandleCpuProfile(enable, &response);
     } else {
       HandleHeapProfile(enable, &response);
     }
-    send->Invoke(std::move(response));
     done.Notify();
   }).detach();
 
@@ -147,6 +145,7 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   // I use done to block the fiber but free the thread to handle other fibers.
   // Still this fiber connection is blocked.
   done.Wait();
+  return response;
 }
 
 }  // namespace http

@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  MainInitGuard guard(&argc, &argv);
+  MainInitGuard guard(&argc, &argv, DISABLE_JIFFIES_THREAD);
 
   LOG(INFO) << "Starting tests in " << argv[0];
 

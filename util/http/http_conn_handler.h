@@ -10,31 +10,10 @@
 
 #include "strings/unique_strings.h"
 #include "util/asio/connection_handler.h"
+#include "util/http/http_common.h"
 
 namespace util {
 namespace http {
-
-// URL consists of path and query delimited by '?'.
-// query can be broken into query args delimited by '&'.
-// Each query arg can be a pair of "key=value" values.
-// In case there is not '=' delimiter, only the first field is filled.
-typedef std::vector<std::pair<StringPiece, StringPiece>> QueryArgs;
-
-typedef ::boost::beast::http::response<::boost::beast::http::string_body> StringResponse;
-
-inline StringResponse MakeStringResponse(
-    ::boost::beast::http::status st = ::boost::beast::http::status::ok) {
-  return StringResponse(st, 11);
-}
-
-inline void SetMime(const char* mime, ::boost::beast::http::fields* dest) {
-  dest->set(::boost::beast::http::field::content_type, mime);
-}
-
-extern const char kHtmlMime[];
-extern const char kJsonMime[];
-extern const char kSvgMime[];
-extern const char kTextMime[];
 
 // This is the C++11 equivalent of a generic lambda.
 // The function object is used to send an HTTP message.

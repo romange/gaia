@@ -71,9 +71,9 @@ template <typename T> class mpmc_bounded_queue {
     }
   }
 
-  // It's super important to leave try_enqueue as template function of free type U.
+  // It's super important to leave try_enqueue as a template function of free type U.
   // Otherwise, moveable objects of different from T type (i.e. U) that can be
-  // moved into V will be moved regardless if try_enqueue succeeds.
+  // moved into T will be moved regardless if try_enqueue succeeds.
   // With this signature it's guaranteed that data is moved only if it's stored in the queue.
   // Added bonus, it seems we do not need the "const T&" version of this function.
   template <typename U> bool try_enqueue(U&& data) {

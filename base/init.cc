@@ -40,7 +40,7 @@ void ModuleInitializer::RunFtors(bool is_ctor) {
 
 static std::atomic<int> main_init_guard_count{0};
 
-MainInitGuard::MainInitGuard(int* argc, char*** argv) {
+MainInitGuard::MainInitGuard(int* argc, char*** argv, uint32_t flags) {
   // MallocExtension::Initialize();
   if (main_init_guard_count.fetch_add(1))
     return;
@@ -59,7 +59,10 @@ MainInitGuard::MainInitGuard(int* argc, char*** argv) {
 #else
   LOG(INFO) << (*argv)[0] << " running in debug mode.";
 #endif
-  base::SetupJiffiesTimer();
+
+  if ((flags & DISABLE_JIFFIES_THREAD) == 0)
+    base::SetupJiffiesTimer();
+
   __internal__::ModuleInitializer::RunFtors(true);
 }
 
