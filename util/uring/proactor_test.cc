@@ -62,6 +62,14 @@ TEST_F(ProactorTest, Await) {
   EXPECT_EQ(15, j);
 }
 
+TEST_F(ProactorTest, Sleep) {
+  proactor_->AwaitBlocking([] {
+    LOG(INFO) << "Before Sleep";
+    this_fiber::sleep_for(10ms);
+    LOG(INFO) << "After Sleep";
+  });
+}
+
 TEST_F(ProactorTest, SqeOverflow) {
   size_t unique_id = 0;
   char buf[128];

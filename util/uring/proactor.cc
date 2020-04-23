@@ -165,6 +165,8 @@ void Proactor::Run(unsigned ring_depth) {
     int num_submitted = io_uring_submit(&ring_);
 
     if (num_submitted >= 0) {
+      if (num_submitted)
+        DVLOG(2) << "Submitted " << num_submitted;
     } else if (num_submitted == -EBUSY) {
       VLOG(1) << "EBUSY " << num_submitted;
       num_submitted = 0;
@@ -230,7 +232,7 @@ void Proactor::Run(unsigned ring_depth) {
     if (tq_seq_.compare_exchange_weak(tq_seq, WAIT_SECTION_STATE, std::memory_order_acquire)) {
       if (is_stopped_)
         break;
-
+      DVLOG(1) << "wait_for_cqe";
       int res = wait_for_cqe(&ring_);
       DVLOG(1) << "Woke up " << res << "/" << tq_seq_.load(std::memory_order_acquire);
 
@@ -255,7 +257,7 @@ void Proactor::Init(size_t ring_size) {
   memset(&params, 0, sizeof(params));
 
   // it seems that SQPOLL requires registering each fd, including sockets fds.
-  // need to check if its worth pursuing. 
+  // need to check if its worth pursuing.
   // For sure not in short-term.
   // params.flags = IORING_SETUP_SQPOLL;
   URING_CHECK(io_uring_queue_init_params(ring_size, &ring_, &params));

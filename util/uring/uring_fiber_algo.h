@@ -53,11 +53,11 @@ class UringFiberAlgo : public ::boost::fibers::algo::algorithm_with_properties<U
   void notify() noexcept final;
 
  private:
-  uint32_t ready_cnt_ = 0;
-
   ready_queue_type rqueue_;
   Proactor* proactor_;
   FiberContext* main_cntx_;
+  timespec ts_;
+  uint32_t ready_cnt_ = 0;
 };
 
 }  // namespace uring

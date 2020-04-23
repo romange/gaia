@@ -45,11 +45,18 @@ class SubmitEntry {
     sqe_->msg_flags = flags;
   }
 
-  void PrepConnect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+  void PrepConnect(int fd, const struct sockaddr* addr, socklen_t addrlen) {
     PrepFd(IORING_OP_CONNECT, fd);
     sqe_->addr = (unsigned long)addr;
     sqe_->len = 0;
     sqe_->off = addrlen;
+  }
+
+  void PrepTimeout(const timespec* ts, bool is_abs = true) {
+    PrepFd(IORING_OP_TIMEOUT, -1);
+    sqe_->addr = (unsigned long)ts;
+    sqe_->len = 1;
+    sqe_->timeout_flags = IORING_TIMEOUT_ABS;
   }
 
   // TODO: To remove this accessor.

@@ -2,8 +2,6 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
-#include <sys/types.h>
-
 #include "util/uring/uring_fiber_algo.h"
 
 #include "base/logging.h"
@@ -14,6 +12,7 @@
 namespace util {
 namespace uring {
 using namespace boost;
+using namespace std;
 
 UringFiberAlgo::UringFiberAlgo(Proactor* proactor) : proactor_(proactor) {
   main_cntx_ = fibers::context::active();
@@ -79,13 +78,28 @@ bool UringFiberAlgo::has_ready_fibers() const noexcept {
 
 // suspend_until halts the thread in case there are no active fibers to run on it.
 // This is done by dispatcher fiber.
-void UringFiberAlgo::suspend_until(time_point const& abs_time) noexcept {
+void UringFiberAlgo::suspend_until(const time_point& abs_time) noexcept {
   auto* cur_cntx = fibers::context::active();
 
   DCHECK(cur_cntx->is_context(fibers::type::dispatcher_context));
   if (time_point::max() != abs_time) {
-    LOG(FATAL) << "TBD";
+    auto cb = [](Proactor::IoResult, int64_t, Proactor*) { this_fiber::yield(); };
+
+    SubmitEntry se = proactor_->GetSubmitEntry(std::move(cb), 0);
+    using namespace chrono;
+    constexpr uint64_t kNsFreq = 1000000000ULL;
+
+    const chrono::time_point<steady_clock, nanoseconds>& tp = abs_time;
+    uint64_t ns = time_point_cast<nanoseconds>(tp).time_since_epoch().count();
+    ts_.tv_sec = ns / kNsFreq;
+    ts_.tv_nsec = ns - ts_.tv_sec * kNsFreq;
+
+    // Please note that we can not pass var on stack because we exit from the function
+    // before we submit to ring. That's why ts_ is a data member.
+    se.PrepTimeout(&ts_);
   }
+
+  // schedule does not block just marks main_cntx_ for activation.
   main_cntx_->get_scheduler()->schedule(main_cntx_);
 }
 
@@ -95,8 +109,8 @@ void UringFiberAlgo::suspend_until(time_point const& abs_time) noexcept {
 void UringFiberAlgo::notify() noexcept {
   DVLOG(1) << "notify from " << syscall(SYS_gettid);
 
-  // We send yield so that 1. Main context would awake and 
-  // 2. it would yield to dispatch context that will put active fibers into 
+  // We send yield so that 1. Main context would awake and
+  // 2. it would yield to dispatch context that will put active fibers into
   // ready queue.
   proactor_->AsyncBrief([] { this_fiber::yield(); });
 }
