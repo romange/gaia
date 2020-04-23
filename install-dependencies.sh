@@ -17,8 +17,9 @@ install_boost() {
     if ! [ -d $BOOST ]; then
       url="http://dl.bintray.com/boostorg/release/${BVER}/source/$BOOST.tar.bz2"
       echo "Downloading from $url"
-      wget -nv ${url} && tar -xjf $BOOST.tar.bz2
-      chown ${SUDO_USER}:${SUDO_USER} -R $BOOST.tar.bz2 $BOOST
+      if ! [ -e $BOOST.tar.bz2 ]; then wget -nv ${url} -O $BOOST.tar.bz2; fi
+
+      tar -xjf $BOOST.tar.bz2 && chown ${SUDO_USER}:${SUDO_USER} -R $BOOST.tar.bz2 $BOOST
     fi
 
     booststap_arg="--prefix=/opt/${BOOST} --without-libraries=graph_parallel,graph,wave,test,mpi,python"

@@ -26,7 +26,6 @@ using IoResult = Proactor::IoResult;
 DEFINE_int32(http_port, 8080, "Http port.");
 DEFINE_int32(port, 6380, "Redis port");
 DEFINE_uint32(queue_depth, 256, "");
-DEFINE_bool(linked_sqe, false, "If true, then no-op events are linked to the next ones");
 
 VarzQps ping_qps("ping-qps");
 
