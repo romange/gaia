@@ -47,22 +47,6 @@ void FilezHandler(const QueryArgs& args, HttpContext* send) {
   return send->Invoke(std::move(fresp));
 }
 
-class PFS : public SyncStreamInterface {
-  FiberSocket& fs_;
-
- public:
-  PFS(FiberSocket& fs) : fs_(fs) {
-  }
-
-  size_t Send(const iovec* ptr, size_t len, std::error_code* ec) final {
-    return fs_.Send(ptr, len, ec);
-  }
-
-  size_t Recv(iovec* ptr, size_t len, std::error_code* ec) final {
-    return fs_.Recv(ptr, len, ec);
-  }
-};
-
 }  // namespace
 
 HttpListenerBase::HttpListenerBase() {
@@ -122,15 +106,14 @@ void HttpHandler2::HandleRequests() {
   RequestType request;
 
   system::error_code ec;
-  AsioStreamAdapter<FiberSocket> asa(socket_);
-  PFS pfs(socket_);
+  AsioStreamAdapter<> asa(socket_);
 
   while (true) {
     h2::read(asa, buffer, request, ec);
     if (ec) {
       break;
     }
-    HttpContext cntx(&pfs);
+    HttpContext cntx(asa);
     VLOG(1) << "Full Url: " << request.target();
     HandleOne(request, &cntx);
   }

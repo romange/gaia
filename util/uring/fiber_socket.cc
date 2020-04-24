@@ -221,14 +221,13 @@ auto FiberSocket::RemoteEndpoint() const -> endpoint_type {
   return endpoint;
 }
 
-size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code* ec) {
+auto FiberSocket::Send(const iovec* ptr, size_t len) -> expected_size_t {
   CHECK(p_);
   CHECK_GT(len, 0);
   CHECK_GE(fd_, 0);
 
   if (fd_ & IS_SHUTDOWN) {
-    *ec = std::make_error_code(std::errc::connection_aborted);
-    return 0;
+    return nonstd::make_unexpected(std::make_error_code(std::errc::connection_aborted));
   }
 
   msghdr msg;
@@ -259,22 +258,19 @@ size_t FiberSocket::Send(const iovec* ptr, size_t len, error_code* ec) {
 
     LOG(FATAL) << "Unexpected error " << res << "/" << strerror(res);
   }
+  std::error_code ec(res, std::generic_category());
+  VSOCK(1) << "Error " << ec << " on " << RemoteEndpoint();
 
-  *ec = std::error_code(res, std::generic_category());
-  VSOCK(1) << "Error " << *ec << " on " << RemoteEndpoint();
-
-  return 0;
+  return nonstd::make_unexpected(std::move(ec));
 }
 
-size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code* ec) {
+auto FiberSocket::Recv(iovec* ptr, size_t len) -> expected_size_t {
   CHECK_GT(len, 0);
   CHECK(p_);
   CHECK_GE(fd_, 0);
 
   if (fd_ & IS_SHUTDOWN) {
-    *ec = std::make_error_code(std::errc::connection_aborted);
-
-    return 0;
+    return nonstd::make_unexpected(std::make_error_code(std::errc::connection_aborted));
   }
 
   msghdr msg;
@@ -313,10 +309,12 @@ size_t FiberSocket::Recv(iovec* ptr, size_t len, error_code* ec) {
 
     LOG(FATAL) << "Unexpected error " << res << "/" << strerror(res);
   }
-  *ec = std::error_code(res, std::generic_category());
-  VSOCK(1) << "Error " << *ec << " on " << RemoteEndpoint();
-
-  return 0;
+  std::error_code ec(res, std::generic_category());
+  VSOCK(1) << "Error " << ec << " on " << RemoteEndpoint();
+  expected_size_t es;
+  es.operator bool();
+  
+  return nonstd::make_unexpected(std::move(ec));
 }
 
 }  // namespace uring

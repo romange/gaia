@@ -7,26 +7,29 @@
 #include <liburing/io_uring.h>
 
 // for tcp::endpoint. Consider introducing our own.
-#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/ip/tcp.hpp>
 
 #include "absl/base/attributes.h"
+#include "util/sync_stream_interface.h"
 
 namespace util {
 namespace uring {
 
 class Proactor;
 
-class FiberSocket {
+class FiberSocket : public SyncStreamInterface {
   FiberSocket(const FiberSocket&) = delete;
   void operator=(const FiberSocket&) = delete;
 
-  explicit FiberSocket(int fd) : fd_(fd) {}
+  explicit FiberSocket(int fd) : fd_(fd) {
+  }
 
  public:
   using native_handle_type = int;
   using endpoint_type = ::boost::asio::ip::tcp::endpoint;
   using error_code = std::error_code;
+  using expected_size_t = nonstd::expected<size_t, error_code>;
 
   FiberSocket() : fd_(-1), p_(nullptr) {
   }
@@ -36,7 +39,7 @@ class FiberSocket {
     other.p_ = nullptr;
   }
 
-  ~FiberSocket();
+  virtual ~FiberSocket();
 
   FiberSocket& operator=(FiberSocket&& other) noexcept;
 
@@ -51,18 +54,18 @@ class FiberSocket {
   ABSL_MUST_USE_RESULT error_code Close();
 
   // Really need here expected.
-  size_t Send(const iovec* ptr, size_t len, error_code* ec);
+  expected_size_t Send(const iovec* ptr, size_t len) override;
 
-  size_t Send(const boost::asio::const_buffer& b, error_code* ec) {
+  expected_size_t Send(const boost::asio::const_buffer& b) {
     iovec v{const_cast<void*>(b.data()), b.size()};
-    return Send(&v, 1, ec);
+    return Send(&v, 1);
   }
 
-  size_t Recv(iovec* ptr, size_t len, error_code* ec);
+  expected_size_t Recv(iovec* ptr, size_t len) override;
 
-  size_t Recv(const boost::asio::mutable_buffer& mb, error_code* ec) {
+  expected_size_t Recv(const boost::asio::mutable_buffer& mb) {
     iovec v{mb.data(), mb.size()};
-    return Recv(&v, 1, ec);
+    return Recv(&v, 1);
   }
 
   native_handle_type native_handle() const {
@@ -84,6 +87,7 @@ class FiberSocket {
   }
 
   void set_proactor(Proactor* p) { p_ = p;}
+  
   Proactor* proactor() { return p_; }
 
   static bool IsConnClosed(const error_code& ec) {
@@ -92,8 +96,8 @@ class FiberSocket {
 
  private:
   // Gives me 512M descriptors.
-  enum { FD_MASK = 0x1fffffff};
-  enum { IS_SHUTDOWN = 0x20000000};
+  enum { FD_MASK = 0x1fffffff };
+  enum { IS_SHUTDOWN = 0x20000000 };
 
   int32_t fd_;
 

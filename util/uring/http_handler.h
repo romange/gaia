@@ -19,10 +19,10 @@ class HttpContext {
   using Response = ::boost::beast::http::response<Body>;
   using error_code = ::boost::system::error_code;
 
-  SyncStreamInterface* iface_;
+  AsioStreamAdapter<>& asa_;
 
 public:
-  explicit HttpContext(SyncStreamInterface* i) : iface_(i) {}
+  explicit HttpContext(AsioStreamAdapter<>& asa) : asa_(asa) {}
 
   template <typename Body> void Invoke(Response<Body>&& msg) {
     // Determine if we should close the connection after
@@ -34,10 +34,8 @@ public:
     msg.prepare_payload();
     ::boost::beast::http::response_serializer<Body> sr{msg};
 
-    AsioStreamAdapter<SyncStreamInterface> asa(*iface_);
-
     ::boost::system::error_code ec;
-    ::boost::beast::http::write(asa, sr, ec);
+    ::boost::beast::http::write(asa_, sr, ec);
   }
 };
 

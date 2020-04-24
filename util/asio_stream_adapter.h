@@ -6,17 +6,11 @@
 
 #include <boost/asio/detail/buffer_sequence_adapter.hpp>
 #include <boost/system/error_code.hpp>
+#include "util/sync_stream_interface.h"
 
 namespace util {
 
-class SyncStreamInterface {
-public:
-  virtual ~SyncStreamInterface() {}
-  virtual size_t Send(const iovec* ptr, size_t len, std::error_code* ec) = 0;
-  virtual size_t Recv(iovec* ptr, size_t len, std::error_code* ec) = 0;
-};
-
-template <typename Socket> class AsioStreamAdapter {
+template <typename Socket = SyncStreamInterface> class AsioStreamAdapter {
   Socket& s_;
 
  public:
@@ -50,11 +44,12 @@ size_t AsioStreamAdapter<Socket>::read_some(const MBS& bufs, error_code& ec) {
       boost::asio::mutable_buffer, const MBS&>;
   badapter bsa(bufs);
 
-  std::error_code lec;
-  auto res = s_.Recv(bsa.buffers(), bsa.count(), &lec);
-  ec = error_code(lec.value(), boost::system::system_category());
+  auto res = s_.Recv(bsa.buffers(), bsa.count());
+  if (res)
+    return res.value();
+  ec = error_code(std::move(res.error()).value(), boost::system::system_category());
 
-  return res;
+  return 0;
 }
 
 template <typename Socket>
@@ -66,10 +61,13 @@ size_t AsioStreamAdapter<Socket>::write_some(const BS& bufs, error_code& ec) {
   badapter bsa(bufs);
 
   std::error_code lec;
-  auto res = s_.Send(bsa.buffers(), bsa.count(), &lec);
-  ec = error_code(lec.value(), boost::system::system_category());
+  auto res = s_.Send(bsa.buffers(), bsa.count());
+  if (res) {
+    return res.value();
+  }
+  ec = error_code(std::move(res.error()).value(), boost::system::system_category());
 
-  return res;
+  return 0;
 }
 
 }  // namespace util
