@@ -72,6 +72,16 @@ VarzListNode*& VarzListNode::global_list() {
   return varz_global_list;
 }
 
+void VarzListNode::Iterate(std::function<void(const char*, AnyValue&&)> f) {
+  folly::RWSpinLock::ReadHolder guard(g_varz_lock);
+
+  for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
+    if (node->name_ != nullptr) {
+      f(node->name_, node->GetData());
+    }
+  }
+}
+
 auto VarzMapCount::ReadLockAndFindOrInsert(StringPiece key) -> Map::iterator {
   rw_spinlock_.lock_shared();
   auto it = map_counts_.find(key);

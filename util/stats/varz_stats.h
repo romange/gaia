@@ -29,7 +29,7 @@ class VarzListNode {
   virtual ~VarzListNode();
 
   // New interface. Func is a function accepting 'const char*' and VarzValue&&.
-  template <typename Func> static void Iterate(Func&& f);
+  static void Iterate(std::function<void(const char*, AnyValue&&)> f);
 
   // Old interface. Appends string representations of each active node in the list to res.
   // Used for outputting the current state.
@@ -158,15 +158,5 @@ template <int N> class FastVarMapCounter {
     map_count_.IncBy(buf_, val);
   }
 };
-
-template <typename Func> void VarzListNode::Iterate(Func&& f) {
-  folly::RWSpinLock::ReadHolder guard(g_varz_lock);
-
-  for (VarzListNode* node = global_list(); node != nullptr; node = node->next_) {
-    if (node->name_ != nullptr) {
-      f(node->name_, node->GetData());
-    }
-  }
-}
 
 }  // namespace util
