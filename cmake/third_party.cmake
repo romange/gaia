@@ -152,7 +152,7 @@ add_third_party(
 add_third_party(
   gtest
   GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG release-1.8.1
+  GIT_TAG release-1.10.0
   # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
   LIB libgtest.a libgmock.a
 )
@@ -192,7 +192,7 @@ set(PROTOC ${PROTOBUF_DIR}/bin/protoc)
 add_third_party(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-    GIT_TAG v3.9.0
+    GIT_TAG v3.11.4
     # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
     PATCH_COMMAND <SOURCE_DIR>/autogen.sh
 
@@ -273,7 +273,7 @@ add_third_party(
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
 add_third_party(lz4
   GIT_REPOSITORY https://github.com/lz4/lz4.git
-  GIT_TAG v1.8.3
+  GIT_TAG v1.9.2
   BUILD_IN_SOURCE 1
   UPDATE_COMMAND ""
   SOURCE_SUBDIR contrib/cmake_unofficial
@@ -341,7 +341,7 @@ ExternalProject_Add_Step(folly_project config
 set(ZSTD_DIR ${THIRD_PARTY_LIB_DIR}/zstd)
 add_third_party(zstd
   GIT_REPOSITORY https://github.com/facebook/zstd.git
-  GIT_TAG v1.4.2
+  GIT_TAG v1.4.4
   SOURCE_SUBDIR "build/cmake"
 
   # for debug pass : "CFLAGS=-fPIC -O0 -ggdb"
@@ -352,12 +352,6 @@ add_third_party(blosc
   GIT_REPOSITORY https://github.com/romange/c-blosc.git
   # GIT_TAG v1.12.1
   CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON -DDEACTIVATE_ZSTD=ON"
-)
-
-add_third_party(
-    nanoflann
-    GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
-    GIT_TAG v1.2.3
 )
 
 add_third_party(snappy
