@@ -24,7 +24,7 @@ using ListType =
     intrusive::slist<Connection, Connection::member_hook_t, intrusive::constant_time_size<true>,
                      intrusive::cache_last<false>>;
 
-struct AcceptServer::SafeConnList {
+struct ListenerInterface::SafeConnList {
   ListType list;
   fibers::mutex mu;
   fibers::condition_variable cond;
@@ -69,11 +69,15 @@ AcceptServer::~AcceptServer() {
 }
 
 void AcceptServer::Run() {
-  if (!listen_wrapper_.empty()) {
-    ref_bc_.Add(listen_wrapper_.size());
+  if (!list_interface_.empty()) {
+    ref_bc_.Add(list_interface_.size());
 
-    for (auto& lw : listen_wrapper_) {
-      lw.listener.proactor()->AsyncFiber(&AcceptServer::RunAcceptLoop, this, &lw);
+    for (auto& lw : list_interface_) {
+      auto* proactor = lw->listener_.proactor();
+      proactor->AsyncFiber([li = lw.get(), this] {
+        li->RunAcceptLoop();
+        ref_bc_.Dec();
+      });
     }
   }
   was_run_ = true;
@@ -95,13 +99,13 @@ void AcceptServer::Wait() {
     ref_bc_.Wait();
     VLOG(1) << "AcceptServer::Wait completed";
   } else {
-    CHECK(listen_wrapper_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
+    CHECK(list_interface_.empty()) << "Must Call AcceptServer::Run() after adding listeners";
   }
 }
 
 // Returns the port number to which the listener was bound.
 unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface* lii) {
-  CHECK(lii);
+  CHECK(lii && !lii->listener_.IsOpen());
 
   // We can not allow dynamic listener additions because listeners_ might reallocate.
   CHECK(!was_run_);
@@ -115,33 +119,35 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
 
   Proactor* next = pool_->GetNextProactor();
   fs.set_proactor(next);
+  lii->listener_ = std::move(fs);
 
-  listen_wrapper_.emplace_back(lii, std::move(fs));
+  list_interface_.emplace_back(lii);
 
   return ep.port();
 }
 
 void AcceptServer::BreakListeners() {
-  for (auto& lw : listen_wrapper_) {
-    lw.listener.proactor()->AsyncBrief([sock = &lw.listener] { sock->Shutdown(SHUT_RDWR); });
+  for (auto& lw : list_interface_) {
+    auto* proactor = lw->listener_.proactor();
+    proactor->AsyncBrief([sock = &lw->listener_] { sock->Shutdown(SHUT_RDWR); });
   }
   VLOG(1) << "AcceptServer::BreakListeners finished";
 }
 
 // Runs in a dedicated fiber for each listener.
-void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
+void ListenerInterface::RunAcceptLoop() {
   auto& fiber_props = this_fiber::properties<UringFiberProps>();
   fiber_props.set_name("AcceptLoop");
 
-  auto ep = lw->listener.LocalEndpoint();
-  VSOCK(0, lw->listener) << "AcceptServer - listening on port " << ep.port();
+  auto ep = listener_.LocalEndpoint();
+  VSOCK(0, listener_) << "AcceptServer - listening on port " << ep.port();
   SafeConnList safe_list;
 
-  lw->lii->PreAcceptLoop(lw->listener.proactor());
+  PreAcceptLoop(listener_.proactor());
 
   while (true) {
     FiberSocket peer;
-    std::error_code ec = lw->listener.Accept(&peer);
+    std::error_code ec = listener_.Accept(&peer);
     if (ec == errc::connection_aborted)
       break;
 
@@ -153,7 +159,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     Proactor* next = pool_->GetNextProactor();  // Could be for another thread.
 
     peer.set_proactor(next);
-    Connection* conn = lw->lii->NewConnection(next);
+    Connection* conn = NewConnection(next);
     conn->SetSocket(std::move(peer));
     safe_list.Link(conn);
 
@@ -166,7 +172,7 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
     next->AsyncFiber(std::move(cb));
   }
 
-  lw->lii->PreShutdown();
+  PreShutdown();
 
   safe_list.mu.lock();
   unsigned cnt = 0;
@@ -181,13 +187,12 @@ void AcceptServer::RunAcceptLoop(ListenerWrapper* lw) {
   VLOG(1) << "Waiting for " << cnt << " connections to close";
   safe_list.AwaitEmpty();
 
-  lw->lii->PostShutdown();
+  PostShutdown();
 
-  LOG(INFO) << "Accept server stopped for port " << ep.port();
-  ref_bc_.Dec();
+  LOG(INFO) << "Listener stopped for port " << ep.port();
 }
 
-void AcceptServer::RunSingleConnection(Connection* conn, SafeConnList* conns) {
+void ListenerInterface::RunSingleConnection(Connection* conn, SafeConnList* conns) {
   VSOCK(2, *conn) << "Running connection";
 
   std::unique_ptr<Connection> guard(conn);

@@ -11,7 +11,7 @@ namespace util {
 namespace uring {
 
 class Proactor;
-class AcceptServer;
+class ListenerInterface;
 
 class Connection {
   using connection_hook_t = ::boost::intrusive::slist_member_hook<
@@ -35,7 +35,7 @@ class Connection {
   virtual void HandleRequests() = 0;
 
   FiberSocket socket_;
-  friend class AcceptServer;
+  friend class ListenerInterface;
 };
 
 }  // namespace uring

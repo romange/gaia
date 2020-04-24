@@ -17,6 +17,50 @@ namespace uring {
 class Proactor;
 class ProactorPool;
 class Connection;
+class ListenerInterface;
+
+class AcceptServer {
+ public:
+  explicit AcceptServer(ProactorPool* pool, bool break_on_int = true);
+  ~AcceptServer();
+
+  void Run();
+
+  // If wait is false - does not wait for the server to stop.
+  // Then you need to run Wait() to wait for proper shutdown.
+  void Stop(bool wait = false);
+
+  void Wait();
+
+  // Returns the port number to which the listener was bound.
+  unsigned short AddListener(unsigned short port, ListenerInterface* cf);
+
+  void TriggerOnBreakSignal(std::function<void()> f) {
+    on_break_hook_ = std::move(f);
+  }
+
+  void set_back_log(uint16_t backlog) {
+    backlog_ = backlog;
+  }
+
+ private:
+
+  void BreakListeners();
+
+  ProactorPool* pool_;
+
+  // Called if a termination signal has been caught (SIGTERM/SIGINT).
+  std::function<void()> on_break_hook_;
+
+  std::vector<std::unique_ptr<ListenerInterface>> list_interface_;
+  fibers_ext::BlockingCounter ref_bc_;  // to synchronize listener threads during the shutdown.
+
+  bool was_run_ = false;
+  bool break_ = false;
+
+  uint16_t backlog_ = 128;
+};
+
 
 /**
  * @brief Abstracts away connections implementation and their life-cycle.
@@ -50,66 +94,18 @@ class ListenerInterface {
     return pool_;
   }
 
- private:
-  ProactorPool* pool_ = nullptr;
-};
-
-class AcceptServer {
- public:
-  explicit AcceptServer(ProactorPool* pool, bool break_on_int = true);
-  ~AcceptServer();
-
-  void Run();
-
-  // If wait is false - does not wait for the server to stop.
-  // Then you need to run Wait() to wait for proper shutdown.
-  void Stop(bool wait = false);
-
-  void Wait();
-
-  // Returns the port number to which the listener was bound.
-  unsigned short AddListener(unsigned short port, ListenerInterface* cf);
-
-  void TriggerOnBreakSignal(std::function<void()> f) {
-    on_break_hook_ = std::move(f);
-  }
-
-  void set_back_log(uint16_t backlog) {
-    backlog_ = backlog;
-  }
+  FiberSocket* listener() { return &listener_;}
 
  private:
-  struct ListenerWrapper {
-    ListenerInterface* lii;
-    FiberSocket listener;
-
-    ListenerWrapper(ListenerInterface* l, FiberSocket fs)
-        : lii(l), listener(std::move(fs)) {
-    }
-    ListenerWrapper(ListenerWrapper&&) noexcept = default;
-  };
-
   struct SafeConnList;
 
-
-  void RunAcceptLoop(ListenerWrapper* lw);
-
+  void RunAcceptLoop();
   static void RunSingleConnection(Connection* conn, SafeConnList* list);
 
-  void BreakListeners();
+  FiberSocket listener_;
 
-  ProactorPool* pool_;
-
-  // Called if a termination signal has been caught (SIGTERM/SIGINT).
-  std::function<void()> on_break_hook_;
-
-  std::vector<ListenerWrapper> listen_wrapper_;
-  fibers_ext::BlockingCounter ref_bc_;  // to synchronize listener threads during the shutdown.
-
-  bool was_run_ = false;
-  bool break_ = false;
-
-  uint16_t backlog_ = 128;
+  ProactorPool* pool_ = nullptr;
+  friend class AcceptServer;
 };
 
 }  // namespace uring
