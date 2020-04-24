@@ -84,10 +84,9 @@ int main(int argc, char* argv[]) {
 
   uring::AcceptServer uring_acceptor(&pp);
   uring_acceptor.AddListener(FLAGS_port, new PingListener);
-  uring::HttpListener<> http;
-
   if (FLAGS_http_port >= 0) {
-    uint16_t port = uring_acceptor.AddListener(FLAGS_http_port, &http);
+
+    uint16_t port = uring_acceptor.AddListener(FLAGS_http_port, new uring::HttpListener<>);
     LOG(INFO) << "Started http server on port " << port;
   }
 

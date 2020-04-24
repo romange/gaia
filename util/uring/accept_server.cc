@@ -66,6 +66,7 @@ AcceptServer::AcceptServer(ProactorPool* pool, bool break_on_int)
 }
 
 AcceptServer::~AcceptServer() {
+  list_interface_.clear();
 }
 
 void AcceptServer::Run() {
@@ -190,6 +191,11 @@ void ListenerInterface::RunAcceptLoop() {
   PostShutdown();
 
   LOG(INFO) << "Listener stopped for port " << ep.port();
+}
+
+
+ListenerInterface::~ListenerInterface() {
+  VLOG(1) << "Destroying ListenerInterface " << this;
 }
 
 void ListenerInterface::RunSingleConnection(Connection* conn, SafeConnList* conns) {

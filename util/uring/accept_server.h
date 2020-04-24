@@ -68,8 +68,7 @@ class AcceptServer {
  */
 class ListenerInterface {
  public:
-  virtual ~ListenerInterface() {
-  }
+  virtual ~ListenerInterface();
 
   void RegisterPool(ProactorPool* pool);
 
