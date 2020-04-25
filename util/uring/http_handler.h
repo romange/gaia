@@ -56,6 +56,9 @@ class HttpListenerBase : public ListenerInterface {
   // Returns true if a callback was registered.
   bool RegisterCb(StringPiece path, RequestCb cb);
 
+  void set_resource_prefix(const char* prefix) { resource_prefix_ = prefix; }
+  void set_favicon(const char* favicon) { favicon_ = favicon;}
+
  private:
   bool HandleRoot(const RequestType& rt, HttpContext* cntx) const;
 

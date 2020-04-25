@@ -69,7 +69,7 @@ StringResponse BuildStatusPage(const QueryArgs& args, const char* resource_prefi
     <script type="text/javascript" src="{s3_path}/status_page.js"></script>
 </head>
 <body>
-<div><img src='{s3_path}/logo.png'/></div>)";
+<div><img src='{s3_path}/logo.png' width="160"/></div>)";
 
   a = absl::StrReplaceAll(a, {{"{s3_path}", resource_prefix}});
 
