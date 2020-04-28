@@ -112,7 +112,7 @@ auto FiberSocket::Close() -> error_code {
   return ec;
 }
 
-auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
+auto FiberSocket::Listen(unsigned port, unsigned backlog, uint32_t sock_opts_mask) -> error_code {
   CHECK_EQ(fd_, -1) << "Close socket before!";
 
   error_code ec;
@@ -121,7 +121,14 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog) -> error_code {
     return ec;
 
   const int val = 1;
-  setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+  for (int opt = 1; sock_opts_mask; ++opt) {
+    if (sock_opts_mask & 1) {
+      if (setsockopt(fd_, SOL_SOCKET, opt, &val, sizeof(val)) < 0) {
+        LOG(WARNING) << "setsockopt: could not set opt " << opt << ", " << strerror(errno);
+      }
+    }
+    sock_opts_mask >>= 1;
+  }
 
   sockaddr_in server_addr;
   memset(&server_addr, 0, sizeof(server_addr));
@@ -313,7 +320,7 @@ auto FiberSocket::Recv(iovec* ptr, size_t len) -> expected_size_t {
   VSOCK(1) << "Error " << ec << " on " << RemoteEndpoint();
   expected_size_t es;
   es.operator bool();
-  
+
   return nonstd::make_unexpected(std::move(ec));
 }
 

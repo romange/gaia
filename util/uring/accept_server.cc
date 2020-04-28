@@ -112,7 +112,8 @@ unsigned short AcceptServer::AddListener(unsigned short port, ListenerInterface*
   CHECK(!was_run_);
 
   FiberSocket fs;
-  auto ec = fs.Listen(port, backlog_);
+  uint32_t sock_opt_mask = lii->GetSockOptMask();
+  auto ec = fs.Listen(port, backlog_, sock_opt_mask);
   CHECK(!ec) << "Could not open port " << port << " " << ec << "/" << ec.message();
 
   auto ep = fs.LocalEndpoint();

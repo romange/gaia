@@ -43,7 +43,10 @@ class FiberSocket : public SyncStreamInterface {
 
   FiberSocket& operator=(FiberSocket&& other) noexcept;
 
-  ABSL_MUST_USE_RESULT error_code Listen(unsigned port, unsigned backlog);
+  // sock_opts are the bit mask of sockopt values shifted left, i.e.
+  // (1 << SO_REUSEADDR) | (1 << SO_DONTROUTE), for example.
+  ABSL_MUST_USE_RESULT error_code Listen(unsigned port, unsigned backlog,
+                                         uint32_t sock_opts_mask = 0);
 
   ABSL_MUST_USE_RESULT error_code Accept(FiberSocket* peer);
 
@@ -87,7 +90,7 @@ class FiberSocket : public SyncStreamInterface {
   }
 
   void set_proactor(Proactor* p) { p_ = p;}
-  
+
   Proactor* proactor() { return p_; }
 
   static bool IsConnClosed(const error_code& ec) {

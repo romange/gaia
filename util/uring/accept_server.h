@@ -88,6 +88,8 @@ class ListenerInterface {
   virtual void PostShutdown() {
   }
 
+  virtual uint32_t GetSockOptMask() const { return 1 << SO_REUSEADDR; }
+
  protected:
   ProactorPool* pool() {
     return pool_;
