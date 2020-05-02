@@ -77,7 +77,7 @@ bool UringFiberAlgo::has_ready_fibers() const noexcept {
 }
 
 // suspend_until halts the thread in case there are no active fibers to run on it.
-// This is done by dispatcher fiber.
+// This function is called by dispatcher fiber.
 void UringFiberAlgo::suspend_until(const time_point& abs_time) noexcept {
   auto* cur_cntx = fibers::context::active();
 
@@ -85,6 +85,20 @@ void UringFiberAlgo::suspend_until(const time_point& abs_time) noexcept {
   if (time_point::max() != abs_time) {
     auto cb = [](Proactor::IoResult, int64_t, Proactor*) { this_fiber::yield(); };
 
+    // TODO: if we got here, most likely our completion queues were empty so
+    // it's unlikely that we will have full submit queue but this state may happen.
+    // GetSubmitEntry may block which may cause a deadlock since our main loop is not
+    // running (it's probably in suspend mode letting dispatcher fiber to run).
+    // Therefore we must use here non blocking calls.
+    // But what happens if SQ is full?
+    // SQ is full we can not use IoUring to schedule awake event, our CQ queue is empty so
+    // we have nothing to process. We might want to give up on this timer and just wait on CQ
+    // since we know something might come up. On the other hand, imagine we send requests on sockets
+    // but they all do not answer so SQ is eventually full, CQ is empty and our IO loop is overflown
+    // and no entries could be processed.
+    // We must reproduce this case: small SQ/CQ. Fill SQ/CQ with alarms that expire in a long time.
+    // So at some point SQ-push returns EBUSY. Now we call this_fiber::sleep and we GetSubmitEntry
+    // would block.
     SubmitEntry se = proactor_->GetSubmitEntry(std::move(cb), 0);
     using namespace chrono;
     constexpr uint64_t kNsFreq = 1000000000ULL;
@@ -109,10 +123,14 @@ void UringFiberAlgo::suspend_until(const time_point& abs_time) noexcept {
 void UringFiberAlgo::notify() noexcept {
   DVLOG(1) << "notify from " << syscall(SYS_gettid);
 
-  // We send yield so that 1. Main context would awake and
-  // 2. it would yield to dispatch context that will put active fibers into
+  // We signal so that
+  // 1. Main context should awake if it is not
+  // 2. it needs to yield to dispatch context that will put active fibers into
   // ready queue.
-  proactor_->AsyncBrief([] { this_fiber::yield(); });
+  auto prev_val = proactor_->tq_seq_.fetch_or(1, std::memory_order_relaxed);
+  if (prev_val == Proactor::WAIT_SECTION_STATE) {
+    proactor_->WakeRing();
+  }
 }
 
 }  // namespace uring

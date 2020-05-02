@@ -200,6 +200,11 @@ void Proactor::Run(unsigned ring_depth) {
       DispatchCompletions(cqes, cqe_count);
     }
 
+    if (tq_seq & 1) {   // We allow dispatch fiber to run.
+      tq_seq_.fetch_and(~1, std::memory_order_relaxed);
+      this_fiber::yield();
+    }
+
     if (sched->has_ready_fibers()) {
       // Suspend this fiber until others will run and get blocked.
       // Eventually UringFiberAlgo will resume back this fiber in suspend_until
@@ -238,7 +243,9 @@ void Proactor::Run(unsigned ring_depth) {
 
       tq_seq = 0;
       ++num_stalls;
-      tq_seq_.store(0, std::memory_order_release);
+
+      // Reset all except the LSB bit that signals that we need to switch to dispatch fiber.
+      tq_seq_.fetch_and(1, std::memory_order_release);
     }
   }
 

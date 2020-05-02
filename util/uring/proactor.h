@@ -119,7 +119,7 @@ class Proactor {
   void WakeRing();
 
   void WakeupIfNeeded() {
-    auto current = tq_seq_.fetch_add(1, std::memory_order_relaxed);
+    auto current = tq_seq_.fetch_add(2, std::memory_order_relaxed);
     if (current == WAIT_SECTION_STATE) {
       WakeRing();
     }
