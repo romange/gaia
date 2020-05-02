@@ -121,7 +121,7 @@ auto FiberSocket::Listen(unsigned port, unsigned backlog, uint32_t sock_opts_mas
     return ec;
 
   const int val = 1;
-  for (int opt = 1; sock_opts_mask; ++opt) {
+  for (int opt = 0; sock_opts_mask; ++opt) {
     if (sock_opts_mask & 1) {
       if (setsockopt(fd_, SOL_SOCKET, opt, &val, sizeof(val)) < 0) {
         LOG(WARNING) << "setsockopt: could not set opt " << opt << ", " << strerror(errno);
