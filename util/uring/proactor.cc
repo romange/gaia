@@ -12,6 +12,7 @@
 #include <boost/fiber/operations.hpp>
 #include <boost/fiber/scheduler.hpp>
 
+#include "absl/base/attributes.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "util/uring/uring_fiber_algo.h"
@@ -43,7 +44,7 @@ inline int sys_io_uring_enter(int fd, unsigned to_submit, unsigned min_complete,
   return syscall(__NR_io_uring_enter, fd, to_submit, min_complete, flags, sig, _NSIG / 8);
 }
 
-inline int wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
+ABSL_ATTRIBUTE_NOINLINE int wait_for_cqe(io_uring* ring, sigset_t* sig = NULL) {
   // res must be 0 or -1.
   int res = sys_io_uring_enter(ring->ring_fd, 0, 1, IORING_ENTER_GETEVENTS, sig);
   if (res == 0 || errno == EINTR)

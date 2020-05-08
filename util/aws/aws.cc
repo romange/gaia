@@ -159,7 +159,7 @@ void AWS::Sign(absl::string_view domain,
     query_string = absl_sv(req->target().substr(pos + 1));
 
     // We must sign query string with params in alphabetical order
-    vector<absl::string_view> params = absl::StrSplit(query_string, "&");
+    vector<absl::string_view> params = absl::StrSplit(query_string, "&", absl::SkipWhitespace{});
     sort(params.begin(), params.end());
     canonical_querystring = absl::StrJoin(params, "&");
   }

@@ -21,10 +21,16 @@ class AWS {
 
   Status Init();
 
+  // TODO: we should remove domain argument in favor to subdomain (bucket).
+  // and build the whole domain it from service and region
+  // for example, "<bucket>.s3.eu-west-1.amazonaws.com"
+  // See: https://docs.aws.amazon.com/general/latest/gr/s3.html
+  //
   void Sign(absl::string_view domain,
             ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) const;
 
   static ::boost::asio::ssl::context CheckedSslContext();
+
  private:
   std::string region_id_, service_, secret_, access_key_;
 

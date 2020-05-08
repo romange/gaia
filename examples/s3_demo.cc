@@ -29,8 +29,24 @@ using namespace boost;
 using namespace util;
 namespace h2 = beast::http;
 
-DEFINE_string(prefix, "", "");
+DEFINE_string(prefix, "", "In form of 'bucket/someprefix' without s3:// part");
+DEFINE_string(region, "us-east-1", "");
 DEFINE_bool(get, false, "");
+DEFINE_bool(list_recursive, false, "If true, will recursively list all objects in the bucket");
+
+/***
+ *  We do not need SSL for working with s3, connecting to port 80 also works: s3cmd  --debug --no-ssl ls
+ *  We should be able to retry with correct region per bucket operation.
+ *
+ * <Error><Code>AuthorizationHeaderMalformed</Code>
+   <Message>The authorization header is malformed; the region 'eu-west-1' is wrong; expecting 'us-east-1'
+   </Message>
+   <Region>us-east-1</Region>
+   <RequestId>9AB4D15F1C4F2F8E</RequestId>
+   <HostId>n7h1hPY8qs7a40qT1QjWbydm/CE3r9Jqb4rRNUAkVZVkXQezqmNOBvpzwxMMnm7NRZXkEGBT6sg=</HostId>
+   </Error>
+ *
+ **/
 
 // TODO: those are used in gcs_utils as well. CreateSslContext is used in gce.
 using bb_str_view = ::boost::beast::string_view;
@@ -73,11 +89,12 @@ http::SslContextResult CreateSslContext() {
 
 const char kRootDomain[] = "s3.amazonaws.com";
 
-void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
+void ListObjects(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   size_t pos = FLAGS_prefix.find('/');
   CHECK_NE(string::npos, pos);
   string bucket = FLAGS_prefix.substr(0, pos);
-  string key = FLAGS_prefix.substr(pos + 1);
+  string prefix = FLAGS_prefix.substr(pos + 1);
+  LOG(INFO) << "Listing bucket " << bucket << ", prefix " << prefix;
 
   string domain = absl::StrCat(bucket, ".", kRootDomain);
 
@@ -89,7 +106,7 @@ void List(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
     cout << name << ":" << sz << endl;
   };
 
-  S3Bucket::ListObjectResult result = s3bucket.List(key, true, cb);
+  S3Bucket::ListObjectResult result = s3bucket.List(prefix, !FLAGS_list_recursive, cb);
   CHECK_STATUS(result);
 }
 
@@ -151,7 +168,7 @@ int main(int argc, char** argv) {
 
   IoContext& io_context = pool.GetNextContext();
 
-  AWS aws{"us-east-1", "s3"};
+  AWS aws{FLAGS_region, "s3"};
 
   CHECK_STATUS(aws.Init());
 

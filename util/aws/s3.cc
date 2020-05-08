@@ -75,7 +75,7 @@ class S3ReadFile : public ReadonlyFile {
   using error_code = ::boost::system::error_code;
   using Parser = h2::response_parser<h2::buffer_body>;
 
-  // does not own gcs object, only wraps it with ReadonlyFile interface.
+  // does not own pool object, only wraps it with ReadonlyFile interface.
   S3ReadFile(const AWS& aws, HttpsClientPool* pool, string read_obj_url)
       : aws_(aws), pool_(pool), read_obj_url_(std::move(read_obj_url)) {
   }
@@ -259,8 +259,12 @@ S3Bucket::S3Bucket(const AWS& aws, http::HttpsClientPool* pool) : aws_(aws), poo
 auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> ListObjectResult {
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
 
-  string url{"/?prefix="};
-  strings::AppendEncodedUrl(glob, &url);
+  string url{"/?"};
+
+  if (!glob.empty()) {
+    url.append("&prefix=");
+    strings::AppendEncodedUrl(glob, &url);
+  }
 
   if (fs_mode) {
     url.append("&delimeter=");
@@ -271,6 +275,7 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
   h2::response<h2::string_body> resp;
 
   aws_.Sign(pool_->domain(), &req);
+  VLOG(1) << "Req: " << req;
 
   system::error_code ec = handle->Send(req, &resp);
 
@@ -310,6 +315,8 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
   h2::response<h2::string_body> resp;
 
   aws.Sign(S3Bucket::kRootDomain, &req);
+
+  VLOG(1) << "Req: " << req;
 
   system::error_code ec = handle->Send(req, &resp);
 
