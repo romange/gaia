@@ -2,6 +2,8 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include "util/aws/s3.h"
+
 #include <libxml/xpath.h>
 #include <libxml/xpathInternals.h>
 
@@ -13,12 +15,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/strip.h"
-
+#include "absl/types/optional.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
-
 #include "util/aws/aws.h"
-#include "util/aws/s3.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
@@ -248,8 +248,90 @@ Status S3ReadFile::Close() {
   return Status::OK;
 }
 
+std::pair<size_t, absl::string_view> ParseXmlObjContents(xmlNodePtr node) {
+  std::pair<size_t, absl::string_view> res;
+
+  for (xmlNodePtr child = node->children; child != node->last; child = child->next) {
+    if (child->type == XML_ELEMENT_NODE) {
+      xmlNodePtr grand = child->children;
+
+      if (!strcmp(as_char(child->name), "Key")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        res.second = absl::string_view(as_char(grand->content));
+      } else if (!strcmp(as_char(child->name), "Size")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        CHECK(absl::SimpleAtoi(as_char(grand->content), &res.first));
+      }
+    }
+  }
+  return res;
+}
+
 }  // namespace
 
+namespace detail {
+
+std::vector<std::string> ParseXmlListBuckets(absl::string_view xml_resp) {
+  xmlDocPtr doc = xmlReadMemory(xml_resp.data(), xml_resp.size(), NULL, NULL, 0);
+  CHECK(doc);
+
+  xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
+
+  auto register_res = xmlXPathRegisterNs(xpathCtx, BAD_CAST "NS",
+                                         BAD_CAST "http://s3.amazonaws.com/doc/2006-03-01/");
+  CHECK_EQ(register_res, 0);
+
+  xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(
+      BAD_CAST "/NS:ListAllMyBucketsResult/NS:Buckets/NS:Bucket/NS:Name", xpathCtx);
+  CHECK(xpathObj);
+  xmlNodeSetPtr nodes = xpathObj->nodesetval;
+  std::vector<std::string> res;
+  if (nodes) {
+    int size = nodes->nodeNr;
+    for (int i = 0; i < size; ++i) {
+      xmlNodePtr cur = nodes->nodeTab[i];
+      CHECK_EQ(XML_ELEMENT_NODE, cur->type);
+      CHECK(cur->ns);
+      CHECK(nullptr == cur->content);
+
+      if (cur->children && cur->last == cur->children && cur->children->type == XML_TEXT_NODE) {
+        CHECK(cur->children->content);
+        res.push_back(as_char(cur->children->content));
+      }
+    }
+  }
+
+  xmlXPathFreeObject(xpathObj);
+  xmlXPathFreeContext(xpathCtx);
+  xmlFreeDoc(doc);
+
+  return res;
+}
+
+void ParseXmlListObj(absl::string_view xml_obj, S3Bucket::ListObjectCb cb) {
+  xmlDocPtr doc = xmlReadMemory(xml_obj.data(), xml_obj.size(), NULL, NULL, 0);
+  CHECK(doc);
+
+  xmlNodePtr root = xmlDocGetRootElement(doc);
+  CHECK_STREQ("ListBucketResult", as_char(root->name));
+
+  for (xmlNodePtr child = root->children; child != root->last; child = child->next) {
+    if (child->type == XML_ELEMENT_NODE) {
+      xmlNodePtr grand = child->children;
+      if (!strcmp(as_char(child->name), "IsTruncated")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        CHECK_STREQ("false", as_char(grand->content)) << "TBD";
+      } else if (!strcmp(as_char(child->name), "Marker")) {
+      } else if (!strcmp(as_char(child->name), "Contents")) {
+        auto sz_name = ParseXmlObjContents(child);
+        cb(sz_name.first, sz_name.second);
+      }
+    }
+  }
+  xmlFreeDoc(doc);
+}
+
+}  // namespace detail
 
 const char* S3Bucket::kRootDomain = "s3.amazonaws.com";
 
@@ -267,7 +349,7 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
   }
 
   if (fs_mode) {
-    url.append("&delimeter=");
+    url.append("&delimiter=");
     strings::AppendEncodedUrl("/", &url);
   }
 
@@ -288,8 +370,9 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
 
     return Status(StatusCode::IO_ERROR, string(resp.reason()));
   }
-
   VLOG(1) << "ListResp: " << resp;
+  detail::ParseXmlListObj(resp.body(), std::move(cb));
+
   return Status::OK;
 }
 
@@ -332,41 +415,7 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
 
   VLOG(1) << "ListS3Buckets: " << resp;
 
-  std::vector<std::string> res;
-
-  xmlDocPtr doc = xmlReadMemory(resp.body().data(), resp.body().size(), NULL, NULL, 0);
-  CHECK(doc);
-
-  xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
-
-  auto register_res = xmlXPathRegisterNs(xpathCtx, BAD_CAST "NS",
-                                         BAD_CAST "http://s3.amazonaws.com/doc/2006-03-01/");
-  CHECK_EQ(register_res, 0);
-
-  xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(
-      BAD_CAST "/NS:ListAllMyBucketsResult/NS:Buckets/NS:Bucket/NS:Name", xpathCtx);
-  CHECK(xpathObj);
-  xmlNodeSetPtr nodes = xpathObj->nodesetval;
-  if (nodes) {
-    int size = nodes->nodeNr;
-    for (int i = 0; i < size; ++i) {
-      xmlNodePtr cur = nodes->nodeTab[i];
-      CHECK_EQ(XML_ELEMENT_NODE, cur->type);
-      CHECK(cur->ns);
-      CHECK(nullptr == cur->content);
-
-      if (cur->children && cur->last == cur->children && cur->children->type == XML_TEXT_NODE) {
-        CHECK(cur->children->content);
-        res.push_back(as_char(cur->children->content));
-      }
-    }
-  }
-
-  xmlXPathFreeObject(xpathObj);
-  xmlXPathFreeContext(xpathCtx);
-  xmlFreeDoc(doc);
-
-  return res;
+  return detail::ParseXmlListBuckets(resp.body());
 }
 
 StatusObject<file::ReadonlyFile*> OpenS3ReadFile(absl::string_view key_path, const AWS& aws,
@@ -382,7 +431,6 @@ StatusObject<file::ReadonlyFile*> OpenS3ReadFile(absl::string_view key_path, con
 
   return fl.release();
 }
-
 
 bool IsS3Path(absl::string_view path) {
   return absl::StartsWith(path, kS3Url);

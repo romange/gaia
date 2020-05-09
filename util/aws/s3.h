@@ -2,6 +2,7 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include <functional>
 #include "file/file.h"
 #include "util/status.h"
 
@@ -32,13 +33,13 @@ class S3Bucket {
   S3Bucket(const AWS& aws, http::HttpsClientPool* pool);
 
   /** @brief Lists objects for a particular bucket.
-  *
-  *  In s3 the bucket is determined by the dns "mybucket.s3.amazonaws.com"
-  *  so unlike in GCS, in S3 api the http pool dns destination determines which bucket
-  *  we are going to list.
-  *  glob contains the object prefix path not including the bucket part.
-  *  if fs_mode is true returns all paths upto the delimeter '/'.
-  */
+   *
+   *  In s3 the bucket is determined by the dns "mybucket.s3.amazonaws.com"
+   *  so unlike in GCS, in S3 api the http pool dns destination determines which bucket
+   *  we are going to list.
+   *  glob contains the object prefix path not including the bucket part.
+   *  if fs_mode is true returns all paths upto the delimeter '/'.
+   */
   ListObjectResult List(absl::string_view glob, bool fs_mode, ListObjectCb cb);
 
   static bool SplitToBucketPath(absl::string_view input, absl::string_view* bucket,
@@ -46,11 +47,10 @@ class S3Bucket {
 
   static std::string ToFullPath(absl::string_view bucket, absl::string_view key_path);
 
-private:
+ private:
   const AWS& aws_;
   http::HttpsClientPool* pool_;
 };
-
 
 using ListS3BucketResult = util::StatusObject<std::vector<std::string>>;
 
@@ -72,5 +72,12 @@ StatusObject<file::ReadonlyFile*> OpenS3ReadFile(
     const file::ReadonlyFile::Options& opts = file::ReadonlyFile::Options{});
 
 bool IsS3Path(absl::string_view path);
+
+namespace detail {
+
+std::vector<std::string> ParseXmlListBuckets(absl::string_view xml_obj);
+void ParseXmlListObj(absl::string_view xml_obj, S3Bucket::ListObjectCb cb);
+
+}  // namespace detail
 
 }  // namespace util

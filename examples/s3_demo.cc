@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
     if (FLAGS_get) {
       io_context.AwaitSafe([&] { Get(ssl_cntx, &aws, &io_context); });
     } else {
-      io_context.AwaitSafe([&] { List(ssl_cntx, &aws, &io_context); });
+      io_context.AwaitSafe([&] { ListObjects(ssl_cntx, &aws, &io_context); });
     }
   }
   return 0;
