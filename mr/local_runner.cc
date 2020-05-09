@@ -36,6 +36,8 @@ DEFINE_bool(local_runner_raw_shortcut_read, false,
             "into records and calling mappers. Used for testing the IO read path.");
 DEFINE_uint32(cloud_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to "
                                                "cloud storage");
+DEFINE_string(local_runner_s3_region, "us-east-1",
+              "Region where bucket is located. We should eliminate this flag at some point");
 
 using namespace util;
 using namespace boost;
@@ -101,7 +103,7 @@ struct LocalRunner::Impl {
   string data_dir;
   fibers_ext::FiberQueueThreadPool fq_pool_;
   std::atomic_bool stop_signal_{false};
-  std::atomic_ulong file_cache_hit_bytes_{0}, input_gcs_conn_{0};
+  std::atomic_ulong file_cache_hit_bytes_{0}, input_cloud_conn_{0};
   const pb::Operator* current_op_ = nullptr;
 
   fibers::mutex cloud_mu_;
@@ -156,19 +158,25 @@ class LocalRunner::Impl::Source {
   file::FiberReadOptions::Stats stats_;
 
   std::unique_ptr<file::ReadonlyFile> rd_file_;
-  bool is_gcs_ = false;
+  enum Type {LOCAL, S3, GCS} type_ = LOCAL;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
 
 Status LocalRunner::Impl::Source::Open() {
-  is_gcs_ = IsGcsPath(fname_);
+  if (IsGcsPath(fname_)) {
+    type_ = GCS;
+  } else if (util::IsS3Path(fname_)) {
+    type_ = S3;
+  }
 
   StatusObject<file::ReadonlyFile*> fl_res;
-  if (is_gcs_) {
+  if (type_ == GCS) {
     fl_res = impl_->OpenGcsFile(fname_);
-  } else {
+  } else if (type_ == LOCAL) {
     fl_res = impl_->OpenLocalFile(fname_, &stats_);
+  } else {
+    LOG(FATAL) << "Not supported " << type_;
   }
 
   if (fl_res.ok()) {
@@ -193,8 +201,8 @@ size_t LocalRunner::Impl::Source::Process(pb::WireFormat::Type type, RawSinkCb c
       break;
   }
 
-  if (is_gcs_) {
-    impl_->input_gcs_conn_.fetch_sub(1, std::memory_order_acq_rel);
+  if (type_ != LOCAL) {
+    impl_->input_cloud_conn_.fetch_sub(1, std::memory_order_acq_rel);
   } else {  // local file
     VLOG(1) << "Read Stats (disk read/cached/read_cnt/preempts): " << stats_;
 
@@ -244,19 +252,19 @@ VarzValue::Map LocalRunner::Impl::GetStats() const {
   VarzValue::Map map;
 
   auto start = base::GetMonotonicMicrosFast();
-  std::atomic_uint total_gcs_connections{0};
+  std::atomic_uint total_cloud_connections{0};
 
   io_pool_->AwaitOnAll([&](IoContext&) {
     if (!per_thread_)
       return;
     auto& maybe_pool = per_thread_->api_conn_pool;
     if (maybe_pool.has_value()) {
-      total_gcs_connections.fetch_add(maybe_pool->handles_count(), std::memory_order_acq_rel);
+      total_cloud_connections.fetch_add(maybe_pool->handles_count(), std::memory_order_acq_rel);
     }
   });
 
-  map.emplace_back("input-gcs-connections", VarzValue::FromInt(input_gcs_conn_.load()));
-  map.emplace_back("total-gcs-connections", VarzValue::FromInt(total_gcs_connections.load()));
+  map.emplace_back("input-cloud-connections", VarzValue::FromInt(input_cloud_conn_.load()));
+  map.emplace_back("total-cloud-connections", VarzValue::FromInt(total_cloud_connections.load()));
   map.emplace_back("stats-latency", VarzValue::FromInt(base::GetMonotonicMicrosFast() - start));
 
   return map;
@@ -425,7 +433,7 @@ StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::stri
   CHECK(IsGcsPath(filename));
   LazyGcsInit();
 
-  input_gcs_conn_.fetch_add(1, std::memory_order_acq_rel);
+  input_cloud_conn_.fetch_add(1, std::memory_order_relaxed);
   auto pt = per_thread_.get();
   return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
 }
@@ -465,8 +473,8 @@ void LocalRunner::Impl::LazyAwsInit() {
   if (aws_handle_)
     return;
 
-  // TODO: to suport multiple regions.
-  aws_handle_.reset(new AWS{"us-east-1", "s3"});
+  // TODO: AWS should not have region argument.
+  aws_handle_.reset(new AWS{FLAGS_local_runner_s3_region, "s3"});
 
   CHECK_STATUS(aws_handle_->Init());
 }

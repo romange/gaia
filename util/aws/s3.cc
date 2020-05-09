@@ -251,7 +251,7 @@ Status S3ReadFile::Close() {
 std::pair<size_t, absl::string_view> ParseXmlObjContents(xmlNodePtr node) {
   std::pair<size_t, absl::string_view> res;
 
-  for (xmlNodePtr child = node->children; child != node->last; child = child->next) {
+  for (xmlNodePtr child = node->children; child; child = child->next) {
     if (child->type == XML_ELEMENT_NODE) {
       xmlNodePtr grand = child->children;
 
@@ -315,7 +315,7 @@ void ParseXmlListObj(absl::string_view xml_obj, S3Bucket::ListObjectCb cb) {
   xmlNodePtr root = xmlDocGetRootElement(doc);
   CHECK_STREQ("ListBucketResult", as_char(root->name));
 
-  for (xmlNodePtr child = root->children; child != root->last; child = child->next) {
+  for (xmlNodePtr child = root->children; child; child = child->next) {
     if (child->type == XML_ELEMENT_NODE) {
       xmlNodePtr grand = child->children;
       if (!strcmp(as_char(child->name), "IsTruncated")) {
