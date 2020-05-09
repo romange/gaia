@@ -55,38 +55,6 @@ inline absl::string_view absl_sv(const bb_str_view s) {
   return absl::string_view{s.data(), s.size()};
 }
 
-http::SslContextResult CreateSslContext() {
-  system::error_code ec;
-  asio::ssl::context cntx{asio::ssl::context::tlsv12_client};
-  cntx.set_options(boost::asio::ssl::context::default_workarounds |
-                   boost::asio::ssl::context::no_compression | boost::asio::ssl::context::no_sslv2 |
-                   boost::asio::ssl::context::no_sslv3 | boost::asio::ssl::context::no_tlsv1 |
-                   boost::asio::ssl::context::no_tlsv1_1);
-  cntx.set_verify_mode(asio::ssl::verify_peer, ec);
-  if (ec) {
-    return http::SslContextResult(ec);
-  }
-  // cntx.add_certificate_authority(asio::buffer(cert_string.data(), cert_string.size()), ec);
-  cntx.load_verify_file("/etc/ssl/certs/ca-certificates.crt", ec);
-  if (ec) {
-    return http::SslContextResult(ec);
-  }
-
-#if 0
-  SSL_CTX* ssl_cntx = cntx.native_handle();
-
-  long flags = SSL_CTX_get_options(ssl_cntx);
-  flags |= SSL_OP_CIPHER_SERVER_PREFERENCE;
-  SSL_CTX_set_options(ssl_cntx, flags);
-
-  constexpr char kCiphers[] = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256";
-  CHECK_EQ(1, SSL_CTX_set_cipher_list(ssl_cntx, kCiphers));
-  CHECK_EQ(1, SSL_CTX_set_ecdh_auto(ssl_cntx, 1));
-#endif
-
-  return http::SslContextResult(std::move(cntx));
-}
-
 const char kRootDomain[] = "s3.amazonaws.com";
 
 void ListObjects(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
@@ -159,9 +127,7 @@ void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) 
 int main(int argc, char** argv) {
   MainInitGuard guard(&argc, &argv);
 
-  auto res = CreateSslContext();
-  asio::ssl::context* ssl_cntx = absl::get_if<asio::ssl::context>(&res);
-  CHECK(ssl_cntx) << absl::get<system::error_code>(res);
+  asio::ssl::context ssl_cntx = AWS::CheckedSslContext();
 
   IoContextPool pool;
   pool.Run();
@@ -173,12 +139,12 @@ int main(int argc, char** argv) {
   CHECK_STATUS(aws.Init());
 
   if (FLAGS_prefix.empty()) {
-    io_context.AwaitSafe([&] { ListBuckets(ssl_cntx, &aws, &io_context); });
+    io_context.AwaitSafe([&] { ListBuckets(&ssl_cntx, &aws, &io_context); });
   } else {
     if (FLAGS_get) {
-      io_context.AwaitSafe([&] { Get(ssl_cntx, &aws, &io_context); });
+      io_context.AwaitSafe([&] { Get(&ssl_cntx, &aws, &io_context); });
     } else {
-      io_context.AwaitSafe([&] { ListObjects(ssl_cntx, &aws, &io_context); });
+      io_context.AwaitSafe([&] { ListObjects(&ssl_cntx, &aws, &io_context); });
     }
   }
   return 0;

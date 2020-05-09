@@ -9,22 +9,18 @@
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/walltime.h"
-
 #include "file/fiber_file.h"
 #include "file/file_util.h"
 #include "file/filesource.h"
 #include "file/list_file_reader.h"
-
 #include "mr/do_context.h"
 #include "mr/impl/local_context.h"
-
 #include "util/asio/io_context_pool.h"
 #include "util/aws/aws.h"
 #include "util/aws/s3.h"
 #include "util/fibers/fiberqueue_threadpool.h"
 #include "util/gce/gcs.h"
 #include "util/http/https_client_pool.h"
-
 #include "util/stats/varz_stats.h"
 #include "util/zlib_source.h"
 
@@ -34,8 +30,9 @@ DEFINE_uint32(local_runner_prefetch_size, 1 << 16, "File input prefetch size");
 DEFINE_bool(local_runner_raw_shortcut_read, false,
             "If true, reads the input without parsing it "
             "into records and calling mappers. Used for testing the IO read path.");
-DEFINE_uint32(cloud_connect_deadline_ms, 2000, "Deadline in milliseconds when connecting to "
-                                               "cloud storage");
+DEFINE_uint32(cloud_connect_deadline_ms, 2000,
+              "Deadline in milliseconds when connecting to "
+              "cloud storage");
 DEFINE_string(local_runner_s3_region, "us-east-1",
               "Region where bucket is located. We should eliminate this flag at some point");
 
@@ -81,6 +78,8 @@ struct LocalRunner::Impl {
                                                   file::FiberReadOptions::Stats* stats);
 
   StatusObject<file::ReadonlyFile*> OpenGcsFile(const std::string& filename);
+  StatusObject<file::ReadonlyFile*> OpenS3File(const std::string& filename);
+
   void ShutDown();
 
   RawContext* NewContext();
@@ -158,25 +157,22 @@ class LocalRunner::Impl::Source {
   file::FiberReadOptions::Stats stats_;
 
   std::unique_ptr<file::ReadonlyFile> rd_file_;
-  enum Type {LOCAL, S3, GCS} type_ = LOCAL;
+  enum Type { LOCAL, S3, GCS } type_ = LOCAL;
 };
 
 thread_local std::unique_ptr<LocalRunner::Impl::PerThread> LocalRunner::Impl::per_thread_;
 
 Status LocalRunner::Impl::Source::Open() {
+  StatusObject<file::ReadonlyFile*> fl_res;
+
   if (IsGcsPath(fname_)) {
     type_ = GCS;
+    fl_res = impl_->OpenGcsFile(fname_);
   } else if (util::IsS3Path(fname_)) {
     type_ = S3;
-  }
-
-  StatusObject<file::ReadonlyFile*> fl_res;
-  if (type_ == GCS) {
-    fl_res = impl_->OpenGcsFile(fname_);
-  } else if (type_ == LOCAL) {
-    fl_res = impl_->OpenLocalFile(fname_, &stats_);
+    fl_res = impl_->OpenS3File(fname_);
   } else {
-    LOG(FATAL) << "Not supported " << type_;
+    fl_res = impl_->OpenLocalFile(fname_, &stats_);
   }
 
   if (fl_res.ok()) {
@@ -374,6 +370,7 @@ void LocalRunner::Impl::End(ShardFileMap* out_files) {
 
 void LocalRunner::Impl::ExpandGCS(absl::string_view glob, ExpandCb cb) {
   absl::string_view bucket, path;
+
   CHECK(GCS::SplitToBucketPath(glob, &bucket, &path));
 
   // Lazy init of gce_handle.
@@ -418,8 +415,7 @@ void LocalRunner::Impl::ExpandS3(absl::string_view glob, ExpandCb cb) {
   }
 
   string domain = absl::StrCat(bucket, ".", S3Bucket::kRootDomain);
-  ::boost::asio::ssl::context ssl_cntx = AWS::CheckedSslContext();
-  http::HttpsClientPool pool{domain, &ssl_cntx, io_context};
+  http::HttpsClientPool pool{domain, &per_thread_->ssl_context.value(), io_context};
   pool.set_connect_timeout(FLAGS_cloud_connect_deadline_ms);
 
   S3Bucket s3{*aws_handle_, &pool};
@@ -436,6 +432,24 @@ StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenGcsFile(const std::stri
   input_cloud_conn_.fetch_add(1, std::memory_order_relaxed);
   auto pt = per_thread_.get();
   return OpenGcsReadFile(filename, *gce_handle_, &pt->api_conn_pool.value());
+}
+
+StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenS3File(const std::string& filename) {
+  LazyAwsInit();
+  input_cloud_conn_.fetch_add(1, std::memory_order_relaxed);
+  auto pt = per_thread_.get();
+
+  absl::string_view bucket, path;
+  CHECK(S3Bucket::SplitToBucketPath(filename, &bucket, &path));
+  string domain = absl::StrCat(bucket, ".", S3Bucket::kRootDomain);
+
+  if (!pt->api_conn_pool) {
+    IoContext* io_context = io_pool_->GetThisContext();
+    pt->api_conn_pool.emplace(domain, &pt->ssl_context.value(), io_context);
+  } else {
+    CHECK_EQ(domain, pt->api_conn_pool->domain()) << "Only a single bucket supported right now";
+  }
+  return OpenS3ReadFile(path, *aws_handle_, &pt->api_conn_pool.value());
 }
 
 StatusObject<file::ReadonlyFile*> LocalRunner::Impl::OpenLocalFile(
@@ -456,6 +470,7 @@ void LocalRunner::Impl::LazyGcsInit() {
   if (!per_thread_) {
     per_thread_.reset(new PerThread);
   }
+
   auto* io_context = io_pool_->GetThisContext();
   per_thread_->SetupGce(io_context);
 
@@ -469,6 +484,11 @@ void LocalRunner::Impl::LazyGcsInit() {
 }
 
 void LocalRunner::Impl::LazyAwsInit() {
+  if (!per_thread_) {
+    per_thread_.reset(new PerThread);
+    per_thread_->ssl_context = AWS::CheckedSslContext();
+  }
+
   std::lock_guard<fibers::mutex> lk(cloud_mu_);
   if (aws_handle_)
     return;
