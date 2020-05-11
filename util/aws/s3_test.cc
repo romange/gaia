@@ -1,12 +1,13 @@
 // Copyright 2020, Beeri 15.  All rights reserved.
 // Author: Roman Gershman (romange@gmail.com)
 //
-#include <gmock/gmock.h>
-
 #include "util/aws/s3.h"
+
+#include <gmock/gmock.h>
 
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "util/aws/aws.h"
 
 using namespace std;
 using namespace testing;
@@ -26,7 +27,7 @@ class S3Test : public testing::Test {
 };
 
 const char* kListBucketRes =
-R"(<?xml version="1.0" encoding="UTF-8"?>
+    R"(<?xml version="1.0" encoding="UTF-8"?>
 <ListAllMyBucketsResult
 	xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
 	<Owner>
@@ -54,9 +55,8 @@ R"(<?xml version="1.0" encoding="UTF-8"?>
 </ListAllMyBucketsResult>
 )";
 
-
 const char* kListObjRes =
-R"(<?xml version="1.0" encoding="UTF-8"?>
+    R"(<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult
 	xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
 	<Name>bucketname</Name>
@@ -105,14 +105,30 @@ TEST_F(S3Test, ParseBucketListResp) {
   EXPECT_THAT(res, ElementsAre("b1", "b2", "b3", "b4"));
 }
 
-
 TEST_F(S3Test, ParseListObjResp) {
   vector<pair<size_t, string>> res;
 
-  detail::ParseXmlListObj(kListObjRes, [&](size_t sz, absl::string_view name) {
-    res.emplace_back(sz, string(name));
-  });
+  detail::ParseXmlListObj(
+      kListObjRes, [&](size_t sz, absl::string_view name) { res.emplace_back(sz, string(name)); });
 
   EXPECT_THAT(res, ElementsAre(Pair(183600, "a1"), Pair(13611950, "a2"), Pair(26171024, "a3")));
 }
+
+TEST_F(S3Test, Sha256) {
+	char buf[65];
+	detail::Sha256String(absl::string_view{}, buf);
+	EXPECT_STREQ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", buf);
+}
+
+
+void BM_Sha256(benchmark::State& state) {
+	string str(1024, 'a');
+	char buf[65];
+
+  while (state.KeepRunning()) {
+		detail::Sha256String(str, buf);
+  }
+}
+BENCHMARK(BM_Sha256);
+
 }  // namespace util

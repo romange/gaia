@@ -10,7 +10,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
-
 #include "base/logging.h"
 
 namespace util {
@@ -53,20 +52,11 @@ void Hexify(const char* str, size_t len, char* dest) {
   static constexpr char kHex[] = "0123456789abcdef";
 
   for (unsigned i = 0; i < len; ++i) {
-    *dest++ = kHex[(str[i] >> 4) & 0xF];
-    *dest++ = kHex[str[i] & 0xF];
+    char c = str[i];
+    *dest++ = kHex[(c >> 4) & 0xF];
+    *dest++ = kHex[c & 0xF];
   }
   *dest = '\0';
-}
-
-void sha256_string(absl::string_view str, char out[65]) {
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256_CTX sha256;
-  SHA256_Init(&sha256);
-  SHA256_Update(&sha256, str.data(), str.size());
-  SHA256_Final(hash, &sha256);
-
-  Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
 }
 
 // TODO: those are used in gcs_utils as well.
@@ -79,6 +69,20 @@ inline absl::string_view absl_sv(const bb_str_view s) {
 constexpr char kAlgo[] = "AWS4-HMAC-SHA256";
 
 }  // namespace
+
+namespace detail {
+
+void Sha256String(absl::string_view str, char out[65]) {
+  unsigned char hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+  SHA256_Update(&sha256, str.data(), str.size());
+  SHA256_Final(hash, &sha256);
+
+  Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
+}
+
+}  // namespace detail
 
 ::boost::asio::ssl::context AWS::CheckedSslContext() {
   system::error_code ec;
@@ -128,13 +132,9 @@ Status AWS::Init() {
 
 // TODO: to support date refreshes - i.e. to update sign_key_, credential_scope_
 // if the current has changed.
-void AWS::Sign(absl::string_view domain,
-               ::boost::beast::http::header<true, ::boost::beast::http::fields>* req) const {
-  req->set(h2::field::host, domain);
-
-  // Below is the hexdigest of sha256 of the empty body.
-  // TODO: to support non-empty body requests - should be hexdigest of sha256(body).
-  const char kPayloadHash[] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+void AWS::Sign(absl::string_view method, absl::string_view domain, absl::string_view body,
+               ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const {
+  header->set(h2::field::host, domain);
 
   time_t now = time(nullptr);  // Must be recent (upto 900sec skew is allowed vs amazon servers).
 
@@ -146,17 +146,34 @@ void AWS::Sign(absl::string_view domain,
   CHECK_GT(strftime(amz_date, arraysize(amz_date), "%Y%m%dT%H%M00Z", &tm_s), 0);
   VLOG(1) << "Time now: " << now;
 
+  char hexdigest[65];
+
+  detail::Sha256String(body, hexdigest);
+
+  header->set("x-amz-date", amz_date);
+  header->set("x-amz-content-sha256", hexdigest);
+
   string canonical_headers = absl::StrCat("host", ":", domain, "\n");
-  absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", kPayloadHash, "\n");
+  absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", hexdigest, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-date", ":", amz_date, "\n");
 
-  size_t pos = req->target().find('?');
-  absl::string_view url = absl_sv(req->target().substr(0, pos));
+
+  string auth_header = AuthHeader(method, canonical_headers, absl_sv(header->target()),
+                                  absl::string_view{hexdigest, 64}, amz_date);
+
+  header->set(h2::field::authorization, auth_header);
+}
+
+string AWS::AuthHeader(absl::string_view method, absl::string_view headers,
+                       absl::string_view target, absl::string_view content_sha256,
+                       absl::string_view amz_date) const {
+  size_t pos = target.find('?');
+  absl::string_view url = target.substr(0, pos);
   absl::string_view query_string;
   string canonical_querystring;
 
   if (pos != string::npos) {
-    query_string = absl_sv(req->target().substr(pos + 1));
+    query_string = target.substr(pos + 1);
 
     // We must sign query string with params in alphabetical order
     vector<absl::string_view> params = absl::StrSplit(query_string, "&", absl::SkipWhitespace{});
@@ -164,15 +181,13 @@ void AWS::Sign(absl::string_view domain,
     canonical_querystring = absl::StrJoin(params, "&");
   }
 
-  constexpr char kMethod[] = "GET";
-
-  string canonical_request = absl::StrCat(kMethod, "\n", url, "\n", canonical_querystring, "\n");
+  string canonical_request = absl::StrCat(method, "\n", url, "\n", canonical_querystring, "\n");
   string signed_headers = "host;x-amz-content-sha256;x-amz-date";
-  absl::StrAppend(&canonical_request, canonical_headers, "\n", signed_headers, "\n", kPayloadHash);
+  absl::StrAppend(&canonical_request, headers, "\n", signed_headers, "\n", content_sha256);
   VLOG(1) << "CanonicalRequest:\n" << canonical_request << "\n-------------------\n";
 
   char hexdigest[65];
-  sha256_string(canonical_request, hexdigest);
+  detail::Sha256String(canonical_request, hexdigest);
 
   string string_to_sign =
       absl::StrCat(kAlgo, "\n", amz_date, "\n", credential_scope_, "\n", hexdigest);
@@ -185,9 +200,7 @@ void AWS::Sign(absl::string_view domain,
       absl::StrCat(kAlgo, " Credential=", access_key_, "/", credential_scope_,
                    ",SignedHeaders=", signed_headers, ",Signature=", hexdigest);
 
-  req->set("x-amz-date", amz_date);
-  req->set("x-amz-content-sha256", kPayloadHash);
-  req->set(h2::field::authorization, authorization_header);
+  return authorization_header;
 }
 
 }  // namespace util

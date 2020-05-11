@@ -127,7 +127,7 @@ Status S3ReadFile::Open() {
 
   VLOG(1) << "Unsigned request: " << req;
 
-  aws_.Sign(pool_->domain(), &req);
+  aws_.SignGet(pool_->domain(), &req);
 
   // TODO: to wrap IO operations with retryable mechanism like in GCS.
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
@@ -356,7 +356,7 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
   h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
 
-  aws_.Sign(pool_->domain(), &req);
+  aws_.SignGet(pool_->domain(), &req);
   VLOG(1) << "Req: " << req;
 
   system::error_code ec = handle->Send(req, &resp);
@@ -397,7 +397,7 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
   h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
   h2::response<h2::string_body> resp;
 
-  aws.Sign(S3Bucket::kRootDomain, &req);
+  aws.SignGet(S3Bucket::kRootDomain, &req);
 
   VLOG(1) << "Req: " << req;
 
