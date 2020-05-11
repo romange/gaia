@@ -132,7 +132,7 @@ Status AWS::Init() {
 
 // TODO: to support date refreshes - i.e. to update sign_key_, credential_scope_
 // if the current has changed.
-void AWS::Sign(absl::string_view method, absl::string_view domain, absl::string_view body,
+void AWS::Sign(absl::string_view domain, absl::string_view body,
                ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const {
   header->set(h2::field::host, domain);
 
@@ -157,9 +157,9 @@ void AWS::Sign(absl::string_view method, absl::string_view domain, absl::string_
   absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", hexdigest, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-date", ":", amz_date, "\n");
 
-
-  string auth_header = AuthHeader(method, canonical_headers, absl_sv(header->target()),
-                                  absl::string_view{hexdigest, 64}, amz_date);
+  string auth_header =
+      AuthHeader(absl_sv(header->method_string()), canonical_headers, absl_sv(header->target()),
+                 absl::string_view{hexdigest, 64}, amz_date);
 
   header->set(h2::field::authorization, auth_header);
 }

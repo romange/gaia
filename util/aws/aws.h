@@ -26,12 +26,12 @@ class AWS {
   // for example, "<bucket>.s3.eu-west-1.amazonaws.com"
   // See: https://docs.aws.amazon.com/general/latest/gr/s3.html
   //
-  void Sign(absl::string_view method, absl::string_view domain, absl::string_view body,
+  void Sign(absl::string_view domain, absl::string_view body,
             ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const;
 
-  void SignGet(absl::string_view domain,
-               ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const {
-    return Sign("GET", domain, absl::string_view{}, header);
+  void SignEmpty(absl::string_view domain,
+                 ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const {
+    return Sign(domain, absl::string_view{}, header);
   }
 
   static ::boost::asio::ssl::context CheckedSslContext();

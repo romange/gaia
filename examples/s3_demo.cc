@@ -31,6 +31,8 @@ namespace h2 = beast::http;
 
 DEFINE_string(prefix, "", "In form of 'bucket/someprefix' without s3:// part");
 DEFINE_string(region, "us-east-1", "");
+DEFINE_string(write_file, "", "bucket/someobj without 's3://' part");
+
 DEFINE_bool(get, false, "");
 DEFINE_bool(list_recursive, false, "If true, will recursively list all objects in the bucket");
 
@@ -112,6 +114,26 @@ void Get(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   LOG(INFO) << "Read " << ofs << " bytes from " << key;
 }
 
+void WriteFile(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
+  size_t pos = FLAGS_write_file.find('/');
+  CHECK_NE(string::npos, pos);
+  string bucket = FLAGS_write_file.substr(0, pos);
+
+  string domain = absl::StrCat(bucket, ".", kRootDomain);
+  string key = FLAGS_write_file.substr(pos + 1);
+
+  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  pool.set_connect_timeout(2000);
+
+  StatusObject<file::WriteFile*> res = OpenS3WriteFile(key, *aws, &pool);
+  CHECK_STATUS(res.status);
+  unique_ptr<file::WriteFile> file(res.obj);
+
+  constexpr size_t kBufSize = 1 << 16;
+  std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
+  memset(buf.get(), 'a', kBufSize);
+}
+
 void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   http::HttpsClientPool pool{kRootDomain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
@@ -138,7 +160,9 @@ int main(int argc, char** argv) {
 
   CHECK_STATUS(aws.Init());
 
-  if (FLAGS_prefix.empty()) {
+  if (!FLAGS_write_file.empty()) {
+    io_context.AwaitSafe([&] { WriteFile(&ssl_cntx, &aws, &io_context); });
+  } else if (FLAGS_prefix.empty()) {
     io_context.AwaitSafe([&] { ListBuckets(&ssl_cntx, &aws, &io_context); });
   } else {
     if (FLAGS_get) {

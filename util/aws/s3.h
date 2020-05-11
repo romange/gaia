@@ -71,6 +71,22 @@ StatusObject<file::ReadonlyFile*> OpenS3ReadFile(
     absl::string_view key_path, const AWS& aws, http::HttpsClientPool* pool,
     const file::ReadonlyFile::Options& opts = file::ReadonlyFile::Options{});
 
+/**
+ * @brief Opens a new GCS file for writes.
+ *
+ * Must be called from the IO thread that manages 'pool'. All accesses to this file
+ * must be done from the same IO thread.
+ *
+ * @param key_path an object path without bucket prefix. The bucket is already predefined in
+ *                 pool connection.
+ * @param aws
+ * @param pool - a pool handling https connections to the bucket.
+ * @return StatusObject<file::WriteFile*>
+ */
+StatusObject<file::WriteFile*> OpenS3WriteFile(
+    absl::string_view key_path, const AWS& aws, http::HttpsClientPool* pool);
+
+
 bool IsS3Path(absl::string_view path);
 
 namespace detail {
