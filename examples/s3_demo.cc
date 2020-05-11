@@ -132,6 +132,8 @@ void WriteFile(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   constexpr size_t kBufSize = 1 << 16;
   std::unique_ptr<uint8_t[]> buf(new uint8_t[kBufSize]);
   memset(buf.get(), 'a', kBufSize);
+  CHECK_STATUS(file->Write(absl::string_view(reinterpret_cast<char*>(buf.get()), kBufSize)));
+  file->Close();
 }
 
 void ListBuckets(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {

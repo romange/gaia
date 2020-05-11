@@ -287,6 +287,41 @@ S3WriteFile::S3WriteFile(absl::string_view name, const AWS& aws, string upload_i
 
 bool S3WriteFile::Close() {
   CHECK(pool_->io_context().InContextThread());
+
+  string url("/");
+
+  strings::AppendEncodedUrl(create_file_name_, &url);
+
+  // Signed params must look like key/value pairs. Instead of handling key-only params
+  // in the signing code we just pass empty value here.
+  absl::StrAppend(&url, "?uploadId=", upload_id_);
+
+  h2::request<h2::string_body> req{h2::verb::post, url, 11};
+  h2::response<h2::string_body> resp;
+
+  req.set(h2::field::content_type, "application/xml");
+  req.body() = R"(<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUpload> xmlns="http://s3.amazonaws.com/doc/2006-03-01/"
+
+</CompleteMultipartUpload>
+)";
+
+  req.prepare_payload();
+  aws_.Sign(pool_->domain(), req.body(), &req);
+
+  HttpsClientPool::ClientHandle handle = pool_->GetHandle();
+  system::error_code ec = handle->Send(req, &resp);
+
+  if (ec) {
+    VLOG(1) << "Error sending to socket " << handle->native_handle() << " " << ec;
+    return false;
+  }
+
+  if (resp.result() != h2::status::ok) {
+    LOG(ERROR) << "S3WriteFile::Close: " << req << "/ " << resp;
+
+    return false;
+  }
   return true;
 }
 
