@@ -18,6 +18,7 @@
 #include "absl/strings/strip.h"
 #include "absl/types/optional.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "strings/escaping.h"
 #include "util/asio/io_context.h"
 #include "util/aws/aws.h"
@@ -26,6 +27,8 @@
 #include "util/http/https_client_pool.h"
 
 namespace util {
+
+DEFINE_uint32(s3_upload_buf_mb, 5, "Upload buffer size in MB. must be at least 5MB");
 
 using file::ReadonlyFile;
 using http::HttpsClientPool;
@@ -286,7 +289,7 @@ Status S3ReadFile::Close() {
 S3WriteFile::S3WriteFile(absl::string_view name, const AWS& aws, string upload_id,
                          HttpsClientPool* pool)
     : file::WriteFile(name), aws_(aws), upload_id_(std::move(upload_id)),
-    body_mb_(5 * (1<< 20)), pool_(pool) {
+    body_mb_(FLAGS_s3_upload_buf_mb * (1 << 20)), pool_(pool) {
 }
 
 bool S3WriteFile::Close() {
@@ -297,6 +300,9 @@ bool S3WriteFile::Close() {
     LOG(ERROR) << "Error uploading " << status;
     return false;
   }
+
+  if (parts_.empty())
+    return true;
 
   string url("/");
 
@@ -326,6 +332,7 @@ bool S3WriteFile::Close() {
   detail::Sha256String(req.body(), sha256);
   aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
 
+  uint64_t start = base::GetMonotonicMicrosFast();
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
   system::error_code ec = handle->Send(req, &resp);
 
@@ -339,6 +346,9 @@ bool S3WriteFile::Close() {
 
     return false;
   }
+  VLOG(1) << "S3Close took " << base::GetMonotonicMicrosFast() - start << " micros";
+  parts_.clear();
+
   return true;
 }
 
@@ -398,18 +408,23 @@ Status S3WriteFile::Upload() {
 
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
   h2::response<h2::string_body> resp;
+
+  uint64_t start = base::GetMonotonicMicrosFast();
   system::error_code ec = handle->Send(req, &resp);
 
   if (ec) {
     VLOG(1) << "Error sending to socket " << handle->native_handle() << " " << ec;
     return ToStatus(ec);
   }
-  VLOG(1) << "Upload: " << resp;
+  VLOG(2) << "Upload: " << resp;
   if (resp.result() != h2::status::ok) {
     LOG(ERROR) << "S3WriteFile::Upload: " << resp;
 
     return Status(StatusCode::IO_ERROR, string(resp.reason()));;
   }
+
+  VLOG(1) << "S3Upload tool " << base::GetMonotonicMicrosFast() - start << " micros";
+
   auto it = resp.find(h2::field::etag);
   CHECK(it != resp.end());
 
