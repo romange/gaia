@@ -38,6 +38,8 @@ extern const char kHtmlMime[];
 extern const char kJsonMime[];
 extern const char kSvgMime[];
 extern const char kTextMime[];
+extern const char kXmlMime[];
+extern const char kBinMime[];
 
 QueryParam ParseQuery(absl::string_view str);
 QueryArgs SplitQuery(absl::string_view query);

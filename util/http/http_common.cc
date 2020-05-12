@@ -41,6 +41,8 @@ const char kHtmlMime[] = "text/html";
 const char kJsonMime[] = "application/json";
 const char kSvgMime[] = "image/svg+xml";
 const char kTextMime[] = "text/plain";
+const char kXmlMime[] = "application/xml";
+const char kBinMime[] = "application/octet-stream";;
 
 QueryParam ParseQuery(StringPiece str) {
   std::pair<StringPiece, StringPiece> res;

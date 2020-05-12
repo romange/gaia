@@ -8,6 +8,7 @@
 #include <libxml/xpathInternals.h>
 
 #include <boost/asio/ssl/error.hpp>
+#include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
 
@@ -18,9 +19,9 @@
 #include "absl/types/optional.h"
 #include "base/logging.h"
 #include "strings/escaping.h"
-
 #include "util/asio/io_context.h"
 #include "util/aws/aws.h"
+#include "util/http/http_common.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
@@ -140,11 +141,13 @@ class S3WriteFile : public file::WriteFile {
   Status Upload();
 
   const AWS& aws_;
+  uint32_t part_num_ = 1;
 
   string upload_id_;
   beast::multi_buffer body_mb_;
   size_t uploaded_ = 0;
   HttpsClientPool* pool_;
+  std::vector<string> parts_;
 };
 
 S3ReadFile::~S3ReadFile() {
@@ -282,11 +285,18 @@ Status S3ReadFile::Close() {
 
 S3WriteFile::S3WriteFile(absl::string_view name, const AWS& aws, string upload_id,
                          HttpsClientPool* pool)
-    : file::WriteFile(name), aws_(aws), upload_id_(std::move(upload_id)), pool_(pool) {
+    : file::WriteFile(name), aws_(aws), upload_id_(std::move(upload_id)),
+    body_mb_(5 * (1<< 20)), pool_(pool) {
 }
 
 bool S3WriteFile::Close() {
   CHECK(pool_->io_context().InContextThread());
+
+  auto status = Upload();
+  if (!status.ok()) {
+    LOG(ERROR) << "Error uploading " << status;
+    return false;
+  }
 
   string url("/");
 
@@ -299,15 +309,22 @@ bool S3WriteFile::Close() {
   h2::request<h2::string_body> req{h2::verb::post, url, 11};
   h2::response<h2::string_body> resp;
 
-  req.set(h2::field::content_type, "application/xml");
-  req.body() = R"(<?xml version="1.0" encoding="UTF-8"?>
-<CompleteMultipartUpload> xmlns="http://s3.amazonaws.com/doc/2006-03-01/"
+  req.set(h2::field::content_type, http::kXmlMime);
+  auto& body = req.body();
+  body = R"(<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/">)";
 
-</CompleteMultipartUpload>
-)";
+  for (size_t i = 0; i < parts_.size(); ++i) {
+    absl::StrAppend(&body, "<Part><ETag>\"", parts_[i], "\"</ETag><PartNumber>", i + 1);
+    absl::StrAppend(&body, "</PartNumber></Part>\n");
+  }
+  body.append("</CompleteMultipartUpload>");
 
   req.prepare_payload();
-  aws_.Sign(pool_->domain(), req.body(), &req);
+  char sha256[65];
+
+  detail::Sha256String(req.body(), sha256);
+  aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
 
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
   system::error_code ec = handle->Send(req, &resp);
@@ -332,8 +349,78 @@ bool S3WriteFile::Open() {
 }
 
 Status S3WriteFile::Write(const uint8* buffer, uint64 length) {
+  while (length) {
+    size_t written = FillBuf(buffer, length);
+    if (body_mb_.size() < body_mb_.max_size())
+      break;
+    length -= written;
+    buffer += written;
+    RETURN_IF_ERROR(Upload());
+  }
+
   return Status::OK;
 }
+
+size_t S3WriteFile::FillBuf(const uint8* buffer, size_t length) {
+  size_t prepare_size = std::min(length, body_mb_.max_size() - body_mb_.size());
+  auto mbs = body_mb_.prepare(prepare_size);
+  size_t offs = 0;
+  for (auto mb : mbs) {
+    memcpy(mb.data(), buffer + offs, mb.size());
+    offs += mb.size();
+  }
+  CHECK_EQ(offs, prepare_size);
+  body_mb_.commit(prepare_size);
+
+  return offs;
+}
+
+Status S3WriteFile::Upload() {
+  size_t body_size = body_mb_.size();
+  if (body_size == 0)
+    return Status::OK;
+
+  string url("/");
+  char sha256[65];
+
+  detail::Sha256String(body_mb_, sha256);
+  strings::AppendEncodedUrl(create_file_name_, &url);
+  absl::StrAppend(&url, "?uploadId=", upload_id_);
+  absl::StrAppend(&url, "&partNumber=", part_num_);
+
+  h2::request<h2::dynamic_body> req{h2::verb::put, url, 11};
+  req.set(h2::field::content_type, http::kBinMime);
+
+  req.body() = std::move(body_mb_);
+  req.prepare_payload();
+
+  aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
+
+  HttpsClientPool::ClientHandle handle = pool_->GetHandle();
+  h2::response<h2::string_body> resp;
+  system::error_code ec = handle->Send(req, &resp);
+
+  if (ec) {
+    VLOG(1) << "Error sending to socket " << handle->native_handle() << " " << ec;
+    return ToStatus(ec);
+  }
+  VLOG(1) << "Upload: " << resp;
+
+  if (resp.result() != h2::status::ok) {
+    LOG(ERROR) << "S3WriteFile::Upload: " << resp;
+
+    return Status(StatusCode::IO_ERROR, string(resp.reason()));;
+  }
+  auto it = resp.find(h2::field::etag);
+  CHECK(it != resp.end());
+
+  parts_.emplace_back(it->value());
+  ++part_num_;
+
+  return Status::OK;
+}
+
+// ******************** Helper utilities
 
 inline xmlDocPtr XmlRead(absl::string_view xml) {
   return xmlReadMemory(xml.data(), xml.size(), NULL, NULL, XML_PARSE_COMPACT | XML_PARSE_NOBLANKS);

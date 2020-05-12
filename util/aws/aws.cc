@@ -82,7 +82,21 @@ void Sha256String(absl::string_view str, char out[65]) {
   Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
 }
 
+void Sha256String(const ::boost::beast::multi_buffer& mb, char out[65]) {
+  unsigned char hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+
+  for (const auto& e: mb.cdata()) {
+    SHA256_Update(&sha256, e.data(), e.size());
+  }
+  SHA256_Final(hash, &sha256);
+  Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
+}
+
 }  // namespace detail
+
+const char AWS::kHashEmpty[] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 ::boost::asio::ssl::context AWS::CheckedSslContext() {
   system::error_code ec;
@@ -132,10 +146,11 @@ Status AWS::Init() {
 
 // TODO: to support date refreshes - i.e. to update sign_key_, credential_scope_
 // if the current has changed.
-void AWS::Sign(absl::string_view domain, absl::string_view body,
+void AWS::Sign(absl::string_view domain, absl::string_view sha256,
                ::boost::beast::http::header<true, ::boost::beast::http::fields>* header) const {
   header->set(h2::field::host, domain);
 
+  // We show consider to pass it via argument to make the function test-friendly.
   time_t now = time(nullptr);  // Must be recent (upto 900sec skew is allowed vs amazon servers).
 
   struct tm tm_s;
@@ -146,20 +161,16 @@ void AWS::Sign(absl::string_view domain, absl::string_view body,
   CHECK_GT(strftime(amz_date, arraysize(amz_date), "%Y%m%dT%H%M00Z", &tm_s), 0);
   VLOG(1) << "Time now: " << now;
 
-  char hexdigest[65];
-
-  detail::Sha256String(body, hexdigest);
-
   header->set("x-amz-date", amz_date);
-  header->set("x-amz-content-sha256", hexdigest);
+  header->set("x-amz-content-sha256", sha256);
 
   string canonical_headers = absl::StrCat("host", ":", domain, "\n");
-  absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", hexdigest, "\n");
+  absl::StrAppend(&canonical_headers, "x-amz-content-sha256", ":", sha256, "\n");
   absl::StrAppend(&canonical_headers, "x-amz-date", ":", amz_date, "\n");
 
   string auth_header =
       AuthHeader(absl_sv(header->method_string()), canonical_headers, absl_sv(header->target()),
-                 absl::string_view{hexdigest, 64}, amz_date);
+                 sha256, amz_date);
 
   header->set(h2::field::authorization, auth_header);
 }
