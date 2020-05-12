@@ -405,7 +405,6 @@ Status S3WriteFile::Upload() {
     return ToStatus(ec);
   }
   VLOG(1) << "Upload: " << resp;
-
   if (resp.result() != h2::status::ok) {
     LOG(ERROR) << "S3WriteFile::Upload: " << resp;
 
@@ -416,6 +415,10 @@ Status S3WriteFile::Upload() {
 
   parts_.emplace_back(it->value());
   ++part_num_;
+
+  if (!resp.keep_alive()) {
+    handle->schedule_reconnect();
+  }
 
   return Status::OK;
 }
