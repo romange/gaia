@@ -58,6 +58,7 @@ inline absl::string_view absl_sv(const bb_str_view s) {
   return absl::string_view{s.data(), s.size()};
 }
 
+using http::HttpsClientPool;
 const char kRootDomain[] = "s3.amazonaws.com";
 
 void ListObjects(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
@@ -69,7 +70,7 @@ void ListObjects(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) 
 
   string domain = absl::StrCat(bucket, ".", kRootDomain);
 
-  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  HttpsClientPool pool{domain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
 
   S3Bucket s3bucket(*aws, &pool);
@@ -89,7 +90,7 @@ void Get(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   string domain = absl::StrCat(bucket, ".", kRootDomain);
   string key = FLAGS_prefix.substr(pos + 1);
 
-  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  HttpsClientPool pool{domain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
 
   StatusObject<file::ReadonlyFile*> res = OpenS3ReadFile(key, *aws, &pool);
@@ -123,8 +124,15 @@ void WriteFile(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   string domain = absl::StrCat(bucket, ".", kRootDomain);
   string key = FLAGS_write_file.substr(pos + 1);
 
-  http::HttpsClientPool pool{domain, ssl_cntx, io_context};
+  HttpsClientPool pool{domain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
+
+  vector<HttpsClientPool::ClientHandle> handles;
+  for (size_t i = 0; i < 100; ++i) {
+    handles.push_back(pool.GetHandle());
+  }
+  handles.clear();
+  LOG(INFO) << "Http connections " << pool.handles_count();
 
   StatusObject<file::WriteFile*> res = OpenS3WriteFile(key, *aws, &pool);
   CHECK_STATUS(res.status);
