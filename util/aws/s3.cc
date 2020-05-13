@@ -144,7 +144,6 @@ class S3WriteFile : public file::WriteFile {
   Status Upload();
 
   const AWS& aws_;
-  uint32_t part_num_ = 1;
 
   string upload_id_;
   beast::multi_buffer body_mb_;
@@ -403,7 +402,7 @@ Status S3WriteFile::Upload() {
   detail::Sha256String(body_mb_, sha256);
   strings::AppendEncodedUrl(create_file_name_, &url);
   absl::StrAppend(&url, "?uploadId=", upload_id_);
-  absl::StrAppend(&url, "&partNumber=", part_num_);
+  absl::StrAppend(&url, "&partNumber=", parts_.size() + 1);
 
   h2::request<h2::dynamic_body> req{h2::verb::put, url, 11};
   req.set(h2::field::content_type, http::kBinMime);
@@ -413,7 +412,7 @@ Status S3WriteFile::Upload() {
 
   aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
 
-  auto up_cb = [this, req = std::move(req)] {
+  auto up_cb = [this, req = std::move(req), id = parts_.size()] {
     VLOG(2) << "StartUpCb";
     h2::response<h2::string_body> resp;
     HttpsClientPool::ClientHandle handle = pool_->GetHandle();
@@ -431,13 +430,13 @@ Status S3WriteFile::Upload() {
     auto it = resp.find(h2::field::etag);
     CHECK(it != resp.end());
 
-    parts_.emplace_back(it->value());
-    ++part_num_;
+    parts_[id] = string(it->value());
 
     if (!resp.keep_alive()) {
       handle->schedule_reconnect();
     }
   };
+  parts_.emplace_back();
 
   // We run it immediately
   fibers::fiber fb(fibers::launch::dispatch, std::move(up_cb));
