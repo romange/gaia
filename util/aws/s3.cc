@@ -151,6 +151,7 @@ class S3WriteFile : public file::WriteFile {
   size_t uploaded_ = 0;
   HttpsClientPool* pool_;
   std::vector<string> parts_;
+  std::vector<fibers::fiber> uploads_;
 };
 
 S3ReadFile::~S3ReadFile() {
@@ -301,6 +302,12 @@ bool S3WriteFile::Close() {
     return false;
   }
 
+  VLOG(1) << "Joining with " << uploads_.size() << " fibers";
+  for (auto& f : uploads_) {
+    f.join();
+  }
+  uploads_.clear();
+
   if (parts_.empty())
     return true;
 
@@ -406,34 +413,35 @@ Status S3WriteFile::Upload() {
 
   aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
 
-  HttpsClientPool::ClientHandle handle = pool_->GetHandle();
-  h2::response<h2::string_body> resp;
+  auto up_cb = [this, req = std::move(req)] {
+    VLOG(2) << "StartUpCb";
+    h2::response<h2::string_body> resp;
+    HttpsClientPool::ClientHandle handle = pool_->GetHandle();
 
-  uint64_t start = base::GetMonotonicMicrosFast();
-  system::error_code ec = handle->Send(req, &resp);
+    VLOG(2) << "BeforeSendUpCb";
+    uint64_t start = base::GetMonotonicMicrosFast();
+    system::error_code ec = handle->Send(req, &resp);
+    CHECK(!ec) << "Error sending to socket " << handle->native_handle() << " " << ec;
 
-  if (ec) {
-    VLOG(1) << "Error sending to socket " << handle->native_handle() << " " << ec;
-    return ToStatus(ec);
-  }
-  VLOG(2) << "Upload: " << resp;
-  if (resp.result() != h2::status::ok) {
-    LOG(ERROR) << "S3WriteFile::Upload: " << resp;
+    VLOG(2) << "Upload: " << resp;
+    CHECK(resp.result() == h2::status::ok) << "S3WriteFile::Upload: " << resp;
 
-    return Status(StatusCode::IO_ERROR, string(resp.reason()));;
-  }
+    VLOG(1) << "S3Upload tool " << base::GetMonotonicMicrosFast() - start << " micros";
 
-  VLOG(1) << "S3Upload tool " << base::GetMonotonicMicrosFast() - start << " micros";
+    auto it = resp.find(h2::field::etag);
+    CHECK(it != resp.end());
 
-  auto it = resp.find(h2::field::etag);
-  CHECK(it != resp.end());
+    parts_.emplace_back(it->value());
+    ++part_num_;
 
-  parts_.emplace_back(it->value());
-  ++part_num_;
+    if (!resp.keep_alive()) {
+      handle->schedule_reconnect();
+    }
+  };
 
-  if (!resp.keep_alive()) {
-    handle->schedule_reconnect();
-  }
+  // We run it immediately
+  fibers::fiber fb(fibers::launch::dispatch, std::move(up_cb));
+  uploads_.emplace_back(std::move(fb));
 
   return Status::OK;
 }
