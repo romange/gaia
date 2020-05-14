@@ -121,7 +121,7 @@ void WriteFile(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
   CHECK_NE(string::npos, pos);
   string bucket = FLAGS_write_file.substr(0, pos);
 
-  string domain = absl::StrCat(bucket, ".", kRootDomain);
+  string domain = absl::StrCat(bucket, ".", FLAGS_region, ".", "amazonaws.com");
   string key = FLAGS_write_file.substr(pos + 1);
 
   HttpsClientPool pool{domain, ssl_cntx, io_context};
