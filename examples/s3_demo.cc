@@ -13,6 +13,8 @@
 #include <boost/fiber/future.hpp>
 
 #include "absl/strings/str_cat.h"
+#include "absl/strings/match.h"
+
 #include "base/init.h"
 #include "base/logging.h"
 #include "file/file_util.h"
@@ -117,12 +119,15 @@ void Get(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
 }
 
 void WriteFile(asio::ssl::context* ssl_cntx, AWS* aws, IoContext* io_context) {
+  CHECK(!absl::StartsWith(FLAGS_write_file, "s3:")) << "write path should be without s3://";
+
   size_t pos = FLAGS_write_file.find('/');
   CHECK_NE(string::npos, pos);
   string bucket = FLAGS_write_file.substr(0, pos);
 
-  string domain = absl::StrCat(bucket, ".", FLAGS_region, ".", "amazonaws.com");
+  string domain = absl::StrCat(bucket, ".s3.", FLAGS_region, ".", "amazonaws.com");
   string key = FLAGS_write_file.substr(pos + 1);
+  LOG(INFO) << "Connecting to " << domain;
 
   HttpsClientPool pool{domain, ssl_cntx, io_context};
   pool.set_connect_timeout(2000);
