@@ -17,6 +17,8 @@
 #warning Please update your libssl to libssl1.1 - install libssl-dev
 #endif
 
+DEFINE_bool(https_client_disable_ssl, false, "");
+
 namespace util {
 namespace http {
 
@@ -99,21 +101,31 @@ auto HttpsClient::InitSslClient() -> error_code {
   error_code ec;
   if (!reconnect_needed_)
     return ec;
-  client_.reset(new SslStream(FiberSyncSocket{host_name_, kPort, &io_context_}, ssl_cntx_));
-  client_->next_layer().set_keep_alive(true);
-
-  if (SSL_set_tlsext_host_name(client_->native_handle(), host_name_.c_str()) != 1) {
-    char buf[128];
-    ERR_error_string_n(::ERR_peek_last_error(), buf, sizeof(buf));
-
-    LOG(FATAL) << "Could not set hostname: " << buf;
-  }
-
-  ec = SslConnect(client_.get(), reconnect_msec_);
-  if (!ec) {
-    reconnect_needed_ = false;
+  if (FLAGS_https_client_disable_ssl) {
+    socket_.reset(new FiberSyncSocket{host_name_, "80", &io_context_});
+    socket_->set_keep_alive(true);
+    ec = socket_->ClientWaitToConnect(reconnect_msec_);
+    if (ec) {
+      VLOG(1) << "Error " << ": " << ec << "/" << ec.message() << " for socket "
+              << socket_->native_handle();
+    }
   } else {
-    VLOG(1) << "Error connecting " << ec << ", socket " << client_->next_layer().native_handle();
+    client_.reset(new SslStream(FiberSyncSocket{host_name_, kPort, &io_context_}, ssl_cntx_));
+    client_->next_layer().set_keep_alive(true);
+
+    if (SSL_set_tlsext_host_name(client_->native_handle(), host_name_.c_str()) != 1) {
+      char buf[128];
+      ERR_error_string_n(::ERR_peek_last_error(), buf, sizeof(buf));
+
+      LOG(FATAL) << "Could not set hostname: " << buf;
+    }
+
+    ec = SslConnect(client_.get(), reconnect_msec_);
+    if (!ec) {
+      reconnect_needed_ = false;
+    } else {
+      VLOG(1) << "Error connecting " << ec << ", socket " << client_->next_layer().native_handle();
+    }
   }
   return ec;
 }
@@ -133,7 +145,13 @@ auto HttpsClient::DrainResponse(h2::response_parser<h2::buffer_body>* parser) ->
   while (!parser->is_done()) {
     body.data = buf.get();
     body.size = kBufSize;
-    size_t raw_bytes = h2::read(*client_, tmp_buffer_, *parser, ec);
+    size_t raw_bytes;
+
+    if (client_)
+      raw_bytes = h2::read(*client_, tmp_buffer_, *parser, ec);
+    else
+      raw_bytes = h2::read(*socket_, tmp_buffer_, *parser, ec);
+
     if (ec && ec != h2::error::need_buffer) {
       VLOG(1) << "Error " << ec << "/" << ec.message();
       return ec;

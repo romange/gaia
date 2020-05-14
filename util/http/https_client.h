@@ -105,6 +105,8 @@ class HttpsClient {
   ::boost::beast::flat_buffer tmp_buffer_;
 
   std::string host_name_;
+
+  std::unique_ptr<FiberSyncSocket> socket_;
   std::unique_ptr<SslStream> client_;
 
   uint32_t reconnect_msec_ = 1000;
@@ -124,7 +126,11 @@ auto HttpsClient::Send(const Req& req, Resp* resp) -> error_code {
     if (IsError(ec))  // Send already retries.
       break;
 
-    h2::read(*client_, tmp_buffer_, *resp, ec);
+    if (client_)
+      h2::read(*client_, tmp_buffer_, *resp, ec);
+    else
+      h2::read(*socket_, tmp_buffer_, *resp, ec);
+
     if (!IsError(ec)) {
       return ec;
     }
@@ -139,7 +145,10 @@ template <typename Req> auto HttpsClient::Send(const Req& req) -> error_code {
     ec = ReconnectIfNeeded();
     if (IsError(ec))
       continue;
-    ::boost::beast::http::write(*client_, req, ec);
+    if (client_)
+      ::boost::beast::http::write(*client_, req, ec);
+    else
+      ::boost::beast::http::write(*socket_, req, ec);
 
     if (HandleWriteError(ec)) {
       break;
@@ -152,8 +161,10 @@ template <typename Req> auto HttpsClient::Send(const Req& req) -> error_code {
 inline auto HttpsClient::ReadHeader(::boost::beast::http::basic_parser<false>* parser)
     -> error_code {
   error_code ec;
-
-  ::boost::beast::http::read_header(*client_, tmp_buffer_, *parser, ec);
+  if (client_)
+    ::boost::beast::http::read_header(*client_, tmp_buffer_, *parser, ec);
+  else
+    ::boost::beast::http::read_header(*socket_, tmp_buffer_, *parser, ec);
   return HandleError(ec);
 }
 
@@ -162,7 +173,10 @@ template <typename Parser> auto HttpsClient::Read(Parser* parser) -> error_code 
 
   // Note that read returns number of raw bytes read from stream before parsing which
   // does not correlate to the final data stored inside the parser.
-  ::boost::beast::http::read(*client_, tmp_buffer_, *parser, ec);
+  if (client_)
+    ::boost::beast::http::read(*client_, tmp_buffer_, *parser, ec);
+  else
+    ::boost::beast::http::read(*socket_, tmp_buffer_, *parser, ec);
   return HandleError(ec);
 }
 
