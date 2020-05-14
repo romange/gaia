@@ -119,8 +119,10 @@ TEST_F(S3Test, Sha256) {
 	detail::Sha256String(absl::string_view{}, buf);
 
 	EXPECT_STREQ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", buf);
-}
 
+	detail::Sha256String("roman", buf);
+	EXPECT_STREQ("4eaae75f1df2f52bda44f6b18a400542d51c81bd7c00b0e720be5dc2c997575d", buf);
+}
 
 void BM_Sha256(benchmark::State& state) {
 	string str(1024, 'a');

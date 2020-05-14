@@ -5,6 +5,7 @@
 
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
+#include <openssl/evp.h>
 
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
@@ -74,10 +75,27 @@ namespace detail {
 
 void Sha256String(absl::string_view str, char out[65]) {
   unsigned char hash[SHA256_DIGEST_LENGTH];
+
+#if 0
+  EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+  CHECK(mdctx);
+
+	CHECK_EQ(1, EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL));
+
+	CHECK_EQ(1, EVP_DigestUpdate(mdctx, str.data(), str.size()));
+
+  unsigned int len = 0;
+	CHECK_EQ(1, EVP_DigestFinal_ex(mdctx, hash, &len));
+  CHECK_EQ(SHA256_DIGEST_LENGTH, len);
+
+	EVP_MD_CTX_free(mdctx);
+
+#else
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
   SHA256_Update(&sha256, str.data(), str.size());
   SHA256_Final(hash, &sha256);
+#endif
 
   Hexify(reinterpret_cast<const char*>(hash), SHA256_DIGEST_LENGTH, out);
 }
