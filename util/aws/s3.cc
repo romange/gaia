@@ -399,7 +399,9 @@ Status S3WriteFile::Upload() {
   string url("/");
   char sha256[65];
 
-  detail::Sha256String(body_mb_, sha256);
+  // TODO: To figure out why SHA256 is so slow.
+  //detail::Sha256String(body_mb_, sha256);
+  const char* kFakeSha = "UNSIGNED-PAYLOAD";
   strings::AppendEncodedUrl(create_file_name_, &url);
   absl::StrAppend(&url, "?uploadId=", upload_id_);
   absl::StrAppend(&url, "&partNumber=", parts_.size() + 1);
@@ -410,7 +412,7 @@ Status S3WriteFile::Upload() {
   req.body() = std::move(body_mb_);
   req.prepare_payload();
 
-  aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
+  aws_.Sign(pool_->domain(), absl::string_view{kFakeSha}, &req);
 
   auto up_cb = [this, req = std::move(req), id = parts_.size()] {
     VLOG(2) << "StartUpCb";
