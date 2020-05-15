@@ -115,13 +115,18 @@ TEST_F(S3Test, ParseListObjResp) {
 }
 
 TEST_F(S3Test, Sha256) {
-	char buf[65];
+	char buf[130];
+
+	// Equivalent to:  echo -n | shasum -a 256
 	detail::Sha256String(absl::string_view{}, buf);
 
 	EXPECT_STREQ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", buf);
 
-	detail::Sha256String("roman", buf);
-	EXPECT_STREQ("4eaae75f1df2f52bda44f6b18a400542d51c81bd7c00b0e720be5dc2c997575d", buf);
+	// Equivalent to:  echo -n roman | shasum -a 256
+	const char kTest[] = "roman";
+	const char* kTestExpected = "4eaae75f1df2f52bda44f6b18a400542d51c81bd7c00b0e720be5dc2c997575d";
+	detail::Sha256String(kTest, buf);
+	EXPECT_STREQ(kTestExpected, buf);
 }
 
 void BM_Sha256(benchmark::State& state) {
