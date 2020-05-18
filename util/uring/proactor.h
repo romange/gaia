@@ -12,6 +12,7 @@
 
 #include "base/function2.hpp"
 #include "base/mpmc_bounded_queue.h"
+#include "base/MPMCQueue.h"
 #include "util/fibers/event_count.h"
 #include "util/fibers/fibers_ext.h"
 #include "util/uring/submit_entry.h"
@@ -153,7 +154,8 @@ class Proactor {
                          false /* non-throwing*/, false /* strong exceptions guarantees*/, void()>;
   static_assert(sizeof(Tasklet) == 32, "");
 
-  using FuncQ = base::mpmc_bounded_queue<Tasklet>;
+  using FuncQ = rigtorp::MPMCQueue<Tasklet>;
+  // base::mpmc_bounded_queue<Tasklet>;
 
   using EventCount = fibers_ext::EventCount;
 

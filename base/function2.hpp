@@ -1482,11 +1482,11 @@ class function<Config, property<IsThrowing, HasStrongExceptGuarantee, Args...>>
 
 public:
   /// Default constructor which empty constructs the function
-  function() = default;
-  ~function() = default;
+  function() noexcept = default;
+  ~function() noexcept = default;
 
   explicit constexpr function(function const& /*right*/) = default;
-  explicit constexpr function(function&& /*right*/) = default;
+  explicit constexpr function(function&& /*right*/) noexcept = default;
 
   /// Copy construction from another copyable function
   template <typename RightConfig,
@@ -1501,7 +1501,7 @@ public:
   template <typename RightConfig,
             enable_if_copyable_correct_t<Config, RightConfig>* = nullptr,
             enable_if_owning_correct_t<Config, RightConfig>* = nullptr>
-  constexpr function(function<RightConfig, property_t>&& right)
+  constexpr function(function<RightConfig, property_t>&& right) noexcept
       : erasure_(std::move(right.erasure_)) {
   }
 
@@ -1511,7 +1511,7 @@ public:
             enable_if_can_accept_all_t<T>* = nullptr,
             assert_wrong_copy_assign_t<T>* = nullptr,
             assert_no_strong_except_guarantee_t<T>* = nullptr>
-  constexpr function(T&& callable)
+  constexpr function(T&& callable) noexcept
       : erasure_(use_bool_op<unrefcv_t<T>>{}, std::forward<T>(callable)) {
   }
   template <typename T, typename Allocator, //
@@ -1526,7 +1526,7 @@ public:
   }
 
   /// Empty constructs the function
-  constexpr function(std::nullptr_t np) : erasure_(np) {
+  constexpr function(std::nullptr_t np) noexcept : erasure_(np) {
   }
 
   function& operator=(function const& /*right*/) = default;
