@@ -404,6 +404,13 @@ add_third_party(intel_z
   LIB libz.a
 )
 
+add_third_party(mimalloc
+  GIT_REPOSITORY https://github.com/microsoft/mimalloc
+  GIT_TAG v1.6.3
+  BUILD_COMMAND make -j4 mimalloc
+  INSTALL_COMMAND make install
+  COMMAND sh -c "test -L ${THIRD_PARTY_LIB_DIR}/mimalloc/include || ln -s ${THIRD_PARTY_LIB_DIR}/mimalloc/lib/mimalloc-1.6/include ${THIRD_PARTY_LIB_DIR}/mimalloc/"
+)
 
 add_third_party(protozero
  GIT_REPOSITORY https://github.com/mapbox/protozero
