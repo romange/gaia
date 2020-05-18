@@ -409,7 +409,7 @@ add_third_party(mimalloc
   GIT_TAG v1.6.3
   BUILD_COMMAND make -j4 mimalloc
   INSTALL_COMMAND make install
-  COMMAND sh -c "test -L ${THIRD_PARTY_LIB_DIR}/mimalloc/include || ln -s ${THIRD_PARTY_LIB_DIR}/mimalloc/lib/mimalloc-1.6/include ${THIRD_PARTY_LIB_DIR}/mimalloc/"
+  COMMAND sh -c "ln -s ${THIRD_PARTY_LIB_DIR}/mimalloc/lib/mimalloc-1.6/include/*.h -t ${THIRD_PARTY_LIB_DIR}/mimalloc/include/"
 )
 
 add_third_party(protozero
