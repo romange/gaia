@@ -83,7 +83,15 @@ void UringFiberAlgo::suspend_until(const time_point& abs_time) noexcept {
 
   DCHECK(cur_cntx->is_context(fibers::type::dispatcher_context));
   if (time_point::max() != abs_time) {
-    auto cb = [](Proactor::IoResult, int64_t, Proactor*) { this_fiber::yield(); };
+    auto cb = [](Proactor::IoResult res, int64_t, Proactor*) {
+      // If io_uring does not support timeout, then this callback will be called
+      // earlier than needed and dispatch won't awake the sleeping fiber.
+      // This will cause deadlock.
+      DCHECK_NE(res, -EINVAL) << "This linux version does not support this operation";
+      DVLOG(1) << "this_fiber::yield " << res;
+
+      this_fiber::yield();
+    };
 
     // TODO: if we got here, most likely our completion queues were empty so
     // it's unlikely that we will have full submit queue but this state may happen.
