@@ -406,9 +406,11 @@ add_third_party(intel_z
 
 set(MIMALLOC_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/mimalloc/include)
 add_third_party(mimalloc
-  GIT_REPOSITORY https://github.com/microsoft/mimalloc
-  GIT_TAG v1.6.3
+  GIT_REPOSITORY https://github.com/romange/mimalloc
+
+  # Add -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=-O0 to debug
   CMAKE_PASS_FLAGS "-DMI_BUILD_SHARED=OFF -DMI_BUILD_TESTS=OFF -DMI_OVERRIDE=OFF"
+
   BUILD_COMMAND make -j4 mimalloc-static
   INSTALL_COMMAND make install
   COMMAND mkdir -p ${MIMALLOC_INCLUDE_DIR}
@@ -430,7 +432,7 @@ add_third_party(libosmium
  DEPENDS protozero_project
  GIT_REPOSITORY https://github.com/osmcode/libosmium.git
  GIT_TAG 5c06fbb
- PATCH_COMMAND 3r -p ${OSMIUM_INCLUDE_DIR}
+ PATCH_COMMAND mkdir -p ${OSMIUM_INCLUDE_DIR}
  BUILD_IN_SOURCE 1
  CONFIGURE_COMMAND true
  BUILD_COMMAND true
