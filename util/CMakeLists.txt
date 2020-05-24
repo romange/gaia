@@ -21,7 +21,7 @@ cxx_link(proc_stats strings)
 
 cxx_test(sinksource_test strings util LABELS CI)
 cxx_test(pb2json_test pb2json addressbook_proto LABELS CI)
-cxx_test(mimalloc_test TRDP::mimalloc LABELS CI)
+cxx_test(mimalloc_test TRDP::mimalloc absl_strings LABELS CI)
 
 add_subdirectory(asio)
 add_subdirectory(fibers)

@@ -8,6 +8,7 @@
 
 #include "base/gtest.h"
 #include "base/logging.h"
+#include "absl/strings/str_cat.h"
 
 using namespace std;
 
@@ -43,10 +44,13 @@ class MimallocTest : public testing::Test {
     mi_stats_print_out(&StatsPrint, nullptr);
   }
 
+  char* MmapShared(string file_name, size_t size, bool is_huge);
 
   static void* Mmap(void* addr, size_t size, size_t try_alignment, mi_mmap_flags_t mmap_flags,
                     void* arg, bool* is_large);
   static bool Munmap(void* addr, size_t size, void* arg);
+
+  int fd_ = -1;
 };
 
 void* MimallocTest::Mmap(void* addr, size_t size, size_t try_alignment, mi_mmap_flags_t mmap_flags,
@@ -55,10 +59,9 @@ void* MimallocTest::Mmap(void* addr, size_t size, size_t try_alignment, mi_mmap_
 
   int protect_flags = mmap_flags & mi_mmap_commit ? (PROT_WRITE | PROT_READ) : PROT_NONE;
   int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
-  int fd = -1;
   *is_large = false;
 
-  void* res = mmap(addr, size, protect_flags, flags, fd, 0);
+  void* res = mmap(addr, size, protect_flags, flags, -1, 0);
   if (res == MAP_FAILED)
     res = NULL;
 
@@ -68,6 +71,26 @@ void* MimallocTest::Mmap(void* addr, size_t size, size_t try_alignment, mi_mmap_
 bool MimallocTest::Munmap(void* addr, size_t size, void* arg) {
   LOG(INFO) << "Munmap A/S: " << addr << "/" << size;
   return munmap(addr, size) == -1;
+}
+
+char* MimallocTest::MmapShared(string file_name, size_t size, bool is_huge) {
+  string path = absl::StrCat("/dev/", is_huge ? "hugepages" : "shm", "/", file_name);
+  fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
+  CHECK_GT(fd_, 0);
+
+  int flags = MAP_SHARED;
+  if (is_huge)
+    flags |= MAP_HUGETLB;
+
+
+  LOG(INFO) << "Before Mmap";
+  char* p1 = reinterpret_cast<char*>(
+      mmap(NULL, size, PROT_WRITE | PROT_READ, flags, fd_, 0));
+  CHECK_NE(p1, MAP_FAILED);
+  LOG(INFO) << "After Mmap";
+  CHECK_EQ(0, ftruncate(fd_, size));
+  LOG(INFO) << "After ftruncate";
+  return p1;
 }
 
 bool PrintHeap(const mi_heap_t* heap, const mi_heap_area_t* area, void* block, size_t block_size,
@@ -139,6 +162,36 @@ TEST_F(MimallocTest, MmapPrivateReshared) {
     ASSERT_EQ(0, array[i]);
   }
   close(fd);
+}
+
+TEST_F(MimallocTest, ShMapUnmap) {
+  constexpr size_t kRegionSize = 1 << 30;
+  constexpr size_t kUnmapSize = 1 << 22;
+  char* p1 = MmapShared("file2.sh", kRegionSize, false);
+  memset(p1, 'R', kRegionSize);
+
+  CHECK_EQ(0, munmap(p1, kUnmapSize));
+
+  ASSERT_EQ(0, fallocate(fd_, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, kUnmapSize)) << errno;
+  close(fd_);
+
+  CHECK_EQ(0, munmap(p1 + kUnmapSize, kRegionSize - kUnmapSize));
+}
+
+TEST_F(MimallocTest, ShMapUnmapHuge) {
+  // It seems that THB create significant latency in mmap.
+  // TBD: It may be that explicit huge pages won't have this problem.
+  constexpr size_t kRegionSize = 1 << 30;
+  constexpr size_t kUnmapSize = 1 << 22;
+  char* p1 = MmapShared("file2.sh", kRegionSize, true);
+  memset(p1, 'R', kRegionSize);
+
+  CHECK_EQ(0, munmap(p1, kUnmapSize));
+
+  ASSERT_EQ(0, fallocate(fd_, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, kUnmapSize)) << errno;
+  close(fd_);
+
+  CHECK_EQ(0, munmap(p1 + kUnmapSize, kRegionSize - kUnmapSize));
 }
 
 }  // namespace util
