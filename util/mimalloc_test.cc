@@ -76,12 +76,14 @@ bool MimallocTest::Munmap(void* addr, size_t size, void* arg) {
 char* MimallocTest::MmapShared(string file_name, size_t size, bool is_huge) {
   string path = absl::StrCat("/dev/", is_huge ? "hugepages" : "shm", "/", file_name);
   fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
+  if (fd_ == -1)
+    return NULL;
+
   CHECK_GT(fd_, 0);
 
   int flags = MAP_SHARED;
   if (is_huge)
     flags |= MAP_HUGETLB;
-
 
   LOG(INFO) << "Before Mmap";
   char* p1 = reinterpret_cast<char*>(
@@ -126,9 +128,11 @@ TEST_F(MimallocTest, Heap) {
   (void)ptr;
   LOG(INFO) << "After HeapDestroy";
   mi_stats_print_out(&StatsPrint, nullptr);
+}
 
-  heap = mi_heap_new();
-  ptr = mi_heap_malloc(heap, 1 << 25);
+TEST_F(MimallocTest, HeapLargeAlloc) {
+  mi_heap_t* heap = mi_heap_new();
+  void* ptr = mi_heap_malloc(heap, 1 << 25);  // 32MB
   memset(ptr, 0, 1 << 25);
   mi_heap_destroy(heap);
 }
@@ -184,6 +188,10 @@ TEST_F(MimallocTest, ShMapUnmapHuge) {
   constexpr size_t kRegionSize = 1 << 30;
   constexpr size_t kUnmapSize = 1 << 22;
   char* p1 = MmapShared("file2.sh", kRegionSize, true);
+  if (p1 == nullptr) {
+    LOG(WARNING) << "Omitting - huge pages are not configured";
+  }
+
   memset(p1, 'R', kRegionSize);
 
   CHECK_EQ(0, munmap(p1, kUnmapSize));
