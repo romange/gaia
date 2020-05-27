@@ -33,8 +33,8 @@ class MimallocTest : public testing::Test {
     mi_process_init();
     // mi_option_enable(mi_option_verbose);
 
-    register_mmap_fun(&Mmap, nullptr);
-    register_munmap_fun(&Munmap, nullptr);
+    mi_register_mmap_fun(&Mmap, nullptr);
+    mi_register_munmap_fun(&Munmap, nullptr);
   }
 
   static void TearDownTestCase() {
