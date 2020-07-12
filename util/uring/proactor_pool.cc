@@ -8,6 +8,8 @@
 #include "base/pthread_utils.h"
 
 DEFINE_uint32(proactor_threads, 0, "Number of io threads in the pool");
+DEFINE_bool(proactor_reuse_wq, false, "If true reuses the same work-queue for all io_urings "
+                                      "in the pool");
 
 using namespace std;
 
@@ -36,8 +38,8 @@ void ProactorPool::Run(uint32_t ring_depth) {
 
   char buf[32];
 
-  for (size_t i = 0; i < pool_size_; ++i) {
-    snprintf(buf, sizeof(buf), "Proactor%lu", i);
+  auto init_proactor = [this, ring_depth, &buf](int i, int wq_fd) mutable {
+    snprintf(buf, sizeof(buf), "Proactor%u", i);
     auto cb = [ptr = &proactor_[i], ring_depth]() { ptr->Run(ring_depth); };
     pthread_t tid = base::StartThread(buf, cb);
     cpu_set_t cps;
@@ -47,6 +49,12 @@ void ProactorPool::Run(uint32_t ring_depth) {
     int rc = pthread_setaffinity_np(tid, sizeof(cpu_set_t), &cps);
     LOG_IF(WARNING, rc) << "Error calling pthread_setaffinity_np: "
                         << strerror(rc) << "\n";
+  };
+  init_proactor(0, -1);
+  int wq_fd = FLAGS_proactor_reuse_wq ? proactor_[0].ring_fd() : -1;
+
+  for (size_t i = 1; i < pool_size_; ++i) {
+    init_proactor(i, wq_fd);
   }
   state_ = RUN;
 

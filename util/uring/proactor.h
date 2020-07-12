@@ -30,7 +30,7 @@ class Proactor {
   ~Proactor();
 
   // Runs the poll-loop. Stalls the calling thread which will become the "Proactor" thread.
-  void Run(unsigned ring_depth = 512);
+  void Run(unsigned ring_depth = 512, int wq_fd = -1);
 
   //! Signals proactor to stop. Does not wait for it.
   void Stop();
@@ -111,10 +111,12 @@ class Proactor {
     RegisterSignal(l, nullptr);
   }
 
+  int ring_fd() const { return ring_.ring_fd;}
+
  private:
   enum { WAIT_SECTION_STATE = 1UL << 31 };
 
-  void Init(size_t ring_size);
+  void Init(size_t ring_size, int wq_fd = -1);
 
   void WakeRing();
 

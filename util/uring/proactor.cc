@@ -142,9 +142,9 @@ void Proactor::Stop() {
   VLOG(1) << "Proactor::StopFinish";
 }
 
-void Proactor::Run(unsigned ring_depth) {
+void Proactor::Run(unsigned ring_depth, int wq_fd) {
   VLOG(1) << "Proactor::Run";
-  Init(ring_depth);
+  Init(ring_depth, wq_fd);
 
   main_loop_ctx_ = fibers::context::active();
   fibers::scheduler* sched = main_loop_ctx_->get_scheduler();
@@ -256,7 +256,7 @@ void Proactor::Run(unsigned ring_depth) {
   centries_.clear();
 }
 
-void Proactor::Init(size_t ring_size) {
+void Proactor::Init(size_t ring_size, int wq_fd) {
   CHECK_EQ(0, ring_size & (ring_size - 1));
   CHECK_GE(ring_size, 8);
   CHECK_EQ(0, thread_id_) << "Init was already called";
@@ -264,12 +264,17 @@ void Proactor::Init(size_t ring_size) {
   io_uring_params params;
   memset(&params, 0, sizeof(params));
 
+  // Optionally reuse the already created work-queue from another uring.
+  if (wq_fd > 0) {
+    params.flags |= IORING_SETUP_ATTACH_WQ;
+    params.wq_fd = wq_fd;
+  }
+
   // it seems that SQPOLL requires registering each fd, including sockets fds.
   // need to check if its worth pursuing.
   // For sure not in short-term.
   // params.flags = IORING_SETUP_SQPOLL;
   URING_CHECK(io_uring_queue_init_params(ring_size, &ring_, &params));
-
   fast_poll_f_ = (params.features & IORING_FEAT_FAST_POLL) != 0;
   if (!fast_poll_f_) {
     LOG_FIRST_N(INFO, 1) << "IORING_FEAT_FAST_POLL feature is not present in the kernel";
