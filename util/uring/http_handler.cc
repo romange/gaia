@@ -97,6 +97,13 @@ bool HttpListenerBase::HandleRoot(const RequestType& request,
   return false;
 }
 
+bool HttpListenerBase::RegisterCb(StringPiece path, RequestCb cb) {
+  CbInfo cb_info{.cb = cb};
+
+  auto res = cb_map_.emplace(path, cb_info);
+  return res.second;
+}
+
 HttpHandler2::HttpHandler2(const HttpListenerBase* base) : base_(base) {
 }
 
@@ -129,6 +136,7 @@ void HttpHandler2::HandleOne(const RequestType& req, HttpContext* cntx) {
   StringPiece target = as_absl(req.target());
   StringPiece path, query;
   tie(path, query) = ParseQuery(target);
+  VLOG(2) << "Searching for " << path;
 
   auto it = base_->cb_map_.find(path);
   if (it == base_->cb_map_.end()) {
