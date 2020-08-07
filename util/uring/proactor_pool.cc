@@ -97,5 +97,27 @@ Proactor* ProactorPool::GetNextProactor() {
   return &proactor;
 }
 
+absl::string_view ProactorPool::GetString(absl::string_view source) {
+  if (source.empty()) {
+    return source;
+  }
+
+  folly::RWSpinLock::ReadHolder rh(str_lock_);
+  auto it = str_set_.find(source);
+  if (it != str_set_.end())
+    return *it;
+  rh.reset();
+
+  str_lock_.lock();
+  char* str = arena_.Allocate(source.size());
+  memcpy(str, source.data(), source.size());
+
+  absl::string_view res(str, source.size());
+  str_set_.insert(res);
+  str_lock_.unlock();
+
+  return res;
+}
+
 }  // namespace uring
 }  // namespace util

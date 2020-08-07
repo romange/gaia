@@ -8,7 +8,11 @@
 
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+#include "absl/strings/string_view.h"
+#include "base/arena.h"
 #include "base/type_traits.h"
+#include "base/RWSpinLock.h"
 #include "util/uring/proactor.h"
 
 namespace util {
@@ -197,6 +201,12 @@ class ProactorPool {
 
   Proactor* GetLocalProactor();
 
+  // Auxillary functions
+
+  // Returns a string owned by pool's global storage. Allocates only once for each new string blob.
+  // Currently has average performance and it employs RW spinlock underneath.
+  absl::string_view GetString(absl::string_view source);
+
  private:
   void WrapLoop(size_t index, fibers_ext::BlockingCounter* bc);
   void CheckRunningState();
@@ -206,6 +216,10 @@ class ProactorPool {
   /// The next io_context to use for a connection.
   std::atomic_uint_fast32_t next_io_context_{0};
   uint32_t pool_size_;
+
+  folly::RWSpinLock str_lock_;
+  absl::flat_hash_set<absl::string_view> str_set_;
+  base::Arena arena_;
 
   enum State { STOPPED, RUN } state_ = STOPPED;
 };
