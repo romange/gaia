@@ -20,6 +20,7 @@ namespace util {
 namespace uring {
 
 class UringFiberAlgo;
+class ProactorPool;
 
 class Proactor {
   Proactor(const Proactor&) = delete;
@@ -60,6 +61,24 @@ class Proactor {
   static bool IsProactorThread() {
     return tl_info_.is_proactor_thread;
   }
+
+  // Returns an approximate (cached) time with usec granularity.
+  // The caller must run in the same thread as the proactor.
+  static uint64_t GetMonotonicTimeUsec() {
+    return tl_info_.monotonic_time;
+  }
+
+  // Returns an 0 <= index < N, where N is the number of proactor threads in the pool of called
+  // from Proactor thread. Returns -1 if called from some other thread.
+  static int32_t GetThreadIndex() {
+    return tl_info_.thread_index;
+  }
+
+  // Internal, used by ProactorPool
+  static void SetThreadIndex(uint32_t index) {
+    tl_info_.thread_index = index;
+  }
+
 
   bool HasFastPoll() const {
     return fast_poll_f_;
@@ -141,7 +160,6 @@ class Proactor {
   void RegrowCentries();
 
   io_uring ring_;
-
   pthread_t thread_id_ = 0U;
 
   int wake_fd_;
@@ -181,10 +199,17 @@ class Proactor {
 
   struct TLInfo {
     bool is_proactor_thread = false;
+    uint32_t thread_index = 0;
+    uint64_t monotonic_time = 0;
   };
   static thread_local TLInfo tl_info_;
 };
 
+
+
+// Implementation
+// **********************************************************************
+//
 template <typename Func> void Proactor::AsyncBrief(Func&& f) {
   if (EmplaceTaskQueue(std::forward<Func>(f)))
     return;

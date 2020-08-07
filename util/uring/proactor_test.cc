@@ -8,15 +8,21 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include <gmock/gmock.h>
+
 #include "base/gtest.h"
 #include "base/logging.h"
 #include "util/fibers/fibers_ext.h"
 #include "util/uring/accept_server.h"
 #include "util/uring/uring_fiber_algo.h"
 #include "util/uring/proactor_pool.h"
+#include "util/uring/sliding_counter.h"
+#include "util/uring/varz.h"
 
 using namespace boost;
 using namespace std;
+using testing::Pair;
+using testing::ElementsAre;
 
 namespace util {
 namespace uring {
@@ -37,6 +43,7 @@ class ProactorTest : public testing::Test {
   }
 
   static void SetUpTestCase() {
+    testing::FLAGS_gtest_death_test_style="threadsafe";
   }
 
   using IoResult = Proactor::IoResult;
@@ -147,6 +154,39 @@ TEST_F(ProactorTest, DispatchTest) {
   }
   LOG(INFO) << "BeforeJoin";
   fb.join();
+}
+
+TEST_F(ProactorTest, SlidingCounter) {
+  SlidingCounterTL<10> sc;
+  proactor_->AwaitBrief([&] { sc.Inc();});
+  uint32_t cnt = proactor_->AwaitBrief([&] { return sc.Sum();});
+  EXPECT_EQ(1, cnt);
+
+  ProactorPool pool{2};
+  pool.Run();
+  SlidingCounter<4> sc2;
+  sc2.Init(&pool);
+  pool.AwaitOnAll([&](auto*) {sc2.Inc();});
+  cnt = sc2.Sum();
+  EXPECT_EQ(2, cnt);
+}
+
+TEST_F(ProactorTest, Varz) {
+  VarzQps qps("test1");
+  ASSERT_DEATH(qps.Inc(), "");
+
+  ProactorPool pool{2};
+  pool.Run();
+
+  qps.Init(&pool);
+
+  vector<pair<string, uint32_t>> vals;
+  auto cb =[&vals](const char* str, VarzValue&& v) {
+    vals.emplace_back(str, v.num);
+  };
+  pool[0].AwaitBlocking([&] { qps.Iterate(cb);} );
+
+  EXPECT_THAT(vals, ElementsAre(Pair("test1", 0)));
 }
 
 

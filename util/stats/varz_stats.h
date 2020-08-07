@@ -6,8 +6,6 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
-#include <string>
-#include <unordered_map>
 
 #include "absl/strings/str_cat.h"   // for absl::AlphaNum
 #include "base/atomic_wrapper.h"

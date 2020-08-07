@@ -58,7 +58,9 @@ void ProactorPool::Run(uint32_t ring_depth) {
   }
   state_ = RUN;
 
-  AwaitOnAll([](Proactor*) {});
+  AwaitOnAll([](unsigned index, Proactor*) {
+    Proactor::SetThreadIndex(index);
+  });
 
   LOG(INFO) << "Running " << pool_size_ << " io threads";
 }

@@ -15,6 +15,7 @@
 #include "absl/base/attributes.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/walltime.h"
 #include "util/uring/uring_fiber_algo.h"
 
 #define URING_CHECK(x)                                                           \
@@ -177,13 +178,17 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
 
     num_task_runs = 0;
 
+    tl_info_.monotonic_time = GetMonotonicMicros();
+    auto task_start = tl_info_.monotonic_time;
+
     tq_seq = tq_seq_.load(std::memory_order_acquire);
 
     // This should handle wait-free and "submit-free" short CPU tasks enqued
-    // using Async/Await calls.
-    while (task_queue_.try_dequeue(task)) {
+    // using Async/Await calls. We allocate the quota of 500usec of CPU time per iteration.
+    while (tl_info_.monotonic_time <= task_start + 500 && task_queue_.try_dequeue(task)) {
       ++num_task_runs;
       task();
+      tl_info_.monotonic_time = GetMonotonicMicros();
     }
 
     if (num_task_runs) {
@@ -211,6 +216,7 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
       // Eventually UringFiberAlgo will resume back this fiber in suspend_until
       // function.
       DVLOG(2) << "Suspend ioloop";
+      tl_info_.monotonic_time = GetMonotonicMicros();
       sched->suspend();
 
       DVLOG(2) << "Resume ioloop";
