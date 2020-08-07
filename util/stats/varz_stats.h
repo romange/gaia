@@ -8,51 +8,18 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include "absl/strings/str_cat.h"
-#include "base/RWSpinLock.h"
+
+#include "absl/strings/str_cat.h"   // for absl::AlphaNum
 #include "base/atomic_wrapper.h"
 #include "base/integral_types.h"
 #include "strings/stringpiece.h"
 #include "strings/unique_strings.h"
 #include "util/stats/sliding_counter.h"
-#include "util/stats/varz_value.h"
+#include "util/stats/varz_node.h"
 
 #define DEFINE_VARZ(type, name) util::type name(#name)
 
 namespace util {
-
-class VarzListNode {
- public:
-  typedef util::VarzValue AnyValue;
-
-  explicit VarzListNode(const char* name);
-  virtual ~VarzListNode();
-
-  // New interface. Func is a function accepting 'const char*' and VarzValue&&.
-  static void Iterate(std::function<void(const char*, AnyValue&&)> f);
-
-  // Old interface. Appends string representations of each active node in the list to res.
-  // Used for outputting the current state.
-  static void IterateValues(std::function<void(const std::string&, const std::string&)> cb) {
-    Iterate([&](const char* name, AnyValue&& av) { cb(name, Format(av)); });
-  }
-
- protected:
-  virtual AnyValue GetData() const = 0;
-
-  const char* name_;
-
-  static std::string Format(const AnyValue& av);
-
- private:
-  // Returns the head to varz linked list. Note that the list becomes invalid after at least one
-  // linked list node was destroyed.
-  static VarzListNode*& global_list();
-  static folly::RWSpinLock g_varz_lock;
-
-  VarzListNode* next_;
-  VarzListNode* prev_;
-};
 
 /**
   Represents a family (map) of counters. Each counter has its own key name.
@@ -68,7 +35,9 @@ class VarzMapCount : public VarzListNode {
   // Increments key by delta.
   void IncBy(StringPiece key, int32 delta);
 
-  void Inc(StringPiece key) { IncBy(key, 1); }
+  void Inc(StringPiece key) {
+    IncBy(key, 1);
+  }
   void Set(StringPiece key, int32 value);
 
  private:
@@ -99,10 +68,15 @@ class VarzMapAverage5m : public VarzListNode {
 
 class VarzCount : public VarzListNode {
  public:
-  explicit VarzCount(const char* varname) : VarzListNode(varname), val_(0) {}
+  explicit VarzCount(const char* varname) : VarzListNode(varname), val_(0) {
+  }
 
-  void IncBy(int32 delta) { val_ += delta; }
-  void Inc() { IncBy(1); }
+  void IncBy(int32 delta) {
+    val_ += delta;
+  }
+  void Inc() {
+    IncBy(1);
+  }
 
  private:
   virtual AnyValue GetData() const override;
@@ -112,9 +86,12 @@ class VarzCount : public VarzListNode {
 
 class VarzQps : public VarzListNode {
  public:
-  explicit VarzQps(const char* varname) : VarzListNode(varname) {}
+  explicit VarzQps(const char* varname) : VarzListNode(varname) {
+  }
 
-  void Inc() { val_.Inc(); }
+  void Inc() {
+    val_.Inc();
+  }
 
  private:
   virtual AnyValue GetData() const override;
@@ -128,7 +105,8 @@ class VarzFunction : public VarzListNode {
   typedef std::function<KeyValMap()> MapCb;
 
   // cb - function that formats the output either as json or html according to the boolean is_json.
-  explicit VarzFunction(const char* varname, MapCb cb) : VarzListNode(varname), cb_(cb) {}
+  explicit VarzFunction(const char* varname, MapCb cb) : VarzListNode(varname), cb_(cb) {
+  }
 
  private:
   AnyValue GetData() const override;
@@ -151,7 +129,9 @@ template <int N> class FastVarMapCounter {
     suffix_ = StrAppend(buf_, N, base);
   }
 
-  void Inc(const char* suffix) { IncBy(suffix, 1); }
+  void Inc(const char* suffix) {
+    IncBy(suffix, 1);
+  }
 
   void IncBy(const char* suffix, int32 val) {
     strcpy(suffix_, suffix);
