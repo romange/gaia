@@ -183,17 +183,21 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
 
     num_task_runs = 0;
 
-    tl_info_.monotonic_time = GetClockNanos();
-    auto task_start = tl_info_.monotonic_time;
+    uint64_t task_start = 0;
 
     tq_seq = tq_seq_.load(std::memory_order_acquire);
 
     // This should handle wait-free and "submit-free" short CPU tasks enqued using Async/Await
     // calls. We allocate the quota of 500K nsec (500usec) of CPU time per iteration.
-    while (tl_info_.monotonic_time <= task_start + 500000 && task_queue_.try_dequeue(task)) {
+    while (task_queue_.try_dequeue(task)) {
       ++num_task_runs;
-      task();
       tl_info_.monotonic_time = GetClockNanos();
+      task();
+      if (task_start == 0) {
+        task_start = tl_info_.monotonic_time;
+      } else if (task_start + 500000 < tl_info_.monotonic_time) {
+        break;
+      }
     }
 
     if (num_task_runs) {
