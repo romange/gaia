@@ -43,13 +43,29 @@ class Proactor {
   using CbType = std::function<void(IoResult, int64_t, Proactor*)>;
 
   /**
-   * The following methods can only run from Proactor::Run thread,i.e when
-   * InProactorThread is true. You can call them from other threads by enqueing via Async.
-   * If cb is nullptr then no callback will be called upon completion of the request and payload
-   * argument is ignored.
+   * @brief Get the Submit Entry object in order to issue I/O request.
+   *
+   * @param cb - completion callback.
+   * @param payload - an argument to the completion callback that is further passed as the second
+   *                  argument to CbType(). Can be nullptr if no notification is required.
+   * @return SubmitEntry with initialized userdata.
+   *
+   * This method might block the calling fiber therefore it should not be called within proactor
+   * context. In other words it can not be called from  *Brief([]...) calls to Proactor.
+   * In addition, this method can not be used for introducing IOSQE_IO_LINK chains since they
+   * require atomic SQE allocation.
+   * @todo We should add GetSubmitEntries that can allocate multiple SQEs atomically.
+   *       In that case we will need RegisterCallback function that takes an unregistered SQE
+   *       and assigns a callback to it. GetSubmitEntry will be implemented using those functions.
    */
   SubmitEntry GetSubmitEntry(CbType cb, int64_t payload);
 
+  /**
+   * @brief Returns true if the called is running in this Proactor thread.
+   *
+   * @return true
+   * @return false
+   */
   bool InMyThread() const {
     return pthread_self() == thread_id_;
   }
@@ -62,21 +78,21 @@ class Proactor {
     return tl_info_.is_proactor_thread;
   }
 
-  // Returns an approximate (cached) time with usec granularity.
+  // Returns an approximate (cached) time with nano-sec granularity.
   // The caller must run in the same thread as the proactor.
-  static uint64_t GetMonotonicTimeUsec() {
+  static uint64_t GetMonotonicTimeNs() {
     return tl_info_.monotonic_time;
   }
 
   // Returns an 0 <= index < N, where N is the number of proactor threads in the pool of called
   // from Proactor thread. Returns -1 if called from some other thread.
-  static int32_t GetThreadIndex() {
-    return tl_info_.thread_index;
+  static int32_t GetIndex() {
+    return tl_info_.proactor_index;
   }
 
   // Internal, used by ProactorPool
-  static void SetThreadIndex(uint32_t index) {
-    tl_info_.thread_index = index;
+  static void SetIndex(uint32_t index) {
+    tl_info_.proactor_index = index;
   }
 
 
@@ -199,7 +215,7 @@ class Proactor {
 
   struct TLInfo {
     bool is_proactor_thread = false;
-    uint32_t thread_index = 0;
+    uint32_t proactor_index = 0;
     uint64_t monotonic_time = 0;
   };
   static thread_local TLInfo tl_info_;

@@ -39,7 +39,7 @@ void SlidingCounterBase::CheckInit() const {
 unsigned SlidingCounterBase::ProactorThreadIndex() const {
   unsigned tnum = CHECK_NOTNULL(pp_)->size();
 
-  int32_t indx = Proactor::GetThreadIndex();
+  int32_t indx = Proactor::GetIndex();
   CHECK_GE(indx, 0) << "Must be called from proactor thread!";
   CHECK_LT(indx, tnum) << "Invalid thread index " << indx;
 

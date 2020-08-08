@@ -15,7 +15,6 @@
 #include "absl/base/attributes.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/walltime.h"
 #include "util/uring/uring_fiber_algo.h"
 
 #define URING_CHECK(x)                                                           \
@@ -84,6 +83,12 @@ void SigAction(int signal, siginfo_t*, void*) {
   } else {
     LOG(ERROR) << "Tangling signal handler " << signal;
   }
+}
+
+inline uint64_t GetClockNanos() {
+  timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * std::nano::den + ts.tv_nsec;
 }
 
 inline unsigned CQReadyCount(const io_uring& ring) {
@@ -156,7 +161,7 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
 
   is_stopped_ = false;
 
-  constexpr size_t kBatchSize = 32;
+  constexpr size_t kBatchSize = 64;
   struct io_uring_cqe cqes[kBatchSize];
   uint32_t tq_seq = 0;
   uint32_t num_stalls = 0;
@@ -178,17 +183,17 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
 
     num_task_runs = 0;
 
-    tl_info_.monotonic_time = GetMonotonicMicros();
+    tl_info_.monotonic_time = GetClockNanos();
     auto task_start = tl_info_.monotonic_time;
 
     tq_seq = tq_seq_.load(std::memory_order_acquire);
 
-    // This should handle wait-free and "submit-free" short CPU tasks enqued
-    // using Async/Await calls. We allocate the quota of 500usec of CPU time per iteration.
-    while (tl_info_.monotonic_time <= task_start + 500 && task_queue_.try_dequeue(task)) {
+    // This should handle wait-free and "submit-free" short CPU tasks enqued using Async/Await
+    // calls. We allocate the quota of 500K nsec (500usec) of CPU time per iteration.
+    while (tl_info_.monotonic_time <= task_start + 500000 && task_queue_.try_dequeue(task)) {
       ++num_task_runs;
       task();
-      tl_info_.monotonic_time = GetMonotonicMicros();
+      tl_info_.monotonic_time = GetClockNanos();
     }
 
     if (num_task_runs) {
@@ -201,9 +206,8 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
       // Once we copied the data we can mark the cqe consumed.
       io_uring_cq_advance(&ring_, cqe_count);
       DVLOG(2) << "Fetched " << cqe_count << " cqes";
-      sqe_avail_.notifyAll();
-
       DispatchCompletions(cqes, cqe_count);
+      sqe_avail_.notifyAll();
     }
 
     if (tq_seq & 1) {   // We allow dispatch fiber to run.
@@ -216,7 +220,7 @@ void Proactor::Run(unsigned ring_depth, int wq_fd) {
       // Eventually UringFiberAlgo will resume back this fiber in suspend_until
       // function.
       DVLOG(2) << "Suspend ioloop";
-      tl_info_.monotonic_time = GetMonotonicMicros();
+      tl_info_.monotonic_time = GetClockNanos();
       sched->suspend();
 
       DVLOG(2) << "Resume ioloop";
@@ -349,6 +353,7 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
       continue;
 
     if (cqe.user_data == kWakeIndex) {
+      // We were woken up. Need to rearm wake_fd_ poller.
       DCHECK_GE(cqe.res, 0);
 
       DVLOG(1) << "Wakeup " << cqe.res << "/" << cqe.flags;
@@ -357,8 +362,9 @@ void Proactor::DispatchCompletions(io_uring_cqe* cqes, unsigned count) {
 
       // TODO: to move io_uring_get_sqe call from here to before we stall.
       struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
-      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);  // And recharge
-      sqe->user_data = 1;
+      CHECK(sqe);  // We just consumed CQEs. I assume it's enough to get an SQE.
+      io_uring_prep_poll_add(sqe, wake_fd_, POLLIN);  // And rearm.
+      sqe->user_data = kWakeIndex;
     } else {
       LOG(ERROR) << "Unrecognized user_data " << cqe.user_data;
     }

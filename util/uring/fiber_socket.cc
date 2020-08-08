@@ -286,6 +286,12 @@ auto FiberSocket::Recv(iovec* ptr, size_t len) -> expected_size_t {
   msg.msg_iovlen = len;
   int fd = fd_ & FD_MASK;
 
+  // There is a possible data-race bug since GetSubmitEntry can preempt inside
+  // FiberCall, thus introducing a chain with random SQE not from here.
+  //
+  // The bug is not really interesting in this context here since we handle the use-case of old
+  // kernels without fast-poll, however it's problematic for transactions that require SQE chains.
+  // Added TODO to proactor.h
   if (!p_->HasFastPoll()) {
     SubmitEntry se = p_->GetSubmitEntry(nullptr, 0);
     se.PrepPollAdd(fd, POLLIN);

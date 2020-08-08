@@ -101,7 +101,7 @@ class EventCount {
 };
 
 inline bool EventCount::notify() noexcept {
-  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
+  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_release);
 
   if (UNLIKELY(prev & kWaiterMask)) {
     auto* active_ctx = ::boost::fibers::context::active();
@@ -131,7 +131,7 @@ inline bool EventCount::notify() noexcept {
 }
 
 inline bool EventCount::notifyAll() noexcept {
-  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
+  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_release);
 
   if (UNLIKELY(prev & kWaiterMask)) {
     auto* active_ctx = ::boost::fibers::context::active();
