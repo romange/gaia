@@ -1,0 +1,4 @@
+<map id="util::uring::SlidingCounterTL&lt; NUM &gt;" name="util::uring::SlidingCounterTL&lt; NUM &gt;">
+<area shape="rect" id="node1" title="Sliding window data structure that can aggregate moving statistics. It&#39;s implmented using ring&#45;buffer..." alt="" coords="5,95,192,136"/>
+<area shape="rect" id="node2" href="$classutil_1_1uring_1_1detail_1_1SlidingCounterTLBase.html" title=" " alt="" coords="13,5,185,47"/>
+</map>

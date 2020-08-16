@@ -1,0 +1,4 @@
+<map id="boost::asio::async_result&lt; util::fibers_ext::yield_t, void(boost::system::error_code, T)&gt;" name="boost::asio::async_result&lt; util::fibers_ext::yield_t, void(boost::system::error_code, T)&gt;">
+<area shape="rect" id="node1" title=" " alt="" coords="5,95,192,165"/>
+<area shape="rect" id="node2" href="$classutil_1_1fibers__ext_1_1detail_1_1async__result__base.html" title=" " alt="" coords="19,5,179,47"/>
+</map>

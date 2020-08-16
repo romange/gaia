@@ -1,0 +1,5 @@
+<map id="util::uring::HttpListenerBase" name="util::uring::HttpListenerBase">
+<area shape="rect" id="node1" title=" " alt="" coords="5,80,209,107"/>
+<area shape="rect" id="node3" href="$classutil_1_1uring_1_1HttpListener.html" title=" " alt="" coords="21,155,193,196"/>
+<area shape="rect" id="node2" href="$classutil_1_1uring_1_1ListenerInterface.html" title="Abstracts away connections implementation and their life&#45;cycle." alt="" coords="6,5,209,32"/>
+</map>
