@@ -134,7 +134,7 @@ endfunction()
 add_third_party(
   gflags
   GIT_REPOSITORY https://github.com/gflags/gflags.git
-  GIT_TAG v2.2.1
+  GIT_TAG v2.2.2
   CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=ON \
                     -DBUILD_STATIC_LIBS=OFF -DBUILD_gflags_nothreads_LIB=OFF"
   SHARED
@@ -166,7 +166,8 @@ add_third_party(
 
 add_third_party(
   gperf
-  GIT_REPOSITORY https://github.com/romange/gperftools
+  GIT_REPOSITORY https://github.com/gperftools/gperftools/
+  GIT_TAG gperftools-2.8
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
                     --enable-libunwind "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"
