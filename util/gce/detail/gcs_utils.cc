@@ -75,6 +75,8 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     }
 
     if (ec == system::errc::operation_not_permitted) {
+      LOG(INFO) << "Failed in iteration #" << (iters+1) 
+                << " due to system::errc::operation_not_permitted, ec: " << ec;
       auto token_res = gce_.RefreshAccessToken(&pool_->io_context());
       if (!token_res.ok())
         return token_res.status;
