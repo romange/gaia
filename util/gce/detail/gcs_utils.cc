@@ -80,7 +80,7 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
         return token_res.status;
 
       AddBearer(token_res.obj, &req);
-      return Status(StatusCode::IO_ERROR, "Disabled operation");
+      continue;;
     }
 
     if (ec == asio::error::no_permission) {
