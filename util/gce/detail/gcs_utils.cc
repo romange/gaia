@@ -75,6 +75,11 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     }
 
     if (ec == system::errc::operation_not_permitted) {
+      auto token_res = gce_.RefreshAccessToken(&pool_->io_context());
+      if (!token_res.ok())
+        return token_res.status;
+
+      AddBearer(token_res.obj, &req);
       return Status(StatusCode::IO_ERROR, "Disabled operation");
     }
 
