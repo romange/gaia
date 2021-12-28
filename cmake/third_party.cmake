@@ -145,7 +145,7 @@ add_third_party(
   glog
   DEPENDS gflags_project
   GIT_REPOSITORY https://github.com/romange/glog.git
-  GIT_TAG Prod
+  GIT_TAG fe1287dd5d43a34e07c441269d8eff9c05b520c0
 )
 
 

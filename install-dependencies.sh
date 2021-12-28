@@ -15,7 +15,7 @@ export CXX=g++
 install_boost() {
     mkdir -p /tmp/boost && pushd /tmp/boost
     if ! [ -d $BOOST ]; then
-      url="http://dl.bintray.com/boostorg/release/${BVER}/source/$BOOST.tar.bz2"
+      url="https://boostorg.jfrog.io/artifactory/main/release/${BVER}/source/$BOOST.tar.bz2"
       echo "Downloading from $url"
       wget -nv ${url} && tar -xjf $BOOST.tar.bz2
       chown ${SUDO_USER}:${SUDO_USER} -R $BOOST.tar.bz2 $BOOST
