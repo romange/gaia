@@ -75,7 +75,14 @@ StatusObject<HttpsClientPool::ClientHandle> ApiSenderBase::SendGeneric(unsigned 
     }
 
     if (ec == system::errc::operation_not_permitted) {
-      return Status(StatusCode::IO_ERROR, "Disabled operation");
+      LOG(INFO) << "Failed in iteration #" << (iters+1) 
+                << " due to system::errc::operation_not_permitted, ec: " << ec;
+      auto token_res = gce_.RefreshAccessToken(&pool_->io_context());
+      if (!token_res.ok())
+        return token_res.status;
+
+      AddBearer(token_res.obj, &req);
+      continue;
     }
 
     if (ec == asio::error::no_permission) {

@@ -318,10 +318,13 @@ template <typename RespBody> Status GCS::SendWithToken(Request* req, Response<Re
 
     if (IsUnauthorized(*resp)) {
       RETURN_IF_ERROR(RefreshToken(req));
-      *resp = Response<RespBody>{};
-      continue;
     }
+    *resp = Response<RespBody>{};
+  }
+
+  if (resp->result() != h2::status::ok) {
     LOG(FATAL) << "Unexpected response " << *resp;
+    return HttpError(*resp);
   }
   return Status::OK;
 }
