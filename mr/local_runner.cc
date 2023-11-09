@@ -63,7 +63,7 @@ struct LocalRunner::Impl {
   }
 
   uint64_t ProcessText(const string& fname, file::ReadonlyFile* fd, RawSinkCb cb);
-  uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb);
+  uint64_t ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb, const std::string& fname = "");
 
   /// Called from the main thread orchestrating the pipeline run.
   void Start(const pb::Operator* op);
@@ -186,7 +186,7 @@ size_t LocalRunner::Impl::Source::Process(pb::WireFormat::Type type, RawSinkCb c
       cnt = impl_->ProcessText(fname_, rd_file_.release(), cb);
       break;
     case pb::WireFormat::LST:
-      cnt = impl_->ProcessLst(rd_file_.release(), cb);
+      cnt = impl_->ProcessLst(rd_file_.release(), cb, fname_);
       break;
     default:
       LOG(FATAL) << "Not implemented " << pb::WireFormat::Type_Name(type);
@@ -297,9 +297,10 @@ uint64_t LocalRunner::Impl::ProcessText(const string& fname, file::ReadonlyFile*
   return cnt;
 }
 
-uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb) {
-  file::ListReader::CorruptionReporter error_fn = [](size_t bytes, const util::Status& status) {
-    LOG(FATAL) << "Lost " << bytes << " bytes, status: " << status;
+uint64_t LocalRunner::Impl::ProcessLst(file::ReadonlyFile* fd, RawSinkCb cb, const std::string& fname) {
+  file::ListReader::CorruptionReporter error_fn = [&fname](size_t bytes, const util::Status& status) {
+    LOG(ERROR) << "Lost " << bytes << " bytes, status: " << status 
+               << " ,file processed: " << fname;
   };
 
 #ifdef MR_SKIP_OBJECT_CHECKSUM
