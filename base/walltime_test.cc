@@ -4,6 +4,7 @@
 #include "base/walltime.h"
 
 #include <sys/timerfd.h>
+#include <syscall.h>
 #include <time.h>
 
 #include <atomic>
@@ -24,7 +25,12 @@ using namespace std::chrono;
 
 namespace base {
 
-class WalltimeTest : public testing::Test {};
+class WalltimeTest : public testing::Test {
+ protected:
+  static void SetUpTestCase() {
+    SetupJiffiesTimer();
+  }
+};
 
 TEST_F(WalltimeTest, BasicTimer) {
   LOG(INFO) << "Resolution in ms: " << Timer::ResolutionUsec() / 1000;
@@ -140,8 +146,7 @@ static void BM_GetTimeOfDay(benchmark::State& state) {
 }
 BENCHMARK(BM_GetTimeOfDay);
 
-template <clockid_t cid>
-void BM_ClockType(benchmark::State& state) {
+template <clockid_t cid> void BM_ClockType(benchmark::State& state) {
   timespec ts;
   while (state.KeepRunning()) {
     DoNotOptimize(clock_gettime(cid, &ts));
@@ -155,6 +160,16 @@ BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_PROCESS_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_THREAD_CPUTIME_ID);
 BENCHMARK_TEMPLATE(BM_ClockType, CLOCK_BOOTTIME_ALARM);
+
+void BM_ThreadClockById(benchmark::State& state) {
+  clockid_t clid;
+  CHECK_EQ(0, pthread_getcpuclockid(pthread_self(), &clid));
+  timespec ts;
+  while (state.KeepRunning()) {
+    DoNotOptimize(clock_gettime(clid, &ts));
+  }
+}
+BENCHMARK(BM_ThreadClockById);
 
 static void BM_ChronoSteady(benchmark::State& state) {
   while (state.KeepRunning()) {
@@ -178,6 +193,22 @@ static void BM_TimerGetTime(benchmark::State& state) {
   CHECK_EQ(0, timer_delete(timerid));
 }
 BENCHMARK(BM_TimerGetTime);
+
+void BM_TimerOverrun(benchmark::State& state) {
+  sigevent sev;
+  timer_t timerid;
+
+  sev.sigev_notify = SIGEV_THREAD_ID;
+  sev._sigev_un._tid = syscall(SYS_gettid);
+  sev.sigev_signo = SIGRTMIN;
+  CHECK_EQ(0, timer_create(CLOCK_MONOTONIC, &sev, &timerid));
+
+  while (state.KeepRunning()) {
+    timer_getoverrun(timerid);
+  }
+  CHECK_EQ(0, timer_delete(timerid));
+}
+BENCHMARK(BM_TimerOverrun);
 
 static void BM_MonotonicJiffies(benchmark::State& state) {
   while (state.KeepRunning()) {

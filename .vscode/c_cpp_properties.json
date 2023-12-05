@@ -24,6 +24,7 @@
                 "${workspaceFolder}/third_party/libs/xxhash/include",
                 "${workspaceFolder}/third_party/libs/lz4/include",
                 "${workspaceFolder}/third_party/libs/re2/include",
+                "${workspaceFolder}/third_party/libs/mimalloc/include",
                 "${workspaceFolder}",
                 "${workspaceFolder}/genfiles",
                 "${default}"

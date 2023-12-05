@@ -10,6 +10,7 @@
 
 namespace std {
 
+#if __cplusplus <  201703L
 template<> struct hash<StringPiece> {
   size_t operator()(StringPiece slice) const {
     return base::MurmurHash3_x86_32(
@@ -17,6 +18,7 @@ template<> struct hash<StringPiece> {
           slice.size() * sizeof(typename StringPiece::value_type), 16785407UL);
   }
 };
+#endif
 
 template<typename Iter> struct hash<strings::Range<Iter>> {
   size_t operator()(strings::Range<Iter> slice) const {

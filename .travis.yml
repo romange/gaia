@@ -16,6 +16,7 @@ addons:
   apt:
     packages:
       - graphviz
+      - gdb
 
 cache:
   directories:

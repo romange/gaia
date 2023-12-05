@@ -6,7 +6,7 @@
 // https://software.intel.com/en-us/forums/intel-threading-building-blocks/topic/299245
 #pragma once
 
-#include <boost/fiber/mutex.hpp>
+#include <boost/fiber/context.hpp>
 
 #include "base/macros.h"
 
@@ -101,7 +101,7 @@ class EventCount {
 };
 
 inline bool EventCount::notify() noexcept {
-  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
+  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_release);
 
   if (UNLIKELY(prev & kWaiterMask)) {
     auto* active_ctx = ::boost::fibers::context::active();
@@ -131,7 +131,7 @@ inline bool EventCount::notify() noexcept {
 }
 
 inline bool EventCount::notifyAll() noexcept {
-  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_acq_rel);
+  uint64_t prev = val_.fetch_add(kAddEpoch, std::memory_order_release);
 
   if (UNLIKELY(prev & kWaiterMask)) {
     auto* active_ctx = ::boost::fibers::context::active();

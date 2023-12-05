@@ -14,7 +14,7 @@
 #include "strings/split.h"
 #include "strings/strcat.h"
 #include "util/fibers/fibers_ext.h"
-#include "util/http/http_conn_handler.h"
+#include "util/http/http_common.h"
 #include "util/spawn.h"
 
 namespace util {
@@ -47,16 +47,17 @@ static void HandleCpuProfile(bool enable, StringResponse* response) {
       int res = ProfilerStart(profile_name.c_str());
       LOG(INFO) << "Starting profiling into " << profile_name << " " << res;
       body.append(
-          "<p> Yeah, let's profile this bitch, baby!</p> \n"
+          "<h1> Wow, your code is so fast!</h1> \n"
           "<img "
-          "src='https://gist.githubusercontent.com/romange/4760c3eebc407755f856fec8e5b6d4c1/"
-          "raw/profiler.gif'>\n");
+          "src='https://gist.github.com/romange/4760c3eebc407755f856fec8e5b6d4c1/raw/"
+          "8da7e4129da2ebef26a0fad7b637364439f33e97/profiler2.gif'>\n");
     }
     return;
   }
   ProfilerStop();
   if (last_profile_suffix[0] == '\0') {
-    body.append("<h3>Profiling is off, commander!</h3> \n");
+    body.append("<h3>Profiling is off, commander!</h3> \n")
+    .append("<img src='https://i.giphy.com/media/l0IykG0AM7911MrCM/giphy.webp'>\n");
     return;
   }
   string cmd("nice -n 15 pprof -noinlines -lines -unit ms --svg ");
@@ -118,7 +119,7 @@ static void HandleHeapProfile(bool enable, StringResponse* response) {
   }
 }
 
-void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
+StringResponse ProfilezHandler(const QueryArgs& args) {
   bool enable = false;
   bool heap = false;
   for (const auto& k_v : args) {
@@ -131,15 +132,13 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   }
 
   fibers_ext::Done done;
-  std::thread([=]() mutable {
-    StringResponse response;
-
+  StringResponse response;
+  std::thread([=, &response]() mutable {
     if (!heap) {
       HandleCpuProfile(enable, &response);
     } else {
       HandleHeapProfile(enable, &response);
     }
-    send->Invoke(std::move(response));
     done.Notify();
   }).detach();
 
@@ -147,6 +146,7 @@ void ProfilezHandler(const QueryArgs& args, HttpHandler::SendFunction* send) {
   // I use done to block the fiber but free the thread to handle other fibers.
   // Still this fiber connection is blocked.
   done.Wait();
+  return response;
 }
 
 }  // namespace http

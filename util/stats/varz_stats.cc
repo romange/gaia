@@ -8,69 +8,10 @@
 #include "strings/strcat.h"
 #include "strings/stringprintf.h"
 
-using absl::StrAppend;
 using std::string;
 using strings::AsString;
-using util::VarzValue;
 
 namespace util {
-
-folly::RWSpinLock VarzListNode::g_varz_lock;
-
-VarzListNode::VarzListNode(const char* name) : name_(name), prev_(nullptr) {
-  folly::RWSpinLock::WriteHolder guard(g_varz_lock);
-
-  next_ = global_list();
-  if (next_) {
-    next_->prev_ = this;
-  }
-  global_list() = this;
-}
-
-VarzListNode::~VarzListNode() {
-  folly::RWSpinLock::WriteHolder guard(g_varz_lock);
-  if (global_list() == this) {
-    global_list() = next_;
-  } else {
-    if (next_) {
-      next_->prev_ = prev_;
-    }
-    if (prev_) {
-      prev_->next_ = next_;
-    }
-  }
-}
-
-string VarzListNode::Format(const AnyValue& av) {
-  string result;
-
-  switch (av.type) {
-    case VarzValue::STRING:
-      StrAppend(&result, "\"", av.str, "\"");
-      break;
-    case VarzValue::NUM:
-    case VarzValue::TIME:
-      StrAppend(&result, av.num);
-      break;
-    case VarzValue::DOUBLE:
-      StrAppend(&result, av.dbl);
-      break;
-    case VarzValue::MAP:
-      result.append("{ ");
-      for (const auto& k_v : av.key_value_array) {
-        StrAppend(&result, "\"", k_v.first, "\": ", Format(k_v.second), ",");
-      }
-      result.back() = ' ';
-      result.append("}");
-      break;
-  }
-  return result;
-}
-
-VarzListNode*& VarzListNode::global_list() {
-  static VarzListNode* varz_global_list = nullptr;
-  return varz_global_list;
-}
 
 auto VarzMapCount::ReadLockAndFindOrInsert(StringPiece key) -> Map::iterator {
   rw_spinlock_.lock_shared();

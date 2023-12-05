@@ -12,6 +12,8 @@ AlwaysBreakTemplateDeclarations: false
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
 DerivePointerAlignment: false
 PointerAlignment: Left
+BasedOnStyle: Google
+ColumnLimit: 100
 ---
 Language: Proto
 BasedOnStyle: Google

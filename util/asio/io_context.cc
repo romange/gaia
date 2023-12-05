@@ -383,6 +383,9 @@ void AsioScheduler::notify() noexcept {
       VLOG(1) << "Awake suspender, tp: " << suspend_tp_.time_since_epoch().count() << " " << ec;
       this_fiber::yield();
     });*/
+
+    // yield is needed so that when the main fiber is waken up, it would switch to dispatch fiber
+    // to call scheduler awaken hooks.
     asio::post(*io_context_, [] { this_fiber::yield(); });
     notify_cnt_.fetch_add(1, std::memory_order_relaxed);
   } else {

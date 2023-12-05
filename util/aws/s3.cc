@@ -2,10 +2,13 @@
 // Author: Roman Gershman (romange@gmail.com)
 //
 
+#include "util/aws/s3.h"
+
 #include <libxml/xpath.h>
 #include <libxml/xpathInternals.h>
 
 #include <boost/asio/ssl/error.hpp>
+#include <boost/beast/http/dynamic_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/string_body.hpp>
 
@@ -13,16 +16,19 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/strip.h"
-
+#include "absl/types/optional.h"
 #include "base/logging.h"
+#include "base/walltime.h"
 #include "strings/escaping.h"
-
+#include "util/asio/io_context.h"
 #include "util/aws/aws.h"
-#include "util/aws/s3.h"
+#include "util/http/http_common.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
 namespace util {
+
+DEFINE_uint32(s3_upload_buf_mb, 5, "Upload buffer size in MB. must be at least 5MB");
 
 using file::ReadonlyFile;
 using http::HttpsClientPool;
@@ -75,7 +81,7 @@ class S3ReadFile : public ReadonlyFile {
   using error_code = ::boost::system::error_code;
   using Parser = h2::response_parser<h2::buffer_body>;
 
-  // does not own gcs object, only wraps it with ReadonlyFile interface.
+  // does not own pool object, only wraps it with ReadonlyFile interface.
   S3ReadFile(const AWS& aws, HttpsClientPool* pool, string read_obj_url)
       : aws_(aws), pool_(pool), read_obj_url_(std::move(read_obj_url)) {
   }
@@ -115,6 +121,38 @@ class S3ReadFile : public ReadonlyFile {
   size_t size_ = 0, offs_ = 0;
 };
 
+class S3WriteFile : public file::WriteFile {
+ public:
+  /**
+   * @brief Construct a new S3 Write File object.
+   *
+   * @param name - aka "gs://somebucket/path_to_obj"
+   * @param aws - initialized AWS object.
+   * @param pool - https connection pool connected to google api server.
+   */
+  S3WriteFile(absl::string_view name, const AWS& aws, string upload_id, HttpsClientPool* pool);
+
+  bool Close() final;
+
+  bool Open() final;
+
+  Status Write(const uint8* buffer, uint64 length) final;
+
+ private:
+  size_t FillBuf(const uint8* buffer, size_t length);
+
+  Status Upload();
+
+  const AWS& aws_;
+
+  string upload_id_;
+  beast::multi_buffer body_mb_;
+  size_t uploaded_ = 0;
+  HttpsClientPool* pool_;
+  std::vector<string> parts_;
+  std::vector<fibers::fiber> uploads_;
+};
+
 S3ReadFile::~S3ReadFile() {
 }
 
@@ -127,7 +165,7 @@ Status S3ReadFile::Open() {
 
   VLOG(1) << "Unsigned request: " << req;
 
-  aws_.Sign(pool_->domain(), &req);
+  aws_.SignEmpty(pool_->domain(), &req);
 
   // TODO: to wrap IO operations with retryable mechanism like in GCS.
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
@@ -248,8 +286,276 @@ Status S3ReadFile::Close() {
   return Status::OK;
 }
 
+S3WriteFile::S3WriteFile(absl::string_view name, const AWS& aws, string upload_id,
+                         HttpsClientPool* pool)
+    : file::WriteFile(name), aws_(aws), upload_id_(std::move(upload_id)),
+    body_mb_(FLAGS_s3_upload_buf_mb * (1 << 20)), pool_(pool) {
+}
+
+bool S3WriteFile::Close() {
+  CHECK(pool_->io_context().InContextThread());
+
+  auto status = Upload();
+  if (!status.ok()) {
+    LOG(ERROR) << "Error uploading " << status;
+    return false;
+  }
+
+  VLOG(1) << "Joining with " << uploads_.size() << " fibers";
+  for (auto& f : uploads_) {
+    f.join();
+  }
+  uploads_.clear();
+
+  if (parts_.empty())
+    return true;
+
+  string url("/");
+
+  strings::AppendEncodedUrl(create_file_name_, &url);
+
+  // Signed params must look like key/value pairs. Instead of handling key-only params
+  // in the signing code we just pass empty value here.
+  absl::StrAppend(&url, "?uploadId=", upload_id_);
+
+  h2::request<h2::string_body> req{h2::verb::post, url, 11};
+  h2::response<h2::string_body> resp;
+
+  req.set(h2::field::content_type, http::kXmlMime);
+  auto& body = req.body();
+  body = R"(<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/">)";
+
+  for (size_t i = 0; i < parts_.size(); ++i) {
+    absl::StrAppend(&body, "<Part><ETag>\"", parts_[i], "\"</ETag><PartNumber>", i + 1);
+    absl::StrAppend(&body, "</PartNumber></Part>\n");
+  }
+  body.append("</CompleteMultipartUpload>");
+
+  req.prepare_payload();
+  char sha256[65];
+
+  detail::Sha256String(req.body(), sha256);
+  aws_.Sign(pool_->domain(), absl::string_view{sha256, 64}, &req);
+
+  uint64_t start = base::GetMonotonicMicrosFast();
+  HttpsClientPool::ClientHandle handle = pool_->GetHandle();
+  system::error_code ec = handle->Send(req, &resp);
+
+  if (ec) {
+    VLOG(1) << "Error sending to socket " << handle->native_handle() << " " << ec;
+    return false;
+  }
+
+  if (resp.result() != h2::status::ok) {
+    LOG(ERROR) << "S3WriteFile::Close: " << req << "/ " << resp;
+
+    return false;
+  }
+  VLOG(1) << "S3Close took " << base::GetMonotonicMicrosFast() - start << " micros";
+  parts_.clear();
+
+  return true;
+}
+
+bool S3WriteFile::Open() {
+  LOG(FATAL) << "Should not be called";
+
+  return true;
+}
+
+Status S3WriteFile::Write(const uint8* buffer, uint64 length) {
+  while (length) {
+    size_t written = FillBuf(buffer, length);
+    if (body_mb_.size() < body_mb_.max_size())
+      break;
+    length -= written;
+    buffer += written;
+    RETURN_IF_ERROR(Upload());
+  }
+
+  return Status::OK;
+}
+
+size_t S3WriteFile::FillBuf(const uint8* buffer, size_t length) {
+  size_t prepare_size = std::min(length, body_mb_.max_size() - body_mb_.size());
+  auto mbs = body_mb_.prepare(prepare_size);
+  size_t offs = 0;
+  for (auto mb : mbs) {
+    memcpy(mb.data(), buffer + offs, mb.size());
+    offs += mb.size();
+  }
+  CHECK_EQ(offs, prepare_size);
+  body_mb_.commit(prepare_size);
+
+  return offs;
+}
+
+Status S3WriteFile::Upload() {
+  size_t body_size = body_mb_.size();
+  if (body_size == 0)
+    return Status::OK;
+
+  string url("/");
+  char sha256[65];
+
+  // TODO: To figure out why SHA256 is so slow.
+  //detail::Sha256String(body_mb_, sha256);
+  const char* kFakeSha = "UNSIGNED-PAYLOAD";
+  strings::AppendEncodedUrl(create_file_name_, &url);
+  absl::StrAppend(&url, "?uploadId=", upload_id_);
+  absl::StrAppend(&url, "&partNumber=", parts_.size() + 1);
+
+  h2::request<h2::dynamic_body> req{h2::verb::put, url, 11};
+  req.set(h2::field::content_type, http::kBinMime);
+
+  req.body() = std::move(body_mb_);
+  req.prepare_payload();
+
+  aws_.Sign(pool_->domain(), absl::string_view{kFakeSha}, &req);
+
+  auto up_cb = [this, req = std::move(req), id = parts_.size()] {
+    VLOG(2) << "StartUpCb";
+    h2::response<h2::string_body> resp;
+    HttpsClientPool::ClientHandle handle = pool_->GetHandle();
+
+    VLOG(2) << "BeforeSendUpCb";
+    uint64_t start = base::GetMonotonicMicrosFast();
+    system::error_code ec = handle->Send(req, &resp);
+    CHECK(!ec) << "Error sending to socket " << handle->native_handle() << " " << ec;
+
+    VLOG(2) << "Upload: " << resp;
+    CHECK(resp.result() == h2::status::ok) << "S3WriteFile::Upload: " << resp;
+
+    VLOG(1) << "S3Upload tool " << base::GetMonotonicMicrosFast() - start << " micros";
+
+    auto it = resp.find(h2::field::etag);
+    CHECK(it != resp.end());
+
+    parts_[id] = string(it->value());
+
+    if (!resp.keep_alive()) {
+      handle->schedule_reconnect();
+    }
+  };
+  parts_.emplace_back();
+
+  // We run it immediately
+  fibers::fiber fb(fibers::launch::dispatch, std::move(up_cb));
+  uploads_.emplace_back(std::move(fb));
+
+  return Status::OK;
+}
+
+// ******************** Helper utilities
+
+inline xmlDocPtr XmlRead(absl::string_view xml) {
+  return xmlReadMemory(xml.data(), xml.size(), NULL, NULL, XML_PARSE_COMPACT | XML_PARSE_NOBLANKS);
+}
+
+std::pair<size_t, absl::string_view> ParseXmlObjContents(xmlNodePtr node) {
+  std::pair<size_t, absl::string_view> res;
+
+  for (xmlNodePtr child = node->children; child; child = child->next) {
+    if (child->type == XML_ELEMENT_NODE) {
+      xmlNodePtr grand = child->children;
+
+      if (!strcmp(as_char(child->name), "Key")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        res.second = absl::string_view(as_char(grand->content));
+      } else if (!strcmp(as_char(child->name), "Size")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        CHECK(absl::SimpleAtoi(as_char(grand->content), &res.first));
+      }
+    }
+  }
+  return res;
+}
+
+void ParseXmlStartUpload(absl::string_view xml_resp, string* upload_id) {
+  xmlDocPtr doc = XmlRead(xml_resp);
+  CHECK(doc);
+
+  xmlNodePtr root = xmlDocGetRootElement(doc);
+  CHECK_STREQ("InitiateMultipartUploadResult", as_char(root->name));
+
+  for (xmlNodePtr child = root->children; child; child = child->next) {
+    if (child->type == XML_ELEMENT_NODE) {
+      xmlNodePtr grand = child->children;
+      if (!strcmp(as_char(child->name), "UploadId")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        upload_id->assign(as_char(grand->content));
+      }
+    }
+  }
+  xmlFreeDoc(doc);
+}
+
 }  // namespace
 
+namespace detail {
+
+std::vector<std::string> ParseXmlListBuckets(absl::string_view xml_resp) {
+  xmlDocPtr doc = XmlRead(xml_resp);
+  CHECK(doc);
+
+  xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
+
+  auto register_res = xmlXPathRegisterNs(xpathCtx, BAD_CAST "NS",
+                                         BAD_CAST "http://s3.amazonaws.com/doc/2006-03-01/");
+  CHECK_EQ(register_res, 0);
+
+  xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(
+      BAD_CAST "/NS:ListAllMyBucketsResult/NS:Buckets/NS:Bucket/NS:Name", xpathCtx);
+  CHECK(xpathObj);
+  xmlNodeSetPtr nodes = xpathObj->nodesetval;
+  std::vector<std::string> res;
+  if (nodes) {
+    int size = nodes->nodeNr;
+    for (int i = 0; i < size; ++i) {
+      xmlNodePtr cur = nodes->nodeTab[i];
+      CHECK_EQ(XML_ELEMENT_NODE, cur->type);
+      CHECK(cur->ns);
+      CHECK(nullptr == cur->content);
+
+      if (cur->children && cur->last == cur->children && cur->children->type == XML_TEXT_NODE) {
+        CHECK(cur->children->content);
+        res.push_back(as_char(cur->children->content));
+      }
+    }
+  }
+
+  xmlXPathFreeObject(xpathObj);
+  xmlXPathFreeContext(xpathCtx);
+  xmlFreeDoc(doc);
+
+  return res;
+}
+
+void ParseXmlListObj(absl::string_view xml_obj, S3Bucket::ListObjectCb cb) {
+  xmlDocPtr doc = XmlRead(xml_obj);
+  CHECK(doc);
+
+  xmlNodePtr root = xmlDocGetRootElement(doc);
+  CHECK_STREQ("ListBucketResult", as_char(root->name));
+
+  for (xmlNodePtr child = root->children; child; child = child->next) {
+    if (child->type == XML_ELEMENT_NODE) {
+      xmlNodePtr grand = child->children;
+      if (!strcmp(as_char(child->name), "IsTruncated")) {
+        CHECK(grand && grand->type == XML_TEXT_NODE);
+        CHECK_STREQ("false", as_char(grand->content)) << "TBD";
+      } else if (!strcmp(as_char(child->name), "Marker")) {
+      } else if (!strcmp(as_char(child->name), "Contents")) {
+        auto sz_name = ParseXmlObjContents(child);
+        cb(sz_name.first, sz_name.second);
+      }
+    }
+  }
+  xmlFreeDoc(doc);
+}
+
+}  // namespace detail
 
 const char* S3Bucket::kRootDomain = "s3.amazonaws.com";
 
@@ -259,18 +565,23 @@ S3Bucket::S3Bucket(const AWS& aws, http::HttpsClientPool* pool) : aws_(aws), poo
 auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> ListObjectResult {
   HttpsClientPool::ClientHandle handle = pool_->GetHandle();
 
-  string url{"/?prefix="};
-  strings::AppendEncodedUrl(glob, &url);
+  string url{"/?"};
+
+  if (!glob.empty()) {
+    url.append("&prefix=");
+    strings::AppendEncodedUrl(glob, &url);
+  }
 
   if (fs_mode) {
-    url.append("&delimeter=");
+    url.append("&delimiter=");
     strings::AppendEncodedUrl("/", &url);
   }
 
   h2::request<h2::empty_body> req{h2::verb::get, url, 11};
   h2::response<h2::string_body> resp;
 
-  aws_.Sign(pool_->domain(), &req);
+  aws_.SignEmpty(pool_->domain(), &req);
+  VLOG(1) << "Req: " << req;
 
   system::error_code ec = handle->Send(req, &resp);
 
@@ -283,8 +594,9 @@ auto S3Bucket::List(absl::string_view glob, bool fs_mode, ListObjectCb cb) -> Li
 
     return Status(StatusCode::IO_ERROR, string(resp.reason()));
   }
-
   VLOG(1) << "ListResp: " << resp;
+  detail::ParseXmlListObj(resp.body(), std::move(cb));
+
   return Status::OK;
 }
 
@@ -309,7 +621,9 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
   h2::request<h2::empty_body> req{h2::verb::get, "/", 11};
   h2::response<h2::string_body> resp;
 
-  aws.Sign(S3Bucket::kRootDomain, &req);
+  aws.SignEmpty(S3Bucket::kRootDomain, &req);
+
+  VLOG(1) << "Req: " << req;
 
   system::error_code ec = handle->Send(req, &resp);
 
@@ -325,41 +639,7 @@ ListS3BucketResult ListS3Buckets(const AWS& aws, http::HttpsClientPool* pool) {
 
   VLOG(1) << "ListS3Buckets: " << resp;
 
-  std::vector<std::string> res;
-
-  xmlDocPtr doc = xmlReadMemory(resp.body().data(), resp.body().size(), NULL, NULL, 0);
-  CHECK(doc);
-
-  xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
-
-  auto register_res = xmlXPathRegisterNs(xpathCtx, BAD_CAST "NS",
-                                         BAD_CAST "http://s3.amazonaws.com/doc/2006-03-01/");
-  CHECK_EQ(register_res, 0);
-
-  xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(
-      BAD_CAST "/NS:ListAllMyBucketsResult/NS:Buckets/NS:Bucket/NS:Name", xpathCtx);
-  CHECK(xpathObj);
-  xmlNodeSetPtr nodes = xpathObj->nodesetval;
-  if (nodes) {
-    int size = nodes->nodeNr;
-    for (int i = 0; i < size; ++i) {
-      xmlNodePtr cur = nodes->nodeTab[i];
-      CHECK_EQ(XML_ELEMENT_NODE, cur->type);
-      CHECK(cur->ns);
-      CHECK(nullptr == cur->content);
-
-      if (cur->children && cur->last == cur->children && cur->children->type == XML_TEXT_NODE) {
-        CHECK(cur->children->content);
-        res.push_back(as_char(cur->children->content));
-      }
-    }
-  }
-
-  xmlXPathFreeObject(xpathObj);
-  xmlXPathFreeContext(xpathCtx);
-  xmlFreeDoc(doc);
-
-  return res;
+  return detail::ParseXmlListBuckets(resp.body());
 }
 
 StatusObject<file::ReadonlyFile*> OpenS3ReadFile(absl::string_view key_path, const AWS& aws,
@@ -376,6 +656,40 @@ StatusObject<file::ReadonlyFile*> OpenS3ReadFile(absl::string_view key_path, con
   return fl.release();
 }
 
+StatusObject<file::WriteFile*> OpenS3WriteFile(absl::string_view key_path, const AWS& aws,
+                                               http::HttpsClientPool* pool) {
+  string url("/");
+
+  strings::AppendEncodedUrl(key_path, &url);
+
+  // Signed params must look like key/value pairs. Instead of handling key-only params
+  // in the signing code we just pass empty value here.
+  absl::StrAppend(&url, "?uploads=");
+
+  h2::request<h2::empty_body> req{h2::verb::post, url, 11};
+  h2::response<h2::string_body> resp;
+
+  aws.SignEmpty(pool->domain(), &req);
+
+  HttpsClientPool::ClientHandle handle = pool->GetHandle();
+  system::error_code ec = handle->Send(req, &resp);
+
+  if (ec) {
+    return ToStatus(ec);
+  }
+
+  if (resp.result() != h2::status::ok) {
+    LOG(ERROR) << "OpenWriteFile Error: " << resp;
+
+    return Status(StatusCode::IO_ERROR, string(resp.reason()));
+  }
+  string upload_id;
+  ParseXmlStartUpload(resp.body(), &upload_id);
+
+  VLOG(1) << "OpenS3WriteFile: " << req << "/" << resp << "UploadId: " << upload_id;
+
+  return new S3WriteFile(key_path, aws, std::move(upload_id), pool);
+}
 
 bool IsS3Path(absl::string_view path) {
   return absl::StartsWith(path, kS3Url);

@@ -35,7 +35,9 @@ string StatusLine(const string& name, const string& val) {
 }
 }  // namespace
 
-void BuildStatusPage(const QueryArgs& args, const char* resource_prefix, StringResponse* response) {
+StringResponse BuildStatusPage(const QueryArgs& args, const char* resource_prefix) {
+  StringResponse response(h2::status::ok, 11);
+
   bool output_json = false;
 
   string varz;
@@ -54,9 +56,9 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix, StringR
 
   auto delta_ms = (base::GetMonotonicMicrosFast() - start) / 1000;
   if (output_json) {
-    response->set(field::content_type, kJsonMime);
-    response->body() = "{" + varz + "}\n";
-    return;
+    response.set(field::content_type, kJsonMime);
+    response.body() = "{" + varz + "}\n";
+    return response;
   }
 
   string a = "<!DOCTYPE html>\n<html><head>\n";
@@ -67,7 +69,7 @@ void BuildStatusPage(const QueryArgs& args, const char* resource_prefix, StringR
     <script type="text/javascript" src="{s3_path}/status_page.js"></script>
 </head>
 <body>
-<div><img src='{s3_path}/logo.png'/></div>)";
+<div><img src='{s3_path}/logo.png' width="160"/></div>)";
 
   a = absl::StrReplaceAll(a, {{"{s3_path}", resource_prefix}});
 
@@ -95,8 +97,9 @@ document.querySelector('.left_panel').innerHTML = JsonToHTML(json_text1);
 </script>
 </html>)";
 
-  response->set(field::content_type, kHtmlMime);
-  response->body() = std::move(a);
+  response.set(field::content_type, kHtmlMime);
+  response.body() = std::move(a);
+  return response;
 }
 
 }  // namespace http

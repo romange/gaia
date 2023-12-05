@@ -34,6 +34,11 @@ static pthread_t timer_thread_id = 0;
 
 static void* UpdateMsCounter(void* arg) {
   CHECK_EQ(0, pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, nullptr));
+
+  sigset_t mask;
+  sigfillset(&mask);
+  CHECK_EQ(0, pthread_sigmask(SIG_BLOCK, &mask, NULL));
+
   int fd;
   uint64 missed;
 

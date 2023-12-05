@@ -17,6 +17,8 @@
 
 #include "util/asio/io_context.h"
 #include "util/gce/detail/gcs_utils.h"
+
+#include "util/http/http_common.h"
 #include "util/http/https_client.h"
 #include "util/http/https_client_pool.h"
 
@@ -211,7 +213,7 @@ auto GcsWriteFile::PrepareRequest(size_t to, ssize_t total) -> Request {
   Request req(h2::verb::put, obj_url_, 11);
   req.body() = std::move(body_mb_);
   req.set(h2::field::content_range, ContentRangeHeader(uploaded_, to, total));
-  req.set(h2::field::content_type, "application/octet-stream");
+  req.set(h2::field::content_type, http::kBinMime);
   req.prepare_payload();
 
   DCHECK_EQ(0, body_mb_.size());

@@ -134,7 +134,7 @@ endfunction()
 add_third_party(
   gflags
   GIT_REPOSITORY https://github.com/gflags/gflags.git
-  GIT_TAG v2.2.1
+  GIT_TAG v2.2.2
   CMAKE_PASS_FLAGS "-DBUILD_SHARED_LIBS=ON \
                     -DBUILD_STATIC_LIBS=OFF -DBUILD_gflags_nothreads_LIB=OFF"
   SHARED
@@ -152,7 +152,7 @@ add_third_party(
 add_third_party(
   gtest
   GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG release-1.8.1
+  GIT_TAG release-1.10.0
   # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
   LIB libgtest.a libgmock.a
 )
@@ -166,7 +166,8 @@ add_third_party(
 
 add_third_party(
   gperf
-  GIT_REPOSITORY https://github.com/romange/gperftools
+  GIT_REPOSITORY https://github.com/gperftools/gperftools/
+  GIT_TAG gperftools-2.8
   PATCH_COMMAND ./autogen.sh
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-frame-pointers --enable-static=no
                     --enable-libunwind "CXXFLAGS=${THIRD_PARTY_CXX_FLAGS}"
@@ -192,7 +193,7 @@ set(PROTOC ${PROTOBUF_DIR}/bin/protoc)
 add_third_party(
     protobuf
     GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-    GIT_TAG v3.9.0
+    GIT_TAG v3.11.4
     # GIT_SHALLOW 1 does not work well with cmake 3.5.1.
     PATCH_COMMAND <SOURCE_DIR>/autogen.sh
 
@@ -247,7 +248,7 @@ add_third_party(
 add_third_party(
   xxhash
   GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
-  GIT_TAG v0.7.1
+  GIT_TAG v0.7.4
   SOURCE_SUBDIR cmake_unofficial
   CMAKE_PASS_FLAGS "-DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF"
 )
@@ -273,7 +274,7 @@ add_third_party(
 set(LZ4_DIR ${THIRD_PARTY_LIB_DIR}/lz4)
 add_third_party(lz4
   GIT_REPOSITORY https://github.com/lz4/lz4.git
-  GIT_TAG v1.8.3
+  GIT_TAG v1.9.2
   BUILD_IN_SOURCE 1
   UPDATE_COMMAND ""
   SOURCE_SUBDIR contrib/cmake_unofficial
@@ -341,7 +342,7 @@ ExternalProject_Add_Step(folly_project config
 set(ZSTD_DIR ${THIRD_PARTY_LIB_DIR}/zstd)
 add_third_party(zstd
   GIT_REPOSITORY https://github.com/facebook/zstd.git
-  GIT_TAG v1.4.2
+  GIT_TAG v1.4.4
   SOURCE_SUBDIR "build/cmake"
 
   # for debug pass : "CFLAGS=-fPIC -O0 -ggdb"
@@ -352,12 +353,6 @@ add_third_party(blosc
   GIT_REPOSITORY https://github.com/romange/c-blosc.git
   # GIT_TAG v1.12.1
   CMAKE_PASS_FLAGS "-DBUILD_TESTS=OFF  -DBUILD_BENCHMARKS=OFF -DDEACTIVATE_SNAPPY=ON -DDEACTIVATE_ZSTD=ON"
-)
-
-add_third_party(
-    nanoflann
-    GIT_REPOSITORY https://github.com/jlblancoc/nanoflann.git
-    GIT_TAG v1.2.3
 )
 
 add_third_party(snappy
@@ -403,6 +398,19 @@ add_third_party(intel_z
   LIB libz.a
 )
 
+set(MIMALLOC_INCLUDE_DIR ${THIRD_PARTY_LIB_DIR}/mimalloc/include)
+add_third_party(mimalloc
+  GIT_REPOSITORY https://github.com/romange/mimalloc
+
+  # Add -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS=-O0 to debug
+  CMAKE_PASS_FLAGS "-DMI_BUILD_SHARED=OFF -DMI_BUILD_TESTS=OFF -DMI_OVERRIDE=OFF"
+
+  BUILD_COMMAND make -j4 mimalloc-static
+  INSTALL_COMMAND make install
+  COMMAND mkdir -p ${MIMALLOC_INCLUDE_DIR}
+  COMMAND sh -c "ln -s ${THIRD_PARTY_LIB_DIR}/mimalloc/lib/mimalloc-1.6/include/*.h -t ${MIMALLOC_INCLUDE_DIR}/ || true"
+  COMMAND sh -c "ln -s ${THIRD_PARTY_LIB_DIR}/mimalloc/libmi* ${THIRD_PARTY_LIB_DIR}/mimalloc/lib/libmimalloc.a || true"
+)
 
 add_third_party(protozero
  GIT_REPOSITORY https://github.com/mapbox/protozero
