@@ -254,7 +254,7 @@ add_third_party(
 
 add_third_party(
   pcre
-  URL https://ftp.pcre.org/pub/pcre/pcre-8.43.tar.gz
+  URL https://sourceforge.net/projects/pcre/files/pcre/8.43/pcre-8.43.tar.gz
   CONFIGURE_COMMAND <SOURCE_DIR>/configure --enable-unicode-properties --enable-utf8
                     --prefix=${THIRD_PARTY_LIB_DIR}/pcre
 
@@ -382,13 +382,6 @@ add_third_party(dynasm
   BUILD_COMMAND gcc -o ${DYNASM_COMPILER} -O3 src/host/minilua.c -lm
   LIB "none"
   INSTALL_COMMAND sh -c "test -L ${DYNASM_INCLUDE_DIR}/dynasm || ln -s ${THIRD_PARTY_DIR}/dynasm/dynasm -t ${DYNASM_INCLUDE_DIR}/"
-)
-
-add_third_party(s2geometry
-  GIT_REPOSITORY https://github.com/romange/s2geometry.git
-  DEPENDS glog_project
-  CMAKE_PASS_FLAGS "-DWITH_GFLAGS=ON  -DWITH_GLOG=ON -DCMAKE_PREFIX_PATH=${GLOG_LIB_DIR}/cmake/glog/|${GFLAGS_LIB_DIR}/cmake/gflags"
-  LIB "libs2.so"
 )
 
 add_third_party(cf_z
