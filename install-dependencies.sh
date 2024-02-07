@@ -6,7 +6,7 @@ apt install -y cmake libunwind-dev zip libfl-dev bison ninja-build autoconf-arch
 apt install -y curl libxml2-dev
 g++ --version
 
-BVER=1.71.0
+BVER=1.73.0
 BOOST=boost_${BVER//./_}   # replace all . with _
 
 # For sake of boost install we always use g++.
